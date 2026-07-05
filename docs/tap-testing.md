@@ -1,9 +1,8 @@
-# Tap testing — v1
+# Tap testing strategy
 
-How implementations of `tap-spec.md` prove they comply: write the compliance check
-once, test every implementation with the spec's fixture. The tap and the dashboard
-build against the spec and never talk to each other; this page is how each proves,
-alone, that it still speaks it.
+How implementations verify themselves against `tap-spec.md`. This is testing, not
+contract: the spec says what the wire carries; this says how the missions prove they
+carry it. Both mission briefs point here for their done-when.
 
 ## The problem
 
@@ -12,66 +11,70 @@ types, ignore unknown fields, tolerate unknown enum values. That leniency has a
 cost: it hides mistakes. A producer that writes `stop_reason` where the spec says
 `stopReason` breaks nothing visibly — consumers ignore what they don't recognise,
 so the field reads as absent and a dashboard column goes quietly blank. Nothing
-fails, so nothing gets fixed.
-
-The contract itself forbids strictness at runtime. So strictness lives in tests,
+fails, so nothing gets fixed. Leniency conceals divergence; that is what leniency
+is for. The contract forbids strictness at runtime, so strictness lives in tests,
 where it costs nothing.
 
-"It works" is not evidence of compliance. Leniency conceals divergence — that is
-what leniency is for.
+## Two artifacts, both data
 
-## The kit
+- `spec/tap.v1.schema.json` — the event shapes as JSON Schema.
+- `spec/fixtures/crash-resume.jsonl` — the spec's worked example as a loadable file.
 
-Two artifacts, both data, living next to the spec:
+The schema must not encode a closed world: `additionalProperties` stays permissive,
+unknown event types are skipped by the harness rather than failed, known enum values
+validate without rejecting others. Otherwise the tests enforce exactly the
+closed-enum bug the spec forbids. The tolerance rules apply to test harnesses too.
 
-- `spec/tap.v1.schema.json` — the event shapes, as JSON Schema.
-- `spec/fixtures/crash-resume.jsonl` — the spec's worked example, as a file.
+## Conformance, per repo, in CI
 
-The fixture is not a second source of truth that could disagree with the spec — it
-is the worked example, promoted from prose. When the example changes, both change
-in the same commit.
+Each implementation checks itself against the artifacts alone — no cross-repo
+dependency, and a later implementation arrives with the same bar to clear.
 
-## Producer tests
+- **Producers** (the node tap; later the Rust agent): drive a scripted session,
+  capture what got published, normalise the volatile fields (ts, pid, run ids),
+  then every event validates against the schema, and the captured sequence contains
+  the fixture's required events as a per-run subsequence, extras allowed. Extras
+  allowed is add-only honoured in the test: new optional events pass; a misshaped
+  old one fails.
+- **Consumers** (the dashboard; anything else): feed the fixture in, assert the
+  projection from the spec's recommended-projection rules: one panel per
+  conversation, timeline unbroken across the crash, pending approval voided when
+  the run goes stale.
 
-For the node tap, the stage-4 agent, and any producer anyone writes. In the
-producer's own repo:
+Runtime never checks conformance — the spec's tolerance rules forbid it, or every
+addition becomes a breaking change. Strictness lives in CI, where it costs nothing.
 
-1. Drive the scenario: a run, a turn, a tool use with its approval, a crash, a
-   resume.
-2. Capture what was published.
-3. Normalise the volatile fields: `ts`, `pid`, run and conversation ids.
-4. Assert every event validates against the schema — this is what catches a wrong
-   field name mechanically.
-5. Assert the captured sequence contains the fixture's events, in order. Extras
-   are allowed.
+## Integration, one check
 
-"Extras allowed" is add-only honoured in the test: a producer emitting a new
-optional event still passes; one that misshapes an existing event fails — in the
-repo that caused it, the day it was caused.
+Real tap, real broker, real dashboard fold: a scripted CLI session against a
+JetStream-enabled broker, asserting the dashboard's projection at the end. One
+compose file. This proves interop as a fact rather than an inference, and catches
+what no schema can: ordering across events, timing, meaning.
 
-## Consumer tests
-
-For the dashboard and any other client. In the consumer's own repo:
-
-1. Feed the fixture in as the event stream.
-2. Assert the projection matches the spec's recommended projection: one panel,
-   continuity unbroken across the crash; the first run stale on heartbeat silence;
-   its pending approval voided with it.
-
-The recommended-projection section becomes assertions instead of advice —
-independent consumers projecting consistently is checked, not hoped.
+Integration only proves the pair that ran, on the paths driven — the POC's
+closed-enum defect passed integration because the fake model never emitted the
+unknown value. Conformance covers what the scenario doesn't drive; integration
+covers what shapes can't say. Neither substitutes for the other.
 
 ## Third parties
 
-A stranger's implementation can't be put in this repo's CI, and doesn't need to
-be. The kit is self-serve: validate against the schema, replay the fixture, check
+A stranger's implementation can't be put in this repo's CI, and doesn't need to be.
+The kit is self-serve: validate against the schema, replay the fixture, check
 yourself before you ship. The blast radius makes self-serve sufficient — a bad
 consumer breaks only its own view; a bad producer pollutes only its own
 conversations' panels. The subject tree contains the damage.
 
-## What this does not claim
+## The discipline that keeps both alive
 
-These tests prove agreement with the spec's example — nothing more. If the
-contract itself is wrong, no test here can see it; only use can. The integration
-test is a live run, and it stays the ground truth: tests pin agreement; reality is
-observed by running.
+When integration (or the field) finds a bug conformance missed, the fix lands
+twice: in the code and in the schema/fixture, same commit. That is how the fixture
+grows with the spec instead of going stale, and how each escaped bug class is
+caught mechanically the next time.
+
+## What this does not do
+
+None of this checks meaning. A schema validates that `stopReason` is a string,
+never that the projection rules were understood. Semantic drift stays a human
+problem, caught by review — the same reviews that found the real defects in the
+POC and in these documents. The tests shrink the mechanical drift class to one
+reviewable artifact; the reading is still the floor.
