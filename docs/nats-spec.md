@@ -20,6 +20,7 @@ tree, however convenient the ride would be.
 | Concern | Namespace | Spec |
 |---|---|---|
 | conversation | `conv` | `conversation-spec.md` |
+| approval | `approval` | `approval-spec.md` |
 
 Other concerns (process liveness is a known one) get their namespace and spec
 when their design pass happens — not before, and never by squatting in an
