@@ -1,0 +1,4 @@
+# Pins the toolchain to the repo: rustup reads this on entry and uses (or
+# fetches) exactly this version, so the machine's default doesn't matter.
+[toolchain]
+channel = "1.96.1"
