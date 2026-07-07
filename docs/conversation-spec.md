@@ -88,7 +88,9 @@ compute, never something it must.
 | Event | Fields | Notes |
 |---|---|---|
 | `turn_started` | `queryId`, `turnId`, `service`, `model`, `thinking`, `effort`, `maxTokens` | a message begins; fires every round of the loop. Carries the request's inputs as asked — `usage` later carries what was reported back; if they differ (model fallback), the record shows it. `service` names what was called — e.g. the Anthropic Messages API — not which model answered |
-| `turn_ended` | `queryId`, `turnId`, `stopReason` | a message stops; fires every round — mid-loop rounds end `tool_use`, `end_turn` closes the query; `cancelled` records an interruption |
+| `turn_ended` | `queryId`, `turnId`, `stopReason` | the model stopped its message; fires every round — mid-loop rounds end `tool_use`, `end_turn` closes the query. `stopReason` is the service's own value, passed through verbatim — never synthesised: a turn that was cancelled or failed did not *end*, and gets its own event below |
+| `turn_cancelled` | `queryId`, `turnId` | the turn was terminated intentionally — a `cancel` was accepted; someone decided |
+| `turn_aborted` | `queryId`, `turnId` | the attempt failed — service error, broken stream; potentially transient. Distinct from `turn_cancelled` because the two imply different follow-ups |
 | `tool_use` | `queryId`, `turnId`, `id`, `name`, `input` | `id` is the opaque tool-use id (`toolu_…`); `input` included — the action is unreviewable without the payload |
 | `usage` | `queryId`, `turnId`, `service`, `model`, `inputTokens`, `cacheCreationTokens`, `cacheReadTokens`, `outputTokens`, `costUsd` | per turn, from the model's usage reporting; a cost row names exactly what it priced, no cross-referencing |
 
@@ -134,7 +136,7 @@ conversation changed? An edit — yes. Trimming a tool result — no. That line 
 where premises break or hold.
 
 A **cancelled turn** commits nothing by itself: the partial assistant message
-existed only as deltas and never enters the store; `turn_ended: cancelled` on
+existed only as deltas and never enters the store; `turn_cancelled` on
 telemetry is its only trace.
 
 | Event | Subject | Fields | Notes |
