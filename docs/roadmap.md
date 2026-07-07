@@ -5,10 +5,11 @@ in stages that are each independently valuable and none of which depend on the
 one after. Read alongside `project-state.md` (where the design stands) and
 `orchestration-layer.md` (the three-concern split this roadmap keeps honest).
 
-The proof this rests on: the NATS POC (prompt3). Four components built by four
-sessions that never saw each other's code interoperated on first contact, because the
-spec was the only surface. The same discipline — protocol as the only coupling —
-is what makes every stage below safe to attempt and safe to abandon.
+The proof this rests on: the NATS POC (now in `poc/`). Four components built by
+four sessions that never saw each other's code interoperated on first contact,
+because the spec was the only surface. The same discipline — protocol as the
+only coupling — is what makes every stage below safe to attempt and safe to
+abandon.
 
 ## The metaphor
 
@@ -68,50 +69,70 @@ Node is never fixed, only vacated. The capabilities node blocks (images, persist
 distribution) land on the Rust side where they are trivial, at the stage where they
 belong. The protocol is the only coupling between stages.
 
-### Stage 1 — See
+### Stage 1 — See: delivered, then superseded
 
-A NATS event tap in the existing node CLI: publish `{conversation, run, event type,
-timestamp}` on the conversation's events subject for run, turn, tool, and approval
-activity (idle is a derived state — quiet since the last event — not an event).
-See `tap-spec.md` for the contract. Pure-JS NATS
-client — deliberately no new native dependencies. The POC tower dashboard adapts to
-the real fleet: one panel per conversation, ordered by last activity.
+Delivered: the tap shipped in the node CLI (pure-JS NATS client, no new native
+dependencies) and the fleet became visible — turn, tool, and per-turn usage
+activity on the wire, idle derived (quiet since the last event), JetStream
+retaining what nobody heard. *Record now, analyse later* became real.
 
-The tap also publishes per-turn `usage` events (tokens, cost) — the CLI already has
-the data — and the broker retains the stream (JetStream), so unheard events are
-recorded, not lost. This is the Cage's *record now, analyse later*: the analytics substrate
-exists before any dashboard asks questions of it.
+Superseded: the tap's contract was replaced wholesale by the concern specs —
+`nats-spec.md`, `conversation-spec.md`, `approval-spec.md` — in the design
+pass that dismantled "run", evicted approvals from the conversation, and split
+telemetry from the committal change stream. The shipped tap still publishes
+the retired contract; conforming the CLI is stage 2's work.
 
-*Value: the ~110-session fleet becomes visible — "mission X quiet 2 hours."*
+*Value: the fleet visible — "conversation quiet 2 hours", grouped by
+deployment convention (tmux server/session/window) into what is in practice
+"mission quiet 2 hours": a capability of telemetry, never an entity in the
+spec.*
 *Retires: window-hopping as monitoring.*
 
-### Stage 2 — Signal
+### Stage 2 — Speak
 
-Done stops being something the SC notices and becomes something the session says: a
-tool in the CLI that publishes `phase_done` with a debrief pointer. The dashboard
-distinguishes working / waiting-on-you / done.
+Implement the concern specs in the node CLI, and make something speak.
+Addressable is not Speak — the specs bind the servicer; the stage is not done
+until something sends. Three pieces:
 
-Signals leave room for a prediction to ride — run-level in the run-start label,
-phase-level as an optional field on `phase_done` (the tap spec carries the single
-story) — and it can stay empty for a year. When one is made, it is timestamped
-before the work and scoreable after — the record the bookie will need, captured
-from the start.
+1. **The servicer** — the CLI implements the three specs: the committal change
+   stream, telemetry, `say`/`cancel` with preconditions and the acceptance
+   limits, the approval concern with its pulse. Proven by `conformance.md`
+   against the `scenarios.md` fixtures.
+2. **The speaker** — the first sending client: a tool in the CLI that
+   publishes a `say` with a premise, reads the reply, watches the change
+   stream for the answer.
+3. **The approval answerer** — the notifier grows a reply path: see the raise,
+   review the payload, answer from anywhere.
 
-*Value: state is declared, not guessed.*
+Done when one conversation asks another a question and reads the answer.
+
+`phase_done` stays retired as a named wire event. A done-declaration is
+ordinary message traffic: the orchestrator routes on it opaquely, and what
+"phase" means stays in the mission data, never in the platform (principle 2).
+The debrief pointer and the prediction ride that same traffic as
+orchestrator-defined content — still timestamped before the work and scoreable
+after, so the record the bookie will need is captured from the start.
+
+*Value: sessions readable, addressable, and approvable over the wire — state
+declared, not guessed; send-keys as transport and the screen-scraping approval
+worker both begin dying.*
 *Retires: capture-pane-and-classify.*
 
-### Stage 3 — Orchestrate one hop
+### Stage 3 — The orchestrator
 
-The dispatch daemon — the first production Rust component, deliberately tiny.
-Subscribes to `phase_done`; on operator-done, spawns the supervisor via tmux exactly
-as the current scripts do, delivers the brief as a message, and on supervisor-done
-notifies the SC (alerter). It routes on signals and interprets nothing; the
-operator → supervisor → notify chain is read from a scenario spec, not hard-coded
-(principle 2).
+Tower is the plane — bus, record, visibility — and privileges nobody. The
+orchestrator is a client *of* it: the one place the fleet logic lives. It
+subscribes to what the fleet says, decides from a scenario spec (data, per
+principle 2), delivers briefs as publishes on the message surface, and spawns new
+runs by running the same scripts used today — spawning staying in scripts is the
+design, not a stopgap. The first orchestrator already exists: the router Claude
+and the fleet scripts, migrating transport from send-keys to the bus. Whether it
+ends up a program, a spec-interpreter, or a Claude stays deliberately open.
 
 *Value: operator → supervisor → SC unattended — roughly two-thirds of the current
 interaction removed.*
-*Retires: Claude-as-Router for the mechanical hop.*
+*Retires: Claude-as-Router for the mechanical hop (the transport migrates; the
+judgement stays wherever it lives).*
 
 ### Stage 4 — The real agent
 
@@ -151,8 +172,10 @@ gets its own document when it is real.
 ## What this roadmap does not decide
 
 - The scenario-spec language (stage 3 starts with the smallest thing that is data).
-- Session resume/persistence/transfer design (deferred in project-state.md; the
-  audit floor covers it).
+- The agent concern, environment, and transfer mechanics — the process-layer
+  design pass (`nats-spec.md` records the boundaries and what is parked where).
+  The conversation's own record model is no longer deferred: it is
+  `conversation-spec.md`.
 - Whether the orchestration logic is ultimately a program, a spec, or a Claude — the
   protocol carries all three (orchestration-layer.md), and stage 3 deliberately does
   not foreclose it.
