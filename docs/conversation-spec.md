@@ -152,8 +152,35 @@ terminal appears on the change stream the same as one that arrived over
 
 | Request | Fields | Reply | Notes |
 |---|---|---|---|
-| `say` | `from`, `content`, `precondition` | `accepted` + `id` \| `rejected` + `reason` | start a new query against a known state; `from` is the sender identity — locally-typed input carries `{ kind: human }` the same way, so no speaker is ever anonymous; the reply acknowledges acceptance only — the answer appears on the change stream like any other turn |
-| `cancel` | `id` | `accepted` \| `rejected` + `reason` | revoke an accepted piece of state by its id — a queued message, a running query, whatever the id names. Its target *is* its premise: never "cancel whatever happens to be running". Rejection reasons are honest: `not_found`, `already_complete`, `unsupported` |
+| `say` | `from`, `text`, `precondition` | `accepted` + `id` \| `rejected` + `reason` | start a new query against a known state; `from` is the sender identity — locally-typed input carries `{ kind: human }` the same way, so no speaker is ever anonymous; the reply acknowledges acceptance only — the answer appears on the change stream like any other turn |
+| `cancel` | `id` | `accepted` \| `rejected` + `reason` | revoke an accepted piece of state by its id — in v1, a running query; whatever kinds acceptance creates later. Its target *is* its premise: never "cancel whatever happens to be running". Rejection reasons are honest: `not_found`, `already_complete`, `unsupported` |
+
+**The `say` message, concretely.** v1 carries text only — a plain string.
+Anything richer (images, attachments) is the terminal's job for now; rich
+content arrives under add-only when the content vocabulary
+(`content-vocabulary.md`) gets its design pass. The committed `message` on the
+change stream still carries full content blocks — the record holds what the
+conversation actually contains; only the inbound ask is text-only. The premise
+is encoded exactly as the preconditions section writes it: one key naming the
+kind.
+
+```json
+// conv.v1.conv-abc.requests
+{
+  "type": "say",
+  "ts": "2026-07-07T17:20:04+10:00",
+  "from": {
+    "kind": "human",
+    "userId": "stephen"
+  },
+  "text": "okay, delete it",
+  "precondition": {
+    "tip": "m4"
+  }
+}
+// reply → { "accepted": true, "id": "q7" }
+//       | { "rejected": true, "reason": "stale" }
+```
 
 Two candidates follow from this design and are named, not designed:
 
@@ -169,22 +196,41 @@ Two candidates follow from this design and are named, not designed:
 Every operation is decided against a known state, and carries that state as a
 typed premise — **required**, not optional. An unanchored mutation is
 timing-dependent nondeterminism: a delayed "hello world" arriving after five
-queries have finished means something nobody said. Two premise kinds:
+queries have finished means something nobody said. One premise kind in v1:
 
 - `{ tip: messageId }` — my premise is a position: that node is the tip I saw.
   Valid while it is still the tip.
-- `{ after: queryId }` — my premise is an outcome: deliver when that query
-  completes. Valid while the query is in flight *or* is the last completed —
-  either way the outcome is the same, which is what makes it deterministic.
-  Anything newer means the world moved past the premise.
 
 A premise that no longer holds is rejected with reason `stale`, and the sender
 re-decides with current knowledge — the wire's version of "actually, wait—".
 Operations premised on incompatible worlds are never merged or sequenced: the
 first commit moves the tree; the rest are refused with an explanation. The only
 anchor-free case is the first message of a new conversation — there is no state
-to have known. How the premise is encoded beyond this is deliberately
-unsettled; the principle is not.
+to have known.
+
+**The spec never requires acceptance; it limits it.** Rejecting everything is
+lawful — internal state is the servicer's, which is the whole point. What a
+compliant servicer must not do:
+
+- accept an operation whose premise does not hold (`stale`);
+- hold more than one **live** acceptance against the same premise — accepting
+  two says premised on the same tip is the two-sender fabrication the premise
+  exists to kill, and the rule covers the accepted-but-uncommitted window that
+  stale-checking alone cannot. A cancelled or aborted acceptance releases its
+  premise.
+
+**Queueing is deliberately not in v1** — and the complexity is not the queue,
+it is that this is *chat*. Queued messages have conversational semantics:
+consecutive user messages merge or stay distinct (and the render already
+flattens them for the API, so which happened must stay visible in the record);
+a queued reply's meaning shifts as answers land ahead of it; two queued
+messages may deserve one query or two; cancelling one out of a batch has to
+mean something. Every one of those is a real decision about what a
+conversation *is*, not a scheduling detail. So v1's affordance is
+cancel-then-send, exactly the local TUI's semantics: a `say` against the tip
+while a query runs is rejected (that premise has a live acceptance); cancel
+the query and the premise frees. Queueing, if ever wanted, arrives as a new
+premise kind under add-only — a real design pass, not a side effect.
 
 An accepted premise does not evaporate: it becomes the new query's **parent**.
 The tree is the accumulation of accepted premises.
