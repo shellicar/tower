@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/protocol",
+    "crates/backend",
+    "crates/frontend",
+    # Scratch proving harness — not part of the deliverable.
+    "harness/stub-agents",
+    "harness/ws-probe",
+]
+
+[workspace.package]
+edition = "2024"

@@ -1,0 +1,11 @@
+{
+  "name": "tower-harness",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Throwaway proving harness — NOT part of the tower deliverable.",
+  "dependencies": {
+    "nats": "^2.28.0",
+    "ws": "^8.18.0"
+  }
+}
