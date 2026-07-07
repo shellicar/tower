@@ -22,9 +22,9 @@ tree, however convenient the ride would be.
 | conversation | `conv` | `conversation-spec.md` |
 | approval | `approval` | `approval-spec.md` |
 
-Other concerns (process liveness is a known one) get their namespace and spec
-when their design pass happens — not before, and never by squatting in an
-existing tree.
+Other concerns (process liveness and environment are known ones) get their
+namespace and spec when their design pass happens — not before, and never by
+squatting in an existing tree.
 
 ## Namespacing
 
@@ -164,17 +164,116 @@ carries the scenario that forced it.
   behind them (what to trim, when, by what thresholds) stays the agent's own.
   The record carries effects, never reasons.
 
+## Planes
+
+Three planes, borrowed from networking (where the separation is rigorous;
+Kubernetes formally defines only its control plane and colloquially calls the
+rest the data plane):
+
+- **Operational plane** — the work itself: the concerns' traffic —
+  conversations, approvals, `say` and answers. Networking's data plane.
+- **Control plane** — what decides how the operational plane runs: scheduling,
+  spawning, lifecycle, health — the behind-the-scenes machinery.
+  `orchestration-layer.md` already names this in the Kubernetes sense as
+  Tower's job; it is named, not yet designed.
+- **Observability plane** — telemetry. Observation of the other two.
+
+The planes carry different trust and dependency profiles — which is why
+networking separates them — and a piece of traffic is classified by the layer
+that *operates through it*, not by who reads it.
+
+Visualised: the two traffic planes are horizontal rows, the concerns are
+vertical columns, and every message lands in exactly one cell:
+
+```
+                conv          approval        agent (future)
+             ┌─────────────┬──────────────┬────────────────┐
+operational  │ changes     │ lifecycle    │ (spawn/config  │
+             │ requests    │ requests     │  requests …)   │
+             │ deltas      │              │                │
+             ├─────────────┼──────────────┼────────────────┤
+observability│ telemetry   │ telemetry    │ lifecycle,     │
+             │ (turns,     │ (pulse)      │ attached,      │
+             │  tools,     │              │ ready …        │
+             │  usage)     │              │                │
+             └─────────────┴──────────────┴────────────────┘
+
+control plane: a participant, not a row —
+  reads the observability row across every column,
+  acts on the operational row (spawns, configures, delivers),
+  and its own traffic lives in the agent column like anyone else's.
+```
+
+The control plane is not a third row — it is a **participant**. It reads the
+observability row across every column, acts on the operational row (spawns,
+configures, delivers), and the traffic it generates is not a plane of its own:
+it lands in the grid like everyone else's, classified by the same two rows.
+Its reach is cross-cutting; its traffic is ordinary. Which is also why it can
+be a program, a spec-interpreter, or a Claude without the grid noticing — a
+participant can be swapped; a plane cannot.
+
+Two orchestration participants, kept distinct (the two senses in
+`orchestration-layer.md`):
+
+- **Routing (workflow)** is operational messaging on the workload columns —
+  conversation 1 sending a message to conversation 2 is a `say`, with
+  `from: orchestrator`.
+- **The control plane** acts on the infrastructure column — conversation 1
+  wanting a *new* conversation is not a message, it is a spin-up: an
+  agent-layer act.
+
+The agent concern sits a layer below the workload concerns: it is what work
+runs *on*. That layering scopes the control plane naturally — read
+observability everywhere, write infrastructure only, touch conversations only
+indirectly, by managing what serves them.
+
+## Environment
+
+The wire is environment-agnostic, deliberately. A conversation's environment
+— the machine, the working directory, the process housing it — is part of
+*what serves it*, and the conversation spec excludes exactly that: kill the
+CLI, move the conversation to another directory, relaunch — not one wire fact
+changes.
+
+Environment becomes real when orchestration does: something must set up an
+environment and create the process that houses a conversation. That lands
+with the control plane and the agent concern's design pass. Whether
+environment is a conversation property, a worker property, or its own concern
+is decided there — and cannot be decided by accident: committing environment
+to a conversation fits none of the change stream's kinds, so the attempt
+itself raises the argument.
+
+Until then, one discipline with teeth: environment must not leak in through a
+side door. The tap-era `label` carried `location` — cwd and tmux coordinates
+riding conversation announcements — and the temptation recurs whenever a fold
+wants it (a session switcher scoped to cwd, auto-resume by directory). The
+rule: cwd-association is attachment telemetry — keyed by the process,
+severable — or a client's local store; never conversation state.
+
+Deployment conventions may ride telemetry fields — cwd, pid, tmux coordinates
+on attachment events, feeding a "click to go to the CLI" — and the spec
+neither defines nor forbids them; add-only already makes them lawful (unknown
+fields are ignored). This is recorded precisely as the reason environment
+stays *out* of the spec: nothing has to be decided now, and nothing useful is
+blocked in the meantime — a convention is a private prototype on the
+observability plane, costing no one anything, replaceable the day the real
+design lands.
+
 ## Telemetry
 
 `telemetry` is a general subject suffix, available to any concern, defined by
-one test: **remove it and everything still functions.** Telemetry is
-observation — dashboards go dark, nothing operational breaks. Traffic the
-system functions *through* (a committal stream, an ask that must be answered)
-is not telemetry, whatever it is named; filing load-bearing traffic under
-telemetry — or observation under an operational subject — is the
-miscategorisation this definition exists to stop. Observers of operational
-traffic *read it*; they never receive a copy — one thing, one owner, observed
-rather than duplicated.
+one test: **the publishing layer operates without it.** Remove a concern's
+telemetry and that layer still functions — dashboards go dark, nothing it does
+breaks. Telemetry is read, or it would be worthless; layers above may even
+build their own operation on it — a control plane scheduling off process
+lifecycle events operates *on* observation, and that is its dependency to
+declare, at its layer. Reading never reclassifies the traffic: severability is
+per-layer, not per-deployment. Traffic a layer functions *through* (a
+committal stream, an ask that must be answered) is not telemetry, whatever it
+is named; filing load-bearing traffic under telemetry — or observation under
+an operational subject — is the miscategorisation this definition exists to
+stop. Observers of operational traffic *read it*; they never receive a copy —
+one thing, one owner, observed rather than duplicated.
 
 The reason the planes are separate channels is trust, not tidiness. Telemetry
 is publish-only from the agent's side and nothing acts on it: the worst case
