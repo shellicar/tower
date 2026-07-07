@@ -235,5 +235,6 @@ implementation's own, made visible by its commits rather than specified:
   is nothing), or a query (the episode — surviving its internal changes). They
   differ exactly when things change, which is why the type is real data; wire
   encoding unruled.
-- **Authority.** Anyone on the bus can address any conversation; acceptable on
-  a local broker, but the line should be drawn consciously.
+
+Authority is settled in `nats-spec.md`: connection is authority; `from` is
+provenance, never enforcement.

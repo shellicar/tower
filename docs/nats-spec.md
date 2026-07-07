@@ -163,6 +163,50 @@ carries the scenario that forced it.
   behind them (what to trim, when, by what thresholds) stays the agent's own.
   The record carries effects, never reasons.
 
+## Telemetry
+
+`telemetry` is a general subject suffix, available to any concern, defined by
+one test: **remove it and everything still functions.** Telemetry is
+observation — dashboards go dark, nothing operational breaks. Traffic the
+system functions *through* (a committal stream, an ask that must be answered)
+is not telemetry, whatever it is named; filing load-bearing traffic under
+telemetry — or observation under an operational subject — is the
+miscategorisation this definition exists to stop. Observers of operational
+traffic *read it*; they never receive a copy — one thing, one owner, observed
+rather than duplicated.
+
+The reason the planes are separate channels is trust, not tidiness. Telemetry
+is publish-only from the agent's side and nothing acts on it: the worst case
+of accepting a bogus publish is a wrong pixel on a dashboard. The operational
+plane is application state: reading it is reading the system's truth, writing
+it is acting. A deployment can therefore grade them — accept telemetry
+promiscuously (even on invalid credentials), while the operational plane
+demands real ones — and that grading is only possible because the subjects
+keep the planes separable.
+
+**The v0 deployment deliberately declines the grading.** These are two
+separate things, kept distinct on purpose: the *model* — planes with different
+trust profiles, gradable per deployment — is the design and stands. The
+*practice* here is strict credentials on everything, no anonymous telemetry
+path. Reasoning: the case an unauthenticated write path would serve (an agent
+that cannot authenticate but should still be seen) is already covered by the
+machine's own metrics, while the cost is an anonymous write path terminating
+on the same broker that holds application state — a standing exposure waiting
+on one misconfiguration, for a niche gain. A deployment where that trade reads
+differently uses the model as designed; this one does not, knowingly.
+
+## Authority
+
+**Connection is authority.** Anyone connected to the broker may send anything;
+the protocol does not authenticate or authorise senders. `from` is provenance,
+never enforcement — it says who spoke, not who may. If a deployment needs
+enforcement, it lives at the application layer — broker accounts, ACLs, the
+deployment's own boundary — never in individual agents: an agent deciding who
+may address it would be every agent re-implementing policy locally, and
+wrongly. Decided knowingly for v0; the broker is the trust boundary — graded
+per plane if the deployment chooses (see Telemetry), strict on the operational
+plane always.
+
 ## Storage
 
 Subjects separate meaning, never storage. Persistence — JetStream or any other
