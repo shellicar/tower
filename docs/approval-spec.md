@@ -121,6 +121,7 @@ transport truth, never verdict:
 // approval.v1.apr-9f3.requests
 {
   "type": "answer",
+  "ts": "2026-07-07T15:03:38+10:00",
   "from": {
     "kind": "human",
     "userId": "stephen"
@@ -130,6 +131,11 @@ transport truth, never verdict:
 // reply → { "accepted": true }
 //       | { "rejected": true, "reason": "already_settled" | "not_found" }
 ```
+
+`from` — and `by` on `settled` — is pass-through provenance, same rule as the
+conversation spec: the answerer supplies what it actually knows, the holder
+echoes it and never authors it. `{ "kind": "human" }` alone is valid; the
+`userId` in the examples is illustrative, not required.
 
 First valid answer wins; `already_settled` is first-wins made honest.
 `not_found` means the holder does not know the id — it died and its model
@@ -170,6 +176,70 @@ diff. The ask then carries the surface like any other occasion that shows one
 different kind of rendering. Richer ask payloads arrive as new ask types
 under add-only — no change to this spec's structure.
 
+## Message schemas — normative
+
+The exchange above narrates; this section defines. Required and optional is
+exactly what the schema says. Same conventions as `conversation-spec.md`'s
+schema section: zod (v4), conformance JSON Schemas generated via
+`z.toJSONSchema`, `z.looseObject` as the add-only tolerance rule, `reason`
+strings an open set. As there, the unions are strict about known types;
+skipping unknown `type`s is the harness's routing rule, never a catch-all
+schema member — a catch-all would let misshaped known messages pass. (The
+`ask` union's `unknownAsk` is different on purpose: ask types are add-only
+*data inside* a known message, so an unknown ask must validate.)
+
+```ts
+import { z } from 'zod';
+
+const ts = z.iso.datetime({ offset: true });
+
+/** Enum tolerance, as in the conversation spec: listed values are the ones
+ *  defined today; an unknown value still validates. */
+const openEnum = <T extends readonly [string, ...string[]]>(values: T) => z.enum(values).or(z.string());
+
+/** Sender identity — same shape and same rule as the conversation spec:
+ *  `userId` only when actually known, never fabricated. */
+const sender = z.looseObject({
+  kind: openEnum(['human', 'agent', 'orchestrator']),
+  userId: z.string().optional(),
+});
+
+/** Ask types are an open set under add-only. `tool_use` is defined today; a
+ *  reviewer that does not know a type still shows the raise and its
+ *  correlation. */
+const toolUseAsk = z.looseObject({ type: z.literal('tool_use'), name: z.string(), input: z.record(z.string(), z.unknown()) });
+const unknownAsk = z.looseObject({ type: z.string() });
+const ask = z.union([toolUseAsk, unknownAsk]);
+
+/** Correlation fields appear when they apply; an ask outside any tool call
+ *  carries what it has. */
+const correlation = z.looseObject({
+  conversationId: z.string().optional(),
+  queryId: z.string().optional(),
+  turnId: z.string().optional(),
+  toolUseId: z.string().optional(),
+});
+
+// approval.v1.{approvalId}.lifecycle
+export const approvalLifecycle = z.discriminatedUnion('type', [
+  z.looseObject({ type: z.literal('raised'), ts, ask, correlation: correlation.optional() }),
+  z.looseObject({ type: z.literal('settled'), ts, approved: z.boolean(), by: sender }),
+]);
+
+// approval.v1.{approvalId}.telemetry
+export const approvalTelemetry = z.looseObject({ type: z.literal('heartbeat'), ts });
+
+// approval.v1.{approvalId}.requests
+export const approvalRequest = z.looseObject({ type: z.literal('answer'), ts, from: sender, approved: z.boolean() });
+
+// Reply — transport truth, never verdict. Known reasons today:
+// already_settled, not_found.
+export const answerReply = z.union([
+  z.looseObject({ accepted: z.literal(true) }),
+  z.looseObject({ rejected: z.literal(true), reason: z.string() }),
+]);
+```
+
 ## The approval model is the agent's — deliberately not contract
 
 The spec carries asks, answers, and settlements. Everything else belongs to
@@ -178,9 +248,7 @@ specified:
 
 - what raises an ask, and at what granularity;
 - whether pending asks survive a restart;
-- what an approval or denial means for the tool's execution;
-- auto-decisions — an ask the model settles itself is a `settled` with the
-  agent as `by`, and an action the model never questions raises nothing.
+- what an approval or denial means for the tool's execution.
 
 Who may answer is authority, settled in `nats-spec.md`: connection is
 authority; `from` is provenance, never enforcement.

@@ -92,7 +92,7 @@ compute, never something it must.
 | `turn_cancelled` | `queryId`, `turnId` | the turn was terminated intentionally — a `cancel` was accepted; someone decided |
 | `turn_aborted` | `queryId`, `turnId` | the attempt failed — service error, broken stream; potentially transient. Distinct from `turn_cancelled` because the two imply different follow-ups |
 | `tool_use` | `queryId`, `turnId`, `id`, `name`, `input` | `id` is the opaque tool-use id (`toolu_…`); `input` included — the action is unreviewable without the payload |
-| `usage` | `queryId`, `turnId`, `service`, `model`, `inputTokens`, `cacheCreationTokens`, `cacheReadTokens`, `outputTokens`, `costUsd` | per turn, from the model's usage reporting; a cost row names exactly what it priced, no cross-referencing |
+| `usage` | `queryId`, `turnId`, `service`, `model`, `inputTokens`, `cacheCreationTokens`, `cacheReadTokens`, `outputTokens` (+ optional: `cacheCreation5mTokens`, `cacheCreation1hTokens`, `thinkingTokens`, `serverToolUse`, `costUsd`) | **per usage frame, not per turn** — a turn may report usage more than once (the service reports at message start and again in the closing delta, and the two legitimately differ); each event carries what its frame reported, never a synthesis of frames. Optional fields appear when the frame reported them — report what you know, fabricate nothing. `costUsd` is derived by the publisher, not reported by the service; it appears when computed, and consumers summing cost must not assume one row per turn |
 
 **Tool approvals are not conversation traffic.** An approval is an
 authorization exchange between the serving process and whatever holds
@@ -115,7 +115,7 @@ something genuinely new needs the argument:
 
 | Change | Fields | Notes |
 |---|---|---|
-| `message` | `id`, `queryId`, `role`, `from`, `content` (+ `turnId` on assistant messages) | **utterance** — the dialogue grew. `id` is the message's stable id; `role` is `user` or `assistant`; `from` is the sender identity (`{ kind: human \| agent \| orchestrator }` + id) so two `role: user` messages from different senders read apart; `content` is content blocks |
+| `message` | `id`, `queryId`, `turnId`, `role`, `from`, `content` | **utterance** — the dialogue grew. `id` is the message's stable id; `role` is `user` or `assistant`; `from` is the sender identity (`{ kind: human \| agent \| orchestrator }` + id) so two `role: user` messages from different senders read apart; `content` is content blocks |
 | `revision` | `messageId`, `content` | **revision** — content changed under a stable id: thinking dropped, a tool result trimmed, an image resized. Carries the resulting content, never the why — policy belongs to whoever revised. The dialogue did not change; the payload did |
 | `tip_moved` | `to` (a message id) | **tip movement** — rewind, fast-forward, the switch after an edit. The reflog, as events |
 
@@ -181,6 +181,14 @@ kind.
 // reply → { "accepted": true, "id": "q7" }
 //       | { "rejected": true, "reason": "stale" }
 ```
+
+**`from` is pass-through provenance.** The sender supplies it; a servicer
+echoes what the sender sent and never authors it. Everything except `kind` is
+optional — a publisher states only what it actually knows, and fabricating the
+rest is non-compliant. `{ "kind": "human" }` alone is valid: it is exactly what
+a terminal that knows a human typed — but not which human — publishes. The
+worked example above shows a sender that did know its `userId`; that field is
+illustrative, not required.
 
 Two candidates follow from this design and are named, not designed:
 
@@ -274,6 +282,103 @@ implementation's own, made visible by its commits rather than specified:
   transformation, is between the agent and its model.
 - Revision policy — what gets trimmed, when, by what thresholds. The change
   stream carries effects, never reasons.
+
+## Message schemas — normative
+
+The tables above narrate; this section defines. Every message on this concern's
+subjects must validate against its schema here — required and optional is
+exactly what the schema says (`.optional()` and nothing else). Written as zod
+(v4); the conformance JSON Schema artifacts are generated from these via
+`z.toJSONSchema`, so prose and artifact cannot drift. `z.looseObject`
+throughout is the tolerance rule as code: unknown fields pass (add-only).
+`reason` strings are an open set — the values named are the ones defined
+today; consumers tolerate others.
+
+The unions are deliberately strict about the types they enumerate — a
+misshaped known message must fail. Openness on the discriminator is the
+**harness's routing rule**, not a schema member: a `type` not listed is
+skipped, never failed (conformance.md). Do not add a catch-all variant to a
+union — a misshaped known message would slide into it and pass, which is the
+leniency-conceals-divergence bug in schema form.
+
+```ts
+import { z } from 'zod';
+
+/** ISO-8601 timestamp with a real UTC offset (e.g. 2026-07-07T21:00:00+10:00). */
+const ts = z.iso.datetime({ offset: true });
+
+/** The tolerance rule for enums: the listed values are the ones defined
+ *  today; an unknown value still validates (a closed enum here would make
+ *  every addition a breaking change — the POC's closed-enum defect). */
+const openEnum = <T extends readonly [string, ...string[]]>(values: T) => z.enum(values).or(z.string());
+
+/** Sender identity. `userId` appears only when the publisher actually knows
+ *  it — never fabricated. A local CLI knows a human typed, not which human:
+ *  it publishes `{ kind: 'human' }` bare. `from` is provenance, never
+ *  enforcement (nats-spec). */
+const sender = z.looseObject({
+  kind: openEnum(['human', 'agent', 'orchestrator']),
+  userId: z.string().optional(),
+});
+
+/** Content blocks are the agent model's own; opaque typed blocks pending the
+ *  content vocabulary's design pass. */
+const contentBlocks = z.array(z.looseObject({ type: z.string() }));
+
+const turnRef = { queryId: z.string(), turnId: z.string() };
+
+// conv.v1.{conversationId}.telemetry
+export const conversationTelemetry = z.discriminatedUnion('type', [
+  z.looseObject({ type: z.literal('turn_started'), ts, ...turnRef, service: z.string(), model: z.string(), thinking: z.boolean(), effort: z.string().optional(), maxTokens: z.number().int() }),
+  z.looseObject({ type: z.literal('turn_ended'), ts, ...turnRef, stopReason: z.string() }),
+  z.looseObject({ type: z.literal('turn_cancelled'), ts, ...turnRef }),
+  z.looseObject({ type: z.literal('turn_aborted'), ts, ...turnRef }),
+  z.looseObject({ type: z.literal('tool_use'), ts, ...turnRef, id: z.string(), name: z.string(), input: z.record(z.string(), z.unknown()) }),
+  z.looseObject({
+    type: z.literal('usage'), ts, ...turnRef, service: z.string(), model: z.string(),
+    inputTokens: z.number().int(), cacheCreationTokens: z.number().int(), cacheReadTokens: z.number().int(), outputTokens: z.number().int(),
+    // Per-frame extras — present when the frame reported them, never synthesised:
+    cacheCreation5mTokens: z.number().int().optional(),
+    cacheCreation1hTokens: z.number().int().optional(),
+    thinkingTokens: z.number().int().optional(),
+    serverToolUse: z.record(z.string(), z.unknown()).optional(),
+    // Derived by the publisher (the service reports tokens, not prices); present when computed:
+    costUsd: z.number().optional(),
+  }),
+]);
+
+// conv.v1.{conversationId}.changes
+export const conversationChange = z.discriminatedUnion('type', [
+  z.looseObject({ type: z.literal('message'), ts, id: z.string(), ...turnRef, role: openEnum(['user', 'assistant']), from: sender, content: contentBlocks }),
+  z.looseObject({ type: z.literal('revision'), ts, messageId: z.string(), content: contentBlocks }),
+  z.looseObject({ type: z.literal('tip_moved'), ts, to: z.string() }),
+]);
+
+// conv.v1.{conversationId}.deltas — deliberately bare: the envelope's `ts` is
+// waived on purpose; deltas are ephemeral and the metadata would outweigh the data.
+export const conversationDelta = z.looseObject({ type: z.literal('delta'), text: z.string() });
+
+// conv.v1.{conversationId}.requests — a request whose `type` is not defined
+// here is still answered: `rejected` with reason `unsupported`. Compliance is
+// answering, not implementing.
+export const conversationRequest = z.discriminatedUnion('type', [
+  z.looseObject({ type: z.literal('say'), ts, from: sender, text: z.string(), precondition: z.looseObject({ tip: z.string() }).optional() }),
+  z.looseObject({ type: z.literal('cancel'), ts, from: sender.optional(), id: z.string() }),
+]);
+
+// Replies (transport truth, never outcome). Known reasons today:
+// stale, not_found, already_complete, unsupported.
+export const requestReply = z.union([
+  z.looseObject({ accepted: z.literal(true), id: z.string().optional() }),
+  z.looseObject({ rejected: z.literal(true), reason: z.string() }),
+]);
+```
+
+Two deliberate asymmetries, so they are not read as omissions:
+`say.precondition` is optional only because the first message of a new
+conversation is the one anchor-free case — every later `say` carries it.
+`cancel.from` is optional because provenance travels when known; the `id` is
+the cancel's premise and is always required.
 
 ## Open questions
 
