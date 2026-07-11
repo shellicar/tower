@@ -206,15 +206,18 @@ typed premise — **required**, not optional. An unanchored mutation is
 timing-dependent nondeterminism: a delayed "hello world" arriving after five
 queries have finished means something nobody said. One premise kind in v1:
 
-- `{ tip: messageId }` — my premise is a position: that node is the tip I saw.
+- `{ tip: messageId | null }` — my premise is a position: that node is the tip
+  I saw. `null` is the position "nothing exists yet" — the first message of a
+  new conversation states it explicitly rather than omitting the premise.
   Valid while it is still the tip.
 
 A premise that no longer holds is rejected with reason `stale`, and the sender
 re-decides with current knowledge — the wire's version of "actually, wait—".
 Operations premised on incompatible worlds are never merged or sequenced: the
-first commit moves the tree; the rest are refused with an explanation. The only
-anchor-free case is the first message of a new conversation — there is no state
-to have known.
+first commit moves the tree; the rest are refused with an explanation. There is
+no anchor-free case: even the first message of a new conversation carries its
+premise — `{ tip: null }`, the claim that nothing exists — and it is enforced
+like any other: a `tip: null` say against a non-empty conversation is `stale`.
 
 **The spec never requires acceptance; it limits it.** Rejecting everything is
 lawful — internal state is the servicer's, which is the whole point. What a
@@ -362,7 +365,7 @@ export const conversationDelta = z.looseObject({ type: z.literal('delta'), text:
 // here is still answered: `rejected` with reason `unsupported`. Compliance is
 // answering, not implementing.
 export const conversationRequest = z.discriminatedUnion('type', [
-  z.looseObject({ type: z.literal('say'), ts, from: sender, text: z.string(), precondition: z.looseObject({ tip: z.string() }).optional() }),
+  z.looseObject({ type: z.literal('say'), ts, from: sender, text: z.string(), precondition: z.looseObject({ tip: z.string().nullable() }) }),
   z.looseObject({ type: z.literal('cancel'), ts, from: sender.optional(), id: z.string() }),
 ]);
 
@@ -374,11 +377,11 @@ export const requestReply = z.union([
 ]);
 ```
 
-Two deliberate asymmetries, so they are not read as omissions:
-`say.precondition` is optional only because the first message of a new
-conversation is the one anchor-free case — every later `say` carries it.
-`cancel.from` is optional because provenance travels when known; the `id` is
-the cancel's premise and is always required.
+One deliberate asymmetry, so it is not read as an omission: `cancel.from` is
+optional because provenance travels when known; the `id` is the cancel's
+premise and is always required. `say.precondition` has no such asymmetry — it
+is always required; the first message of a new conversation states
+`{ tip: null }` rather than omitting it.
 
 ## Open questions
 

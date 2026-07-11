@@ -88,23 +88,25 @@ deployment convention (tmux server/session/window) into what is in practice
 spec.*
 *Retires: window-hopping as monitoring.*
 
-### Stage 2 — Speak
+### Stage 2 — Speak: delivered
 
-Implement the concern specs in the node CLI, and make something speak.
-Addressable is not Speak — the specs bind the servicer; the stage is not done
-until something sends. Three pieces:
+Delivered (claude-cli PR #411): the concern specs implemented in the node CLI,
+and something speaks. Three pieces, all landed:
 
 1. **The servicer** — the CLI implements the three specs: the committal change
    stream, telemetry, `say`/`cancel` with preconditions and the acceptance
    limits, the approval concern with its pulse. Proven by `conformance.md`
    against the `scenarios.md` fixtures.
-2. **The speaker** — the first sending client: a tool in the CLI that
-   publishes a `say` with a premise, reads the reply, watches the change
-   stream for the answer.
-3. **The approval answerer** — the notifier grows a reply path: see the raise,
-   review the payload, answer from anywhere.
+2. **The speaker** — the first sending client: the demonstration `send`
+   script publishes a `say` with a premise, reads the reply, and the events
+   arrive on `monitor`/`query`.
+3. **The approval answerer** — the same script's answer mode: see the raise,
+   review the payload, answer from anywhere; it settles with `by`.
 
-Done when one conversation asks another a question and reads the answer.
+`say` was the goal, and it is demonstrated end to end over a real broker: a
+wire `say` drives a real turn — accepted → `turn_started` → deltas → commits
+on `changes` → `turn_ended` — and an approval raised over the wire is answered
+and settles. The fleet's conversations are addressable and answerable.
 
 `phase_done` stays retired as a named wire event. A done-declaration is
 ordinary message traffic: the orchestrator routes on it opaquely, and what

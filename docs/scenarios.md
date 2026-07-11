@@ -42,7 +42,7 @@ closing round (ends `end_turn`).
   closing on `end_turn`.
 
 ```jsonl
-{"subject":"conv.v1.conv-abc.requests","message":{"type":"say","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"text":"read file X and summarise it"},"reply":{"accepted":true,"id":"q1"}}
+{"subject":"conv.v1.conv-abc.requests","message":{"type":"say","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"text":"read file X and summarise it","precondition":{"tip":null}},"reply":{"accepted":true,"id":"q1"}}
 {"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m1","queryId":"q1","turnId":"t1","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"read file X and summarise it"}]}}
 {"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_started","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}}
 {"subject":"conv.v1.conv-abc.telemetry","message":{"type":"tool_use","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","id":"toolu_01ABC","name":"ReadFile","input":{"path":"X"}}}
@@ -57,8 +57,9 @@ closing round (ends `end_turn`).
 {"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m4","queryId":"q1","turnId":"t2","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"File X contains a summary of…"}]}}
 ```
 
-The first `say` of a new conversation is the one anchor-free case — no
-`precondition`, there was no state to have known.
+The first `say` of a new conversation carries `{ "tip": null }` — the premise
+that nothing exists yet, stated and enforced like any other; there is no
+anchor-free case.
 
 ## 2. Cancel mid-turn
 

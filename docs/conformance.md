@@ -18,9 +18,11 @@ strictness lives in tests, where it costs nothing.
 
 ## Artifacts, all data
 
-- Per-concern JSON Schemas: the message shapes of `conv.v1` and `approval.v1`.
-- Fixture files: the scenarios of `scenarios.md` as loadable captures,
-  authored during implementation and kept alive by fix-lands-twice.
+- Per-concern JSON Schemas: generated from the specs' normative zod sections
+  via `z.toJSONSchema`, so spec and artifact cannot drift.
+- Fixtures: the jsonl templates inline in `scenarios.md` — authored with the
+  specs, validated by first implementation contact, and kept alive by
+  fix-lands-twice.
 
 Tower authors the artifacts; each implementation carries **verbatim copies**
 — colocation, not coupling. No cross-repo dependency until the specs are

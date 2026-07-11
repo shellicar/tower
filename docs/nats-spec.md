@@ -313,3 +313,13 @@ Subjects separate meaning, never storage. Persistence — JetStream or any other
 recorder — is a subscriber's choice, made per deployment: which subjects a
 stream captures and for how long are deployment configuration, not contract. No
 spec may depend on what is recorded.
+
+One boundary is contract, not configuration: **streams capture event subjects
+only — never a `.requests` subject.** JetStream acknowledges whatever it
+captures with a PubAck to the publish's reply inbox, and a request *is* a
+publish with a reply inbox — a stream over a requests subject becomes a second
+responder, racing the servicer's reply (found on first live contact, not in
+theory). Requests are not events: their durable trace is their effect on the
+record, and replies ride point-to-point inboxes no stream can capture anyway.
+A deployment that genuinely wants an audit of asks creates a separate `NoAck`
+stream for that purpose, deliberately — never the committal capture.
