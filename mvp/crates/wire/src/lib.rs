@@ -13,5 +13,8 @@ pub use approval::{AnswerOutcome, ApprovalLifecycle, encode_answer, parse_answer
 pub use conv::{ConvBlock, ConvChange, ConvDelta, ConvTelemetry, Tolerant};
 pub use ids::{ApprovalId, ConversationId, MessageId, QueryId, TurnId};
 pub use ingest::{ApprovalEvent, ApprovalKind, Event, EventKind, WireEvent, parse_wire};
-pub use say::{SayCommand, SayOutcome, encode_say, parse_say_reply};
-pub use ts::parse_ts;
+pub use say::{
+    ConvRequest, SayCommand, SayOutcome, encode_accepted, encode_rejected, encode_say,
+    parse_request, parse_say_reply,
+};
+pub use ts::{format_ts, now_iso, parse_ts};

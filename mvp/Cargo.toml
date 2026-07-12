@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/wire", "crates/towerd"]
+members = ["crates/wire", "crates/towerd", "crates/bridge"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,9 +12,13 @@ anyhow = "1"
 async-nats = "0.49"
 axum = { version = "0.8", features = ["ws"] }
 futures = "0.3"
+# reqwest: the bridge's model adapter — one streaming HTTPS call; rustls so no
+# system OpenSSL. uuid: id minting (conversation/query/turn/message ids).
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
