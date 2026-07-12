@@ -1,0 +1,20 @@
+[package]
+name = "towerd"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wire = { path = "../wire" }
+anyhow.workspace = true
+async-nats.workspace = true
+axum.workspace = true
+futures.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+# The integration check's WS client — already in the tree via axum's ws feature.
+tokio-tungstenite = "0.29"

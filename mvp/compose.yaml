@@ -1,0 +1,31 @@
+services:
+  nats:
+    image: nats:2.11-alpine
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats-data:/data
+
+  # Creates the capture stream once the broker is up, then exits.
+  # Event subjects only — never a `.requests` subject: JetStream acks a
+  # captured publish to its reply inbox, and a request IS a publish with a
+  # reply inbox, so a stream over requests becomes a second responder racing
+  # the servicer's reply (nats-spec, Storage).
+  stream-init:
+    image: natsio/nats-box:latest
+    depends_on:
+      - nats
+    command: >
+      sh -c "
+        until nats --server nats://nats:4222 server check connection >/dev/null 2>&1; do sleep 0.5; done;
+        nats --server nats://nats:4222 stream add conv-approval
+          --subjects 'conv.v1.*.telemetry,conv.v1.*.changes,conv.v1.*.deltas,approval.v1.*.lifecycle,approval.v1.*.telemetry'
+          --storage file --retention limits --max-age 168h
+          --discard old --defaults
+          || true
+      "
+
+volumes:
+  nats-data:

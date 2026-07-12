@@ -1,0 +1,10 @@
+[package]
+name = "wire"
+version.workspace = true
+edition.workspace = true
+
+# Spec types + pure folds. No I/O, no tokio — the conformance fixtures in
+# ../../../docs/spec/scenarios.md test this crate.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

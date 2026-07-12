@@ -1,0 +1,18 @@
+# Named verbs for the workspace. `just` with no argument lists them.
+
+# Build every crate.
+build:
+    cargo build --workspace
+
+# Test every crate.
+test:
+    cargo test --workspace
+
+# Lint + format check — what CI would run.
+check:
+    cargo clippy --workspace
+    cargo fmt --check
+
+# Run towerd (expects NATS_URL, TOWER_BIND, TOWER_DB in the environment).
+run:
+    cargo run -p towerd
