@@ -97,3 +97,7 @@ the commit, don't reach.
 - Stage by exact path; never `git add .`/`-A`.
 - Comments carry why, not what. No ceremony traits, no speculative
   abstraction — a seam appears when a second implementation exists.
+- That rule is for code and design, **not database schemas**. A schema is
+  the last thing to keep changing: when the future shape is known (a second
+  stream, groups, layouts), key the table for it now — don't singleton it
+  and migrate later.
