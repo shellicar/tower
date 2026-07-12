@@ -178,13 +178,13 @@
     {#each section.rows as row (row.conv)}
       <li>
         <button
-          class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900 {tower.open.has(
+          class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900 {tower.tab.convs.includes(
             row.conv,
           )
             ? 'bg-slate-800'
             : ''}"
           onclick={() =>
-            tower.open.has(row.conv)
+            tower.tab.convs.includes(row.conv)
               ? tower.closeConversation(row.conv)
               : tower.openConversation(row.conv)}
         >

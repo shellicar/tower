@@ -44,13 +44,29 @@ export interface ViewConfig {
   hideUntagged: boolean;
 }
 
+/** A tab is a whole working view: its own view config AND its own open
+ *  conversations — switch tabs, switch worlds. Per profile. */
+export interface Tab {
+  name: string;
+  view: ViewConfig;
+  convs: string[];
+}
+
+const defaultView = (): ViewConfig => ({
+  filters: {},
+  groupKey: '',
+  alwaysShow: [],
+  hideUntagged: false,
+});
+
 class Tower {
   rows = $state<Map<string, RowState>>(new Map());
   open = $state<Map<string, OpenConversation>>(new Map());
   approvals = $state<Map<string, ApprovalState>>(new Map());
   /** key → colour, from the list snapshot — the shared colour language. */
   tagKeys = $state<Record<string, string>>({});
-  view = $state<ViewConfig>(readViewConfig());
+  tabs = $state<Tab[]>(readTabs());
+  active = $state<number>(readActiveTab());
   /** Whether the approvals view is showing — pure view state. */
   approvalsOpen = $state(false);
   /** Transient outcome of the last answer per approval id, for display. */
@@ -71,6 +87,49 @@ class Tower {
     return [...this.rows.values()].sort((a, b) => b.lastEvent - a.lastEvent);
   }
 
+  /** The active tab; tabs always number at least one. */
+  get tab(): Tab {
+    return this.tabs[Math.min(this.active, this.tabs.length - 1)];
+  }
+
+  /** The active tab's view config — what the rail reads and mutates. */
+  get view(): ViewConfig {
+    return this.tab.view;
+  }
+
+  addTab() {
+    this.tabs.push({ name: `view ${this.tabs.length + 1}`, view: defaultView(), convs: [] });
+    this.active = this.tabs.length - 1;
+    this.saveView();
+  }
+
+  closeTab(i: number) {
+    if (this.tabs.length <= 1) return;
+    const removed = this.tabs[i];
+    this.tabs.splice(i, 1);
+    if (this.active >= this.tabs.length) this.active = this.tabs.length - 1;
+    // Conversations open in no remaining tab stop flowing.
+    for (const conv of removed.convs) this.#dropIfOrphaned(conv);
+    this.saveView();
+  }
+
+  renameTab(i: number, name: string) {
+    if (name.trim()) this.tabs[i].name = name.trim();
+    this.saveView();
+  }
+
+  switchTab(i: number) {
+    this.active = i;
+    this.saveView();
+  }
+
+  #dropIfOrphaned(conv: string) {
+    if (this.tabs.some((t) => t.convs.includes(conv))) return;
+    this.open.delete(conv);
+    this.open = new Map(this.open);
+    this.#send({ type: 'close', id: this.#id(), conv });
+  }
+
   /** Pending asks, oldest first — a waiting Claude burns wall-clock. */
   get pendingApprovals(): ApprovalState[] {
     return [...this.approvals.values()]
@@ -88,11 +147,12 @@ class Tower {
   }
 
   connect() {
-    // A refresh keeps what was being read: the open set survives in
-    // localStorage, and reconnect's own re-open path does the rest.
+    // A refresh keeps what was being read: every tab's open set survives in
+    // localStorage, and reconnect's own re-open path does the rest. Content
+    // flows for all tabs' conversations — switching tabs is instant.
     if (!this.#restored) {
       this.#restored = true;
-      for (const conv of readOpenSet()) {
+      for (const conv of new Set(this.tabs.flatMap((t) => t.convs))) {
         this.open.set(conv, {
           conv,
           messages: [],
@@ -134,19 +194,21 @@ class Tower {
   }
 
   openConversation(conv: string) {
+    if (!this.tab.convs.includes(conv)) {
+      this.tab.convs.push(conv);
+      this.saveView();
+    }
     if (!this.open.has(conv)) {
       this.open.set(conv, { conv, messages: [], streaming: [], lastSay: null, loaded: false });
       this.open = new Map(this.open);
-      writeOpenSet(this.open);
     }
     this.#send({ type: 'open', id: this.#id(), conv, after: null });
   }
 
   closeConversation(conv: string) {
-    this.open.delete(conv);
-    this.open = new Map(this.open);
-    writeOpenSet(this.open);
-    this.#send({ type: 'close', id: this.#id(), conv });
+    this.tab.convs = this.tab.convs.filter((c) => c !== conv);
+    this.saveView();
+    this.#dropIfOrphaned(conv);
   }
 
   /** Tags follow the titles discipline: the tagging client updates its own
@@ -170,7 +232,8 @@ class Tower {
 
   saveView() {
     try {
-      localStorage.setItem('tower.view', JSON.stringify(this.view));
+      localStorage.setItem('tower.tabs', JSON.stringify(this.tabs));
+      localStorage.setItem('tower.activeTab', String(this.active));
     } catch {
       // Storage full or blocked: persistence degrades, viewing does not.
     }
@@ -350,39 +413,50 @@ function highWater(oc: OpenConversation): Millis | null {
   return oc.messages.length > 0 ? oc.messages[oc.messages.length - 1].ts : null;
 }
 
-function readViewConfig(): ViewConfig {
+/** Tabs from storage, migrating the pre-tab keys (tower.view, tower.open)
+ *  into tab one so nothing is lost on upgrade. Always at least one tab. */
+function readTabs(): Tab[] {
   try {
-    const parsed = JSON.parse(localStorage.getItem('tower.view') ?? '{}');
-    return {
-      filters: parsed.filters ?? {},
-      groupKey: parsed.groupKey ?? '',
-      alwaysShow: parsed.alwaysShow ?? [],
-      hideUntagged: parsed.hideUntagged ?? false,
-    };
+    const parsed = JSON.parse(localStorage.getItem('tower.tabs') ?? 'null');
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed.map((t) => ({
+        name: typeof t.name === 'string' ? t.name : 'view',
+        view: {
+          filters: t.view?.filters ?? {},
+          groupKey: t.view?.groupKey ?? '',
+          alwaysShow: t.view?.alwaysShow ?? [],
+          hideUntagged: t.view?.hideUntagged ?? false,
+        },
+        convs: Array.isArray(t.convs) ? t.convs.filter((c: unknown) => typeof c === 'string') : [],
+      }));
+    }
   } catch {
-    return { filters: {}, groupKey: '', alwaysShow: [], hideUntagged: false };
+    // fall through to migration
   }
+  // Migration: the single pre-tab view + open set become tab one.
+  let view = defaultView();
+  let convs: string[] = [];
+  try {
+    const v = JSON.parse(localStorage.getItem('tower.view') ?? 'null');
+    if (v) {
+      view = {
+        filters: v.filters ?? {},
+        groupKey: v.groupKey ?? '',
+        alwaysShow: v.alwaysShow ?? [],
+        hideUntagged: v.hideUntagged ?? false,
+      };
+    }
+    const o = JSON.parse(localStorage.getItem('tower.open') ?? '[]');
+    if (Array.isArray(o)) convs = o.filter((c) => typeof c === 'string');
+  } catch {
+    // defaults stand
+  }
+  return [{ name: 'main', view, convs }];
 }
 
-// The open set, in opening order. Local view state, not conversation state —
-// exactly what a client's own storage is for.
-const OPEN_KEY = 'tower.open';
-
-function readOpenSet(): string[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(OPEN_KEY) ?? '[]');
-    return Array.isArray(parsed) ? parsed.filter((x) => typeof x === 'string') : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeOpenSet(open: Map<string, OpenConversation>) {
-  try {
-    localStorage.setItem(OPEN_KEY, JSON.stringify([...open.keys()]));
-  } catch {
-    // Storage full or blocked: persistence degrades, reading does not.
-  }
+function readActiveTab(): number {
+  const n = Number(localStorage.getItem('tower.activeTab') ?? '0');
+  return Number.isInteger(n) && n >= 0 ? n : 0;
 }
 
 export const tower = new Tower();
