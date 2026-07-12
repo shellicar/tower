@@ -65,6 +65,20 @@ Stop one conversation's content flow. Response: `closed`. `row` events for
 that conversation continue — closing affects reading, never awareness.
 Closing something not open is not an error; the response is the same.
 
+### `set_title`
+
+```json
+{ "type": "set_title", "id": "r4", "conv": "c65b902d-…", "title": "tower build" }
+```
+
+Name a conversation. The title is **tower's own annotation** — it lives in
+towerd, never travels on NATS, and never reaches the conversation's servicer.
+Any client may rename; concurrent renames are last-write-wins. An empty
+`title` clears the name (clients fall back to showing the id). Response:
+`title_set`. Titles do not propagate live: the renaming client already knows
+what it did, and every other client sees the new name in its next `list` —
+refresh is the propagation.
+
 ### `say`
 
 ```json
@@ -88,9 +102,14 @@ the wire's own rule (the reply confirms acceptance, never outcome).
 
 ```json
 { "type": "list", "rows": [
-  { "conv": "c65b902d-…", "lastEvent": 1760187514000, "lastKind": "message" }
+  { "conv": "c65b902d-…", "lastEvent": 1760187514000, "lastKind": "message", "title": "tower build" }
 ] }
 ```
+
+`title` is present only for conversations that have been named (`set_title`);
+absent means untitled — show the id. The `list` is the only carrier: `row`
+events do not carry titles, because a rename is not fleet activity and must
+not touch staleness.
 
 The full snapshot: one row per conversation towerd has ever seen, unsorted —
 ordering is the client's (by `lastEvent`, descending, is the product). Sent
@@ -130,6 +149,14 @@ The catch-up: every stored message with `ts` greater than the request's
 (the client renders known block types, skips unknown ones), and `ts`. The
 boundary may overlap what the client already holds when `after` is a shared
 timestamp — dedupe by message `id`; rendering a known id again is a no-op.
+
+### `title_set` — response to `set_title`
+
+```json
+{ "type": "title_set", "id": "r4", "conv": "c65b902d-…" }
+```
+
+Acknowledgement, nothing more.
 
 ### `closed` — response to `close`
 
@@ -283,12 +310,14 @@ const rowState = z.looseObject({
   conv: z.string(),
   lastEvent: millis,
   lastKind: z.string(),
+  title: z.string().optional(),
 });
 
 export const clientMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('open'),  id: z.string(), conv: z.string(), after: millis.nullable() }),
   z.looseObject({ type: z.literal('close'), id: z.string(), conv: z.string() }),
   z.looseObject({ type: z.literal('say'),   id: z.string(), conv: z.string(), text: z.string(), tip: z.string().nullable() }),
+  z.looseObject({ type: z.literal('set_title'), id: z.string(), conv: z.string(), title: z.string() }),
 ]);
 
 export const serverMsg = z.discriminatedUnion('type', [
@@ -296,6 +325,7 @@ export const serverMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('row'),          conv: z.string(), lastEvent: millis, lastKind: z.string() }),
   z.looseObject({ type: z.literal('conversation'), id: z.string(), conv: z.string(), messages: z.array(conversationMessage) }),
   z.looseObject({ type: z.literal('closed'),       id: z.string(), conv: z.string() }),
+  z.looseObject({ type: z.literal('title_set'),    id: z.string(), conv: z.string() }),
   z.looseObject({ type: z.literal('say_result'),   id: z.string(), outcome: z.literal('accepted'), query: z.string() }),
   z.looseObject({ type: z.literal('say_result'),   id: z.string(), outcome: z.literal('rejected'), reason: z.string() }),
   z.looseObject({ type: z.literal('say_result'),   id: z.string(), outcome: z.literal('unreachable') }),

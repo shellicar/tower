@@ -44,6 +44,8 @@ pub struct RowState {
     pub conv: ConversationId,
     pub last_event: i64,
     pub last_kind: String,
+    /// Tower's own annotation (`titles` table) — never wire state.
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +72,12 @@ pub enum ViewQuery {
     Ref {
         id: String,
         reply: oneshot::Sender<Option<(String, Vec<u8>)>>,
+    },
+    /// Empty title clears the name. Last write wins.
+    SetTitle {
+        conv: ConversationId,
+        title: String,
+        reply: oneshot::Sender<()>,
     },
 }
 
@@ -113,6 +121,13 @@ const MIGRATIONS: &[&str] = &[
          id    TEXT PRIMARY KEY,
          hint  TEXT NOT NULL,
          bytes BLOB NOT NULL
+     );",
+    // 2 — titles: tower's own annotation, keyed by conversation id. NOT a
+    // materialised view: it is the one table rematerialisation must never
+    // touch, because it derives from nothing — it is what the SC typed.
+    "CREATE TABLE titles (
+         conv  TEXT PRIMARY KEY,
+         title TEXT NOT NULL
      );",
 ];
 
@@ -341,19 +356,41 @@ impl Views {
             ViewQuery::Ref { id, reply } => {
                 let _ = reply.send(self.get_ref(&id).ok().flatten());
             }
+            ViewQuery::SetTitle { conv, title, reply } => {
+                if let Err(e) = self.set_title(&conv, &title) {
+                    eprintln!("views: set_title failed for {conv}: {e:#}");
+                }
+                let _ = reply.send(());
+            }
         }
     }
 
+    fn set_title(&self, conv: &ConversationId, title: &str) -> anyhow::Result<()> {
+        if title.is_empty() {
+            self.db
+                .execute("DELETE FROM titles WHERE conv = ?1", [&conv.0])?;
+        } else {
+            self.db.execute(
+                "INSERT INTO titles (conv, title) VALUES (?1, ?2)
+                 ON CONFLICT(conv) DO UPDATE SET title = excluded.title",
+                rusqlite::params![conv.0, title],
+            )?;
+        }
+        Ok(())
+    }
+
     fn list(&self) -> anyhow::Result<Vec<RowState>> {
-        let mut stmt = self
-            .db
-            .prepare_cached("SELECT conv, last_event, last_kind FROM rows")?;
+        let mut stmt = self.db.prepare_cached(
+            "SELECT r.conv, r.last_event, r.last_kind, t.title
+             FROM rows r LEFT JOIN titles t ON t.conv = r.conv",
+        )?;
         let rows = stmt
             .query_map([], |r| {
                 Ok(RowState {
                     conv: ConversationId(r.get(0)?),
                     last_event: r.get(1)?,
                     last_kind: r.get(2)?,
+                    title: r.get(3)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -580,6 +617,40 @@ mod tests {
         let rows = views.list().unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].last_kind, "vibe_shift");
+    }
+
+    #[test]
+    fn titles_set_overwrite_clear_and_survive_rematerialisation() {
+        let (mut views, _rx) = fresh();
+        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
+        let conv = ConversationId("conv-abc".into());
+
+        // Set, then overwrite (last write wins).
+        views.set_title(&conv, "tower build").unwrap();
+        views.set_title(&conv, "tower v1").unwrap();
+        assert_eq!(views.list().unwrap()[0].title.as_deref(), Some("tower v1"));
+
+        // A title for a conversation the views have never seen is allowed;
+        // the row is born titled when its first event arrives.
+        views
+            .set_title(&ConversationId("conv-new".into()), "early name")
+            .unwrap();
+
+        // Rematerialisation truncates the derived tables only — titles are
+        // not a materialised view and must survive.
+        views
+            .db
+            .execute_batch(
+                "DELETE FROM rows; DELETE FROM messages; DELETE FROM refs;
+             UPDATE cursor SET seq = 0 WHERE id = 1;",
+            )
+            .unwrap();
+        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
+        assert_eq!(views.list().unwrap()[0].title.as_deref(), Some("tower v1"));
+
+        // Empty title clears; the row falls back to untitled.
+        views.set_title(&conv, "").unwrap();
+        assert_eq!(views.list().unwrap()[0].title, None);
     }
 
     #[test]

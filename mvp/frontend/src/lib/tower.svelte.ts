@@ -101,6 +101,19 @@ class Tower {
     this.#send({ type: 'close', id: this.#id(), conv });
   }
 
+  /** Titles don't propagate live — refresh is the propagation — so the
+   *  renaming client updates its own row from its own action. An empty
+   *  title clears the name. */
+  setTitle(conv: string, title: string) {
+    this.#send({ type: 'set_title', id: this.#id(), conv, title });
+    const row = this.rows.get(conv);
+    if (row) {
+      if (title === '') delete row.title;
+      else row.title = title;
+      this.rows = new Map(this.rows);
+    }
+  }
+
   /** The tip is this client's view of the latest message id — the premise
    *  belongs to the sender; null claims the conversation is empty. */
   say(conv: string, text: string) {
@@ -122,10 +135,12 @@ class Tower {
       }
       case 'row': {
         // Upsert by conv: an unknown conv IS a new conversation being born.
+        // `row` never carries a title; the one we hold survives the upsert.
         this.rows.set(msg.conv, {
           conv: msg.conv,
           lastEvent: msg.lastEvent,
           lastKind: msg.lastKind,
+          title: this.rows.get(msg.conv)?.title,
         });
         this.rows = new Map(this.rows);
         break;
@@ -169,6 +184,7 @@ class Tower {
         break;
       }
       case 'closed':
+      case 'title_set':
       case 'error':
         break; // acknowledgements; errors surface nothing actionable in v1
       default:

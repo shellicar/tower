@@ -72,6 +72,32 @@
   // (an open set): shown verbatim, never branched on.
   const row = $derived(tower.rows.get(oc.conv));
 
+  // The header is the title's editor: click the name, type, Enter or blur
+  // lands it (empty clears — back to the id). Escape abandons.
+  let editingTitle = $state(false);
+  let titleDraft = $state('');
+
+  function startTitleEdit() {
+    titleDraft = row?.title ?? '';
+    editingTitle = true;
+  }
+
+  function commitTitle() {
+    if (!editingTitle) return;
+    editingTitle = false;
+    const title = titleDraft.trim();
+    if (title !== (row?.title ?? '')) tower.setTitle(oc.conv, title);
+  }
+
+  function titleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitTitle();
+    } else if (e.key === 'Escape') {
+      editingTitle = false; // abandon: nothing sent
+    }
+  }
+
   let now = $state(Date.now());
   $effect(() => {
     const t = setInterval(() => (now = Date.now()), 1_000);
@@ -88,8 +114,26 @@
 </script>
 
 <section class="flex h-screen min-w-[480px] flex-1 flex-col border-r border-neutral-700">
-  <header class="flex items-center justify-between border-b border-neutral-700 px-3 py-2">
-    <span class="truncate text-sky-300">{oc.conv}</span>
+  <header class="flex items-center justify-between gap-2 border-b border-neutral-700 px-3 py-2">
+    {#if editingTitle}
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        class="min-w-0 flex-1 border border-neutral-600 bg-neutral-900 px-1 text-sky-300"
+        bind:value={titleDraft}
+        onblur={commitTitle}
+        onkeydown={titleKeydown}
+        placeholder={oc.conv}
+        autofocus
+      />
+    {:else}
+      <button
+        class="min-w-0 cursor-text truncate text-left text-sky-300"
+        title={oc.conv}
+        onclick={startTitleEdit}
+      >
+        {row?.title ?? oc.conv}
+      </button>
+    {/if}
     <button
       class="cursor-pointer text-base text-neutral-400 hover:text-neutral-200"
       onclick={() => tower.closeConversation(oc.conv)}>×</button

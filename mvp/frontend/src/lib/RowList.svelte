@@ -27,7 +27,7 @@
             ? tower.closeConversation(row.conv)
             : tower.openConversation(row.conv)}
       >
-        <span class="truncate">{row.conv}</span>
+        <span class="truncate" class:text-neutral-200={row.title}>{row.title ?? row.conv}</span>
         <span class="flex shrink-0 gap-2 text-neutral-400">
           <span>{row.lastKind}</span>
           <span class="min-w-[3ch] text-right">{age(row.lastEvent)}</span>

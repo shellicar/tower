@@ -35,6 +35,12 @@ pub enum ClientMsg {
         text: String,
         tip: Option<String>,
     },
+    #[serde(rename = "set_title")]
+    SetTitle {
+        id: String,
+        conv: String,
+        title: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -58,6 +64,8 @@ pub enum ServerMsg {
     },
     #[serde(rename = "closed")]
     Closed { id: String, conv: String },
+    #[serde(rename = "title_set")]
+    TitleSet { id: String, conv: String },
     #[serde(rename = "say_result")]
     SayResult {
         id: String,
@@ -82,6 +90,9 @@ pub struct WsRow {
     pub last_event: i64,
     #[serde(rename = "lastKind")]
     pub last_kind: String,
+    /// Present only for named conversations; absent = untitled, show the id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -101,6 +112,7 @@ impl From<RowState> for WsRow {
             conv: r.conv.0,
             last_event: r.last_event,
             last_kind: r.last_kind,
+            title: r.title,
         }
     }
 }
@@ -238,6 +250,21 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
         ClientMsg::Close { id, conv } => {
             session.close(&conv);
             ServerMsg::Closed { id, conv }
+        }
+        ClientMsg::SetTitle { id, conv, title } => {
+            let (tx, rx) = oneshot::channel();
+            let query = ViewQuery::SetTitle {
+                conv: ConversationId(conv.clone()),
+                title,
+                reply: tx,
+            };
+            if views.queries.send(query).await.is_err() || rx.await.is_err() {
+                return ServerMsg::Error {
+                    id,
+                    reason: "views unavailable".into(),
+                };
+            }
+            ServerMsg::TitleSet { id, conv }
         }
         ClientMsg::Say {
             id,

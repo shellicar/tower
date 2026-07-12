@@ -37,6 +37,8 @@ export interface RowState {
   conv: string;
   lastEvent: Millis;
   lastKind: string;
+  /** Tower's own annotation; absent = untitled, show the id. */
+  title?: string;
 }
 
 // towerd → client
@@ -45,6 +47,7 @@ export type ServerMsg =
   | { type: 'row'; conv: string; lastEvent: Millis; lastKind: string }
   | { type: 'conversation'; id: string; conv: string; messages: ConversationMessage[] }
   | { type: 'closed'; id: string; conv: string }
+  | { type: 'title_set'; id: string; conv: string }
   | { type: 'say_result'; id: string; outcome: 'accepted'; query: string }
   | { type: 'say_result'; id: string; outcome: 'rejected'; reason: string }
   | { type: 'say_result'; id: string; outcome: 'unreachable' }
@@ -56,7 +59,8 @@ export type ServerMsg =
 export type ClientMsg =
   | { type: 'open'; id: string; conv: string; after: Millis | null }
   | { type: 'close'; id: string; conv: string }
-  | { type: 'say'; id: string; conv: string; text: string; tip: string | null };
+  | { type: 'say'; id: string; conv: string; text: string; tip: string | null }
+  | { type: 'set_title'; id: string; conv: string; title: string };
 
 export function isRef(value: unknown): value is Ref {
   return (
