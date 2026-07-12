@@ -211,6 +211,19 @@ Transport truth, never verdict — the same three-way honesty as `say_result`.
 `unreachable` means nobody answered: the holder is gone, and the ask will read
 as void when its pulse lapses.
 
+### `stream_block` — live, gated by `open`
+
+```json
+{ "type": "stream_block", "conv": "c65b902d-…", "blockType": "thinking" }
+```
+
+The wire's `block` marker, forwarded: the conversation's in-flight stream
+changed character — the `streaming` chunks that follow are `blockType`
+(`thinking`, `text`, `tool_use` — an open set, shown verbatim, never branched
+on beyond styling). Same gating and ephemerality as `streaming`: only for
+open conversations, superseded by the committed message. A client that
+predates this frame skips it and sees exactly what it saw before.
+
 ### `title_set` — response to `set_title`
 
 ```json
@@ -416,6 +429,7 @@ export const serverMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('say_result'),   id: z.string(), outcome: z.literal('unreachable') }),
   z.looseObject({ type: z.literal('message'),      conv: z.string(), message: conversationMessage }),
   z.looseObject({ type: z.literal('streaming'),    conv: z.string(), text: z.string() }),
+  z.looseObject({ type: z.literal('stream_block'), conv: z.string(), blockType: z.string() }),
   z.looseObject({ type: z.literal('error'),        id: z.string(), reason: z.string() }),
 ]);
 ```

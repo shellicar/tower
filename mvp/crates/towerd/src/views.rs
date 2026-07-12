@@ -33,6 +33,12 @@ pub enum ViewEvent {
         conv: ConversationId,
         text: String,
     },
+    /// The in-flight stream changed character; the streaming chunks that
+    /// follow are `block_type`. Ephemeral, like `Streaming`.
+    StreamBlock {
+        conv: ConversationId,
+        block_type: String,
+    },
     /// An approval's state changed — raised, pulsed, or settled. Awareness
     /// is unconditional, like `Row`.
     Approval(ApprovalState),
@@ -378,12 +384,16 @@ impl Views {
         }
 
         // Block markers are stream punctuation, like deltas: never stored,
-        // no row touch (no ts to honestly claim). Cursor advance only, until
-        // the WS surface learns to carry them.
-        if let EventKind::Block(_) = &event.kind {
+        // no row touch (no ts to honestly claim), fanned out for open
+        // conversations' streaming displays.
+        if let EventKind::Block(b) = &event.kind {
             let tx = self.db.transaction()?;
             tx.execute("UPDATE cursor SET seq = ?1 WHERE id = 1", [seq as i64])?;
             tx.commit()?;
+            let _ = self.events.send(ViewEvent::StreamBlock {
+                conv: conv.clone(),
+                block_type: b.block_type.clone(),
+            });
             return Ok(());
         }
 

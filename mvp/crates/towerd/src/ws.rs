@@ -98,6 +98,12 @@ pub enum ServerMsg {
     Message { conv: String, message: WsMessage },
     #[serde(rename = "streaming")]
     Streaming { conv: String, text: String },
+    #[serde(rename = "stream_block")]
+    StreamBlock {
+        conv: String,
+        #[serde(rename = "blockType")]
+        block_type: String,
+    },
     #[serde(rename = "error")]
     Error { id: String, reason: String },
 }
@@ -229,6 +235,12 @@ impl Session {
             }
             ViewEvent::Streaming { conv, text } if self.watching.contains(&conv) => {
                 Some(ServerMsg::Streaming { conv: conv.0, text })
+            }
+            ViewEvent::StreamBlock { conv, block_type } if self.watching.contains(&conv) => {
+                Some(ServerMsg::StreamBlock {
+                    conv: conv.0,
+                    block_type,
+                })
             }
             // Approvals are awareness, like rows: unconditional.
             ViewEvent::Approval(state) => Some(ServerMsg::Approval(state.into())),

@@ -12,12 +12,21 @@ import type {
   ServerMsg,
 } from './types';
 
+/** One stretch of the in-flight stream: the marker said what it is, the
+ *  chunks accumulate into it. blockType is an open set — styled, never
+ *  branched on beyond styling. */
+export interface StreamSegment {
+  blockType: string;
+  text: string;
+}
+
 export interface OpenConversation {
   conv: string;
   /** ts-ordered, deduped by message id. */
   messages: ConversationMessage[];
-  /** The in-flight assistant text; cleared when its committed message lands. */
-  streaming: string;
+  /** The in-flight stream as typed segments; cleared when the committed
+   *  message lands. Chunks before any marker fold into a `text` segment. */
+  streaming: StreamSegment[];
   /** Outcome of the last say, shown until the next one. */
   lastSay: string | null;
   loaded: boolean;
@@ -72,7 +81,7 @@ class Tower {
         this.open.set(conv, {
           conv,
           messages: [],
-          streaming: '',
+          streaming: [],
           lastSay: null,
           loaded: false,
         });
@@ -111,7 +120,7 @@ class Tower {
 
   openConversation(conv: string) {
     if (!this.open.has(conv)) {
-      this.open.set(conv, { conv, messages: [], streaming: '', lastSay: null, loaded: false });
+      this.open.set(conv, { conv, messages: [], streaming: [], lastSay: null, loaded: false });
       this.open = new Map(this.open);
       writeOpenSet(this.open);
     }
@@ -192,14 +201,26 @@ class Tower {
         if (!oc) break;
         insertMessage(oc, msg.message);
         // A committed message supersedes the streaming that preceded it.
-        oc.streaming = '';
+        oc.streaming = [];
         this.open = new Map(this.open);
         break;
       }
       case 'streaming': {
         const oc = this.open.get(msg.conv);
         if (!oc) break;
-        oc.streaming += msg.text;
+        // Append to the current segment; chunks arriving before any marker
+        // are text — the mid-turn join renders honestly until corrected.
+        const last = oc.streaming[oc.streaming.length - 1];
+        if (last) last.text += msg.text;
+        else oc.streaming.push({ blockType: 'text', text: msg.text });
+        this.open = new Map(this.open);
+        break;
+      }
+      case 'stream_block': {
+        const oc = this.open.get(msg.conv);
+        if (!oc) break;
+        // The stream changed character: open a new segment.
+        oc.streaming.push({ blockType: msg.blockType, text: '' });
         this.open = new Map(this.open);
         break;
       }

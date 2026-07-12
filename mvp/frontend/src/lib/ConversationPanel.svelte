@@ -66,7 +66,8 @@
   // streaming chunk. While unanchored, never move.
   $effect(() => {
     void oc.messages.length;
-    void oc.streaming;
+    void oc.streaming.length;
+    void oc.streaming[oc.streaming.length - 1]?.text;
     void oc.loaded;
     if (anchored) pin();
   });
@@ -176,9 +177,19 @@
       {#each oc.messages as message (message.id)}
         <MessageView {message} />
       {/each}
-      {#if oc.streaming}
-        <div class="my-2 whitespace-pre-wrap border-l-2 border-indigo-800 pl-2 text-indigo-200">
-          {oc.streaming}
+      {#if oc.streaming.length > 0}
+        <div class="my-2 border-l-2 border-indigo-800 pl-2">
+          {#each oc.streaming as segment, i (i)}
+            {#if segment.text}
+              {#if segment.blockType === 'thinking'}
+                <div class="whitespace-pre-wrap text-neutral-500 italic">{segment.text}</div>
+              {:else if segment.blockType === 'tool_use'}
+                <div class="wrap-anywhere whitespace-pre-wrap text-neutral-500">⚒ {segment.text}</div>
+              {:else}
+                <div class="whitespace-pre-wrap text-indigo-200">{segment.text}</div>
+              {/if}
+            {/if}
+          {/each}
         </div>
       {/if}
     </div>

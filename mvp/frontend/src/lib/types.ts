@@ -73,6 +73,7 @@ export type ServerMsg =
   | { type: 'say_result'; id: string; outcome: 'unreachable' }
   | { type: 'message'; conv: string; message: ConversationMessage }
   | { type: 'streaming'; conv: string; text: string }
+  | { type: 'stream_block'; conv: string; blockType: string }
   | { type: 'error'; id: string; reason: string };
 
 // client → towerd
