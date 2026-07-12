@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
 
     let client = async_nats::connect(&nats_url).await?; // fail-fast
 
-    let (events_tx, events_rx) = mpsc::channel::<(u64, wire::Event)>(1024);
+    let (events_tx, events_rx) = mpsc::channel::<(u64, wire::WireEvent)>(1024);
     let (queries_tx, queries_rx) = mpsc::channel::<views::ViewQuery>(64);
     let (view_events_tx, _) = broadcast::channel::<views::ViewEvent>(1024);
 

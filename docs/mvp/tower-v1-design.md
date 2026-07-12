@@ -231,6 +231,17 @@ async fn main() -> anyhow::Result<()> {
 - Config: `NATS_URL`, `TOWER_BIND`, `TOWER_DB`.
 - Shutdown = crash: transactions make them the same path.
 - History depth = replay + everything folded since. `history` request stays parked.
+- **Approvals** are consumed like conversations: ingest also folds
+  `approval.v1.*.lifecycle` and `.telemetry` into a derived `approvals` table
+  (in the rematerialise truncation set — fully rebuildable from replay).
+  The outstanding-set fold is the approval spec's: raised without settled is
+  the candidate; the pulse confirms; **void is derived client-side** from
+  `lastPulse` against the clock (~3 missed pulses) — no time-driven state in
+  the Views loop, and a void ask is greyed, never deleted. `answer` goes
+  through the gateway as `say`'s sibling: `from` stamped `{ kind: "human" }`
+  bare, no retry, transport silence folds to unreachable, `already_settled`
+  shown honestly (first answer wins — losing the race to the terminal is
+  information, not an error).
 
 ## Testing
 
@@ -242,7 +253,6 @@ async fn main() -> anyhow::Result<()> {
 
 ## Out of scope v1
 
-- Approvals surface (badge + answer).
 - "Go to pane" (needs attachment telemetry).
 - Mission grouping, org filtering, multiple towers.
 - Auth / public serving; binds locally.

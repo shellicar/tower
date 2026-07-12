@@ -41,6 +41,21 @@ export interface RowState {
   title?: string;
 }
 
+export interface ApprovalState {
+  id: string;
+  /** Verbatim from the wire; `ask.type` is an open set. */
+  ask: { type: string; name?: string; input?: unknown; [extra: string]: unknown };
+  correlation?: {
+    conversationId?: string;
+    queryId?: string;
+    turnId?: string;
+    toolUseId?: string;
+  };
+  raisedTs: Millis;
+  lastPulse: Millis;
+  settled?: { approved: boolean; by: Sender; ts: Millis };
+}
+
 // towerd → client
 export type ServerMsg =
   | { type: 'list'; rows: RowState[] }
@@ -48,6 +63,11 @@ export type ServerMsg =
   | { type: 'conversation'; id: string; conv: string; messages: ConversationMessage[] }
   | { type: 'closed'; id: string; conv: string }
   | { type: 'title_set'; id: string; conv: string }
+  | { type: 'approvals'; approvals: ApprovalState[] }
+  | ({ type: 'approval' } & ApprovalState)
+  | { type: 'answer_result'; id: string; outcome: 'accepted' }
+  | { type: 'answer_result'; id: string; outcome: 'rejected'; reason: string }
+  | { type: 'answer_result'; id: string; outcome: 'unreachable' }
   | { type: 'say_result'; id: string; outcome: 'accepted'; query: string }
   | { type: 'say_result'; id: string; outcome: 'rejected'; reason: string }
   | { type: 'say_result'; id: string; outcome: 'unreachable' }
@@ -60,7 +80,8 @@ export type ClientMsg =
   | { type: 'open'; id: string; conv: string; after: Millis | null }
   | { type: 'close'; id: string; conv: string }
   | { type: 'say'; id: string; conv: string; text: string; tip: string | null }
-  | { type: 'set_title'; id: string; conv: string; title: string };
+  | { type: 'set_title'; id: string; conv: string; title: string }
+  | { type: 'answer'; id: string; approval: string; approved: boolean };
 
 export function isRef(value: unknown): value is Ref {
   return (

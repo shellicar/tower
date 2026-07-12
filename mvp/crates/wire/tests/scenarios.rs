@@ -4,11 +4,14 @@
 //! capture event subjects only). Fix lands twice: a change here means the
 //! fixture in scenarios.md changes in the same commit, or the code does.
 
-use wire::{ConvChange, ConvTelemetry, Event, EventKind, parse_ts, parse_wire};
+use wire::{
+    ApprovalKind, ApprovalLifecycle, ConvChange, ConvTelemetry, Event, EventKind, WireEvent,
+    parse_ts, parse_wire,
+};
 
 /// One fixture line: `{"subject":…,"message":{…}}` (reply keys ignored —
 /// request lines are filtered out before parsing).
-fn parse_line(line: &str) -> Option<Event> {
+fn parse_line(line: &str) -> Option<WireEvent> {
     let v: serde_json::Value = serde_json::from_str(line).unwrap();
     let subject = v["subject"].as_str().unwrap();
     if subject.ends_with(".requests") {
@@ -23,6 +26,10 @@ fn events(fixture: &str) -> Vec<Event> {
         .lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(parse_line)
+        .map(|w| match w {
+            WireEvent::Conv(e) => e,
+            other => panic!("conversation fixture produced {other:?}"),
+        })
         .collect()
 }
 
@@ -63,6 +70,32 @@ const SCENARIO_4: &str = r#"
 {"subject":"conv.v1.conv-abc.changes","message":{"type":"revision","ts":"2026-07-07T21:00:00+10:00","messageId":"m2","content":[{"type":"tool_use","id":"toolu_01ABC","name":"ReadFile","input":{"path":"X"}}]}}
 {"subject":"conv.v1.conv-abc.changes","message":{"type":"revision","ts":"2026-07-07T21:00:00+10:00","messageId":"m3","content":[{"type":"tool_result","tool_use_id":"toolu_01ABC","content":"…trimmed…"}]}}
 "#;
+
+// Scenario 6 — approval, both endings (verbatim from scenarios.md).
+const SCENARIO_6A: &str = r#"
+{"subject":"approval.v1.apr-1.lifecycle","message":{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"tool_use","name":"DeleteFile","input":{"content":{"type":"files","values":["./old.ts"]}}},"correlation":{"conversationId":"conv-abc","queryId":"q2","turnId":"t3","toolUseId":"toolu_02DEF"}}}
+{"subject":"approval.v1.apr-1.telemetry","message":{"type":"heartbeat","ts":"2026-07-07T21:00:00+10:00"}}
+{"subject":"approval.v1.apr-1.requests","message":{"type":"answer","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"approved":true},"reply":{"accepted":true}}
+{"subject":"approval.v1.apr-1.requests","message":{"type":"answer","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"agent"},"approved":false},"reply":{"rejected":true,"reason":"already_settled"}}
+{"subject":"approval.v1.apr-1.lifecycle","message":{"type":"settled","ts":"2026-07-07T21:00:00+10:00","approved":true,"by":{"kind":"human","userId":"stephen"}}}
+"#;
+
+const SCENARIO_6B: &str = r#"
+{"subject":"approval.v1.apr-2.lifecycle","message":{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"tool_use","name":"DeleteFile","input":{"content":{"type":"files","values":["./other.ts"]}}},"correlation":{"conversationId":"conv-abc","queryId":"q3","turnId":"t5","toolUseId":"toolu_03GHI"}}}
+{"subject":"approval.v1.apr-2.telemetry","message":{"type":"heartbeat","ts":"2026-07-07T21:00:00+10:00"}}
+"#;
+
+fn approval_events(fixture: &str) -> Vec<wire::ApprovalEvent> {
+    fixture
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(parse_line)
+        .map(|w| match w {
+            WireEvent::Approval(e) => e,
+            other => panic!("approval fixture produced {other:?}"),
+        })
+        .collect()
+}
 
 fn assert_all_known(events: &[Event]) {
     for e in events {
@@ -123,6 +156,37 @@ fn scenario_3_tip_movements_parse() {
         })
         .collect();
     assert_eq!(tips, ["m1", "m4"]);
+}
+
+#[test]
+fn scenario_6a_approval_answered() {
+    let evs = approval_events(SCENARIO_6A);
+    assert_eq!(evs.len(), 3); // raised + heartbeat + settled; requests filtered
+    assert!(evs.iter().all(|e| e.id.0 == "apr-1"));
+    assert!(matches!(
+        &evs[0].kind,
+        ApprovalKind::Lifecycle(ApprovalLifecycle::Raised { .. })
+    ));
+    assert!(matches!(&evs[1].kind, ApprovalKind::Heartbeat { .. }));
+    let ApprovalKind::Lifecycle(ApprovalLifecycle::Settled { approved, by, .. }) = &evs[2].kind
+    else {
+        panic!("expected settled");
+    };
+    assert!(approved);
+    assert_eq!(by["userId"], "stephen");
+}
+
+#[test]
+fn scenario_6b_holder_died() {
+    // Raised + one pulse, then silence — nothing settles; the void reading
+    // is the consumer's (pulse silence), not an event.
+    let evs = approval_events(SCENARIO_6B);
+    assert_eq!(evs.len(), 2);
+    assert!(matches!(
+        &evs[0].kind,
+        ApprovalKind::Lifecycle(ApprovalLifecycle::Raised { .. })
+    ));
+    assert!(matches!(&evs[1].kind, ApprovalKind::Heartbeat { .. }));
 }
 
 #[test]

@@ -8,11 +8,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::{broadcast, oneshot};
 
-use wire::{ConversationId, SayCommand, SayOutcome};
+use wire::{AnswerOutcome, ApprovalId, ConversationId, SayCommand, SayOutcome};
 
 use crate::broker::{Broker, Clock};
 use crate::gateway;
-use crate::views::{ConversationMessage, RowState, ViewEvent, ViewQuery, ViewsHandle};
+use crate::views::{
+    ApprovalState, ConversationMessage, RowState, ViewEvent, ViewQuery, ViewsHandle,
+};
 
 // ---------------------------------------------------------------------------
 // The contract (normative in tower-ws-spec.md; serde mirrors the zod)
@@ -41,6 +43,12 @@ pub enum ClientMsg {
         conv: String,
         title: String,
     },
+    #[serde(rename = "answer")]
+    Answer {
+        id: String,
+        approval: String,
+        approved: bool,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -66,6 +74,17 @@ pub enum ServerMsg {
     Closed { id: String, conv: String },
     #[serde(rename = "title_set")]
     TitleSet { id: String, conv: String },
+    #[serde(rename = "approvals")]
+    Approvals { approvals: Vec<WsApproval> },
+    #[serde(rename = "approval")]
+    Approval(WsApproval),
+    #[serde(rename = "answer_result")]
+    AnswerResult {
+        id: String,
+        outcome: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
     #[serde(rename = "say_result")]
     SayResult {
         id: String,
@@ -93,6 +112,45 @@ pub struct WsRow {
     /// Present only for named conversations; absent = untitled, show the id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WsApproval {
+    pub id: String,
+    /// Verbatim from the wire; `ask.type` is an open set.
+    pub ask: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation: Option<Value>,
+    #[serde(rename = "raisedTs")]
+    pub raised_ts: i64,
+    #[serde(rename = "lastPulse")]
+    pub last_pulse: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settled: Option<WsSettled>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WsSettled {
+    pub approved: bool,
+    pub by: Value,
+    pub ts: i64,
+}
+
+impl From<ApprovalState> for WsApproval {
+    fn from(a: ApprovalState) -> Self {
+        WsApproval {
+            id: a.id.0,
+            ask: a.ask,
+            correlation: a.correlation,
+            raised_ts: a.raised_ts,
+            last_pulse: a.last_pulse,
+            settled: a.settled.map(|s| WsSettled {
+                approved: s.approved,
+                by: s.by,
+                ts: s.ts,
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -172,6 +230,8 @@ impl Session {
             ViewEvent::Streaming { conv, text } if self.watching.contains(&conv) => {
                 Some(ServerMsg::Streaming { conv: conv.0, text })
             }
+            // Approvals are awareness, like rows: unconditional.
+            ViewEvent::Approval(state) => Some(ServerMsg::Approval(state.into())),
             _ => None,
         }
     }
@@ -251,6 +311,27 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
             session.close(&conv);
             ServerMsg::Closed { id, conv }
         }
+        ClientMsg::Answer {
+            id,
+            approval,
+            approved,
+        } => match gateway::answer(broker, clock, &ApprovalId(approval), approved).await {
+            AnswerOutcome::Accepted => ServerMsg::AnswerResult {
+                id,
+                outcome: "accepted",
+                reason: None,
+            },
+            AnswerOutcome::Rejected { reason } => ServerMsg::AnswerResult {
+                id,
+                outcome: "rejected",
+                reason: Some(reason),
+            },
+            AnswerOutcome::Unreachable => ServerMsg::AnswerResult {
+                id,
+                outcome: "unreachable",
+                reason: None,
+            },
+        },
         ClientMsg::SetTitle { id, conv, title } => {
             let (tx, rx) = oneshot::channel();
             let query = ViewQuery::SetTitle {
@@ -342,6 +423,24 @@ pub async fn run_session<B: Broker, C: Clock>(
         rows: rows.into_iter().map(Into::into).collect(),
     };
     if send(&mut sink, &list).await.is_err() {
+        return;
+    }
+
+    // The outstanding approvals snapshot, once, right after `list`.
+    let (tx, rx) = oneshot::channel();
+    if views
+        .queries
+        .send(ViewQuery::Approvals { reply: tx })
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let Ok(approvals) = rx.await else { return };
+    let snapshot = ServerMsg::Approvals {
+        approvals: approvals.into_iter().map(Into::into).collect(),
+    };
+    if send(&mut sink, &snapshot).await.is_err() {
         return;
     }
 

@@ -16,23 +16,25 @@
 use futures::StreamExt;
 use tokio::sync::{mpsc, oneshot};
 
-use wire::{Event, parse_wire};
+use wire::{WireEvent, parse_wire};
 
 use crate::views::ViewQuery;
 
 /// Subjects ingest folds — event subjects only, never `.requests`
 /// (nats-spec, Storage: a stream over requests becomes a second responder).
-const SUBJECTS: [&str; 3] = [
+const SUBJECTS: [&str; 5] = [
     "conv.v1.*.telemetry",
     "conv.v1.*.changes",
     "conv.v1.*.deltas",
+    "approval.v1.*.lifecycle",
+    "approval.v1.*.telemetry",
 ];
 
 pub async fn run_ingest(
     client: async_nats::Client,
     stream: String,
     queries: mpsc::Sender<ViewQuery>,
-    events_tx: mpsc::Sender<(u64, Event)>,
+    events_tx: mpsc::Sender<(u64, WireEvent)>,
 ) {
     let js = async_nats::jetstream::new(client);
 
@@ -51,7 +53,7 @@ async fn consume(
     js: &async_nats::jetstream::Context,
     stream: &str,
     queries: &mpsc::Sender<ViewQuery>,
-    events_tx: &mpsc::Sender<(u64, Event)>,
+    events_tx: &mpsc::Sender<(u64, WireEvent)>,
 ) -> anyhow::Result<()> {
     // Which stream captures the event subjects is deployment configuration
     // (nats-spec, Storage) — the name arrives from config, never hard-coded.

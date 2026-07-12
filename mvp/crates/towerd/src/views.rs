@@ -12,7 +12,10 @@ use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
-use wire::{ConvChange, ConversationId, Event, EventKind, MessageId, QueryId, TurnId, parse_ts};
+use wire::{
+    ApprovalEvent, ApprovalId, ApprovalKind, ApprovalLifecycle, ConvChange, ConversationId, Event,
+    EventKind, MessageId, QueryId, TurnId, WireEvent, parse_ts,
+};
 
 use crate::refs::{Blob, externalise};
 
@@ -30,6 +33,27 @@ pub enum ViewEvent {
         conv: ConversationId,
         text: String,
     },
+    /// An approval's state changed — raised, pulsed, or settled. Awareness
+    /// is unconditional, like `Row`.
+    Approval(ApprovalState),
+}
+
+#[derive(Debug, Clone)]
+pub struct ApprovalState {
+    pub id: ApprovalId,
+    /// Verbatim from the wire; ask types are an open set.
+    pub ask: Value,
+    pub correlation: Option<Value>,
+    pub raised_ts: i64,
+    pub last_pulse: i64,
+    pub settled: Option<SettledState>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SettledState {
+    pub approved: bool,
+    pub by: Value,
+    pub ts: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +102,11 @@ pub enum ViewQuery {
         conv: ConversationId,
         title: String,
         reply: oneshot::Sender<()>,
+    },
+    /// The outstanding snapshot: every unsettled ask (void is the client's
+    /// derivation from `last_pulse`; a dead holder's ask is information).
+    Approvals {
+        reply: oneshot::Sender<Vec<ApprovalState>>,
     },
     /// Ingest's reconcile, on every consumer build: "the stream I found was
     /// created at `created` and its sequences end at `last_seq` — where do I
@@ -145,6 +174,21 @@ const MIGRATIONS: &[&str] = &[
          id      INTEGER PRIMARY KEY CHECK (id = 1),
          created TEXT NOT NULL
      );",
+    // 4 — approvals: the outstanding-set fold, derived from
+    // approval.v1.*.{lifecycle,telemetry} (in the rematerialise truncation
+    // set). `conv` is correlation.conversationId extracted for the rail's
+    // row marker; ask/correlation/by stay verbatim JSON.
+    "CREATE TABLE approvals (
+         id               TEXT PRIMARY KEY,
+         ask              TEXT NOT NULL,
+         correlation      TEXT,
+         conv             TEXT,
+         raised_ts        INTEGER NOT NULL,
+         last_pulse       INTEGER NOT NULL,
+         settled_approved INTEGER,
+         settled_by       TEXT,
+         settled_ts       INTEGER
+     );",
 ];
 
 pub fn apply_schema(db: &Connection) -> anyhow::Result<()> {
@@ -187,7 +231,7 @@ impl Views {
     /// the loop (shutdown = crash: transactions make them the same path).
     pub fn run_blocking(
         mut self,
-        mut events_rx: mpsc::Receiver<(u64, Event)>,
+        mut events_rx: mpsc::Receiver<(u64, WireEvent)>,
         mut queries_rx: mpsc::Receiver<ViewQuery>,
     ) {
         loop {
@@ -225,11 +269,14 @@ impl Views {
         }
     }
 
-    /// One event → one transaction (rows + messages + refs + cursor), then
-    /// the broadcast. Publish after commit: subscribers read the db they can
-    /// now see.
-    pub fn apply(&mut self, seq: u64, event: &Event) {
-        if let Err(e) = self.apply_inner(seq, event) {
+    /// One event → one transaction (tables + cursor), then the broadcast.
+    /// Publish after commit: subscribers read the db they can now see.
+    pub fn apply(&mut self, seq: u64, event: &WireEvent) {
+        let result = match event {
+            WireEvent::Conv(e) => self.apply_conv(seq, e),
+            WireEvent::Approval(e) => self.apply_approval(seq, e),
+        };
+        if let Err(e) = result {
             // A poisoned frame must not kill the fold; it is logged and the
             // cursor still advances past it (skipping forever beats halting).
             eprintln!("views: apply failed at seq {seq}: {e:#}");
@@ -239,7 +286,79 @@ impl Views {
         }
     }
 
-    fn apply_inner(&mut self, seq: u64, event: &Event) -> anyhow::Result<()> {
+    /// The approval fold (approval-spec, The outstanding set): raised inserts
+    /// the candidate, the pulse refreshes `last_pulse`, settled records the
+    /// outcome. Idempotent under replay; a raised re-delivered after settled
+    /// never erases the settlement (the settled columns are not in the
+    /// upsert). A pulse or settlement for an id never raised (pre-retention)
+    /// is skipped — an ask is unreviewable without its raise.
+    fn apply_approval(&mut self, seq: u64, event: &ApprovalEvent) -> anyhow::Result<()> {
+        let id = &event.id;
+        let tx = self.db.transaction()?;
+        match &event.kind {
+            ApprovalKind::Lifecycle(ApprovalLifecycle::Raised {
+                ts,
+                ask,
+                correlation,
+            }) => {
+                let ts_ms = parse_ts(ts)
+                    .ok_or_else(|| anyhow::anyhow!("raised {id} has unparseable ts {ts}"))?;
+                let conv = correlation
+                    .as_ref()
+                    .and_then(|c| c.get("conversationId"))
+                    .and_then(Value::as_str);
+                tx.execute(
+                    "INSERT INTO approvals (id, ask, correlation, conv, raised_ts, last_pulse)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+                     ON CONFLICT(id) DO UPDATE SET
+                         ask = excluded.ask,
+                         correlation = excluded.correlation,
+                         conv = excluded.conv,
+                         raised_ts = excluded.raised_ts,
+                         last_pulse = max(approvals.last_pulse, excluded.last_pulse)",
+                    rusqlite::params![
+                        id.0,
+                        serde_json::to_string(ask)?,
+                        correlation
+                            .as_ref()
+                            .map(serde_json::to_string)
+                            .transpose()?,
+                        conv,
+                        ts_ms,
+                    ],
+                )?;
+            }
+            ApprovalKind::Lifecycle(ApprovalLifecycle::Settled { ts, approved, by }) => {
+                let ts_ms = parse_ts(ts)
+                    .ok_or_else(|| anyhow::anyhow!("settled {id} has unparseable ts {ts}"))?;
+                tx.execute(
+                    "UPDATE approvals SET settled_approved = ?1, settled_by = ?2, settled_ts = ?3
+                     WHERE id = ?4",
+                    rusqlite::params![*approved as i64, serde_json::to_string(by)?, ts_ms, id.0],
+                )?;
+            }
+            ApprovalKind::Heartbeat { ts } => {
+                if let Some(ts_ms) = parse_ts(ts) {
+                    tx.execute(
+                        "UPDATE approvals SET last_pulse = max(last_pulse, ?1) WHERE id = ?2",
+                        rusqlite::params![ts_ms, id.0],
+                    )?;
+                }
+            }
+            // Unknown approval traffic: represented at ingest, nothing to
+            // fold; the cursor still advances.
+            ApprovalKind::Unknown { .. } => {}
+        }
+        tx.execute("UPDATE cursor SET seq = ?1 WHERE id = 1", [seq as i64])?;
+        tx.commit()?;
+
+        if let Some(state) = self.get_approval(id)? {
+            let _ = self.events.send(ViewEvent::Approval(state));
+        }
+        Ok(())
+    }
+
+    fn apply_conv(&mut self, seq: u64, event: &Event) -> anyhow::Result<()> {
         let conv = &event.conv;
 
         // Deltas are ephemeral: never stored, no row touch (the wire's own
@@ -372,6 +491,9 @@ impl Views {
             ViewQuery::Ref { id, reply } => {
                 let _ = reply.send(self.get_ref(&id).ok().flatten());
             }
+            ViewQuery::Approvals { reply } => {
+                let _ = reply.send(self.approvals().unwrap_or_default());
+            }
             ViewQuery::SetTitle { conv, title, reply } => {
                 if let Err(e) = self.set_title(&conv, &title) {
                     eprintln!("views: set_title failed for {conv}: {e:#}");
@@ -436,6 +558,7 @@ impl Views {
                 let tx = self.db.transaction()?;
                 tx.execute_batch(
                     "DELETE FROM rows; DELETE FROM messages; DELETE FROM refs;
+                     DELETE FROM approvals;
                      UPDATE cursor SET seq = 0 WHERE id = 1;",
                 )?;
                 tx.execute("UPDATE stream SET created = ?1 WHERE id = 1", [created])?;
@@ -534,6 +657,74 @@ impl Views {
             .collect()
     }
 
+    /// The outstanding snapshot: unsettled only, oldest first.
+    fn approvals(&self) -> anyhow::Result<Vec<ApprovalState>> {
+        let mut stmt = self.db.prepare_cached(
+            "SELECT id, ask, correlation, raised_ts, last_pulse
+             FROM approvals WHERE settled_approved IS NULL ORDER BY raised_ts",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(|(id, ask, correlation, raised_ts, last_pulse)| {
+                Ok(ApprovalState {
+                    id: ApprovalId(id),
+                    ask: serde_json::from_str(&ask)?,
+                    correlation: correlation
+                        .as_deref()
+                        .map(serde_json::from_str)
+                        .transpose()?,
+                    raised_ts,
+                    last_pulse,
+                    settled: None,
+                })
+            })
+            .collect()
+    }
+
+    fn get_approval(&self, id: &ApprovalId) -> anyhow::Result<Option<ApprovalState>> {
+        let mut stmt = self.db.prepare_cached(
+            "SELECT ask, correlation, raised_ts, last_pulse,
+                    settled_approved, settled_by, settled_ts
+             FROM approvals WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query([&id.0])?;
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
+        let ask: String = row.get(0)?;
+        let correlation: Option<String> = row.get(1)?;
+        let settled_approved: Option<i64> = row.get(4)?;
+        let settled = match settled_approved {
+            Some(approved) => Some(SettledState {
+                approved: approved != 0,
+                by: serde_json::from_str(&row.get::<_, String>(5)?)?,
+                ts: row.get(6)?,
+            }),
+            None => None,
+        };
+        Ok(Some(ApprovalState {
+            id: id.clone(),
+            ask: serde_json::from_str(&ask)?,
+            correlation: correlation
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?,
+            raised_ts: row.get(2)?,
+            last_pulse: row.get(3)?,
+            settled,
+        }))
+    }
+
     fn get_ref(&self, id: &str) -> anyhow::Result<Option<(String, Vec<u8>)>> {
         let mut stmt = self
             .db
@@ -578,7 +769,7 @@ mod tests {
         (Views::new(db, tx), rx)
     }
 
-    fn event(subject: &str, payload: &str) -> Event {
+    fn event(subject: &str, payload: &str) -> WireEvent {
         parse_wire(subject, payload.as_bytes()).unwrap()
     }
 
@@ -809,6 +1000,64 @@ mod tests {
         // Same-incarnation arm gets the same protection.
         views.apply(23386, &event("conv.v1.conv-abc.changes", MSG_M1));
         assert_eq!(views.sync_stream("incarnation-A", 628).unwrap(), 0);
+    }
+
+    #[test]
+    fn approval_fold_raised_pulsed_settled() {
+        let (mut views, mut rx) = fresh();
+
+        // Scenario 6a: raised → pending in the snapshot, with its ask verbatim.
+        views.apply(1, &event("approval.v1.apr-1.lifecycle",
+            r#"{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"tool_use","name":"DeleteFile","input":{"content":{"type":"files","values":["./old.ts"]}}},"correlation":{"conversationId":"conv-abc","queryId":"q2","turnId":"t3","toolUseId":"toolu_02DEF"}}"#));
+        let pending = views.approvals().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id.0, "apr-1");
+        assert_eq!(pending[0].ask["name"], "DeleteFile");
+        assert_eq!(
+            pending[0].correlation.as_ref().unwrap()["conversationId"],
+            "conv-abc"
+        );
+        assert!(matches!(rx.try_recv().unwrap(), ViewEvent::Approval(_)));
+
+        // The pulse refreshes last_pulse, monotonically.
+        views.apply(
+            2,
+            &event(
+                "approval.v1.apr-1.telemetry",
+                r#"{"type":"heartbeat","ts":"2026-07-07T21:00:15+10:00"}"#,
+            ),
+        );
+        let pending = views.approvals().unwrap();
+        assert!(pending[0].last_pulse > pending[0].raised_ts);
+
+        // Settled: out of the pending snapshot; the broadcast carries whose
+        // decision it was.
+        views.apply(3, &event("approval.v1.apr-1.lifecycle",
+            r#"{"type":"settled","ts":"2026-07-07T21:00:30+10:00","approved":true,"by":{"kind":"human","userId":"stephen"}}"#));
+        assert!(views.approvals().unwrap().is_empty());
+        let _ = rx.try_recv(); // the pulse's event
+        let ViewEvent::Approval(state) = rx.try_recv().unwrap() else {
+            panic!("expected an approval event");
+        };
+        let settled = state.settled.unwrap();
+        assert!(settled.approved);
+        assert_eq!(settled.by["userId"], "stephen");
+
+        // Replay of the raised after settlement never erases the settlement.
+        views.apply(1, &event("approval.v1.apr-1.lifecycle",
+            r#"{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"tool_use","name":"DeleteFile","input":{"content":{"type":"files","values":["./old.ts"]}}},"correlation":{"conversationId":"conv-abc"}}"#));
+        assert!(views.approvals().unwrap().is_empty());
+
+        // A pulse for an id never raised is skipped, not invented.
+        views.apply(
+            4,
+            &event(
+                "approval.v1.apr-unknown.telemetry",
+                r#"{"type":"heartbeat","ts":"2026-07-07T21:00:00+10:00"}"#,
+            ),
+        );
+        assert!(views.approvals().unwrap().is_empty());
+        assert_eq!(read_cursor(&views.db).unwrap(), 4);
     }
 
     #[test]

@@ -7,7 +7,10 @@
 
 use std::time::Duration;
 
-use wire::{SayCommand, SayOutcome, encode_say, parse_say_reply};
+use wire::{
+    AnswerOutcome, ApprovalId, SayCommand, SayOutcome, encode_answer, encode_say,
+    parse_answer_reply, parse_say_reply,
+};
 
 use crate::broker::{Broker, BrokerReply, Clock};
 
@@ -20,6 +23,26 @@ pub async fn say<B: Broker, C: Clock>(broker: &B, clock: &C, cmd: SayCommand) ->
     {
         BrokerReply::Data(bytes) => parse_say_reply(&bytes),
         BrokerReply::Timeout | BrokerReply::NoResponders => SayOutcome::Unreachable,
+    }
+}
+
+/// `say`'s sibling: answer a pending approval. Same disciplines — no retry
+/// (a double answer would race itself; `already_settled` is the honest loss),
+/// transport silence folds to unreachable.
+pub async fn answer<B: Broker, C: Clock>(
+    broker: &B,
+    clock: &C,
+    approval: &ApprovalId,
+    approved: bool,
+) -> AnswerOutcome {
+    let subject = format!("approval.v1.{}.requests", approval.0);
+    let payload = encode_answer(approved, &clock.now_iso());
+    match broker
+        .request(&subject, payload, Duration::from_secs(5))
+        .await
+    {
+        BrokerReply::Data(bytes) => parse_answer_reply(&bytes),
+        BrokerReply::Timeout | BrokerReply::NoResponders => AnswerOutcome::Unreachable,
     }
 }
 
@@ -97,5 +120,39 @@ mod tests {
                 SayOutcome::Unreachable
             );
         }
+    }
+
+    #[tokio::test]
+    async fn answer_addresses_the_approval_and_parses_the_reply() {
+        let broker = FakeBroker {
+            reply: BrokerReply::Data(br#"{"rejected":true,"reason":"already_settled"}"#.to_vec()),
+            seen: Arc::default(),
+        };
+        let outcome = answer(&broker, &FixedClock, &ApprovalId("apr-9f3".into()), true).await;
+        assert_eq!(
+            outcome,
+            AnswerOutcome::Rejected {
+                reason: "already_settled".into()
+            }
+        );
+
+        let seen = broker.seen.lock().unwrap();
+        assert_eq!(seen[0].0, "approval.v1.apr-9f3.requests");
+        let v: serde_json::Value = serde_json::from_slice(&seen[0].1).unwrap();
+        assert_eq!(v["type"], "answer");
+        assert_eq!(v["approved"], true);
+        assert_eq!(v["from"], serde_json::json!({ "kind": "human" }));
+    }
+
+    #[tokio::test]
+    async fn answer_transport_silence_is_unreachable() {
+        let broker = FakeBroker {
+            reply: BrokerReply::NoResponders,
+            seen: Arc::default(),
+        };
+        assert_eq!(
+            answer(&broker, &FixedClock, &ApprovalId("apr-1".into()), false).await,
+            AnswerOutcome::Unreachable
+        );
     }
 }

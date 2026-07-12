@@ -4,6 +4,7 @@
 // list, re-open what was being read with `after` so history travels once.
 
 import type {
+  ApprovalState,
   ClientMsg,
   ConversationMessage,
   Millis,
@@ -25,6 +26,11 @@ export interface OpenConversation {
 class Tower {
   rows = $state<Map<string, RowState>>(new Map());
   open = $state<Map<string, OpenConversation>>(new Map());
+  approvals = $state<Map<string, ApprovalState>>(new Map());
+  /** Whether the approvals view is showing — pure view state. */
+  approvalsOpen = $state(false);
+  /** Transient outcome of the last answer per approval id, for display. */
+  answerNotes = $state<Map<string, string>>(new Map());
   connected = $state(false);
 
   #ws: WebSocket | null = null;
@@ -32,11 +38,29 @@ class Tower {
   #restored = false;
   /** requestId → conv, so say_result (which carries no conv) finds its home. */
   #pendingSays = new Map<string, string>();
+  /** requestId → approval id, same routing for answer_result. */
+  #pendingAnswers = new Map<string, string>();
   #retryMs = 500;
 
   /** Rows by lastEvent descending — the staleness order is the product. */
   get ordered(): RowState[] {
     return [...this.rows.values()].sort((a, b) => b.lastEvent - a.lastEvent);
+  }
+
+  /** Pending asks, oldest first — a waiting Claude burns wall-clock. */
+  get pendingApprovals(): ApprovalState[] {
+    return [...this.approvals.values()]
+      .filter((a) => !a.settled)
+      .sort((a, b) => a.raisedTs - b.raisedTs);
+  }
+
+  /** Conversations with a pending ask, for the rail's marker. */
+  get pendingByConv(): Set<string> {
+    const set = new Set<string>();
+    for (const a of this.pendingApprovals) {
+      if (a.correlation?.conversationId) set.add(a.correlation.conversationId);
+    }
+    return set;
   }
 
   connect() {
@@ -114,6 +138,16 @@ class Tower {
     }
   }
 
+  /** Answer a pending approval. First valid answer wins; losing the race
+   *  comes back as `already_settled` and is shown, not treated as an error. */
+  answer(approval: string, approved: boolean) {
+    const id = this.#id();
+    this.#pendingAnswers.set(id, approval);
+    this.answerNotes.delete(approval);
+    this.answerNotes = new Map(this.answerNotes);
+    this.#send({ type: 'answer', id, approval, approved });
+  }
+
   /** The tip is this client's view of the latest message id — the premise
    *  belongs to the sender; null claims the conversation is empty. */
   say(conv: string, text: string) {
@@ -181,6 +215,34 @@ class Tower {
               ? `rejected: ${msg.reason}` // shown, never branched on
               : 'unreachable — nothing is serving this conversation';
         this.open = new Map(this.open);
+        break;
+      }
+      case 'approvals': {
+        // The outstanding snapshot replaces the map — once per connection.
+        this.approvals = new Map(msg.approvals.map((a) => [a.id, a]));
+        break;
+      }
+      case 'approval': {
+        // Upsert by id: an unknown id is a new ask being born.
+        const { type: _type, ...state } = msg;
+        this.approvals.set(state.id, state);
+        this.approvals = new Map(this.approvals);
+        break;
+      }
+      case 'answer_result': {
+        const approval = this.#pendingAnswers.get(msg.id);
+        this.#pendingAnswers.delete(msg.id);
+        if (!approval) break;
+        const note =
+          msg.outcome === 'accepted'
+            ? null // the settlement arrives as an approval event
+            : msg.outcome === 'rejected'
+              ? `rejected: ${msg.reason}` // shown, never branched on
+              : 'unreachable — the holder is gone';
+        if (note) {
+          this.answerNotes.set(approval, note);
+          this.answerNotes = new Map(this.answerNotes);
+        }
         break;
       }
       case 'closed':

@@ -96,6 +96,20 @@ Response: `say_result`. The *answer* to what was said is not in the response —
 it arrives on the conversation's content flow like everything else, which is
 the wire's own rule (the reply confirms acceptance, never outcome).
 
+### `answer`
+
+```json
+{ "type": "answer", "id": "r5", "approval": "apr-9f3", "approved": true }
+```
+
+Answer a pending approval. towerd forwards it to the approval's holder as a
+wire `answer` — `approved` verbatim, `from` stamped `{ "kind": "human" }`
+bare, exactly as `say`. Response: `answer_result`. First valid answer wins
+(the approval spec's rule): losing the race to the terminal comes back as
+`rejected` with reason `already_settled` — information, not an error. The
+settlement itself arrives as an `approval` event like any other, carrying
+whose decision it was.
+
 ## towerd → client
 
 ### `list` — once, on connect
@@ -149,6 +163,53 @@ The catch-up: every stored message with `ts` greater than the request's
 (the client renders known block types, skips unknown ones), and `ts`. The
 boundary may overlap what the client already holds when `after` is a shared
 timestamp — dedupe by message `id`; rendering a known id again is a no-op.
+
+### `approvals` — once, on connect
+
+```json
+{ "type": "approvals", "approvals": [
+  {
+    "id": "apr-9f3",
+    "ask": { "type": "tool_use", "name": "DeleteFile", "input": { "content": { "type": "files", "values": ["./old.ts"] } } },
+    "correlation": { "conversationId": "c65b902d-…", "queryId": "7d8022be-…", "turnId": "b44cf632-…", "toolUseId": "toolu_01ABC" },
+    "raisedTs": 1760187514000,
+    "lastPulse": 1760187529000
+  }
+] }
+```
+
+The outstanding snapshot: every **unsettled** ask towerd knows, sent once per
+connection right after `list`. `ask` and `correlation` are verbatim from the
+wire (`ask.type` is an open set — an unknown type still shows with its
+correlation). **Void is the client's derivation**: the pulse is ~15s while
+pending, so an ask whose `lastPulse` lags the clock by ~3 intervals displays
+as void — greyed, never dropped; a dead holder's ask is information.
+
+### `approval` — live, unconditional
+
+```json
+{ "type": "approval", "id": "apr-9f3", "ask": { … }, "correlation": { … },
+  "raisedTs": 1760187514000, "lastPulse": 1760187544000,
+  "settled": { "approved": true, "by": { "kind": "human", "userId": "stephen" }, "ts": 1760187550000 } }
+```
+
+One approval's state changed — raised, pulsed, or settled. Upsert by `id`,
+exactly the `row` discipline: awareness is unconditional, an unknown id is a
+new ask being born. `settled` is present only once settled; a settled ask
+leaves the pending count and shows whose decision it was.
+
+### `answer_result` — response to `answer`
+
+```json
+{ "type": "answer_result", "id": "r5", "outcome": "accepted" }
+{ "type": "answer_result", "id": "r5", "outcome": "rejected", "reason": "already_settled" }
+{ "type": "answer_result", "id": "r5", "outcome": "unreachable" }
+```
+
+Transport truth, never verdict — the same three-way honesty as `say_result`.
+`reason` is an open set (`already_settled`, `not_found`, and anything future).
+`unreachable` means nobody answered: the holder is gone, and the ask will read
+as void when its pulse lapses.
 
 ### `title_set` — response to `set_title`
 
@@ -313,11 +374,30 @@ const rowState = z.looseObject({
   title: z.string().optional(),
 });
 
+const approvalState = z.looseObject({
+  id: z.string(),
+  ask: z.looseObject({ type: z.string() }),
+  correlation: z.looseObject({
+    conversationId: z.string().optional(),
+    queryId: z.string().optional(),
+    turnId: z.string().optional(),
+    toolUseId: z.string().optional(),
+  }).optional(),
+  raisedTs: millis,
+  lastPulse: millis,
+  settled: z.looseObject({
+    approved: z.boolean(),
+    by: sender,
+    ts: millis,
+  }).optional(),
+});
+
 export const clientMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('open'),  id: z.string(), conv: z.string(), after: millis.nullable() }),
   z.looseObject({ type: z.literal('close'), id: z.string(), conv: z.string() }),
   z.looseObject({ type: z.literal('say'),   id: z.string(), conv: z.string(), text: z.string(), tip: z.string().nullable() }),
   z.looseObject({ type: z.literal('set_title'), id: z.string(), conv: z.string(), title: z.string() }),
+  z.looseObject({ type: z.literal('answer'), id: z.string(), approval: z.string(), approved: z.boolean() }),
 ]);
 
 export const serverMsg = z.discriminatedUnion('type', [
@@ -326,6 +406,11 @@ export const serverMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('conversation'), id: z.string(), conv: z.string(), messages: z.array(conversationMessage) }),
   z.looseObject({ type: z.literal('closed'),       id: z.string(), conv: z.string() }),
   z.looseObject({ type: z.literal('title_set'),    id: z.string(), conv: z.string() }),
+  z.looseObject({ type: z.literal('approvals'),    approvals: z.array(approvalState) }),
+  z.looseObject({ type: z.literal('approval') }).and(approvalState),
+  z.looseObject({ type: z.literal('answer_result'), id: z.string(), outcome: z.literal('accepted') }),
+  z.looseObject({ type: z.literal('answer_result'), id: z.string(), outcome: z.literal('rejected'), reason: z.string() }),
+  z.looseObject({ type: z.literal('answer_result'), id: z.string(), outcome: z.literal('unreachable') }),
   z.looseObject({ type: z.literal('say_result'),   id: z.string(), outcome: z.literal('accepted'), query: z.string() }),
   z.looseObject({ type: z.literal('say_result'),   id: z.string(), outcome: z.literal('rejected'), reason: z.string() }),
   z.looseObject({ type: z.literal('say_result'),   id: z.string(), outcome: z.literal('unreachable') }),

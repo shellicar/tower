@@ -21,3 +21,4 @@ id!(ConversationId);
 id!(QueryId);
 id!(TurnId);
 id!(MessageId);
+id!(ApprovalId);

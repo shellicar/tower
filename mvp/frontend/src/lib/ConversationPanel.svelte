@@ -72,6 +72,12 @@
   // (an open set): shown verbatim, never branched on.
   const row = $derived(tower.rows.get(oc.conv));
 
+  // Pending asks belonging to this conversation — the in-context answer
+  // surface for the cases where the list line alone isn't enough.
+  const pendingHere = $derived(
+    tower.pendingApprovals.filter((a) => a.correlation?.conversationId === oc.conv),
+  );
+
   // The header is the title's editor: click the name, type, Enter or blur
   // lands it (empty clears — back to the id). Escape abandons.
   let editingTitle = $state(false);
@@ -168,6 +174,26 @@
   </div>
 
   <div class="border-t border-neutral-700 px-3 py-2">
+    {#each pendingHere as a (a.id)}
+      <div class="mb-1.5 flex items-center justify-between gap-2 border border-amber-900 bg-amber-950/30 px-2 py-1">
+        <span class="truncate text-amber-200">
+          ⚠ {a.ask.name ?? a.ask.type}
+          {#if tower.answerNotes.get(a.id)}
+            <span class="text-orange-300"> · {tower.answerNotes.get(a.id)}</span>
+          {/if}
+        </span>
+        <span class="flex shrink-0 gap-2">
+          <button
+            class="cursor-pointer border border-green-800 px-2 text-green-300 hover:bg-green-950"
+            onclick={() => tower.answer(a.id, true)}>approve</button
+          >
+          <button
+            class="cursor-pointer border border-red-900 px-2 text-red-300 hover:bg-red-950"
+            onclick={() => tower.answer(a.id, false)}>deny</button
+          >
+        </span>
+      </div>
+    {/each}
     {#if row}
       <p class="mb-1.5 text-neutral-500">{row.lastKind} · {age(row.lastEvent)} ago</p>
     {/if}
