@@ -125,11 +125,28 @@ CREATE TABLE messages (
     PRIMARY KEY (conv, message_id)
 );
 CREATE INDEX messages_by_conv_ts ON messages (conv, ts);
+
+CREATE TABLE refs (
+    id    TEXT PRIMARY KEY,                     -- sha256 of the bytes
+    hint  TEXT NOT NULL,                        -- media type or block kind
+    bytes BLOB NOT NULL
+);
 ```
 
 - `ts` parsed once to UTC millis: wire timestamps carry mixed offsets; strings misorder.
 - PK `(conv, message_id)` + `INSERT OR REPLACE` = idempotent replay; at-least-once delivery is safe.
 - `sender`/`content` opaque JSON; tower renders, never interprets. Deltas are not stored.
+- Heavy values are externalised at apply time into `refs` (content-addressed,
+  deduped) and replaced in place by `{ "$ref": id, "size", "hint" }` — an
+  opaque id, never a URL (routes are the client's; ids are the data's).
+  **v1 applies this at four fixed nodes**: `image.source`, `document.source`
+  (base64, wherever the block nests), `tool_result.content`, and string
+  values inside `tool_use.input` over a threshold (~16 KB — input is
+  arbitrary JSON and unbounded; a large generated document is legitimately
+  all input). The mechanism itself is position-agnostic; new nodes are add-only.
+  Stored form = shipped form; `GET /ref/{id}` (Range for paging) serves the
+  bytes. Ids, ordering, and the tip are untouched. Interim — the real split
+  lands at the CLI level (content vocabulary).
 
 ## Gateway
 

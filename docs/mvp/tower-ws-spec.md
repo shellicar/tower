@@ -192,6 +192,48 @@ is correct, just less alive.
 Every request is answered; a request towerd cannot parse or does not know is
 answered with this. `reason` is an open set.
 
+## References — weight never rides the wire
+
+One mechanism for every heavy value, uniformly. In v1 towerd externalises at
+four fixed nodes — `image.source` and `document.source` (base64, wherever the
+block nests), `tool_result.content`, and oversized values inside
+`tool_use.input` — replacing the value in place by a reference. The shape is
+position-agnostic, so a client handles a `$ref` at *any* node it meets;
+further nodes are add-only:
+
+```json
+{ "$ref": "sha256-9f2c…", "size": 524288, "hint": "tool_result" }
+```
+
+- `$ref` is an opaque content-addressed id — **never a URL**. The client
+  constructs the fetch from its own knowledge of this API; routes are the
+  client's, ids are the data's. A route change costs stored data nothing.
+- `size` is the byte length of the referenced content — enough to render
+  `↩ result · 513 KB` without fetching.
+- `hint` says what the bytes are — a media type (`image/png`,
+  `application/pdf`) or a block kind (`tool_result`) — render fodder, an
+  open set.
+
+Fetching:
+
+```
+GET /ref/{id}          → the bytes (Content-Type from the store)
+GET /ref/{id}  + Range → a slice — preview the first 4 KB of a 500 KB result
+```
+
+The client rule is one line: wherever a `$ref` object sits — as a
+`tool_result`'s `content`, as an image `source`'s `data`, as any leaf — the
+client knows what the content *is* (`hint`) and how big (`size`); **how it
+materialises it is entirely the client's policy.** Fetch eagerly and bake a
+`data:` URL, set an `<img src>` and let the browser lazy-load, show a
+"load · 513 KB" button, or never fetch — all correct. The protocol supplies
+facts, never rendering mechanism. References are content-addressed, so any
+constructed URL is immutable and cacheable forever.
+
+Everything else about the message — its ids, its position, the tip — is
+unaffected: externalisation never falsifies position, and a client that never
+fetches a single ref still reads the whole dialogue.
+
 ## Tolerance
 
 The wire's evolution rules, both directions: producers only add — new message
