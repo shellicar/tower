@@ -149,9 +149,11 @@ impl Views {
         Views { db, events }
     }
 
-    /// The loop, on its own OS thread. Biased toward the apply path; both
-    /// channels closing ends the loop (shutdown = crash: transactions make
-    /// them the same path).
+    /// The loop, on its own OS thread. Queries are checked first on purpose:
+    /// reads are a trickle and latency-sensitive (a `list` at connect),
+    /// applies are a flood and latency-tolerant — apply-first would starve
+    /// the UI for the whole of a startup replay. Both channels closing ends
+    /// the loop (shutdown = crash: transactions make them the same path).
     pub fn run_blocking(
         mut self,
         mut events_rx: mpsc::Receiver<(u64, Event)>,
