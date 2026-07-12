@@ -4,7 +4,23 @@
 
   let { oc }: { oc: OpenConversation } = $props();
 
-  let draft = $state('');
+  // The draft survives a refresh: half-typed thoughts are the reader's own
+  // in-flight state — exactly what the client's local storage is for.
+  // Keyed per conversation; cleared on send; empty drafts leave no residue.
+  // The initial capture is intended: panels are keyed by conv in App, so
+  // this component's conversation identity never changes.
+  // svelte-ignore state_referenced_locally
+  const draftKey = `tower.draft.${oc.conv}`;
+  let draft = $state(localStorage.getItem(draftKey) ?? '');
+  $effect(() => {
+    try {
+      if (draft === '') localStorage.removeItem(draftKey);
+      else localStorage.setItem(draftKey, draft);
+    } catch {
+      // Storage full or blocked: persistence degrades, typing does not.
+    }
+  });
+
   let scroller: HTMLDivElement | undefined = $state();
   let editor: HTMLTextAreaElement | undefined = $state();
 
@@ -39,6 +55,12 @@
     editor.style.height = `${editor.scrollHeight}px`;
     if (anchored) pin(); // editor growth steals viewport; keep the pin
   }
+
+  // A restored draft needs the editor sized to it on mount — autosize
+  // otherwise only runs on input.
+  $effect(() => {
+    if (editor && draft !== '') autosize();
+  });
 
   // While anchored, re-pin on any geometry change — catch-up, new message,
   // streaming chunk. While unanchored, never move.
