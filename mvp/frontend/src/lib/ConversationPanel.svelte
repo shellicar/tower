@@ -66,6 +66,25 @@
       submit();
     }
   }
+
+  // The conversation's latest wire event — the same staleness fact the list
+  // shows, put where the reader is looking. `lastKind` is display fodder
+  // (an open set): shown verbatim, never branched on.
+  const row = $derived(tower.rows.get(oc.conv));
+
+  let now = $state(Date.now());
+  $effect(() => {
+    const t = setInterval(() => (now = Date.now()), 1_000);
+    return () => clearInterval(t);
+  });
+
+  function age(ts: number): string {
+    const s = Math.max(0, Math.floor((now - ts) / 1000));
+    if (s < 60) return `${s}s`;
+    if (s < 3600) return `${Math.floor(s / 60)}m`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h`;
+    return `${Math.floor(s / 86400)}d`;
+  }
 </script>
 
 <section class="flex h-screen min-w-[480px] flex-1 flex-col border-r border-neutral-700">
@@ -105,6 +124,9 @@
   </div>
 
   <div class="border-t border-neutral-700 px-3 py-2">
+    {#if row}
+      <p class="mb-1.5 text-neutral-500">{row.lastKind} · {age(row.lastEvent)} ago</p>
+    {/if}
     {#if oc.lastSay}
       <p class="mb-1.5 text-orange-300">{oc.lastSay}</p>
     {/if}
