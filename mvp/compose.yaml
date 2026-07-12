@@ -1,31 +1,51 @@
+# The canonical broker for the conv/approval wire — one file, used verbatim by
+# every repo that needs the deployment (tower, claude-cli). JetStream (`-js`)
+# retains events with no live subscriber ("record now, analyse later");
+# `-m 8222` exposes monitoring.
 services:
   nats:
-    image: nats:2.11-alpine
-    command: ["-js", "-m", "8222"]
+    image: nats:latest
+    # `-sd /data` points JetStream at the mounted volume — without it the
+    # store defaults to /tmp inside the container and the volume is decorative.
+    command: ['-js', '-sd', '/data', '-m', '8222']
+    # The broker outlives incidents: restart on crash or daemon restart, stay
+    # down only when deliberately stopped. stream-init has no policy on
+    # purpose — it is a one-shot that must be allowed to exit.
+    restart: unless-stopped
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - '4222:4222'
+      - '8222:8222'
     volumes:
       - nats-data:/data
 
-  # Creates the capture stream once the broker is up, then exits.
-  # Event subjects only — never a `.requests` subject: JetStream acks a
-  # captured publish to its reply inbox, and a request IS a publish with a
-  # reply inbox, so a stream over requests becomes a second responder racing
-  # the servicer's reply (nats-spec, Storage).
+  # One-shot: create the capture stream so late joiners and analytics can
+  # replay history. Event subjects only — never a `.requests` subject: a
+  # JetStream stream over a request subject answers the request with its own
+  # PubAck, beating the servicer's reply (nats-spec, Storage). Retention is
+  # deployment config, not contract.
+  # The broker image is distroless (no shell for a healthcheck), so this
+  # container — which has a shell — owns the wait: probe until the broker
+  # answers. `stream info` first makes the whole thing idempotent: a re-up
+  # against an existing stream is success, not thirty failed adds.
   stream-init:
     image: natsio/nats-box:latest
     depends_on:
       - nats
-    command: >
-      sh -c "
-        until nats --server nats://nats:4222 server check connection >/dev/null 2>&1; do sleep 0.5; done;
-        nats --server nats://nats:4222 stream add conv-approval
-          --subjects 'conv.v1.*.telemetry,conv.v1.*.changes,conv.v1.*.deltas,approval.v1.*.lifecycle,approval.v1.*.telemetry'
-          --storage file --retention limits --max-age 168h
-          --discard old --defaults
-          || true
-      "
+    entrypoint:
+      - sh
+      - -c
+      - |
+        for i in $$(seq 1 30); do
+          if nats --server nats://nats:4222 stream info conv-approval >/dev/null 2>&1; then
+            echo 'stream conv-approval already exists'; exit 0
+          fi
+          nats --server nats://nats:4222 stream add conv-approval \
+            --subjects 'conv.v1.*.changes,conv.v1.*.deltas,conv.v1.*.telemetry,approval.v1.*.lifecycle,approval.v1.*.telemetry' \
+            --storage file --retention limits --max-age 30d --discard old --defaults \
+            && exit 0
+          echo "nats not ready, retrying ($$i)..."; sleep 1
+        done
+        echo 'gave up waiting for nats'; exit 1
 
 volumes:
   nats-data:
