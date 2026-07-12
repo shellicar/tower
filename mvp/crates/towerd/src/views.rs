@@ -76,6 +76,8 @@ pub struct RowState {
     pub last_kind: String,
     /// Tower's own annotation (`titles` table) — never wire state.
     pub title: Option<String>,
+    /// Tower's own annotations (`tags` table) — flat key:value, verbatim.
+    pub tags: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,9 +91,13 @@ pub struct ConversationMessage {
     pub ts: i64,
 }
 
+/// `list`'s answer: the rows and the key→colour map (the shared colour
+/// language), one round trip.
+pub type ListSnapshot = (Vec<RowState>, Vec<(String, String)>);
+
 pub enum ViewQuery {
     List {
-        reply: oneshot::Sender<Vec<RowState>>,
+        reply: oneshot::Sender<ListSnapshot>,
     },
     Conversation {
         conv: ConversationId,
@@ -107,6 +113,14 @@ pub enum ViewQuery {
     SetTitle {
         conv: ConversationId,
         title: String,
+        reply: oneshot::Sender<()>,
+    },
+    /// Empty value clears the key. Last write wins. First use of a key
+    /// assigns it a colour from the palette.
+    SetTag {
+        conv: ConversationId,
+        key: String,
+        value: String,
         reply: oneshot::Sender<()>,
     },
     /// The outstanding snapshot: every unsettled ask (void is the client's
@@ -194,6 +208,20 @@ const MIGRATIONS: &[&str] = &[
          settled_approved INTEGER,
          settled_by       TEXT,
          settled_ts       INTEGER
+     );",
+    // 5 — tags: tower's own annotations, flat key:value (one value per key
+    // per conversation), plus the key's colour — the tag's identity IS the
+    // key, so its colour is shared truth. NOT materialised views: never
+    // touched by rematerialisation.
+    "CREATE TABLE tags (
+         conv  TEXT NOT NULL,
+         key   TEXT NOT NULL,
+         value TEXT NOT NULL,
+         PRIMARY KEY (conv, key)
+     );
+     CREATE TABLE tag_keys (
+         key    TEXT PRIMARY KEY,
+         colour TEXT NOT NULL
      );",
 ];
 
@@ -505,6 +533,17 @@ impl Views {
             ViewQuery::List { reply } => {
                 let _ = reply.send(self.list().unwrap_or_default());
             }
+            ViewQuery::SetTag {
+                conv,
+                key,
+                value,
+                reply,
+            } => {
+                if let Err(e) = self.set_tag(&conv, &key, &value) {
+                    eprintln!("views: set_tag failed for {conv}: {e:#}");
+                }
+                let _ = reply.send(());
+            }
             ViewQuery::Conversation { conv, after, reply } => {
                 let _ = reply.send(self.conversation(&conv, after).unwrap_or_default());
             }
@@ -603,6 +642,38 @@ impl Views {
         Ok(cursor)
     }
 
+    /// The palette keys draw from at first use — readable on the dark UI.
+    /// `set_key_colour` is a db edit in v1; this only seeds.
+    const PALETTE: [&'static str; 10] = [
+        "#8ec07c", "#83a598", "#d3869b", "#fabd2f", "#fe8019", "#b8bb26", "#7fc7ff", "#d65d0e",
+        "#b16286", "#689d6a",
+    ];
+
+    fn set_tag(&mut self, conv: &ConversationId, key: &str, value: &str) -> anyhow::Result<()> {
+        if value.is_empty() {
+            self.db.execute(
+                "DELETE FROM tags WHERE conv = ?1 AND key = ?2",
+                rusqlite::params![conv.0, key],
+            )?;
+            return Ok(());
+        }
+        let tx = self.db.transaction()?;
+        // First use of a key mints its colour — random pick, then stable.
+        let n: i64 = tx.query_row("SELECT COUNT(*) FROM tag_keys", [], |r| r.get(0))?;
+        let colour = Self::PALETTE[(n as usize) % Self::PALETTE.len()];
+        tx.execute(
+            "INSERT OR IGNORE INTO tag_keys (key, colour) VALUES (?1, ?2)",
+            rusqlite::params![key, colour],
+        )?;
+        tx.execute(
+            "INSERT INTO tags (conv, key, value) VALUES (?1, ?2, ?3)
+             ON CONFLICT(conv, key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![conv.0, key, value],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     fn set_title(&self, conv: &ConversationId, title: &str) -> anyhow::Result<()> {
         if title.is_empty() {
             self.db
@@ -617,22 +688,49 @@ impl Views {
         Ok(())
     }
 
-    fn list(&self) -> anyhow::Result<Vec<RowState>> {
+    fn list(&self) -> anyhow::Result<ListSnapshot> {
         let mut stmt = self.db.prepare_cached(
             "SELECT r.conv, r.last_event, r.last_kind, t.title
              FROM rows r LEFT JOIN titles t ON t.conv = r.conv",
         )?;
-        let rows = stmt
+        let mut rows = stmt
             .query_map([], |r| {
                 Ok(RowState {
                     conv: ConversationId(r.get(0)?),
                     last_event: r.get(1)?,
                     last_kind: r.get(2)?,
                     title: r.get(3)?,
+                    tags: Vec::new(),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
+
+        let mut tag_stmt = self
+            .db
+            .prepare_cached("SELECT conv, key, value FROM tags")?;
+        let mut by_conv: std::collections::HashMap<String, Vec<(String, String)>> =
+            std::collections::HashMap::new();
+        for row in tag_stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })? {
+            let (conv, key, value) = row?;
+            by_conv.entry(conv).or_default().push((key, value));
+        }
+        for r in &mut rows {
+            if let Some(tags) = by_conv.remove(&r.conv.0) {
+                r.tags = tags;
+            }
+        }
+
+        let mut key_stmt = self.db.prepare_cached("SELECT key, colour FROM tag_keys")?;
+        let keys = key_stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((rows, keys))
     }
 
     fn conversation(
@@ -793,6 +891,11 @@ mod tests {
         parse_wire(subject, payload.as_bytes()).unwrap()
     }
 
+    /// The rows half of list(); most tests don't care about tag keys.
+    fn rows_of(views: &Views) -> Vec<RowState> {
+        views.list().unwrap().0
+    }
+
     const MSG_M1: &str = r#"{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m1","queryId":"q1","turnId":"t1","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"read file X and summarise it"}]}"#;
 
     #[test]
@@ -800,7 +903,7 @@ mod tests {
         let (mut views, mut rx) = fresh();
         views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
 
-        let rows = views.list().unwrap();
+        let rows = rows_of(&views);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].conv.0, "conv-abc");
         assert_eq!(rows[0].last_kind, "message");
@@ -846,7 +949,7 @@ mod tests {
         let (mut views, _rx) = fresh();
         views.apply(1, &event("conv.v1.conv-abc.telemetry",
             r#"{"type":"turn_started","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}"#));
-        let rows = views.list().unwrap();
+        let rows = rows_of(&views);
         assert_eq!(rows[0].last_kind, "turn_started");
         assert!(
             views
@@ -866,7 +969,7 @@ mod tests {
                 r#"{"type":"delta","text":"File X"}"#,
             ),
         );
-        assert!(views.list().unwrap().is_empty());
+        assert!(rows_of(&views).is_empty());
         assert!(matches!(
             rx.try_recv().unwrap(),
             ViewEvent::Streaming { .. }
@@ -920,7 +1023,7 @@ mod tests {
                 r#"{"type":"vibe_shift","ts":"2026-07-07T21:00:00+10:00"}"#,
             ),
         );
-        let rows = views.list().unwrap();
+        let rows = rows_of(&views);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].last_kind, "vibe_shift");
     }
@@ -934,7 +1037,7 @@ mod tests {
         // Set, then overwrite (last write wins).
         views.set_title(&conv, "tower build").unwrap();
         views.set_title(&conv, "tower v1").unwrap();
-        assert_eq!(views.list().unwrap()[0].title.as_deref(), Some("tower v1"));
+        assert_eq!(rows_of(&views)[0].title.as_deref(), Some("tower v1"));
 
         // A title for a conversation the views have never seen is allowed;
         // the row is born titled when its first event arrives.
@@ -952,11 +1055,11 @@ mod tests {
             )
             .unwrap();
         views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
-        assert_eq!(views.list().unwrap()[0].title.as_deref(), Some("tower v1"));
+        assert_eq!(rows_of(&views)[0].title.as_deref(), Some("tower v1"));
 
         // Empty title clears; the row falls back to untitled.
         views.set_title(&conv, "").unwrap();
-        assert_eq!(views.list().unwrap()[0].title, None);
+        assert_eq!(rows_of(&views)[0].title, None);
     }
 
     #[test]
@@ -970,18 +1073,18 @@ mod tests {
         // First contact (nothing stored): ADOPT — keep data, keep cursor.
         // This is also the upgrade path for a db from before migration 3.
         assert_eq!(views.sync_stream("incarnation-A", 100).unwrap(), 1);
-        assert_eq!(views.list().unwrap().len(), 1);
+        assert_eq!(rows_of(&views).len(), 1);
 
         // Same incarnation again (every consumer rebuild): resume, touch nothing.
         views.apply(2, &event("conv.v1.conv-abc.telemetry",
             r#"{"type":"turn_started","ts":"2026-07-07T21:01:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}"#));
         assert_eq!(views.sync_stream("incarnation-A", 100).unwrap(), 2);
-        assert_eq!(views.list().unwrap().len(), 1);
+        assert_eq!(rows_of(&views).len(), 1);
 
         // A DIFFERENT incarnation: the stream was recreated — rematerialise.
         // Derived tables empty, cursor 0; the title (annotation) survives.
         assert_eq!(views.sync_stream("incarnation-B", 100).unwrap(), 0);
-        assert!(views.list().unwrap().is_empty());
+        assert!(rows_of(&views).is_empty());
         assert!(
             views
                 .conversation(&ConversationId("conv-abc".into()), None)
@@ -992,7 +1095,7 @@ mod tests {
 
         // Replay refills the views; the row comes back already titled.
         views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
-        assert_eq!(views.list().unwrap()[0].title.as_deref(), Some("tower v1"));
+        assert_eq!(rows_of(&views)[0].title.as_deref(), Some("tower v1"));
 
         // And incarnation-B is now home: same again resumes normally.
         assert_eq!(views.sync_stream("incarnation-B", 100).unwrap(), 1);
@@ -1013,8 +1116,8 @@ mod tests {
         // Adopt arm meets a 628-message stream holding cursor 23386.
         assert_eq!(views.sync_stream("incarnation-A", 628).unwrap(), 0);
         // Views intact — no truncation on the guard path; cursor reset.
-        assert_eq!(views.list().unwrap().len(), 1);
-        assert_eq!(views.list().unwrap()[0].title.as_deref(), Some("tower v1"));
+        assert_eq!(rows_of(&views).len(), 1);
+        assert_eq!(rows_of(&views)[0].title.as_deref(), Some("tower v1"));
         assert_eq!(read_cursor(&views.db).unwrap(), 0);
 
         // Same-incarnation arm gets the same protection.
@@ -1081,12 +1184,65 @@ mod tests {
     }
 
     #[test]
+    fn tags_set_overwrite_clear_and_colour_keys() {
+        let (mut views, _rx) = fresh();
+        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
+        let conv = ConversationId("conv-abc".into());
+
+        // Set two keys; first use mints each key's colour.
+        views.set_tag(&conv, "mission", "tower-design").unwrap();
+        views.set_tag(&conv, "role", "pm").unwrap();
+        let (rows, keys) = views.list().unwrap();
+        assert_eq!(rows[0].tags.len(), 2);
+        assert!(
+            rows[0]
+                .tags
+                .contains(&("mission".into(), "tower-design".into()))
+        );
+        assert_eq!(keys.len(), 2);
+        assert!(keys.iter().all(|(_, c)| c.starts_with('#')));
+
+        // Overwrite (last write wins) keeps one value per key; the key's
+        // colour is stable across overwrites.
+        let mission_colour = keys.iter().find(|(k, _)| k == "mission").unwrap().1.clone();
+        views.set_tag(&conv, "mission", "tower-v2").unwrap();
+        let (rows, keys) = views.list().unwrap();
+        assert!(
+            rows[0]
+                .tags
+                .contains(&("mission".into(), "tower-v2".into()))
+        );
+        assert_eq!(
+            keys.iter().find(|(k, _)| k == "mission").unwrap().1,
+            mission_colour
+        );
+
+        // Empty value clears the key from the conversation; the key's colour
+        // survives (other conversations may still wear it).
+        views.set_tag(&conv, "mission", "").unwrap();
+        let (rows, keys) = views.list().unwrap();
+        assert_eq!(rows[0].tags.len(), 1);
+        assert_eq!(keys.len(), 2);
+
+        // Tags survive rematerialisation — annotations, not derived views.
+        views
+            .db
+            .execute_batch(
+                "DELETE FROM rows; DELETE FROM messages; DELETE FROM refs;
+                 UPDATE cursor SET seq = 0 WHERE id = 1;",
+            )
+            .unwrap();
+        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
+        assert_eq!(rows_of(&views)[0].tags.len(), 1);
+    }
+
+    #[test]
     fn out_of_order_row_touch_never_regresses() {
         let (mut views, _rx) = fresh();
         views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1)); // 21:00
         views.apply(2, &event("conv.v1.conv-abc.telemetry",
             r#"{"type":"turn_cancelled","ts":"2026-07-07T20:00:00+10:00","queryId":"q0","turnId":"t0"}"#));
-        let rows = views.list().unwrap();
+        let rows = rows_of(&views);
         assert_eq!(rows[0].last_kind, "message"); // the earlier ts did not win
     }
 }

@@ -39,6 +39,8 @@ export interface RowState {
   lastKind: string;
   /** Tower's own annotation; absent = untitled, show the id. */
   title?: string;
+  /** Flat key:value annotations, verbatim; absent when untagged. */
+  tags?: Record<string, string>;
 }
 
 export interface ApprovalState {
@@ -58,11 +60,12 @@ export interface ApprovalState {
 
 // towerd → client
 export type ServerMsg =
-  | { type: 'list'; rows: RowState[] }
+  | { type: 'list'; rows: RowState[]; tagKeys?: Record<string, string> }
   | { type: 'row'; conv: string; lastEvent: Millis; lastKind: string }
   | { type: 'conversation'; id: string; conv: string; messages: ConversationMessage[] }
   | { type: 'closed'; id: string; conv: string }
   | { type: 'title_set'; id: string; conv: string }
+  | { type: 'tag_set'; id: string; conv: string }
   | { type: 'approvals'; approvals: ApprovalState[] }
   | ({ type: 'approval' } & ApprovalState)
   | { type: 'answer_result'; id: string; outcome: 'accepted' }
@@ -82,6 +85,7 @@ export type ClientMsg =
   | { type: 'close'; id: string; conv: string }
   | { type: 'say'; id: string; conv: string; text: string; tip: string | null }
   | { type: 'set_title'; id: string; conv: string; title: string }
+  | { type: 'set_tag'; id: string; conv: string; key: string; value: string }
   | { type: 'answer'; id: string; approval: string; approved: boolean };
 
 export function isRef(value: unknown): value is Ref {

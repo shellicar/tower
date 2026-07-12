@@ -43,6 +43,13 @@ pub enum ClientMsg {
         conv: String,
         title: String,
     },
+    #[serde(rename = "set_tag")]
+    SetTag {
+        id: String,
+        conv: String,
+        key: String,
+        value: String,
+    },
     #[serde(rename = "answer")]
     Answer {
         id: String,
@@ -55,7 +62,15 @@ pub enum ClientMsg {
 #[serde(tag = "type")]
 pub enum ServerMsg {
     #[serde(rename = "list")]
-    List { rows: Vec<WsRow> },
+    List {
+        rows: Vec<WsRow>,
+        /// key → colour: the shared colour language, once per connection.
+        #[serde(
+            rename = "tagKeys",
+            skip_serializing_if = "std::collections::HashMap::is_empty"
+        )]
+        tag_keys: std::collections::HashMap<String, String>,
+    },
     #[serde(rename = "row")]
     Row {
         conv: String,
@@ -74,6 +89,8 @@ pub enum ServerMsg {
     Closed { id: String, conv: String },
     #[serde(rename = "title_set")]
     TitleSet { id: String, conv: String },
+    #[serde(rename = "tag_set")]
+    TagSet { id: String, conv: String },
     #[serde(rename = "approvals")]
     Approvals { approvals: Vec<WsApproval> },
     #[serde(rename = "approval")]
@@ -118,6 +135,9 @@ pub struct WsRow {
     /// Present only for named conversations; absent = untitled, show the id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Flat key:value annotations, verbatim; absent when untagged.
+    #[serde(skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub tags: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -177,6 +197,7 @@ impl From<RowState> for WsRow {
             last_event: r.last_event,
             last_kind: r.last_kind,
             title: r.title,
+            tags: r.tags.into_iter().collect(),
         }
     }
 }
@@ -344,6 +365,27 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
                 reason: None,
             },
         },
+        ClientMsg::SetTag {
+            id,
+            conv,
+            key,
+            value,
+        } => {
+            let (tx, rx) = oneshot::channel();
+            let query = ViewQuery::SetTag {
+                conv: ConversationId(conv.clone()),
+                key,
+                value,
+                reply: tx,
+            };
+            if views.queries.send(query).await.is_err() || rx.await.is_err() {
+                return ServerMsg::Error {
+                    id,
+                    reason: "views unavailable".into(),
+                };
+            }
+            ServerMsg::TagSet { id, conv }
+        }
         ClientMsg::SetTitle { id, conv, title } => {
             let (tx, rx) = oneshot::channel();
             let query = ViewQuery::SetTitle {
@@ -430,9 +472,12 @@ pub async fn run_session<B: Broker, C: Clock>(
     {
         return;
     }
-    let Ok(rows) = rx.await else { return };
+    let Ok((rows, tag_keys)) = rx.await else {
+        return;
+    };
     let list = ServerMsg::List {
         rows: rows.into_iter().map(Into::into).collect(),
+        tag_keys: tag_keys.into_iter().collect(),
     };
     if send(&mut sink, &list).await.is_err() {
         return;

@@ -79,6 +79,24 @@ Any client may rename; concurrent renames are last-write-wins. An empty
 what it did, and every other client sees the new name in its next `list` —
 refresh is the propagation.
 
+### `set_tag`
+
+```json
+{ "type": "set_tag", "id": "r6", "conv": "c65b902d-…", "key": "mission", "value": "tower-design" }
+```
+
+Tag a conversation. Tags are **tower's own annotations** — flat `key: value`
+pairs (one value per key per conversation), never wire state, never
+interpreted: tower renders keys and values verbatim; the meaning is the
+user's. An empty `value` clears the key. Last write wins. Response:
+`tag_set`. Like titles, tags do not propagate live — refresh is the
+propagation.
+
+The tag's identity is the **key**: each key carries a colour (assigned
+randomly from a palette at first use, editable in the store), so clients can
+render bare values — `operator`, not `role: operator` — with the colour
+saying which key it belongs to.
+
 ### `say`
 
 ```json
@@ -115,12 +133,18 @@ whose decision it was.
 ### `list` — once, on connect
 
 ```json
-{ "type": "list", "rows": [
-  { "conv": "c65b902d-…", "lastEvent": 1760187514000, "lastKind": "message", "title": "tower build" }
+{ "type": "list",
+  "tagKeys": { "mission": "#7c6f64", "role": "#458588" },
+  "rows": [
+  { "conv": "c65b902d-…", "lastEvent": 1760187514000, "lastKind": "message", "title": "tower build",
+    "tags": { "mission": "tower-design", "role": "pm" } }
 ] }
 ```
 
-`title` is present only for conversations that have been named (`set_title`);
+`tags` is present only for tagged conversations; `tagKeys` maps every known
+key to its colour, once per connection — the colour language is shared truth,
+identical on every client. `title` is present only for conversations that
+have been named (`set_title`);
 absent means untitled — show the id. The `list` is the only carrier: `row`
 events do not carry titles, because a rename is not fleet activity and must
 not touch staleness.
@@ -223,6 +247,14 @@ changed character — the `streaming` chunks that follow are `blockType`
 on beyond styling). Same gating and ephemerality as `streaming`: only for
 open conversations, superseded by the committed message. A client that
 predates this frame skips it and sees exactly what it saw before.
+
+### `tag_set` — response to `set_tag`
+
+```json
+{ "type": "tag_set", "id": "r6", "conv": "c65b902d-…" }
+```
+
+Acknowledgement, nothing more.
 
 ### `title_set` — response to `set_title`
 
@@ -385,6 +417,7 @@ const rowState = z.looseObject({
   lastEvent: millis,
   lastKind: z.string(),
   title: z.string().optional(),
+  tags: z.record(z.string(), z.string()).optional(),
 });
 
 const approvalState = z.looseObject({
@@ -410,15 +443,17 @@ export const clientMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('close'), id: z.string(), conv: z.string() }),
   z.looseObject({ type: z.literal('say'),   id: z.string(), conv: z.string(), text: z.string(), tip: z.string().nullable() }),
   z.looseObject({ type: z.literal('set_title'), id: z.string(), conv: z.string(), title: z.string() }),
+  z.looseObject({ type: z.literal('set_tag'), id: z.string(), conv: z.string(), key: z.string(), value: z.string() }),
   z.looseObject({ type: z.literal('answer'), id: z.string(), approval: z.string(), approved: z.boolean() }),
 ]);
 
 export const serverMsg = z.discriminatedUnion('type', [
-  z.looseObject({ type: z.literal('list'),         rows: z.array(rowState) }),
+  z.looseObject({ type: z.literal('list'),         rows: z.array(rowState), tagKeys: z.record(z.string(), z.string()).optional() }),
   z.looseObject({ type: z.literal('row'),          conv: z.string(), lastEvent: millis, lastKind: z.string() }),
   z.looseObject({ type: z.literal('conversation'), id: z.string(), conv: z.string(), messages: z.array(conversationMessage) }),
   z.looseObject({ type: z.literal('closed'),       id: z.string(), conv: z.string() }),
   z.looseObject({ type: z.literal('title_set'),    id: z.string(), conv: z.string() }),
+  z.looseObject({ type: z.literal('tag_set'),      id: z.string(), conv: z.string() }),
   z.looseObject({ type: z.literal('approvals'),    approvals: z.array(approvalState) }),
   z.looseObject({ type: z.literal('approval') }).and(approvalState),
   z.looseObject({ type: z.literal('answer_result'), id: z.string(), outcome: z.literal('accepted') }),

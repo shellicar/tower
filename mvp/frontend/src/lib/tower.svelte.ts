@@ -32,10 +32,25 @@ export interface OpenConversation {
   loaded: boolean;
 }
 
+/** The rail's view configuration — per profile, like the open set. */
+export interface ViewConfig {
+  /** key -> selected values; OR within a key, AND across keys. */
+  filters: Record<string, string[]>;
+  /** Section the rail by this key; '' = flat. */
+  groupKey: string;
+  /** Keys whose values decorate rows (value only; colour carries the key). */
+  alwaysShow: string[];
+  /** When grouping, drop rows that lack the group key entirely. */
+  hideUntagged: boolean;
+}
+
 class Tower {
   rows = $state<Map<string, RowState>>(new Map());
   open = $state<Map<string, OpenConversation>>(new Map());
   approvals = $state<Map<string, ApprovalState>>(new Map());
+  /** key → colour, from the list snapshot — the shared colour language. */
+  tagKeys = $state<Record<string, string>>({});
+  view = $state<ViewConfig>(readViewConfig());
   /** Whether the approvals view is showing — pure view state. */
   approvalsOpen = $state(false);
   /** Transient outcome of the last answer per approval id, for display. */
@@ -134,6 +149,33 @@ class Tower {
     this.#send({ type: 'close', id: this.#id(), conv });
   }
 
+  /** Tags follow the titles discipline: the tagging client updates its own
+   *  row; everyone else sees it on next connect. Empty value clears the key. */
+  setTag(conv: string, key: string, value: string) {
+    this.#send({ type: 'set_tag', id: this.#id(), conv, key, value });
+    const row = this.rows.get(conv);
+    if (row) {
+      const tags = { ...(row.tags ?? {}) };
+      if (value === '') delete tags[key];
+      else tags[key] = value;
+      row.tags = tags;
+      this.rows = new Map(this.rows);
+    }
+    // A brand-new key gets its real colour on next connect; a placeholder
+    // keeps it renderable meanwhile.
+    if (value !== '' && !this.tagKeys[key]) {
+      this.tagKeys = { ...this.tagKeys, [key]: '#888888' };
+    }
+  }
+
+  saveView() {
+    try {
+      localStorage.setItem('tower.view', JSON.stringify(this.view));
+    } catch {
+      // Storage full or blocked: persistence degrades, viewing does not.
+    }
+  }
+
   /** Titles don't propagate live — refresh is the propagation — so the
    *  renaming client updates its own row from its own action. An empty
    *  title clears the name. */
@@ -174,16 +216,19 @@ class Tower {
       case 'list': {
         // The full snapshot replaces the map — sent once per connection.
         this.rows = new Map(msg.rows.map((r) => [r.conv, r]));
+        if (msg.tagKeys) this.tagKeys = msg.tagKeys;
         break;
       }
       case 'row': {
         // Upsert by conv: an unknown conv IS a new conversation being born.
-        // `row` never carries a title; the one we hold survives the upsert.
+        // `row` never carries annotations; the ones we hold survive the upsert.
+        const held = this.rows.get(msg.conv);
         this.rows.set(msg.conv, {
           conv: msg.conv,
           lastEvent: msg.lastEvent,
           lastKind: msg.lastKind,
-          title: this.rows.get(msg.conv)?.title,
+          title: held?.title,
+          tags: held?.tags,
         });
         this.rows = new Map(this.rows);
         break;
@@ -268,6 +313,7 @@ class Tower {
       }
       case 'closed':
       case 'title_set':
+      case 'tag_set':
       case 'error':
         break; // acknowledgements; errors surface nothing actionable in v1
       default:
@@ -302,6 +348,20 @@ function insertMessage(oc: OpenConversation, m: ConversationMessage) {
 
 function highWater(oc: OpenConversation): Millis | null {
   return oc.messages.length > 0 ? oc.messages[oc.messages.length - 1].ts : null;
+}
+
+function readViewConfig(): ViewConfig {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('tower.view') ?? '{}');
+    return {
+      filters: parsed.filters ?? {},
+      groupKey: parsed.groupKey ?? '',
+      alwaysShow: parsed.alwaysShow ?? [],
+      hideUntagged: parsed.hideUntagged ?? false,
+    };
+  } catch {
+    return { filters: {}, groupKey: '', alwaysShow: [], hideUntagged: false };
+  }
 }
 
 // The open set, in opening order. Local view state, not conversation state —
