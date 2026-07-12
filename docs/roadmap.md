@@ -2,8 +2,8 @@
 
 How to get from the current state — the fleet run by hand over tmux — to tower v1,
 in stages that are each independently valuable and none of which depend on the
-one after. Read alongside `project-state.md` (where the design stands) and
-`orchestration-layer.md` (the three-concern split this roadmap keeps honest).
+one after. Read alongside `planning/project-state.md` (where the design stands) and
+`planning/orchestration-layer.md` (the three-concern split this roadmap keeps honest).
 
 The proof this rests on: the NATS POC (now in `poc/`). Four components built by
 four sessions that never saw each other's code interoperated on first contact,
@@ -77,7 +77,7 @@ activity on the wire, idle derived (quiet since the last event), JetStream
 retaining what nobody heard. *Record now, analyse later* became real.
 
 Superseded: the tap's contract was replaced wholesale by the concern specs —
-`nats-spec.md`, `conversation-spec.md`, `approval-spec.md` — in the design
+`spec/nats-spec.md`, `spec/conversation-spec.md`, `spec/approval-spec.md` — in the design
 pass that dismantled "run", evicted approvals from the conversation, and split
 telemetry from the committal change stream. The shipped tap still publishes
 the retired contract; conforming the CLI is stage 2's work.
@@ -95,8 +95,8 @@ and something speaks. Three pieces, all landed:
 
 1. **The servicer** — the CLI implements the three specs: the committal change
    stream, telemetry, `say`/`cancel` with preconditions and the acceptance
-   limits, the approval concern with its pulse. Proven by `conformance.md`
-   against the `scenarios.md` fixtures.
+   limits, the approval concern with its pulse. Proven by `spec/conformance.md`
+   against the `spec/scenarios.md` fixtures.
 2. **The speaker** — the first sending client: the demonstration `send`
    script publishes a `say` with a premise, reads the reply, and the events
    arrive on `monitor`/`query`.
@@ -175,9 +175,9 @@ gets its own document when it is real.
 
 - The scenario-spec language (stage 3 starts with the smallest thing that is data).
 - The agent concern, environment, and transfer mechanics — the process-layer
-  design pass (`nats-spec.md` records the boundaries and what is parked where).
+  design pass (`spec/nats-spec.md` records the boundaries and what is parked where).
   The conversation's own record model is no longer deferred: it is
-  `conversation-spec.md`.
+  `spec/conversation-spec.md`.
 - Whether the orchestration logic is ultimately a program, a spec, or a Claude — the
-  protocol carries all three (orchestration-layer.md), and stage 3 deliberately does
+  protocol carries all three (`planning/orchestration-layer.md`), and stage 3 deliberately does
   not foreclose it.

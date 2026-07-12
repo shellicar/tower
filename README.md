@@ -21,28 +21,28 @@ central plane; `tmux attach` is ssh, and it stays.
 
 The wire contract. One concern per document, structured by the master spec:
 
-- [`docs/nats-spec.md`](docs/nats-spec.md): the master document. Namespacing,
+- [`docs/spec/nats-spec.md`](docs/spec/nats-spec.md): the master document. Namespacing,
   message structure, evolution rules, the planes, authority, storage, and the
   system principles with the reasoning that produced them.
-- [`docs/conversation-spec.md`](docs/conversation-spec.md): the conversation
+- [`docs/spec/conversation-spec.md`](docs/spec/conversation-spec.md): the conversation
   concern. The tree of messages, the committal change stream, telemetry,
   `say`/`cancel` with preconditions.
-- [`docs/approval-spec.md`](docs/approval-spec.md): the approval concern. The
+- [`docs/spec/approval-spec.md`](docs/spec/approval-spec.md): the approval concern. The
   authorization exchange: raise, answer, settle.
-- [`docs/conformance.md`](docs/conformance.md) and
-  [`docs/scenarios.md`](docs/scenarios.md): how implementations prove they
+- [`docs/spec/conformance.md`](docs/spec/conformance.md) and
+  [`docs/spec/scenarios.md`](docs/spec/scenarios.md): how implementations prove they
   carry the specs, and the fixture scenarios that prove it.
-- [`docs/content-vocabulary.md`](docs/content-vocabulary.md): the standard by
+- [`docs/spec/content-vocabulary.md`](docs/spec/content-vocabulary.md): the standard by
   which a tool's output is presented. Understanding recorded ahead of its
   design pass.
 
 ## The design docs
 
-- [`docs/project-state.md`](docs/project-state.md): read first. Maps the
+- [`docs/planning/project-state.md`](docs/planning/project-state.md): read first. Maps the
   design documents and says where things stand.
-- [`docs/multi-transport-architecture.md`](docs/multi-transport-architecture.md):
+- [`docs/planning/multi-transport-architecture.md`](docs/planning/multi-transport-architecture.md):
   the capabilities spec. Agent, bridge, protocol, the layers.
-- [`docs/orchestration-layer.md`](docs/orchestration-layer.md): the three
+- [`docs/planning/orchestration-layer.md`](docs/planning/orchestration-layer.md): the three
   concerns above the agent: routing, control plane, orchestration logic.
 - [`docs/roadmap.md`](docs/roadmap.md): CLI to tower v1, in stages that are
   each independently valuable.

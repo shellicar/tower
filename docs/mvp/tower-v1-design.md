@@ -208,7 +208,7 @@ async fn main() -> anyhow::Result<()> {
 
 ## Testing
 
-- `wire`: pure fold tests, inputs = the conformance fixtures in `scenarios.md`.
+- `wire`: pure fold tests, inputs = the conformance fixtures in `../spec/scenarios.md`.
 - Components: literal values through the seams; only fake = `Broker`.
 - Integration: compose broker, scripted publisher, WS client asserts; one check.
 - Frontend: against `tower-ws-spec.md` + its worked examples only.

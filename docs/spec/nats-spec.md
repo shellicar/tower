@@ -174,7 +174,7 @@ rest the data plane):
   conversations, approvals, `say` and answers. Networking's data plane.
 - **Control plane** — what decides how the operational plane runs: scheduling,
   spawning, lifecycle, health — the behind-the-scenes machinery.
-  `orchestration-layer.md` already names this in the Kubernetes sense as
+  `../planning/orchestration-layer.md` already names this in the Kubernetes sense as
   Tower's job; it is named, not yet designed.
 - **Observability plane** — telemetry. Observation of the other two.
 
@@ -213,7 +213,7 @@ be a program, a spec-interpreter, or a Claude without the grid noticing — a
 participant can be swapped; a plane cannot.
 
 Two orchestration participants, kept distinct (the two senses in
-`orchestration-layer.md`):
+`../planning/orchestration-layer.md`):
 
 - **Routing (workflow)** is operational messaging on the workload columns —
   conversation 1 sending a message to conversation 2 is a `say`, with

@@ -68,6 +68,6 @@ The last piece was input versus surface. The tool input goes into the tool; the 
 
 ## Relationship to the other docs
 
-- `tui-architecture.md` captures this from the presentation side: typed content blocks the peers agree on, per-type renderers, unknown-type fallback. That is the renderer's end of the same standard.
-- `code-architecture.md`'s content-vocabulary contract is the tool-output edge, and it still carries an earlier framing (the representation "riding in the approval"), from before the input-versus-surface split was clear. It should be reconciled to that split.
-- One concrete thing to square: `tui-architecture.md`'s worked example currently has the renderer parse the tool's `input` to produce the rich rendering. That is the renderer interpreting input, which this understanding replaces with the tool producing a surface. The two need to be reconciled.
+- `../planning/tui-architecture.md` captures this from the presentation side: typed content blocks the peers agree on, per-type renderers, unknown-type fallback. That is the renderer's end of the same standard.
+- `../planning/code-architecture.md`'s content-vocabulary contract is the tool-output edge, and it still carries an earlier framing (the representation "riding in the approval"), from before the input-versus-surface split was clear. It should be reconciled to that split.
+- One concrete thing to square: `../planning/tui-architecture.md`'s worked example currently has the renderer parse the tool's `input` to produce the rich rendering. That is the renderer interpreting input, which this understanding replaces with the tool producing a surface. The two need to be reconciled.
