@@ -27,7 +27,9 @@
     </header>
     <RowList />
   </aside>
-  <main class="flex min-w-0 flex-col">
+  <!-- min-h-0 defeats the grid child's implicit min-height:auto — without
+       it, content grows main past the track and h-full children follow. -->
+  <main class="flex min-h-0 min-w-0 flex-col">
     <!-- Tabs: each is a whole view — its own filters, grouping, and open
          conversations. Click switches; click the active one renames;
          × closes (never the last). -->

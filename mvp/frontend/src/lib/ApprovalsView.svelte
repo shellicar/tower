@@ -51,7 +51,7 @@
   }
 </script>
 
-<section class="flex h-screen min-w-[480px] flex-1 flex-col border-r border-neutral-700">
+<section class="flex h-full min-w-[480px] flex-1 flex-col border-r border-neutral-700">
   <header class="flex items-center justify-between border-b border-neutral-700 px-3 py-2">
     <span class="text-amber-300">approvals · {tower.pendingApprovals.length} pending</span>
     <button

@@ -97,7 +97,7 @@
 <!-- The view controls: group by, then the facet bar (keys first — click a
      key, pick values; the value chip is bare, colour carries the key). -->
 <div class="border-b border-neutral-800 px-3 py-2 text-xs">
-  <div class="flex items-center gap-2">
+  <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
     <span class="text-neutral-500">group</span>
     <select
       class="border border-neutral-700 bg-neutral-900 px-1 text-neutral-300"
