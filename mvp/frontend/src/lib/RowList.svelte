@@ -21,67 +21,20 @@
   {#each tower.ordered as row (row.conv)}
     <li>
       <button
-        class:open={tower.open.has(row.conv)}
+        class="flex w-full cursor-pointer justify-between gap-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900 {tower.open.has(row.conv) ? 'bg-slate-800' : ''}"
         onclick={() =>
           tower.open.has(row.conv)
             ? tower.closeConversation(row.conv)
             : tower.openConversation(row.conv)}
       >
-        <span class="conv">{row.conv}</span>
-        <span class="meta">
-          <span class="kind">{row.lastKind}</span>
-          <span class="age">{age(row.lastEvent)}</span>
+        <span class="truncate">{row.conv}</span>
+        <span class="flex shrink-0 gap-2 text-neutral-400">
+          <span>{row.lastKind}</span>
+          <span class="min-w-[3ch] text-right">{age(row.lastEvent)}</span>
         </span>
       </button>
     </li>
   {:else}
-    <li class="none">No conversations yet.</li>
+    <li class="p-3 text-neutral-500">No conversations yet.</li>
   {/each}
 </ul>
-
-<style>
-  ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-  li.none {
-    padding: 12px;
-    color: #666;
-  }
-  button {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    width: 100%;
-    padding: 8px 12px;
-    background: none;
-    border: none;
-    border-bottom: 1px solid #222;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  button:hover {
-    background: #1a1a1a;
-  }
-  button.open {
-    background: #1d2733;
-  }
-  .conv {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .meta {
-    display: flex;
-    gap: 8px;
-    flex-shrink: 0;
-    color: #888;
-  }
-  .age {
-    min-width: 3ch;
-    text-align: right;
-  }
-</style>

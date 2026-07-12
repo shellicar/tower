@@ -1,0 +1,11 @@
+@import 'tailwindcss';
+
+/* Real CSS earns its place here; utilities cover the ordinary cases.
+   (Tailwind's own guidance: no @apply, CSS where it's warranted.) */
+
+body {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 13px;
+  background: #111;
+  color: #ddd;
+}

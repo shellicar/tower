@@ -10,37 +10,21 @@
   const time = $derived(
     new Date(message.ts).toLocaleTimeString(undefined, { hour12: false }),
   );
+  const edge = $derived(
+    message.role === 'assistant'
+      ? 'border-green-800'
+      : message.role === 'user'
+        ? 'border-indigo-800'
+        : 'border-neutral-600',
+  );
 </script>
 
-<article class={message.role}>
-  <header>
-    <span class="who">{who}</span>
-    <span class="time">{time}</span>
+<article class="my-2 border-l-2 py-1.5 pl-2 {edge}">
+  <header class="mb-1 flex gap-2 text-neutral-400">
+    <span class="text-neutral-300">{who}</span>
+    <span>{time}</span>
   </header>
   {#each message.content as block, i (i)}
     <BlockView {block} />
   {/each}
 </article>
-
-<style>
-  article {
-    margin: 8px 0;
-    padding: 6px 8px;
-    border-left: 2px solid #444;
-  }
-  article.assistant {
-    border-left-color: #575;
-  }
-  article.user {
-    border-left-color: #557;
-  }
-  header {
-    display: flex;
-    gap: 8px;
-    color: #888;
-    margin-bottom: 4px;
-  }
-  .who {
-    color: #aaa;
-  }
-</style>

@@ -6,65 +6,21 @@
 
 <!-- Staleness first: the list is always there, ordered by last event; open
      conversations are drill-downs beside it, any number at once. -->
-<div class="layout">
-  <aside>
-    <header>
-      <h1>Tower</h1>
-      <span class="status" class:connected={tower.connected}>
+<div class="grid h-screen grid-cols-[320px_1fr]">
+  <aside class="overflow-y-auto border-r border-neutral-700">
+    <header class="flex items-baseline justify-between border-b border-neutral-700 px-3 py-2">
+      <h1 class="text-sm font-bold">Tower</h1>
+      <span class={tower.connected ? 'text-green-500' : 'text-red-400'}>
         {tower.connected ? 'live' : 'reconnecting…'}
       </span>
     </header>
     <RowList />
   </aside>
-  <main>
+  <main class="flex overflow-x-auto">
     {#each [...tower.open.values()] as oc (oc.conv)}
       <ConversationPanel {oc} />
     {:else}
-      <p class="empty">Open a conversation from the list.</p>
+      <p class="m-auto text-neutral-500">Open a conversation from the list.</p>
     {/each}
   </main>
 </div>
-
-<style>
-  :global(body) {
-    margin: 0;
-    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-    font-size: 13px;
-    background: #111;
-    color: #ddd;
-  }
-  .layout {
-    display: grid;
-    grid-template-columns: 320px 1fr;
-    height: 100vh;
-  }
-  aside {
-    border-right: 1px solid #333;
-    overflow-y: auto;
-  }
-  header {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    padding: 8px 12px;
-    border-bottom: 1px solid #333;
-  }
-  h1 {
-    font-size: 14px;
-    margin: 0;
-  }
-  .status {
-    color: #b66;
-  }
-  .status.connected {
-    color: #6b6;
-  }
-  main {
-    display: flex;
-    overflow-x: auto;
-  }
-  .empty {
-    margin: auto;
-    color: #666;
-  }
-</style>

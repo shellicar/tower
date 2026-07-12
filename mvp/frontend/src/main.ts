@@ -1,3 +1,4 @@
+import './app.css';
 import { mount } from 'svelte';
 import App from './App.svelte';
 import { tower } from './lib/tower.svelte';
