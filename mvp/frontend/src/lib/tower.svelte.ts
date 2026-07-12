@@ -29,6 +29,7 @@ class Tower {
 
   #ws: WebSocket | null = null;
   #nextId = 1;
+  #restored = false;
   /** requestId → conv, so say_result (which carries no conv) finds its home. */
   #pendingSays = new Map<string, string>();
   #retryMs = 500;
@@ -39,6 +40,21 @@ class Tower {
   }
 
   connect() {
+    // A refresh keeps what was being read: the open set survives in
+    // localStorage, and reconnect's own re-open path does the rest.
+    if (!this.#restored) {
+      this.#restored = true;
+      for (const conv of readOpenSet()) {
+        this.open.set(conv, {
+          conv,
+          messages: [],
+          streaming: '',
+          lastSay: null,
+          loaded: false,
+        });
+      }
+      this.open = new Map(this.open);
+    }
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
     this.#ws = ws;
@@ -73,6 +89,7 @@ class Tower {
     if (!this.open.has(conv)) {
       this.open.set(conv, { conv, messages: [], streaming: '', lastSay: null, loaded: false });
       this.open = new Map(this.open);
+      writeOpenSet(this.open);
     }
     this.#send({ type: 'open', id: this.#id(), conv, after: null });
   }
@@ -80,6 +97,7 @@ class Tower {
   closeConversation(conv: string) {
     this.open.delete(conv);
     this.open = new Map(this.open);
+    writeOpenSet(this.open);
     this.#send({ type: 'close', id: this.#id(), conv });
   }
 
@@ -185,6 +203,27 @@ function insertMessage(oc: OpenConversation, m: ConversationMessage) {
 
 function highWater(oc: OpenConversation): Millis | null {
   return oc.messages.length > 0 ? oc.messages[oc.messages.length - 1].ts : null;
+}
+
+// The open set, in opening order. Local view state, not conversation state —
+// exactly what a client's own storage is for.
+const OPEN_KEY = 'tower.open';
+
+function readOpenSet(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(OPEN_KEY) ?? '[]');
+    return Array.isArray(parsed) ? parsed.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeOpenSet(open: Map<string, OpenConversation>) {
+  try {
+    localStorage.setItem(OPEN_KEY, JSON.stringify([...open.keys()]));
+  } catch {
+    // Storage full or blocked: persistence degrades, reading does not.
+  }
 }
 
 export const tower = new Tower();
