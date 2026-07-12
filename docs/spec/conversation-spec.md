@@ -141,7 +141,42 @@ telemetry is its only trace.
 
 | Event | Subject | Fields | Notes |
 |---|---|---|---|
-| `delta` | `deltas` | `text` | a chunk of the assistant message currently streaming; superseded by the committed `message`, which is the record. Deliberately bare — no correlation ids: deltas are purely ephemeral, and the metadata would outweigh the data by orders of magnitude |
+| `delta` | `deltas` | `text` | a chunk of whatever the stream is currently emitting; superseded by the committed `message`, which is the record. Deliberately bare — no correlation ids: deltas are purely ephemeral, and the metadata would outweigh the data by orders of magnitude |
+| `block` | `deltas` | `blockType` | the stream changed character: the deltas that follow are `thinking`, `text`, or `tool_use` — an open set, mirroring the committed message's content block types. As bare as the deltas it introduces |
+
+**Why a marker, not typed deltas.** The assistant emits *one* token stream,
+in order; the blocks are transitions marked within it — markup over a single
+stream, not parallel channels. A delta is therefore always the same thing —
+the next chunk of that stream — and the only additional fact is what the
+stream is currently emitting, which changes at block boundaries, not per
+chunk. Order carries the structure: traffic for one conversation arrives in
+publication order per subject (see What consumers may assume), so a `block`
+marker always precedes the deltas it describes. No index, no per-chunk type:
+the evidence on the wire is strictly sequential blocks, and anything more is
+machinery for an interleave that does not occur.
+
+Worked stream — a turn that thinks, speaks, then calls a tool (the
+`tool_use` deltas stream the input JSON as it forms, fragment by fragment,
+exactly as the service emits it):
+
+```jsonl
+{"subject":"conv.v1.conv-abc.deltas","message":{"type":"block","blockType":"thinking"}}
+{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"The file has to go — checking wha"}}
+{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"t references it first."}}
+{"subject":"conv.v1.conv-abc.deltas","message":{"type":"block","blockType":"text"}}
+{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"Deleting the old module — nothing"}}
+{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":" imports it any more."}}
+{"subject":"conv.v1.conv-abc.deltas","message":{"type":"block","blockType":"tool_use"}}
+{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"{\"files\": [\"./o"}}
+{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"ld.ts\"]}"}}
+```
+
+Tolerance does the compatibility work in both directions: a consumer that
+predates `block` skips it (unknown type) and sees exactly what it saw before
+— text deltas; a consumer that joins mid-turn renders deltas as text until
+the first marker corrects it — an acceptable imperfection for an ephemeral
+display the committed message supersedes. A producer that never emits
+`block` (today's) remains compliant: the marker is additive.
 
 A delta is how a message looks *while it is happening*; the committed message
 is what happened. Locally-entered input commits too: a message typed at the
@@ -359,7 +394,12 @@ export const conversationChange = z.discriminatedUnion('type', [
 
 // conv.v1.{conversationId}.deltas — deliberately bare: the envelope's `ts` is
 // waived on purpose; deltas are ephemeral and the metadata would outweigh the data.
-export const conversationDelta = z.looseObject({ type: z.literal('delta'), text: z.string() });
+// `block` marks the stream changing character; `blockType` is an open set
+// mirroring the committed content block types.
+export const conversationDelta = z.discriminatedUnion('type', [
+  z.looseObject({ type: z.literal('delta'), text: z.string() }),
+  z.looseObject({ type: z.literal('block'), blockType: openEnum(['thinking', 'text', 'tool_use']) }),
+]);
 
 // conv.v1.{conversationId}.requests — a request whose `type` is not defined
 // here is still answered: `rejected` with reason `unsupported`. Compliance is

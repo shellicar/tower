@@ -8,7 +8,7 @@
 use serde_json::Value;
 
 use crate::approval::ApprovalLifecycle;
-use crate::conv::{ConvChange, ConvDelta, ConvTelemetry, Tolerant};
+use crate::conv::{ConvBlock, ConvChange, ConvDelta, ConvTelemetry, Tolerant};
 use crate::ids::{ApprovalId, ConversationId};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -22,6 +22,8 @@ pub enum EventKind {
     Telemetry(ConvTelemetry),
     Change(ConvChange),
     Delta(ConvDelta),
+    /// The stream changed character; the deltas that follow are `block_type`.
+    Block(ConvBlock),
     /// Anything the wire says that this build doesn't model: an unknown kind
     /// token, an unknown `type`, a misshaped known type, non-JSON bytes.
     /// Carried, not dropped — the staleness fold still counts it as a touch
@@ -109,8 +111,15 @@ fn parse_conv(id: &str, kind: &str, payload: &[u8]) -> Event {
             Ok(Tolerant::Known(c)) => EventKind::Change(c),
             Ok(Tolerant::Unknown(_)) | Err(_) => unknown(type_name),
         },
-        "deltas" => match serde_json::from_value::<ConvDelta>(value) {
-            Ok(d) if type_name == "delta" => EventKind::Delta(d),
+        "deltas" => match type_name.as_str() {
+            "delta" => match serde_json::from_value::<ConvDelta>(value) {
+                Ok(d) => EventKind::Delta(d),
+                Err(_) => unknown(type_name),
+            },
+            "block" => match serde_json::from_value::<ConvBlock>(value) {
+                Ok(b) => EventKind::Block(b),
+                Err(_) => unknown(type_name),
+            },
             _ => unknown(type_name),
         },
         // `.requests` never reaches ingest (streams capture event subjects
@@ -209,6 +218,20 @@ mod tests {
             event.kind,
             EventKind::Delta(ConvDelta {
                 text: "File X contains".into()
+            })
+        );
+    }
+
+    #[test]
+    fn block_marker_parses() {
+        let event = conv_event(
+            "conv.v1.conv-abc.deltas",
+            br#"{"type":"block","blockType":"thinking"}"#,
+        );
+        assert_eq!(
+            event.kind,
+            EventKind::Block(ConvBlock {
+                block_type: "thinking".into()
             })
         );
     }

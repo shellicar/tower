@@ -377,11 +377,21 @@ impl Views {
             return Ok(());
         }
 
+        // Block markers are stream punctuation, like deltas: never stored,
+        // no row touch (no ts to honestly claim). Cursor advance only, until
+        // the WS surface learns to carry them.
+        if let EventKind::Block(_) = &event.kind {
+            let tx = self.db.transaction()?;
+            tx.execute("UPDATE cursor SET seq = ?1 WHERE id = 1", [seq as i64])?;
+            tx.commit()?;
+            return Ok(());
+        }
+
         let (kind_label, ts) = match &event.kind {
             EventKind::Telemetry(t) => (t.type_name().to_string(), parse_ts(t.ts())),
             EventKind::Change(c) => (c.type_name().to_string(), parse_ts(c.ts())),
             EventKind::Unknown { label, ts } => (label.clone(), ts.as_deref().and_then(parse_ts)),
-            EventKind::Delta(_) => unreachable!("handled above"),
+            EventKind::Delta(_) | EventKind::Block(_) => unreachable!("handled above"),
         };
 
         let mut stored_message: Option<ConversationMessage> = None;

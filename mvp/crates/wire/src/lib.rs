@@ -10,7 +10,7 @@ pub mod say;
 pub mod ts;
 
 pub use approval::{AnswerOutcome, ApprovalLifecycle, encode_answer, parse_answer_reply};
-pub use conv::{ConvChange, ConvDelta, ConvTelemetry, Tolerant};
+pub use conv::{ConvBlock, ConvChange, ConvDelta, ConvTelemetry, Tolerant};
 pub use ids::{ApprovalId, ConversationId, MessageId, QueryId, TurnId};
 pub use ingest::{ApprovalEvent, ApprovalKind, Event, EventKind, WireEvent, parse_wire};
 pub use say::{SayCommand, SayOutcome, encode_say, parse_say_reply};

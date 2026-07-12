@@ -216,10 +216,20 @@ impl ConvChange {
 
 // ---------------------------------------------------------------------------
 // conv.v1.{id}.deltas — deliberately bare: no ts, no correlation ids.
+// One token stream, in order: `delta` is always the next chunk of it, and
+// `block` marks the stream changing character (thinking, text, tool_use —
+// an open set mirroring the committed content block types). Order carries
+// the structure; markers precede the deltas they describe.
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ConvDelta {
     pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct ConvBlock {
+    #[serde(rename = "blockType")]
+    pub block_type: String,
 }
 
 #[cfg(test)]

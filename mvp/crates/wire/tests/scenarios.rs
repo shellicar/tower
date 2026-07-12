@@ -1,8 +1,20 @@
-//! The conformance fixtures (docs/spec/scenarios.md) through the wire folds.
-//! Tower is a consumer: the event-subject lines (telemetry, changes, deltas)
-//! must all parse as Known — request lines never reach ingest (streams
+//! The conformance fixtures (docs/spec/fixtures/*.jsonl, narrated by
+//! scenarios.md) through the wire folds — read from the files themselves:
+//! this repo is the fixtures' source of truth, and these tests consume the
+//! same bytes implementations copy. Tower is a consumer: the event-subject
+//! lines must all parse as Known — request lines never reach ingest (streams
 //! capture event subjects only). Fix lands twice: a change here means the
-//! fixture in scenarios.md changes in the same commit, or the code does.
+//! fixture file changes in the same commit, or the code does.
+
+macro_rules! fixture {
+    ($name:literal) => {
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/spec/fixtures/",
+            $name
+        ))
+    };
+}
 
 use wire::{
     ApprovalKind, ApprovalLifecycle, ConvChange, ConvTelemetry, Event, EventKind, WireEvent,
@@ -33,57 +45,13 @@ fn events(fixture: &str) -> Vec<Event> {
         .collect()
 }
 
-// Scenario 1 — the plain exchange (verbatim from scenarios.md).
-const SCENARIO_1: &str = r#"
-{"subject":"conv.v1.conv-abc.requests","message":{"type":"say","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"text":"read file X and summarise it","precondition":{"tip":null}},"reply":{"accepted":true,"id":"q1"}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m1","queryId":"q1","turnId":"t1","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"read file X and summarise it"}]}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_started","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"tool_use","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","id":"toolu_01ABC","name":"ReadFile","input":{"path":"X"}}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_ended","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","stopReason":"tool_use"}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"usage","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","inputTokens":1200,"cacheCreationTokens":0,"cacheReadTokens":0,"outputTokens":80,"costUsd":0.005}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m2","queryId":"q1","turnId":"t1","role":"assistant","from":{"kind":"agent"},"content":[{"type":"tool_use","id":"toolu_01ABC","name":"ReadFile","input":{"path":"X"}}]}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m3","queryId":"q1","turnId":"t2","role":"user","from":{"kind":"agent"},"content":[{"type":"tool_result","tool_use_id":"toolu_01ABC","content":"…file contents…"}]}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_started","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t2","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}}
-{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"File X contains"}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_ended","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t2","stopReason":"end_turn"}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"usage","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t2","service":"anthropic.messages","model":"claude-sonnet-4-5","inputTokens":1400,"cacheCreationTokens":0,"cacheReadTokens":1200,"outputTokens":150,"costUsd":0.006}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m4","queryId":"q1","turnId":"t2","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"File X contains a summary of…"}]}}
-"#;
-
-// Scenario 2 — cancel mid-turn (event lines only relevant here).
-const SCENARIO_2: &str = r#"
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_started","ts":"2026-07-07T21:00:00+10:00","queryId":"q2","turnId":"t3","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}}
-{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"Deleting"}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_cancelled","ts":"2026-07-07T21:00:00+10:00","queryId":"q2","turnId":"t3"}}
-"#;
-
-// Scenario 3 — edit and rewind.
-const SCENARIO_3: &str = r#"
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"tip_moved","ts":"2026-07-07T21:00:00+10:00","to":"m1"}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m5","queryId":"q2","turnId":"t4","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"read file Y and summarise it"}]}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m6","queryId":"q2","turnId":"t4","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"File Y contains…"}]}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"tip_moved","ts":"2026-07-07T21:00:00+10:00","to":"m4"}}
-"#;
-
-// Scenario 4 — revision.
-const SCENARIO_4: &str = r#"
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"revision","ts":"2026-07-07T21:00:00+10:00","messageId":"m2","content":[{"type":"tool_use","id":"toolu_01ABC","name":"ReadFile","input":{"path":"X"}}]}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"revision","ts":"2026-07-07T21:00:00+10:00","messageId":"m3","content":[{"type":"tool_result","tool_use_id":"toolu_01ABC","content":"…trimmed…"}]}}
-"#;
-
-// Scenario 6 — approval, both endings (verbatim from scenarios.md).
-const SCENARIO_6A: &str = r#"
-{"subject":"approval.v1.apr-1.lifecycle","message":{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"tool_use","name":"DeleteFile","input":{"content":{"type":"files","values":["./old.ts"]}}},"correlation":{"conversationId":"conv-abc","queryId":"q2","turnId":"t3","toolUseId":"toolu_02DEF"}}}
-{"subject":"approval.v1.apr-1.telemetry","message":{"type":"heartbeat","ts":"2026-07-07T21:00:00+10:00"}}
-{"subject":"approval.v1.apr-1.requests","message":{"type":"answer","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"approved":true},"reply":{"accepted":true}}
-{"subject":"approval.v1.apr-1.requests","message":{"type":"answer","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"agent"},"approved":false},"reply":{"rejected":true,"reason":"already_settled"}}
-{"subject":"approval.v1.apr-1.lifecycle","message":{"type":"settled","ts":"2026-07-07T21:00:00+10:00","approved":true,"by":{"kind":"human","userId":"stephen"}}}
-"#;
-
-const SCENARIO_6B: &str = r#"
-{"subject":"approval.v1.apr-2.lifecycle","message":{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"tool_use","name":"DeleteFile","input":{"content":{"type":"files","values":["./other.ts"]}}},"correlation":{"conversationId":"conv-abc","queryId":"q3","turnId":"t5","toolUseId":"toolu_03GHI"}}}
-{"subject":"approval.v1.apr-2.telemetry","message":{"type":"heartbeat","ts":"2026-07-07T21:00:00+10:00"}}
-"#;
+const SCENARIO_1: &str = fixture!("scenario-1.jsonl");
+const SCENARIO_2: &str = fixture!("scenario-2.jsonl");
+const SCENARIO_3: &str = fixture!("scenario-3.jsonl");
+const SCENARIO_4: &str = fixture!("scenario-4.jsonl");
+const SCENARIO_6A: &str = fixture!("scenario-6a.jsonl");
+const SCENARIO_6B: &str = fixture!("scenario-6b.jsonl");
+const SCENARIO_7: &str = fixture!("scenario-7.jsonl");
 
 fn approval_events(fixture: &str) -> Vec<wire::ApprovalEvent> {
     fixture
@@ -187,6 +155,55 @@ fn scenario_6b_holder_died() {
         ApprovalKind::Lifecycle(ApprovalLifecycle::Raised { .. })
     ));
     assert!(matches!(&evs[1].kind, ApprovalKind::Heartbeat { .. }));
+}
+
+#[test]
+fn scenario_7_block_stream_reconstructs_the_turn() {
+    // The deltas subject carries one ordered stream; `block` markers say what
+    // it is currently emitting. Folding it reconstructs thinking → text →
+    // tool_use, and the committed message supersedes with the same order.
+    let evs = events(SCENARIO_7);
+    assert_all_known(&evs);
+
+    let mut phases: Vec<String> = Vec::new();
+    let mut texts: Vec<(String, String)> = Vec::new(); // (phase, accumulated)
+    for e in &evs {
+        match &e.kind {
+            EventKind::Block(b) => phases.push(b.block_type.clone()),
+            EventKind::Delta(d) => {
+                let phase = phases.last().cloned().unwrap_or_else(|| "text".into());
+                match texts.last_mut() {
+                    Some((p, acc)) if *p == phase => acc.push_str(&d.text),
+                    _ => texts.push((phase, d.text.clone())),
+                }
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(phases, ["thinking", "text", "tool_use"]);
+    assert_eq!(
+        texts[0].1,
+        "The file has to go — checking what references it first."
+    );
+    assert_eq!(
+        texts[1].1,
+        "Deleting the old module — nothing imports it any more."
+    );
+    assert_eq!(texts[2].1, r#"{"files": ["./old.ts"]}"#);
+
+    // The committed message carries the same blocks, same order.
+    let committed = evs
+        .iter()
+        .find_map(|e| match &e.kind {
+            EventKind::Change(ConvChange::Message { content, .. }) => Some(content),
+            _ => None,
+        })
+        .expect("the commit closes the stream");
+    let block_types: Vec<&str> = committed
+        .iter()
+        .map(|b| b["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(block_types, ["thinking", "text", "tool_use"]);
 }
 
 #[test]
