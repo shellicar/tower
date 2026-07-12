@@ -27,12 +27,19 @@
     if (nearBottom) scroller.scrollTop = scroller.scrollHeight;
   });
 
-  function submit(e: SubmitEvent) {
-    e.preventDefault();
+  function submit() {
     const text = draft.trim();
     if (!text) return;
     tower.say(oc.conv, text);
     draft = '';
+  }
+
+  // Enter is a newline; Cmd+Enter (mac) / Ctrl+Enter submits.
+  function onkeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      submit();
+    }
   }
 </script>
 
@@ -59,14 +66,15 @@
     {/if}
   </div>
 
-  <form class="border-t border-neutral-700 px-3 py-2" onsubmit={submit}>
+  <div class="border-t border-neutral-700 px-3 py-2">
     {#if oc.lastSay}
       <p class="mb-1.5 text-orange-300">{oc.lastSay}</p>
     {/if}
-    <input
-      class="w-full border border-neutral-700 bg-neutral-900 px-2 py-1.5"
+    <textarea
+      class="max-h-48 min-h-16 w-full resize-y border border-neutral-700 bg-neutral-900 px-2 py-1.5"
       bind:value={draft}
-      placeholder="say…"
-    />
-  </form>
+      {onkeydown}
+      placeholder="say… (⌘↩ to send)"
+    ></textarea>
+  </div>
 </section>
