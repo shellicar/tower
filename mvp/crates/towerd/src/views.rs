@@ -80,10 +80,12 @@ pub enum ViewQuery {
         reply: oneshot::Sender<()>,
     },
     /// Ingest's reconcile, on every consumer build: "the stream I found was
-    /// created at `created` — where do I resume?" The reply is the cursor to
-    /// resume after (0 = replay from the start).
+    /// created at `created` and its sequences end at `last_seq` — where do I
+    /// resume?" The reply is the cursor to resume after (0 = replay from the
+    /// start).
     SyncStream {
         created: String,
+        last_seq: u64,
         reply: oneshot::Sender<u64>,
     },
 }
@@ -376,8 +378,12 @@ impl Views {
                 }
                 let _ = reply.send(());
             }
-            ViewQuery::SyncStream { created, reply } => {
-                match self.sync_stream(&created) {
+            ViewQuery::SyncStream {
+                created,
+                last_seq,
+                reply,
+            } => {
+                match self.sync_stream(&created, last_seq) {
                     Ok(cursor) => {
                         let _ = reply.send(cursor);
                     }
@@ -406,13 +412,22 @@ impl Views {
     /// Only a genuinely different stream reaches the destructive arm: blips,
     /// timeouts, and reconnects never change a stream's `created`, and a
     /// malformed message never reaches this code path at all.
-    fn sync_stream(&mut self, created: &str) -> anyhow::Result<u64> {
+    ///
+    /// The `last_seq` guard: whatever arm answers, a cursor beyond the
+    /// stream's last sequence is a position that can never be reached
+    /// (sequences only grow) — consuming from it waits forever, silently.
+    /// Answer 0 instead: replay, with no truncation — the fold is idempotent,
+    /// so existing views keep what they hold and refill on top. This is the
+    /// adopt arm's blind spot closed: adoption trusts that the stream it
+    /// meets is the one that advanced the cursor, and the guard is the check
+    /// that the trust is arithmetically possible.
+    fn sync_stream(&mut self, created: &str, last_seq: u64) -> anyhow::Result<u64> {
         let stored: Option<String> = self
             .db
             .query_row("SELECT created FROM stream WHERE id = 1", [], |r| r.get(0))
             .optional()?;
-        match stored {
-            Some(s) if s == created => read_cursor(&self.db),
+        let cursor = match stored {
+            Some(s) if s == created => read_cursor(&self.db)?,
             Some(s) => {
                 eprintln!(
                     "views: stream incarnation changed ({s} -> {created}); \
@@ -425,14 +440,24 @@ impl Views {
                 )?;
                 tx.execute("UPDATE stream SET created = ?1 WHERE id = 1", [created])?;
                 tx.commit()?;
-                Ok(0)
+                0
             }
             None => {
                 self.db
                     .execute("INSERT INTO stream (id, created) VALUES (1, ?1)", [created])?;
-                read_cursor(&self.db)
+                read_cursor(&self.db)?
             }
+        };
+        if cursor > last_seq {
+            eprintln!(
+                "views: cursor {cursor} is beyond the stream's last sequence {last_seq} \
+                 — an unreachable position; replaying from the start (no truncation)"
+            );
+            self.db
+                .execute("UPDATE cursor SET seq = 0 WHERE id = 1", [])?;
+            return Ok(0);
         }
+        Ok(cursor)
     }
 
     fn set_title(&self, conv: &ConversationId, title: &str) -> anyhow::Result<()> {
@@ -733,18 +758,18 @@ mod tests {
 
         // First contact (nothing stored): ADOPT — keep data, keep cursor.
         // This is also the upgrade path for a db from before migration 3.
-        assert_eq!(views.sync_stream("incarnation-A").unwrap(), 1);
+        assert_eq!(views.sync_stream("incarnation-A", 100).unwrap(), 1);
         assert_eq!(views.list().unwrap().len(), 1);
 
         // Same incarnation again (every consumer rebuild): resume, touch nothing.
         views.apply(2, &event("conv.v1.conv-abc.telemetry",
             r#"{"type":"turn_started","ts":"2026-07-07T21:01:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}"#));
-        assert_eq!(views.sync_stream("incarnation-A").unwrap(), 2);
+        assert_eq!(views.sync_stream("incarnation-A", 100).unwrap(), 2);
         assert_eq!(views.list().unwrap().len(), 1);
 
         // A DIFFERENT incarnation: the stream was recreated — rematerialise.
         // Derived tables empty, cursor 0; the title (annotation) survives.
-        assert_eq!(views.sync_stream("incarnation-B").unwrap(), 0);
+        assert_eq!(views.sync_stream("incarnation-B", 100).unwrap(), 0);
         assert!(views.list().unwrap().is_empty());
         assert!(
             views
@@ -759,7 +784,31 @@ mod tests {
         assert_eq!(views.list().unwrap()[0].title.as_deref(), Some("tower v1"));
 
         // And incarnation-B is now home: same again resumes normally.
-        assert_eq!(views.sync_stream("incarnation-B").unwrap(), 1);
+        assert_eq!(views.sync_stream("incarnation-B", 100).unwrap(), 1);
+    }
+
+    #[test]
+    fn sync_stream_guard_replays_when_cursor_is_beyond_last_seq() {
+        // Tonight's live strand: adopt a stream whose sequences end BELOW
+        // the cursor — an unreachable position. The guard answers 0 (replay)
+        // and, unlike rematerialisation, truncates nothing: the views keep
+        // what they hold and the idempotent fold refills on top.
+        let (mut views, _rx) = fresh();
+        views.apply(23386, &event("conv.v1.conv-abc.changes", MSG_M1));
+        views
+            .set_title(&ConversationId("conv-abc".into()), "tower v1")
+            .unwrap();
+
+        // Adopt arm meets a 628-message stream holding cursor 23386.
+        assert_eq!(views.sync_stream("incarnation-A", 628).unwrap(), 0);
+        // Views intact — no truncation on the guard path; cursor reset.
+        assert_eq!(views.list().unwrap().len(), 1);
+        assert_eq!(views.list().unwrap()[0].title.as_deref(), Some("tower v1"));
+        assert_eq!(read_cursor(&views.db).unwrap(), 0);
+
+        // Same-incarnation arm gets the same protection.
+        views.apply(23386, &event("conv.v1.conv-abc.changes", MSG_M1));
+        assert_eq!(views.sync_stream("incarnation-A", 628).unwrap(), 0);
     }
 
     #[test]

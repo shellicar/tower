@@ -57,18 +57,21 @@ async fn consume(
     // (nats-spec, Storage) — the name arrives from config, never hard-coded.
     let mut stream = js.get_stream(stream).await?;
     // `created` is fixed at the stream's birth: the incarnation identity.
-    let created = stream
-        .info()
-        .await?
-        .created
-        .unix_timestamp_nanos()
-        .to_string();
+    // `last_seq` bounds what any honest cursor can be — the views use it to
+    // refuse an unreachable resume position (the silent-strand guard).
+    let info = stream.info().await?;
+    let created = info.created.unix_timestamp_nanos().to_string();
+    let last_seq = info.state.last_sequence;
 
     // Reconcile: the views own the durable position and decide what the
     // cursor means against this incarnation. No answer = no consuming.
     let (tx, rx) = oneshot::channel();
     queries
-        .send(ViewQuery::SyncStream { created, reply: tx })
+        .send(ViewQuery::SyncStream {
+            created,
+            last_seq,
+            reply: tx,
+        })
         .await
         .map_err(|_| anyhow::anyhow!("views gone"))?;
     let cursor = rx
