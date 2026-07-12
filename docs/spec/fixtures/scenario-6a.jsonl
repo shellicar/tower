@@ -1,0 +1,5 @@
+{"subject":"approval.v1.apr-1.lifecycle","message":{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"tool_use","name":"DeleteFile","input":{"content":{"type":"files","values":["./old.ts"]}}},"correlation":{"conversationId":"conv-abc","queryId":"q2","turnId":"t3","toolUseId":"toolu_02DEF"}}}
+{"subject":"approval.v1.apr-1.telemetry","message":{"type":"heartbeat","ts":"2026-07-07T21:00:00+10:00"}}
+{"subject":"approval.v1.apr-1.requests","message":{"type":"answer","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"approved":true},"reply":{"accepted":true}}
+{"subject":"approval.v1.apr-1.requests","message":{"type":"answer","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"agent"},"approved":false},"reply":{"rejected":true,"reason":"already_settled"}}
+{"subject":"approval.v1.apr-1.lifecycle","message":{"type":"settled","ts":"2026-07-07T21:00:00+10:00","approved":true,"by":{"kind":"human","userId":"stephen"}}}

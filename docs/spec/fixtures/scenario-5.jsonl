@@ -1,0 +1,3 @@
+{"subject":"conv.v1.conv-abc.requests","message":{"type":"say","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"text":"okay, delete it","precondition":{"tip":"m4"}},"reply":{"accepted":true,"id":"q2"}}
+{"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m5","queryId":"q2","turnId":"t3","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"okay, delete it"}]}}
+{"subject":"conv.v1.conv-abc.requests","message":{"type":"say","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"agent"},"text":"keep it, actually","precondition":{"tip":"m4"}},"reply":{"rejected":true,"reason":"stale"}}

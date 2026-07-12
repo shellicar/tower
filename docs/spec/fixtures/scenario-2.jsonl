@@ -1,0 +1,5 @@
+{"subject":"conv.v1.conv-abc.requests","message":{"type":"say","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"text":"now delete it","precondition":{"tip":"m4"}},"reply":{"accepted":true,"id":"q2"}}
+{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_started","ts":"2026-07-07T21:00:00+10:00","queryId":"q2","turnId":"t3","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}}
+{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"Deleting"}}
+{"subject":"conv.v1.conv-abc.requests","message":{"type":"cancel","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"id":"q2"},"reply":{"accepted":true}}
+{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_cancelled","ts":"2026-07-07T21:00:00+10:00","queryId":"q2","turnId":"t3"}}

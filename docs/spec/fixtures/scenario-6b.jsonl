@@ -1,0 +1,2 @@
+{"subject":"approval.v1.apr-2.lifecycle","message":{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"tool_use","name":"DeleteFile","input":{"content":{"type":"files","values":["./other.ts"]}}},"correlation":{"conversationId":"conv-abc","queryId":"q3","turnId":"t5","toolUseId":"toolu_03GHI"}}}
+{"subject":"approval.v1.apr-2.telemetry","message":{"type":"heartbeat","ts":"2026-07-07T21:00:00+10:00"}}

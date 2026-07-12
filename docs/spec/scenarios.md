@@ -1,15 +1,27 @@
 # Conformance scenarios
 
 The fixture set for `conformance.md`. Each scenario is one capturable session,
-small, exercising a distinct slice of the contract. The fixtures are inline
-below as jsonl templates — one line per wire message, the subject riding each
-line; request lines carry their reply inline, since a reply has no subject of
-its own. `ts` values and minted ids (`m…`, `q…`, `t…`, `apr-…`, `toolu_…`) are
+small, exercising a distinct slice of the contract. The fixtures live as jsonl
+files in `fixtures/` — **this repo is their source of truth**; implementations
+carry verbatim copies, byte-diffable against these files (conformance.md,
+Artifacts). One line per wire message, the subject riding each line; request
+lines carry their reply inline, since a reply has no subject of its own. `ts`
+values and minted ids (`m…`, `q…`, `t…`, `apr-…`, `toolu_…`) are
 placeholders: conformance normalises them before comparison, so a fixture is a
 template by construction, never a byte-exact recording. The templates double as
 the specs' worked examples. First implementation contact validates them — where
 an implementation and a template disagree, someone reasons about which is
 wrong, and the fix lands twice.
+
+| Scenario | Fixture |
+|---|---|
+| 1 — the plain exchange | `fixtures/scenario-1.jsonl` |
+| 2 — cancel mid-turn | `fixtures/scenario-2.jsonl` |
+| 3 — edit and rewind | `fixtures/scenario-3.jsonl` |
+| 4 — revision | `fixtures/scenario-4.jsonl` |
+| 5 — stale premise | `fixtures/scenario-5.jsonl` |
+| 6 — approval, both endings | `fixtures/scenario-6a.jsonl`, `fixtures/scenario-6b.jsonl` |
+| 7 — the block stream | `fixtures/scenario-7.jsonl` |
 
 Each template lists the **required** entries: a producer's capture must contain
 them as a subsequence per subject, extras allowed (add-only honoured).
@@ -41,21 +53,7 @@ closing round (ends `end_turn`).
 - Asserts: the baseline schemas; the query fold grouping by `queryId` and
   closing on `end_turn`.
 
-```jsonl
-{"subject":"conv.v1.conv-abc.requests","message":{"type":"say","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"text":"read file X and summarise it","precondition":{"tip":null}},"reply":{"accepted":true,"id":"q1"}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m1","queryId":"q1","turnId":"t1","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"read file X and summarise it"}]}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_started","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"tool_use","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","id":"toolu_01ABC","name":"ReadFile","input":{"path":"X"}}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_ended","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","stopReason":"tool_use"}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"usage","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","inputTokens":1200,"cacheCreationTokens":0,"cacheReadTokens":0,"outputTokens":80,"costUsd":0.005}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m2","queryId":"q1","turnId":"t1","role":"assistant","from":{"kind":"agent"},"content":[{"type":"tool_use","id":"toolu_01ABC","name":"ReadFile","input":{"path":"X"}}]}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m3","queryId":"q1","turnId":"t2","role":"user","from":{"kind":"agent"},"content":[{"type":"tool_result","tool_use_id":"toolu_01ABC","content":"…file contents…"}]}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_started","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t2","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}}
-{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"File X contains"}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_ended","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t2","stopReason":"end_turn"}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"usage","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t2","service":"anthropic.messages","model":"claude-sonnet-4-5","inputTokens":1400,"cacheCreationTokens":0,"cacheReadTokens":1200,"outputTokens":150,"costUsd":0.006}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m4","queryId":"q1","turnId":"t2","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"File X contains a summary of…"}]}}
-```
+Fixture: `fixtures/scenario-1.jsonl`.
 
 The first `say` of a new conversation carries `{ "tip": null }` — the premise
 that nothing exists yet, stated and enforced like any other; there is no
@@ -73,13 +71,7 @@ accepted `cancel`.
   zero commits for the interrupted turn; whether the user-role half committed
   is the implementation's declaration, visible either way.
 
-```jsonl
-{"subject":"conv.v1.conv-abc.requests","message":{"type":"say","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"text":"now delete it","precondition":{"tip":"m4"}},"reply":{"accepted":true,"id":"q2"}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_started","ts":"2026-07-07T21:00:00+10:00","queryId":"q2","turnId":"t3","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}}
-{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"Deleting"}}
-{"subject":"conv.v1.conv-abc.requests","message":{"type":"cancel","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"id":"q2"},"reply":{"accepted":true}}
-{"subject":"conv.v1.conv-abc.telemetry","message":{"type":"turn_cancelled","ts":"2026-07-07T21:00:00+10:00","queryId":"q2","turnId":"t3"}}
-```
+Fixture: `fixtures/scenario-2.jsonl`.
 
 The user-role commit for `q2` is deliberately absent from the required
 entries: committing it or not is the implementation's declaration, and either
@@ -97,12 +89,7 @@ because nobody asked. The tree starts as scenario 1 left it (`m1`–`m4`).
   unreachable is not deleted; fast-forward is possible because the tip's
   history was kept.
 
-```jsonl
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"tip_moved","ts":"2026-07-07T21:00:00+10:00","to":"m1"}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m5","queryId":"q2","turnId":"t4","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"read file Y and summarise it"}]}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m6","queryId":"q2","turnId":"t4","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"File Y contains…"}]}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"tip_moved","ts":"2026-07-07T21:00:00+10:00","to":"m4"}}
-```
+Fixture: `fixtures/scenario-3.jsonl`.
 
 After the first `tip_moved`, `m2`–`m4` are unreachable but present; after the
 fast-forward, `m5`–`m6` are the unreachable branch. Both remain in the log.
@@ -117,10 +104,7 @@ under stable ids. The tree starts as scenario 1 left it.
   the post-trim state; no dialogue position moved — premises anchored on
   message ids still hold.
 
-```jsonl
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"revision","ts":"2026-07-07T21:00:00+10:00","messageId":"m2","content":[{"type":"tool_use","id":"toolu_01ABC","name":"ReadFile","input":{"path":"X"}}]}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"revision","ts":"2026-07-07T21:00:00+10:00","messageId":"m3","content":[{"type":"tool_result","tool_use_id":"toolu_01ABC","content":"…trimmed…"}]}}
-```
+Fixture: `fixtures/scenario-4.jsonl`.
 
 ## 5. Stale premise
 
@@ -132,11 +116,7 @@ tree, the second arrives premised on the old tip. The tree starts at `m4`.
 - Asserts: no merging or sequencing of incompatible premises; the change
   stream shows one new query; `from` distinguishes the senders.
 
-```jsonl
-{"subject":"conv.v1.conv-abc.requests","message":{"type":"say","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"text":"okay, delete it","precondition":{"tip":"m4"}},"reply":{"accepted":true,"id":"q2"}}
-{"subject":"conv.v1.conv-abc.changes","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m5","queryId":"q2","turnId":"t3","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"okay, delete it"}]}}
-{"subject":"conv.v1.conv-abc.requests","message":{"type":"say","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"agent"},"text":"keep it, actually","precondition":{"tip":"m4"}},"reply":{"rejected":true,"reason":"stale"}}
-```
+Fixture: `fixtures/scenario-5.jsonl`.
 
 A second `say` premised on `m4` arriving *while `q2` is still live* is also
 rejected — that premise has a live acceptance; cancel-then-send is the
@@ -156,21 +136,33 @@ raised, pulsing, then silence — the holder died.
 
 ### 6a — answered
 
-```jsonl
-{"subject":"approval.v1.apr-1.lifecycle","message":{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"tool_use","name":"DeleteFile","input":{"content":{"type":"files","values":["./old.ts"]}}},"correlation":{"conversationId":"conv-abc","queryId":"q2","turnId":"t3","toolUseId":"toolu_02DEF"}}}
-{"subject":"approval.v1.apr-1.telemetry","message":{"type":"heartbeat","ts":"2026-07-07T21:00:00+10:00"}}
-{"subject":"approval.v1.apr-1.requests","message":{"type":"answer","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"approved":true},"reply":{"accepted":true}}
-{"subject":"approval.v1.apr-1.requests","message":{"type":"answer","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"agent"},"approved":false},"reply":{"rejected":true,"reason":"already_settled"}}
-{"subject":"approval.v1.apr-1.lifecycle","message":{"type":"settled","ts":"2026-07-07T21:00:00+10:00","approved":true,"by":{"kind":"human","userId":"stephen"}}}
-```
+Fixture: `fixtures/scenario-6a.jsonl`.
 
 ### 6b — the holder died
 
-```jsonl
-{"subject":"approval.v1.apr-2.lifecycle","message":{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"tool_use","name":"DeleteFile","input":{"content":{"type":"files","values":["./other.ts"]}}},"correlation":{"conversationId":"conv-abc","queryId":"q3","turnId":"t5","toolUseId":"toolu_03GHI"}}}
-{"subject":"approval.v1.apr-2.telemetry","message":{"type":"heartbeat","ts":"2026-07-07T21:00:00+10:00"}}
-```
+Fixture: `fixtures/scenario-6b.jsonl`.
 
-Nothing follows — no further pulse, no `settled`. The consumer fold reads
-`apr-2` as void after one silent heartbeat interval; an `answer` sent to it
-gets a reply of `not_found`, or silence and a timeout. All three are honest.
+Nothing follows the second heartbeat — no further pulse, no `settled`. The
+consumer fold reads `apr-2` as void after one silent heartbeat interval; an
+`answer` sent to it gets a reply of `not_found`, or silence and a timeout.
+All three are honest.
+
+## 7. The block stream
+
+One assistant turn streamed live: thinking, then the reply text, then a tool
+call whose input JSON forms fragment by fragment — closed by the committed
+message carrying the same three blocks. Producer-side only (deltas are
+events; nobody asked), so there is no reject branch; a producer that does not
+yet emit `block` markers simply never exercises this fixture and remains
+compliant — the marker is additive.
+
+- Exercises: `block` markers changing the stream's character; `delta` as the
+  sole text carrier regardless of block; the committed `message` superseding
+  the whole stream with content blocks in the same order.
+- Asserts: markers precede the deltas they describe (publication order per
+  subject is the only ordering needed — no index, no per-chunk type); a
+  consumer folding the stream reconstructs thinking → text → tool_use; a
+  consumer that skips `block` (predates it) still renders the text deltas
+  exactly as before.
+
+Fixture: `fixtures/scenario-7.jsonl`.
