@@ -17,6 +17,7 @@ wrong, and the fix lands twice.
 |---|---|
 | 1 — the plain exchange | `fixtures/scenario-1.jsonl` |
 | 2 — cancel mid-turn | `fixtures/scenario-2.jsonl` |
+| 2b — cancel after completion | `fixtures/scenario-2b.jsonl` |
 | 3 — edit and rewind | `fixtures/scenario-3.jsonl` |
 | 4 — revision | `fixtures/scenario-4.jsonl` |
 | 5 — stale premise | `fixtures/scenario-5.jsonl` |
@@ -76,6 +77,24 @@ Fixture: `fixtures/scenario-2.jsonl`.
 The user-role commit for `q2` is deliberately absent from the required
 entries: committing it or not is the implementation's declaration, and either
 capture is compliant. No assistant commit may appear for `t3`.
+
+### 2b — cancel after completion
+
+The cancel arrives a beat too late: the turn already ended and its message is
+committed. Born from a real race in the first bridge implementation — a
+turn's publishes reach the wire before its completion reaches the servicer's
+control loop, and a cancel landing in that gap was answered `accepted` with a
+`turn_cancelled` published for a turn that had already ended.
+
+- Exercises: the servicer's honesty when cancellation is impossible —
+  `rejected: already_complete`.
+- Asserts: once `turn_ended` has been published for a turn, no
+  `turn_cancelled` may follow for it, whatever the internal timing; the
+  committed message stands. A `cancel` for a query the servicer never held
+  is `not_found`; a finished one is `already_complete` — both honest, never
+  `accepted`.
+
+Fixture: `fixtures/scenario-2b.jsonl`.
 
 ## 3. Edit and rewind
 

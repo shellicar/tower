@@ -59,12 +59,7 @@ pub async fn run(client: async_nats::Client, config: AgentConfig) {
         tokio::select! {
             // A turn finished: fold its outcome into the tree.
             Some((query, end)) = done_rx.recv() => {
-                if live.as_ref().is_some_and(|l| l.query == query) {
-                    live = None;
-                }
-                if let TurnEnd::Completed { message_id, content } = end {
-                    tree.push(Message { id: message_id, role: "assistant".into(), content });
-                }
+                fold_turn_end(&mut tree, &mut live, query, end);
             }
             maybe = requests.next() => {
                 let Some(msg) = maybe else { break };
@@ -112,7 +107,21 @@ pub async fn run(client: async_nats::Client, config: AgentConfig) {
                         }
                     }
                     ConvRequest::Cancel { query, .. } => {
+                        // A turn's publishes land on the wire before its
+                        // completion reaches this loop — fold anything
+                        // buffered first, so a turn that finished a beat ago
+                        // reads as complete, never as cancellable. Between
+                        // the drain and the finished check, the answer for a
+                        // done turn is `already_complete` (the spec's word),
+                        // and no turn_cancelled contradicts the turn_ended
+                        // already published.
+                        while let Ok((q, end)) = done_rx.try_recv() {
+                            fold_turn_end(&mut tree, &mut live, q, end);
+                        }
                         match &live {
+                            Some(l) if l.query == query.0 && l.abort.is_finished() => {
+                                encode_rejected("already_complete")
+                            }
                             Some(l) if l.query == query.0 => {
                                 l.abort.abort();
                                 publish(&client, &config.conv, "telemetry", json!({
@@ -136,6 +145,27 @@ pub async fn run(client: async_nats::Client, config: AgentConfig) {
                 let _ = client.publish(reply_to, response.into()).await;
             }
         }
+    }
+}
+
+/// Fold one finished turn into the loop's state. The tree-push is
+/// unconditional on purpose: a completed turn's message is already on the
+/// wire — every consumer has it — so the tree must carry it too, whatever
+/// raced it; dropping it would desync the tip from the world forever.
+fn fold_turn_end(tree: &mut Vec<Message>, live: &mut Option<Live>, query: String, end: TurnEnd) {
+    if live.as_ref().is_some_and(|l| l.query == query) {
+        *live = None;
+    }
+    if let TurnEnd::Completed {
+        message_id,
+        content,
+    } = end
+    {
+        tree.push(Message {
+            id: message_id,
+            role: "assistant".into(),
+            content,
+        });
     }
 }
 

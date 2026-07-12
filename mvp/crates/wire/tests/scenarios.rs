@@ -47,6 +47,7 @@ fn events(fixture: &str) -> Vec<Event> {
 
 const SCENARIO_1: &str = fixture!("scenario-1.jsonl");
 const SCENARIO_2: &str = fixture!("scenario-2.jsonl");
+const SCENARIO_2B: &str = fixture!("scenario-2b.jsonl");
 const SCENARIO_3: &str = fixture!("scenario-3.jsonl");
 const SCENARIO_4: &str = fixture!("scenario-4.jsonl");
 const SCENARIO_6A: &str = fixture!("scenario-6a.jsonl");
@@ -110,6 +111,29 @@ fn scenario_2_cancelled_turn_commits_nothing() {
         EventKind::Telemetry(ConvTelemetry::TurnCancelled { .. })
     )));
     assert!(!evs.iter().any(|e| matches!(&e.kind, EventKind::Change(_))));
+}
+
+#[test]
+fn scenario_2b_cancel_after_completion() {
+    // The cancel arrived after the turn ended (reply: already_complete — the
+    // request line is filtered before parsing). The event lines must show a
+    // completed turn — turn_ended and the committed message — and NO
+    // turn_cancelled may appear: cancellation of a finished turn publishes
+    // nothing that contradicts the turn_ended already on the wire.
+    let evs = events(SCENARIO_2B);
+    assert_all_known(&evs);
+    assert!(evs.iter().any(|e| matches!(
+        &e.kind,
+        EventKind::Telemetry(ConvTelemetry::TurnEnded { .. })
+    )));
+    assert!(evs.iter().any(|e| matches!(
+        &e.kind,
+        EventKind::Change(ConvChange::Message { role, .. }) if role == "assistant"
+    )));
+    assert!(!evs.iter().any(|e| matches!(
+        &e.kind,
+        EventKind::Telemetry(ConvTelemetry::TurnCancelled { .. })
+    )));
 }
 
 #[test]

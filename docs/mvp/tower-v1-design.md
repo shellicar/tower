@@ -251,6 +251,16 @@ async fn main() -> anyhow::Result<()> {
 - Frontend: against `tower-ws-spec.md` + its worked examples only.
 - Fix lands twice: code + fixture, same commit.
 
+## Known debts
+
+- **The bridge agent's decisions are untestable in place**: premise checks,
+  cancel arms, and the completion fold live inline in its select loop,
+  entangled with the NATS client — which is how the cancel-after-completion
+  race (scenario 2b) shipped unproven. Owed to the bridge code review: factor
+  an `AgentState` fold (`on_request`, `on_turn_end` — pure, no I/O, the
+  ws.rs `Session` pattern) so the race case becomes a deterministic unit
+  test, and the loop shrinks to plumbing.
+
 ## Out of scope v1
 
 - "Go to pane" (needs attachment telemetry).
