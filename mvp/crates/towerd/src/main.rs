@@ -5,7 +5,7 @@
 use tokio::sync::{broadcast, mpsc};
 
 use towerd::broker::{NatsBroker, SystemClock};
-use towerd::views::{Views, ViewsHandle, apply_schema, read_cursor};
+use towerd::views::{Views, ViewsHandle, apply_schema};
 use towerd::{ingest, views, web};
 
 #[tokio::main]
@@ -19,10 +19,9 @@ async fn main() -> anyhow::Result<()> {
     // the default matches the deployed capture stream's name.
     let stream = std::env::var("TOWER_STREAM").unwrap_or_else(|_| "conv-approval".into());
 
-    // Storage first: the cursor must exist before ingest can start.
+    // Storage first: the schema must exist before the views thread starts.
     let db = rusqlite::Connection::open(&db_path)?;
     apply_schema(&db)?;
-    let cursor = read_cursor(&db)?; // 0 on a fresh file → full replay
 
     let client = async_nats::connect(&nats_url).await?; // fail-fast
 
@@ -34,12 +33,14 @@ async fn main() -> anyhow::Result<()> {
     let views = Views::new(db, view_events_tx.clone());
     std::thread::spawn(move || views.run_blocking(events_rx, queries_rx));
 
-    // Ingest: plain async fn, worker pool.
+    // Ingest: plain async fn, worker pool. Where to resume is the views'
+    // call — ingest reconciles the stream incarnation against the cursor on
+    // every consumer build (see ingest.rs).
     tokio::spawn(ingest::run_ingest(
         client.clone(),
         stream,
+        queries_tx.clone(),
         events_tx,
-        cursor + 1,
     ));
 
     // Web: axum serves frontend dist/ + /ws + /ref/{id}.

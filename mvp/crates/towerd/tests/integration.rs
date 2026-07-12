@@ -43,7 +43,12 @@ async fn scripted_publisher_reaches_the_ws_client() {
     let views = Views::new(db, view_events_tx.clone());
     std::thread::spawn(move || views.run_blocking(events_rx, queries_rx));
     let stream = std::env::var("TOWER_STREAM").unwrap_or_else(|_| "conv-approval".into());
-    tokio::spawn(ingest::run_ingest(client.clone(), stream, events_tx, 1));
+    tokio::spawn(ingest::run_ingest(
+        client.clone(),
+        stream,
+        queries_tx.clone(),
+        events_tx,
+    ));
 
     let state = web::AppState {
         views: ViewsHandle {

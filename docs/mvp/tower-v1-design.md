@@ -217,6 +217,15 @@ async fn main() -> anyhow::Result<()> {
   stream retention, so the db outgrows "cache" as soon as it is older than retention.
 - Views loop on a dedicated OS thread, not the tokio pool.
 - Ingest reads through the stream only (consumer from cursor+1). Restart = reconnect = same path.
+- The views record the capture stream's **incarnation** (its `created` time)
+  beside the cursor. A recreated stream restarts sequences at 1, and a cursor
+  resumed against it waits forever, silently. On every consumer build ingest
+  asks the views to reconcile: same incarnation → resume from cursor+1;
+  different → the views rematerialise (truncate the derived tables — rows,
+  messages, refs — cursor to 0; annotations are not derived and survive) and
+  replay starts from 1. A db from before this scheme adopts the current
+  stream as-is — no wipe on upgrade. Blips cannot trigger this: connection
+  errors never change a stream's `created`; only genuine recreation does.
 - Startup order in `main`: open db → read cursor → build consumer → spawn loops.
 - Say premise = the browser's tip, forwarded verbatim. `from` = `{ kind: "human" }` bare (no auth in v1).
 - Config: `NATS_URL`, `TOWER_BIND`, `TOWER_DB`.

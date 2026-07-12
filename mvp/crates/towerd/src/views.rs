@@ -8,7 +8,7 @@
 //!   snapshot (duplicate-apply is harmless; a missed event is not).
 //! - `ViewQuery` in over an mpsc, answered over oneshots — the read path.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -79,6 +79,13 @@ pub enum ViewQuery {
         title: String,
         reply: oneshot::Sender<()>,
     },
+    /// Ingest's reconcile, on every consumer build: "the stream I found was
+    /// created at `created` — where do I resume?" The reply is the cursor to
+    /// resume after (0 = replay from the start).
+    SyncStream {
+        created: String,
+        reply: oneshot::Sender<u64>,
+    },
 }
 
 /// What sessions hold: the read channel plus the event fan-out.
@@ -128,6 +135,13 @@ const MIGRATIONS: &[&str] = &[
     "CREATE TABLE titles (
          conv  TEXT PRIMARY KEY,
          title TEXT NOT NULL
+     );",
+    // 3 — the capture stream's incarnation (its created time), recorded so a
+    // recreated stream (sequences restart at 1) is detectable: the cursor is
+    // only meaningful against the stream it was advanced by.
+    "CREATE TABLE stream (
+         id      INTEGER PRIMARY KEY CHECK (id = 1),
+         created TEXT NOT NULL
      );",
 ];
 
@@ -345,7 +359,7 @@ impl Views {
         Ok(())
     }
 
-    fn answer(&self, query: ViewQuery) {
+    fn answer(&mut self, query: ViewQuery) {
         match query {
             ViewQuery::List { reply } => {
                 let _ = reply.send(self.list().unwrap_or_default());
@@ -361,6 +375,62 @@ impl Views {
                     eprintln!("views: set_title failed for {conv}: {e:#}");
                 }
                 let _ = reply.send(());
+            }
+            ViewQuery::SyncStream { created, reply } => {
+                match self.sync_stream(&created) {
+                    Ok(cursor) => {
+                        let _ = reply.send(cursor);
+                    }
+                    Err(e) => {
+                        // No reply: ingest's await fails and it retries —
+                        // never consume from a position we couldn't verify.
+                        eprintln!("views: sync_stream failed: {e:#}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Reconcile the cursor against the stream incarnation ingest found.
+    ///
+    /// - Same `created` as stored → same stream; resume from the cursor.
+    /// - Different → the stream was recreated: sequences restarted, so the
+    ///   cursor is meaningless. Rematerialise — truncate the DERIVED tables
+    ///   only (rows, messages, refs), cursor to 0 — and adopt the new
+    ///   incarnation, all in one transaction. Annotations (titles) are not
+    ///   derived and are not touched.
+    /// - Nothing stored → first contact under this scheme (fresh db, or a db
+    ///   from before migration 3): adopt the stream as-is, keep everything.
+    ///   Adoption cannot destroy data by construction.
+    ///
+    /// Only a genuinely different stream reaches the destructive arm: blips,
+    /// timeouts, and reconnects never change a stream's `created`, and a
+    /// malformed message never reaches this code path at all.
+    fn sync_stream(&mut self, created: &str) -> anyhow::Result<u64> {
+        let stored: Option<String> = self
+            .db
+            .query_row("SELECT created FROM stream WHERE id = 1", [], |r| r.get(0))
+            .optional()?;
+        match stored {
+            Some(s) if s == created => read_cursor(&self.db),
+            Some(s) => {
+                eprintln!(
+                    "views: stream incarnation changed ({s} -> {created}); \
+                     rematerialising the derived views (annotations untouched)"
+                );
+                let tx = self.db.transaction()?;
+                tx.execute_batch(
+                    "DELETE FROM rows; DELETE FROM messages; DELETE FROM refs;
+                     UPDATE cursor SET seq = 0 WHERE id = 1;",
+                )?;
+                tx.execute("UPDATE stream SET created = ?1 WHERE id = 1", [created])?;
+                tx.commit()?;
+                Ok(0)
+            }
+            None => {
+                self.db
+                    .execute("INSERT INTO stream (id, created) VALUES (1, ?1)", [created])?;
+                read_cursor(&self.db)
             }
         }
     }
@@ -651,6 +721,45 @@ mod tests {
         // Empty title clears; the row falls back to untitled.
         views.set_title(&conv, "").unwrap();
         assert_eq!(views.list().unwrap()[0].title, None);
+    }
+
+    #[test]
+    fn sync_stream_adopts_resumes_and_rematerialises() {
+        let (mut views, _rx) = fresh();
+        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
+        views
+            .set_title(&ConversationId("conv-abc".into()), "tower v1")
+            .unwrap();
+
+        // First contact (nothing stored): ADOPT — keep data, keep cursor.
+        // This is also the upgrade path for a db from before migration 3.
+        assert_eq!(views.sync_stream("incarnation-A").unwrap(), 1);
+        assert_eq!(views.list().unwrap().len(), 1);
+
+        // Same incarnation again (every consumer rebuild): resume, touch nothing.
+        views.apply(2, &event("conv.v1.conv-abc.telemetry",
+            r#"{"type":"turn_started","ts":"2026-07-07T21:01:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}"#));
+        assert_eq!(views.sync_stream("incarnation-A").unwrap(), 2);
+        assert_eq!(views.list().unwrap().len(), 1);
+
+        // A DIFFERENT incarnation: the stream was recreated — rematerialise.
+        // Derived tables empty, cursor 0; the title (annotation) survives.
+        assert_eq!(views.sync_stream("incarnation-B").unwrap(), 0);
+        assert!(views.list().unwrap().is_empty());
+        assert!(
+            views
+                .conversation(&ConversationId("conv-abc".into()), None)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(read_cursor(&views.db).unwrap(), 0);
+
+        // Replay refills the views; the row comes back already titled.
+        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
+        assert_eq!(views.list().unwrap()[0].title.as_deref(), Some("tower v1"));
+
+        // And incarnation-B is now home: same again resumes normally.
+        assert_eq!(views.sync_stream("incarnation-B").unwrap(), 1);
     }
 
     #[test]
