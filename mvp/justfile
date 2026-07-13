@@ -13,6 +13,18 @@ check:
     cargo clippy --workspace
     cargo fmt --check
 
-# Run towerd (expects NATS_URL, TOWER_BIND, TOWER_DB in the environment).
+# Run towerd (env NATS_URL, TOWER_BIND, TOWER_DB all default to the local
+# deployment). Serves the webapp from frontend/dist — see `just frontend`.
 run:
     cargo run -p towerd
+
+# Bring the whole mvp up (towerd + vite with hot reload). Multi-process
+# orchestration is the one job cargo doesn't do; dev.sh owns it. The broker
+# is expected up (docker compose up -d). Web: http://localhost:5173.
+dev:
+    ./dev.sh
+
+# Build the webapp towerd serves. dist/ is gitignored, so a fresh clone
+# runs this once (or uses `just dev` and never needs it).
+frontend:
+    cd frontend && pnpm install && pnpm build
