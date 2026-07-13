@@ -105,11 +105,9 @@ class Tower {
 
   closeTab(i: number) {
     if (this.tabs.length <= 1) return;
-    const removed = this.tabs[i];
     this.tabs.splice(i, 1);
     if (this.active >= this.tabs.length) this.active = this.tabs.length - 1;
-    // Conversations open in no remaining tab stop flowing.
-    for (const conv of removed.convs) this.#dropIfOrphaned(conv);
+    this.#reconcileOpen();
     this.saveView();
   }
 
@@ -120,11 +118,39 @@ class Tower {
 
   switchTab(i: number) {
     this.active = i;
+    this.#reconcileOpen();
     this.saveView();
   }
 
+  /** Only the ACTIVE tab's conversations stay open — background tabs are
+   *  cold. Warm tabs held every conversation's full content in memory and
+   *  re-folded every streaming delta from all of them; with a fleet that
+   *  streams constantly, that was CPU and RAM spent on invisible panels.
+   *  Switching back re-fetches — half a second against a gigabyte. */
+  #reconcileOpen() {
+    for (const conv of [...this.open.keys()]) {
+      if (!this.tab.convs.includes(conv)) {
+        this.open.delete(conv);
+        this.#send({ type: 'close', id: this.#id(), conv });
+      }
+    }
+    for (const conv of this.tab.convs) {
+      if (!this.open.has(conv)) {
+        this.open.set(conv, {
+          conv,
+          messages: [],
+          streaming: [],
+          lastSay: null,
+          loaded: false,
+        });
+        this.#send({ type: 'open', id: this.#id(), conv, after: null });
+      }
+    }
+    this.open = new Map(this.open);
+  }
+
   #dropIfOrphaned(conv: string) {
-    if (this.tabs.some((t) => t.convs.includes(conv))) return;
+    if (this.tab.convs.includes(conv)) return;
     this.open.delete(conv);
     this.open = new Map(this.open);
     this.#send({ type: 'close', id: this.#id(), conv });
@@ -147,12 +173,12 @@ class Tower {
   }
 
   connect() {
-    // A refresh keeps what was being read: every tab's open set survives in
-    // localStorage, and reconnect's own re-open path does the rest. Content
-    // flows for all tabs' conversations — switching tabs is instant.
+    // A refresh keeps what was being read: the tabs survive in localStorage,
+    // and reconnect's re-open path does the rest — for the ACTIVE tab only;
+    // background tabs are cold and re-fetch on switch.
     if (!this.#restored) {
       this.#restored = true;
-      for (const conv of new Set(this.tabs.flatMap((t) => t.convs))) {
+      for (const conv of this.tab.convs) {
         this.open.set(conv, {
           conv,
           messages: [],

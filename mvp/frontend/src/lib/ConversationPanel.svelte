@@ -12,13 +12,27 @@
   // svelte-ignore state_referenced_locally
   const draftKey = `tower.draft.${oc.conv}`;
   let draft = $state(localStorage.getItem(draftKey) ?? '');
+  // Debounced with a max-wait: a synchronous localStorage write per
+  // keystroke is main-thread I/O the typing loop doesn't need. The trailing
+  // write lands 300ms after the last keystroke, and continuous typing still
+  // persists every ~2s — at most ~2s of draft is ever at risk. A timer that
+  // outlives the panel simply fires anyway, which IS the unmount flush.
+  let draftTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastPersist = Date.now();
   $effect(() => {
-    try {
-      if (draft === '') localStorage.removeItem(draftKey);
-      else localStorage.setItem(draftKey, draft);
-    } catch {
-      // Storage full or blocked: persistence degrades, typing does not.
-    }
+    const value = draft;
+    clearTimeout(draftTimer);
+    const write = () => {
+      lastPersist = Date.now();
+      try {
+        if (value === '') localStorage.removeItem(draftKey);
+        else localStorage.setItem(draftKey, value);
+      } catch {
+        // Storage full or blocked: persistence degrades, typing does not.
+      }
+    };
+    if (Date.now() - lastPersist >= 2_000) write();
+    else draftTimer = setTimeout(write, 300);
   });
 
   let scroller: HTMLDivElement | undefined = $state();
