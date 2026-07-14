@@ -48,9 +48,10 @@ carries only what consumers read after delivery. This is structural, not
 stylistic: NATS routes and filters on subjects only, never payloads. A type
 buried in the payload cannot be filtered server-side, captured selectively by
 a stream, graded by retention, or named in an ACL — it can only be received
-and discarded. The subject is the authoritative discriminator; the payload's
-`type` (see Message structure) remains as self-description, so a message read
-out of a store still says what it is.
+and discarded. The subject is the sole discriminator; the
+type is not repeated in the body. A stored message keeps its subject
+(JetStream retains it with the message), so it is self-describing without a
+redundant field that could drift.
 
 **Token depth.** A token earns its place when it is a real axis — something a
 subscription, a stream's capture filter, a retention rule, or a credential
@@ -93,8 +94,17 @@ it is a real fork, taken knowingly.
 ## Message structure
 
 - JSON, UTF-8, one object per NATS message.
-- Every message carries `type` (the discriminator) and `ts` (ISO-8601 with UTC
-  offset).
+- **The type is stated once, in its natural home — the fault is duplication,
+  never a `type` field as such.** Where the type is a routing axis it is a
+  subject leaf, and the body does not repeat it: a second copy could only
+  drift, and the subject travels with the message everywhere it is routed,
+  stored, or replayed. Where a subject deliberately carries several shapes
+  that share every routing and retention policy (a flat subject like
+  conversation `deltas`), the type is not an axis, earns no token, and its
+  home is the body — an explicit `type` field, the single place a
+  subject-less discriminator lives.
+- Every message carries `ts` (ISO-8601 with UTC offset), except subjects that
+  declare themselves bare.
 - Everything else belongs to the concern's spec.
 
 ## Two kinds of traffic

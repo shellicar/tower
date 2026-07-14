@@ -1,5 +1,5 @@
-{"subject":"conv.v2.conv-abc.changes.tip.moved","message":{"type":"tip_moved","ts":"2026-07-07T21:00:00+10:00","to":"m1"}}
-{"subject":"conv.v2.conv-abc.changes.message","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m5","queryId":"q2","turnId":"t4","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"read file Y and summarise it"}]}}
-{"subject":"conv.v2.conv-abc.changes.message","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m6","queryId":"q2","turnId":"t4","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"File Y contains…"}]}}
-{"subject":"conv.v2.conv-abc.changes.query","message":{"type":"query","ts":"2026-07-07T21:00:00+10:00","queryId":"q2","reason":"completed"}}
-{"subject":"conv.v2.conv-abc.changes.tip.moved","message":{"type":"tip_moved","ts":"2026-07-07T21:00:00+10:00","to":"m4"}}
+{"subject":"conv.v2.conv-abc.changes.tip.moved","message":{"ts":"2026-07-07T21:00:00+10:00","to":"m1"}}
+{"subject":"conv.v2.conv-abc.changes.message","message":{"ts":"2026-07-07T21:00:00+10:00","id":"m5","queryId":"q2","turnId":"t4","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"read file Y and summarise it"}]}}
+{"subject":"conv.v2.conv-abc.changes.message","message":{"ts":"2026-07-07T21:00:00+10:00","id":"m6","queryId":"q2","turnId":"t4","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"File Y contains…"}]}}
+{"subject":"conv.v2.conv-abc.changes.query","message":{"ts":"2026-07-07T21:00:00+10:00","queryId":"q2","reason":"completed"}}
+{"subject":"conv.v2.conv-abc.changes.tip.moved","message":{"ts":"2026-07-07T21:00:00+10:00","to":"m4"}}

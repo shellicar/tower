@@ -62,11 +62,11 @@ was kept.
 | `conv.v2.{conversationId}.deltas` | events | the in-progress message, chunk by chunk |
 | `conv.v2.{conversationId}.requests.>` | requests | inbound: address the conversation |
 
-**The subject spells the type** (nats-spec, Namespacing): a message's `type`
-maps to the tokens after the class — underscores become token boundaries —
-and the payload keeps `type` as self-description. A consumer reconstructs the
-type from the subject by joining its tokens with `_`; the two never disagree,
-by construction. The full map:
+**The subject spells the type** (nats-spec, Namespacing): a message's type is
+the subject tokens after the class — underscores become token boundaries — so
+the body does not repeat it. The one exception is `deltas`: a flat subject
+carrying two shapes (`delta`, `block`) that share every policy, not a routing
+axis, so the type stays in the body there as a `type` field. The full map:
 
 | Type | Subject |
 |---|---|
@@ -262,7 +262,6 @@ kind.
 ```json
 // conv.v2.conv-abc.requests.say
 {
-  "type": "say",
   "ts": "2026-07-07T17:20:04+10:00",
   "from": {
     "kind": "human",
@@ -398,11 +397,13 @@ throughout is the tolerance rule as code: unknown fields pass (add-only).
 `reason` strings are an open set — the values named are the ones defined
 today; consumers tolerate others.
 
-The unions are deliberately strict about the types they enumerate — a
-misshaped known message must fail. Openness on the discriminator is the
-**harness's routing rule**, not a schema member: a `type` not listed is
-skipped, never failed (conformance.md). Do not add a catch-all variant to a
-union — a misshaped known message would slide into it and pass, which is the
+Each schema is strict about its own fields — a misshaped known message must
+fail. Routing is by subject, not a `type` member: the leaf selects the schema
+(the keyed records below), and a leaf not listed is skipped, never failed
+(conformance.md). `deltas` is the one flat subject, so its two shapes are a
+`type`-discriminated union — the discriminator lives in the body there, the
+single place the subject does not spell it. Do not add a catch-all schema — a
+misshaped known message would slide into it and pass, the
 leniency-conceals-divergence bug in schema form.
 
 ```ts
@@ -431,15 +432,18 @@ const contentBlocks = z.array(z.looseObject({ type: z.string() }));
 
 const turnRef = { queryId: z.string(), turnId: z.string() };
 
-// conv.v2.{conversationId}.telemetry.> — each type on its own leaf (Subjects)
-export const conversationTelemetry = z.discriminatedUnion('type', [
-  z.looseObject({ type: z.literal('turn_started'), ts, ...turnRef, service: z.string(), model: z.string(), thinking: z.boolean(), effort: z.string().optional(), maxTokens: z.number().int() }),
-  z.looseObject({ type: z.literal('turn_ended'), ts, ...turnRef, stopReason: z.string() }),
-  z.looseObject({ type: z.literal('turn_cancelled'), ts, ...turnRef }),
-  z.looseObject({ type: z.literal('turn_aborted'), ts, ...turnRef }),
-  z.looseObject({ type: z.literal('tool_use'), ts, ...turnRef, id: z.string(), name: z.string(), input: z.record(z.string(), z.unknown()) }),
-  z.looseObject({
-    type: z.literal('usage'), ts, ...turnRef, service: z.string(), model: z.string(),
+// Leafed classes are keyed by subject leaf (the tokens after the class): the
+// subject selects the schema, and the body carries no `type`.
+
+// conv.v2.{conversationId}.telemetry.>
+export const conversationTelemetry = {
+  'turn.started': z.looseObject({ ts, ...turnRef, service: z.string(), model: z.string(), thinking: z.boolean(), effort: z.string().optional(), maxTokens: z.number().int() }),
+  'turn.ended': z.looseObject({ ts, ...turnRef, stopReason: z.string() }),
+  'turn.cancelled': z.looseObject({ ts, ...turnRef }),
+  'turn.aborted': z.looseObject({ ts, ...turnRef }),
+  'tool.use': z.looseObject({ ts, ...turnRef, id: z.string(), name: z.string(), input: z.record(z.string(), z.unknown()) }),
+  'usage': z.looseObject({
+    ts, ...turnRef, service: z.string(), model: z.string(),
     inputTokens: z.number().int(), cacheCreationTokens: z.number().int(), cacheReadTokens: z.number().int(), outputTokens: z.number().int(),
     // Per-frame extras — present when the frame reported them, never synthesised:
     cacheCreation5mTokens: z.number().int().optional(),
@@ -449,32 +453,31 @@ export const conversationTelemetry = z.discriminatedUnion('type', [
     // Derived by the publisher (the service reports tokens, not prices); present when computed:
     costUsd: z.number().optional(),
   }),
-]);
+};
 
-// conv.v2.{conversationId}.changes.> — each type on its own leaf (Subjects)
-export const conversationChange = z.discriminatedUnion('type', [
-  z.looseObject({ type: z.literal('message'), ts, id: z.string(), ...turnRef, role: openEnum(['user', 'assistant']), from: sender, content: contentBlocks }),
-  z.looseObject({ type: z.literal('revision'), ts, messageId: z.string(), content: contentBlocks }),
-  z.looseObject({ type: z.literal('tip_moved'), ts, to: z.string() }),
-  z.looseObject({ type: z.literal('query'), ts, queryId: z.string(), reason: openEnum(['completed', 'cancelled', 'aborted']) }),
-]);
+// conv.v2.{conversationId}.changes.>
+export const conversationChange = {
+  'message': z.looseObject({ ts, id: z.string(), ...turnRef, role: openEnum(['user', 'assistant']), from: sender, content: contentBlocks }),
+  'revision': z.looseObject({ ts, messageId: z.string(), content: contentBlocks }),
+  'tip.moved': z.looseObject({ ts, to: z.string() }),
+  'query': z.looseObject({ ts, queryId: z.string(), reason: openEnum(['completed', 'cancelled', 'aborted']) }),
+};
 
-// conv.v2.{conversationId}.deltas — one flat subject, deliberately bare: the envelope's `ts` is
-// waived on purpose; deltas are ephemeral and the metadata would outweigh the data.
-// `block` marks the stream changing character; `blockType` is an open set
-// mirroring the committed content block types.
+// conv.v2.{conversationId}.deltas — the one flat subject: `delta` and `block`
+// share it, so the type lives in the body here, the single place the subject
+// does not spell it. `ts` is waived — deltas are ephemeral and the metadata
+// would outweigh the data.
 export const conversationDelta = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('delta'), text: z.string() }),
   z.looseObject({ type: z.literal('block'), blockType: openEnum(['thinking', 'text', 'tool_use']) }),
 ]);
 
-// conv.v2.{conversationId}.requests.> — a request whose `type` is not defined
-// here is still answered: `rejected` with reason `unsupported`. Compliance is
-// answering, not implementing.
-export const conversationRequest = z.discriminatedUnion('type', [
-  z.looseObject({ type: z.literal('say'), ts, from: sender, text: z.string(), precondition: z.looseObject({ tip: z.string().nullable() }) }),
-  z.looseObject({ type: z.literal('cancel'), ts, from: sender.optional(), id: z.string() }),
-]);
+// conv.v2.{conversationId}.requests.> — a leaf not listed is still answered:
+// `rejected` with reason `unsupported`. Compliance is answering, not implementing.
+export const conversationRequest = {
+  'say': z.looseObject({ ts, from: sender, text: z.string(), precondition: z.looseObject({ tip: z.string().nullable() }) }),
+  'cancel': z.looseObject({ ts, from: sender.optional(), id: z.string() }),
+};
 
 // Replies (transport truth, never outcome). Known reasons today:
 // stale, not_found, already_complete, unsupported.

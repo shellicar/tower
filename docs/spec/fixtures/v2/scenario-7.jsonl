@@ -7,4 +7,4 @@
 {"subject":"conv.v2.conv-abc.deltas","message":{"type":"block","blockType":"tool_use"}}
 {"subject":"conv.v2.conv-abc.deltas","message":{"type":"delta","text":"{\"files\": [\"./o"}}
 {"subject":"conv.v2.conv-abc.deltas","message":{"type":"delta","text":"ld.ts\"]}"}}
-{"subject":"conv.v2.conv-abc.changes.message","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m7","queryId":"q3","turnId":"t5","role":"assistant","from":{"kind":"agent"},"content":[{"type":"thinking","thinking":"The file has to go — checking what references it first."},{"type":"text","text":"Deleting the old module — nothing imports it any more."},{"type":"tool_use","id":"toolu_04JKL","name":"DeleteFile","input":{"files":["./old.ts"]}}]}}
+{"subject":"conv.v2.conv-abc.changes.message","message":{"ts":"2026-07-07T21:00:00+10:00","id":"m7","queryId":"q3","turnId":"t5","role":"assistant","from":{"kind":"agent"},"content":[{"type":"thinking","thinking":"The file has to go — checking what references it first."},{"type":"text","text":"Deleting the old module — nothing imports it any more."},{"type":"tool_use","id":"toolu_04JKL","name":"DeleteFile","input":{"files":["./old.ts"]}}]}}

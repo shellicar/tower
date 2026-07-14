@@ -1,2 +1,2 @@
-{"subject":"conv.v2.conv-abc.changes.revision","message":{"type":"revision","ts":"2026-07-07T21:00:00+10:00","messageId":"m2","content":[{"type":"tool_use","id":"toolu_01ABC","name":"ReadFile","input":{"path":"X"}}]}}
-{"subject":"conv.v2.conv-abc.changes.revision","message":{"type":"revision","ts":"2026-07-07T21:00:00+10:00","messageId":"m3","content":[{"type":"tool_result","tool_use_id":"toolu_01ABC","content":"…trimmed…"}]}}
+{"subject":"conv.v2.conv-abc.changes.revision","message":{"ts":"2026-07-07T21:00:00+10:00","messageId":"m2","content":[{"type":"tool_use","id":"toolu_01ABC","name":"ReadFile","input":{"path":"X"}}]}}
+{"subject":"conv.v2.conv-abc.changes.revision","message":{"ts":"2026-07-07T21:00:00+10:00","messageId":"m3","content":[{"type":"tool_result","tool_use_id":"toolu_01ABC","content":"…trimmed…"}]}}
