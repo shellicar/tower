@@ -1,4 +1,4 @@
-//! bridge: the agent host. Conversations are tasks, not processes — nothing
+//! bridge: the agent host. Conversations are tasks, not processes; nothing
 //! on the wire knows the difference (the concern specs are conversation-
 //! centric by design). v0 control is stdio, deliberately not a wire concern:
 //! creation stays local until practice teaches the spawn request's shape.
@@ -13,13 +13,14 @@
 //! The process is one agent instance in a world (agent-spec): `ready` on
 //! boot, a `pulse` every PULSE_INTERVAL_S, `attached` per spawn. The world
 //! is deployer-chosen (`BRIDGE_WORLD`, default `local`); the instance id is
-//! generated per process — a restart is a new instance in the same world.
+//! generated per process, so a restart is a new instance in the same world.
 //! No `detached` in v0: conversations die with the host, and a kill is a
 //! crash from the wire's view (a crash publishes nothing; the pulse going
 //! silent is what observers fold).
 
 mod agent;
 mod anthropic;
+mod decisions;
 mod skills;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -54,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
     let instance = uuid::Uuid::new_v4().to_string();
 
     // The skills root; the catalogue itself is scanned per conversation at
-    // its FIRST message — a skill added after boot reaches the next
+    // its FIRST message, so a skill added after boot reaches the next
     // conversation, while an already-started one keeps the snapshot its
     // committed reminder describes. BRIDGE_SKILLS overrides the home.
     let skills_root: std::path::PathBuf = std::env::var("BRIDGE_SKILLS")
@@ -103,7 +104,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // The stdio control loop: one JSON object per line in, one per line out.
-    // Unknown control lines are answered with an error line — compliance is
+    // Unknown control lines are answered with an error line; compliance is
     // answering, on every surface.
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     eprintln!("bridge: ready (model {default_model}); spawn with {{\"spawn\":{{}}}}");
@@ -138,7 +139,7 @@ async fn main() -> anyhow::Result<()> {
             tokio::spawn(agent::run(client.clone(), config));
             // The attachment is what makes the conversation exist for
             // observers before its first message. cwd is causal (an input to
-            // how the conversation unfolds) — published when known.
+            // how the conversation unfolds), published when known.
             let mut attached = serde_json::json!({
                 "ts": now_iso(),
                 "instanceId": instance,

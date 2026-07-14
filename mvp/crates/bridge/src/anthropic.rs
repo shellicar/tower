@@ -1,5 +1,5 @@
 //! The model adapter: one streaming call to the messages API, SSE events
-//! mapped onto the wire's delta stream — `content_block_start` becomes the
+//! mapped onto the wire's delta stream. `content_block_start` becomes the
 //! `block` marker, every chunk becomes a plain `delta` (one token stream;
 //! markers, not typed deltas). Hand-rolled SSE: the format is `event:` and
 //! `data:` lines, and a dependency is a decision this doesn't earn.
@@ -13,7 +13,7 @@ pub const MAX_TOKENS: i64 = 8192;
 
 /// Both ways of being allowed in: a platform API key, or the Claude Code
 /// subscription's OAuth token (bearer + the oauth beta header). v0 does not
-/// refresh — an expired token fails the turn honestly (`turn_aborted`).
+/// refresh; an expired token fails the turn honestly (`turn_aborted`).
 #[derive(Clone)]
 pub enum Auth {
     ApiKey(String),
@@ -70,8 +70,8 @@ pub async fn stream_turn(
     messages: &[Value],
     tools: &[Value],
 ) -> anyhow::Result<TurnDone> {
-    // The system array always leads with the Agent SDK identity prefix —
-    // subscription (OAuth) access requires it; the spawn's own system prompt
+    // The system array always leads with the Agent SDK identity prefix;
+    // subscription (OAuth) access requires it. The spawn's own system prompt
     // follows as a second block.
     let mut system_blocks = vec![json!({
         "type": "text",
@@ -103,7 +103,7 @@ pub async fn stream_turn(
     }
 
     // v2's one deliberately flat subject: delta and block keep their body
-    // `type` — the leaf does not spell it here.
+    // `type`; the leaf does not spell it here.
     let deltas_subject = format!("conv.v2.{}.deltas", conv.0);
     let publish = |payload: Value| {
         let client = client.clone();
@@ -115,7 +115,7 @@ pub async fn stream_turn(
     };
 
     // The fold state: content blocks accumulate by index (the API streams
-    // them strictly sequentially — order carries the structure). A tool_use
+    // them strictly sequentially; order carries the structure). A tool_use
     // block's input streams as `partial_json` chunks; they accumulate here
     // and fold into the block's `input` when the block closes.
     let mut content: Vec<Value> = Vec::new();
@@ -158,7 +158,7 @@ pub async fn stream_turn(
                     let block = &event["content_block"];
                     let block_type = block["type"].as_str().unwrap_or("text").to_string();
                     publish(json!({ "type": "block", "blockType": block_type })).await;
-                    // Seed the accumulating block — a tool_use start carries
+                    // Seed the accumulating block; a tool_use start carries
                     // its id and name; the input arrives as partial_json.
                     content.push(block.clone());
                 }
@@ -200,7 +200,7 @@ pub async fn stream_turn(
                 "error" => {
                     anyhow::bail!("stream error: {}", event["error"]);
                 }
-                // content_block_stop, message_stop, ping: nothing to do —
+                // content_block_stop, message_stop, ping: nothing to do;
                 // order carries the structure.
                 _ => {}
             }
@@ -220,7 +220,7 @@ pub async fn stream_turn(
 }
 
 /// Close the open block: a tool_use's accumulated `partial_json` becomes its
-/// `input`. Unparseable JSON leaves the seeded input — the commit stays
+/// `input`. Unparseable JSON leaves the seeded input; the commit stays
 /// well-formed and the model's next turn sees its own tool call as sent.
 fn finish_block(content: &mut [Value], open_json: &mut String) {
     if open_json.is_empty() {

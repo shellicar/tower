@@ -1,8 +1,8 @@
-//! Skills: the catalogue is scanned once at boot (static by design — a new
-//! skill needs a restart; no cache invalidation), the body is read at invoke
-//! time. A skill is `{root}/{dir}/SKILL.md` with YAML-ish frontmatter carrying
-//! `name` and `description`; the body below the frontmatter is what the Skill
-//! tool returns, stripped of the frontmatter.
+//! Skills: the catalogue is scanned per conversation at its first message
+//! and then fixed for that conversation; the body is read fresh at invoke
+//! time. A skill is `{root}/{dir}/SKILL.md` with YAML frontmatter carrying
+//! `name` and `description`; the body below the frontmatter is what the
+//! Skill tool returns, stripped of the frontmatter.
 
 use std::path::PathBuf;
 
@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 /// The frontmatter fields the catalogue reads; unknown fields are ignored
-/// (yaml_serde tolerates them by default — the open-set rule, here too).
+/// (yaml_serde tolerates them by default: the open-set rule, here too).
 #[derive(Debug, Default, Deserialize)]
 struct Frontmatter {
     name: Option<String>,
@@ -29,7 +29,7 @@ pub struct Skills {
 
 impl Skills {
     /// Scan `{root}/*/SKILL.md`. A file that fails to read or parse is
-    /// skipped with a log line, never fatal — a broken skill must not stop
+    /// skipped with a log line, never fatal; a broken skill must not stop
     /// the host. `name` defaults to the directory name when the frontmatter
     /// omits it.
     pub fn scan(root: PathBuf) -> Skills {
@@ -110,7 +110,7 @@ impl Skills {
 
     /// Invoke: read the skill fresh (the catalogue is static, the body is
     /// whatever is on disk now) and return it with the frontmatter stripped.
-    /// Unknown names and unreadable files are `Err` — the tool_result carries
+    /// Unknown names and unreadable files are `Err`; the tool_result carries
     /// the message with `is_error`.
     pub fn invoke(&self, name: &str) -> Result<String, String> {
         let Some(skill) = self.list.iter().find(|s| s.name == name) else {
@@ -143,7 +143,7 @@ fn split_frontmatter(text: &str) -> (&str, &str) {
 mod tests {
     use super::*;
 
-    /// A unique throwaway dir under the OS temp dir — std only, no tempfile
+    /// A unique throwaway dir under the OS temp dir: std only, no tempfile
     /// dependency for two tests. Best-effort cleanup by the caller.
     fn skills_dir(tag: &str, files: &[(&str, &str)]) -> PathBuf {
         let dir =
@@ -180,7 +180,7 @@ mod tests {
         assert!(reminder.contains("- test-skill: I am a teapot"));
         assert!(reminder.ends_with("</system-reminder>\n\n"));
 
-        // Invoke returns the body only — frontmatter stripped.
+        // Invoke returns the body only, frontmatter stripped.
         assert_eq!(skills.invoke("test-skill").unwrap(), "hello world\n");
         assert!(skills.invoke("nope").unwrap_err().contains("test-skill"));
         let _ = std::fs::remove_dir_all(&dir);

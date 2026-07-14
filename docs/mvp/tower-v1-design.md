@@ -284,6 +284,19 @@ async fn main() -> anyhow::Result<()> {
   events, so short-lived attach/detach cycles (spawn probes, quick tasks)
   leave no tombstone rows behind.
 
+- **Cancellation is cooperative** — no hard abort, ever. The bridge's
+  decisions live in a pure `Conversation` fold (`on_say`, `on_cancel`,
+  `on_query_end` — no I/O, the ws.rs `Session` pattern; decisions.rs); the
+  select loop is plumbing. The cancel arm only signals (a `watch` flip) and replies
+  `accepted` — a reply confirms acceptance, never outcome (the wire's own
+  rule; a settled reply would just wait for what the change stream already
+  delivers). The query task winds down at its next safe point, publishes its
+  own ending (`turn_cancelled` with the real turn id, then the
+  `changes.query` closure), and always completes its `done` report — so the
+  tree can never lose a message the wire has, and the
+  cancel-after-completion ordering (scenario 2b) is a deterministic unit
+  test, not a timing accident.
+
 ## Testing
 
 - `wire`: pure fold tests, inputs = the conformance fixtures in `../spec/scenarios.md`.
@@ -294,13 +307,8 @@ async fn main() -> anyhow::Result<()> {
 
 ## Known debts
 
-- **The bridge agent's decisions are untestable in place**: premise checks,
-  cancel arms, and the completion fold live inline in its select loop,
-  entangled with the NATS client — which is how the cancel-after-completion
-  race (scenario 2b) shipped unproven. Owed to the bridge code review: factor
-  an `AgentState` fold (`on_request`, `on_turn_end` — pure, no I/O, the
-  ws.rs `Session` pattern) so the race case becomes a deterministic unit
-  test, and the loop shrinks to plumbing.
+- _(none currently — the bridge's untestable-decisions debt was paid by the
+  `Conversation` fold; see Decisions, Cancellation is cooperative.)_
 
 ## Out of scope v1
 
