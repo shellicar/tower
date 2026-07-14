@@ -516,6 +516,20 @@ retires — they retire with v1, not with v2's arrival.
 
 ## Open questions
 
+- **The committal grain of tool results: message or content.** A turn ending
+  in ten parallel tool_uses settles piecewise — five results exist while five
+  still run — and the `message` change can only commit the settled whole (a
+  half-answered results message is as invalid as a bare tool_use). A finer
+  change kind — content blocks committed into a message id incrementally —
+  would emit each result when known. Either way this is a **durability**
+  question, not correctness, which is why the finer grain would be optional:
+  the servicer owns local conversation state, and recovery is a
+  reconciliation against the published record with two shapes. Recovered
+  *ahead* of what was published: publish what you know — the record catches
+  up. Recovered *behind* what was published: either reconcile local state up
+  to the record, or fix the record (a tip movement, a revision) to where you
+  actually are. Both are lawful today; the grain only changes how large the
+  gap can grow. Resolve when a parallel-tool implementation forces it.
 - **The parent's wire type.** A follow-up after an interrupted query could
   anchor on a message (an exact node — but revisable, and possibly the interior
   of an incomplete turn), a turn (an outcome — but a cancelled turn's outcome
