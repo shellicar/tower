@@ -1,8 +1,12 @@
-# Conversation spec — v1
+# Conversation spec — v2
 
 The conversation concern. Structure per `nats-spec.md`; namespace `conv`. Every
 message here is *about* one conversation — traffic about anything else does not
 belong in this tree.
+
+v2 is the current tree. v1 — one flat subject per class, no `query` closure —
+is superseded but still spoken; the differences and the migration posture are
+at the end (The v1 tree).
 
 ## The entity
 
@@ -34,8 +38,9 @@ pointers carry no information. The one parent that carries information is the
 **query's**: where its segment attaches, which can be *any* message in the
 tree — the premise its `say` was accepted against (today a message id, the tip
 the sender saw; whether a parent may instead name a turn or a query is an open
-question below). A rewind-then-say is a new query attached mid-tree; an edit
-("file X" → "file Y") is a new query attached where the sender rewound to. The
+question below). A rewind-then-say is a new query attached mid-tree — changing "file X" to
+"file Y" is exactly that: rewind to the parent, then say the new message.
+There is no "edit" operation; the tree moving is a rewind and a say. The
 tree is not stored as extra structure and never travels as one — it is
 derivable by any consumer from the change stream: messages plus tip movements,
 the accumulated record of accepted premises.
@@ -52,10 +57,37 @@ was kept.
 
 | Subject | Traffic | Carries |
 |---|---|---|
-| `conv.v1.{conversationId}.telemetry` | events | observation: turns, tools, usage — never authority |
-| `conv.v1.{conversationId}.changes` | events | the committal change stream: messages, revisions, tip movements |
-| `conv.v1.{conversationId}.deltas` | events | the in-progress message, chunk by chunk |
-| `conv.v1.{conversationId}.requests` | requests | inbound: address the conversation |
+| `conv.v2.{conversationId}.telemetry.>` | events | observation: turns, tools, usage — never authority |
+| `conv.v2.{conversationId}.changes.>` | events | the committal change stream: messages, revisions, tip movements, query closures |
+| `conv.v2.{conversationId}.deltas` | events | the in-progress message, chunk by chunk |
+| `conv.v2.{conversationId}.requests.>` | requests | inbound: address the conversation |
+
+**The subject spells the type** (nats-spec, Namespacing): a message's `type`
+maps to the tokens after the class — underscores become token boundaries —
+and the payload keeps `type` as self-description. A consumer reconstructs the
+type from the subject by joining its tokens with `_`; the two never disagree,
+by construction. The full map:
+
+| Type | Subject |
+|---|---|
+| `turn_started` | `conv.v2.{id}.telemetry.turn.started` |
+| `turn_ended` | `conv.v2.{id}.telemetry.turn.ended` |
+| `turn_cancelled` | `conv.v2.{id}.telemetry.turn.cancelled` |
+| `turn_aborted` | `conv.v2.{id}.telemetry.turn.aborted` |
+| `tool_use` | `conv.v2.{id}.telemetry.tool.use` |
+| `usage` | `conv.v2.{id}.telemetry.usage` |
+| `message` | `conv.v2.{id}.changes.message` |
+| `revision` | `conv.v2.{id}.changes.revision` |
+| `tip_moved` | `conv.v2.{id}.changes.tip.moved` |
+| `query` | `conv.v2.{id}.changes.query` |
+| `delta`, `block` | `conv.v2.{id}.deltas` — flat, deliberately |
+| `say` | `conv.v2.{id}.requests.say` |
+| `cancel` | `conv.v2.{id}.requests.cancel` |
+
+`deltas` stays a single subject, decided not forgotten: nobody filters `delta`
+from `block`, the stream is meaningful only whole and in order, and the
+payloads are deliberately bare — a token per chunk kind fails nats-spec's
+token-depth test.
 
 ## Telemetry and commit
 
@@ -109,15 +141,17 @@ where consequences land, not what owns the thing.
 
 ## The change stream — `changes`
 
-Three kinds of change — a closed set of kinds, an open set of operations
+Four kinds of change — a closed set of kinds, an open set of operations
 within them. A change that cannot be expressed as one of these is the signal
-something genuinely new needs the argument:
+something genuinely new needs the argument (the fourth, `query`, arrived by
+exactly that argument):
 
 | Change | Fields | Notes |
 |---|---|---|
 | `message` | `id`, `queryId`, `turnId`, `role`, `from`, `content` | **utterance** — the dialogue grew. `id` is the message's stable id; `role` is `user` or `assistant`; `from` is the sender identity (`{ kind: human \| agent \| orchestrator }` + id) so two `role: user` messages from different senders read apart; `content` is content blocks |
-| `revision` | `messageId`, `content` | **revision** — content changed under a stable id: thinking dropped, a tool result trimmed, an image resized. Carries the resulting content, never the why — policy belongs to whoever revised. The dialogue did not change; the payload did |
-| `tip_moved` | `to` (a message id) | **tip movement** — rewind, fast-forward, the switch after an edit. The reflog, as events |
+| `revision` | `messageId`, `content` | **revision** — the content under a stable id changed: a trim, a resize, or the words themselves rewritten. Carries the resulting content, never the why — the record carries effects, never reasons |
+| `tip_moved` | `to` (a message id) | **tip movement** — the tip pointer moved: rewind, fast-forward. The reflog, as events |
+| `query` | `queryId`, `reason` | **query closure** — the query will grow no further; the record now contains everything it will ever contain. `reason` is the system's own vocabulary, an open set under add-only: `completed` (closed by `end_turn`), `cancelled` (a `cancel` was accepted), `aborted` (the attempt failed and the servicer gave the query up). Committal like every change: published after the closing fact is in the record, never speculatively |
 
 The folds:
 
@@ -128,16 +162,42 @@ The folds:
   folds composed. Live watchers folding as they go and late joiners asking for
   a snapshot converge on the same state, by construction.
 
-A **user edit** ("read file X" → "read file Y") is not a revision — the
-dialogue changed. It is a new message and a tip movement: a new query whose
-parent sits where the sender rewound to. Revisions are for changes where no
-one's *words* changed; edits move the tree. The test: would a sender say the
-conversation changed? An edit — yes. Trimming a tool result — no. That line is
-where premises break or hold.
+### Query closure — why it is a change
 
-A **cancelled turn** commits nothing by itself: the partial assistant message
-existed only as deltas and never enters the store; `turn_cancelled` on
-telemetry is its only trace.
+Whether a query is finished is a fact only the state owner holds: it decides
+not to run another round, or accepts the cancel, or gives the attempt up.
+Consumers could previously only *derive* closure from telemetry — branching
+on a verbatim, open-set `stopReason`, on the observation plane, with no
+signal at all on the cancelled and aborted paths. The `query` change is that
+fact published once, where the answer already lives: a sender that said
+something and wants the reply subscribes `changes.>`, collects its query's
+messages, and is done when the closure arrives — one subscription, every
+ending covered.
+
+**Revision and tip movement are two orthogonal mechanisms, not two
+categories the spec assigns.** `revision` changes the content under a stable
+id; `tip_moved` moves the tip. A change may do one, the other, or both — and
+nothing on the wire distinguishes "trimming a tool result" from "going back
+and rewriting what was said." Both are the same operation: new content under
+the same id. The difference is the reviser's reason, and reason is not on the
+wire — the spec cannot enforce one reading over another, and does not try.
+
+What this means for a reader: fold the revision. The conversation *is* what
+the record says after folding — there is no "what was really said" outside
+the store to be true or false against (the record constitutes the state). A
+reader working from a stale copy answers from a word that is no longer there,
+confidently and wrongly; the only defence is to read the current record, not
+reason about it. This is exactly why `revision` is a first-class committal
+change and not a footnote: a reader that misses it renders the old word
+under a conversation that now holds a new one.
+
+A **cancelled turn**'s assistant message never commits: it existed only as
+deltas and never enters the store; `turn_cancelled` on telemetry is its
+trace. The user-role half — the `say` that opened the query — is the
+implementation's declaration: commit it or not, the record is the answer (see
+Implementation details), which is why scenario 2's fixture omits it as one
+compliant capture. The *query* it ended, though, closed — and closure is
+committal: a `query` change with reason `cancelled` records it.
 
 | Event | Subject | Fields | Notes |
 |---|---|---|---|
@@ -160,15 +220,15 @@ Worked stream — a turn that thinks, speaks, then calls a tool (the
 exactly as the service emits it):
 
 ```jsonl
-{"subject":"conv.v1.conv-abc.deltas","message":{"type":"block","blockType":"thinking"}}
-{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"The file has to go — checking wha"}}
-{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"t references it first."}}
-{"subject":"conv.v1.conv-abc.deltas","message":{"type":"block","blockType":"text"}}
-{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"Deleting the old module — nothing"}}
-{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":" imports it any more."}}
-{"subject":"conv.v1.conv-abc.deltas","message":{"type":"block","blockType":"tool_use"}}
-{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"{\"files\": [\"./o"}}
-{"subject":"conv.v1.conv-abc.deltas","message":{"type":"delta","text":"ld.ts\"]}"}}
+{"subject":"conv.v2.conv-abc.deltas","message":{"type":"block","blockType":"thinking"}}
+{"subject":"conv.v2.conv-abc.deltas","message":{"type":"delta","text":"The file has to go — checking wha"}}
+{"subject":"conv.v2.conv-abc.deltas","message":{"type":"delta","text":"t references it first."}}
+{"subject":"conv.v2.conv-abc.deltas","message":{"type":"block","blockType":"text"}}
+{"subject":"conv.v2.conv-abc.deltas","message":{"type":"delta","text":"Deleting the old module — nothing"}}
+{"subject":"conv.v2.conv-abc.deltas","message":{"type":"delta","text":" imports it any more."}}
+{"subject":"conv.v2.conv-abc.deltas","message":{"type":"block","blockType":"tool_use"}}
+{"subject":"conv.v2.conv-abc.deltas","message":{"type":"delta","text":"{\"files\": [\"./o"}}
+{"subject":"conv.v2.conv-abc.deltas","message":{"type":"delta","text":"ld.ts\"]}"}}
 ```
 
 Tolerance does the compatibility work in both directions: a consumer that
@@ -200,7 +260,7 @@ is encoded exactly as the preconditions section writes it: one key naming the
 kind.
 
 ```json
-// conv.v1.conv-abc.requests
+// conv.v2.conv-abc.requests.say
 {
   "type": "say",
   "ts": "2026-07-07T17:20:04+10:00",
@@ -291,16 +351,22 @@ Every request owes a reply; an implementation that does not support an
 operation replies `rejected` with reason `unsupported` — compliance is
 answering, not implementing. The reply confirms acceptance, never outcome. A
 sender that wants the answer subscribes to the change stream — one mechanism
-for every reader.
+for every reader; the `query` closure says when the answer is complete.
 
 ## What consumers may assume
 
-- Traffic for one conversation arrives in publication order per subject.
-- **No ordering across subjects**: telemetry and commits interleave without
+- Traffic for one conversation arrives in publication order per subject, and
+  in publication order across one subscription: a single `changes.>`
+  subscription sees all change kinds in order (nats-spec, Subscription
+  discipline). Fold consumers subscribe `{class}.>`, never a set of sibling
+  leaves — a partial change stream is corrupted state, and a sibling-set
+  subscriber is silently blind to leaves added later.
+- **No ordering across classes**: telemetry and commits interleave without
   guarantee; a consumer must never infer state from their relative arrival.
-- The query is derived, not an event: group by `queryId`; a `turn_ended` with
-  `end_turn` closes it. Idle is derived — quiet since the last event — never
-  declared.
+- The query fold groups by `queryId`; its committal end is the `query`
+  closure on `changes`. Deriving an ending from telemetry (`turn_ended` +
+  verbatim `stopReason`) remains lawful observation, never authority. Idle is
+  derived — quiet since the last event — never declared.
 
 ## Implementation details — deliberately not contract
 
@@ -365,7 +431,7 @@ const contentBlocks = z.array(z.looseObject({ type: z.string() }));
 
 const turnRef = { queryId: z.string(), turnId: z.string() };
 
-// conv.v1.{conversationId}.telemetry
+// conv.v2.{conversationId}.telemetry.> — each type on its own leaf (Subjects)
 export const conversationTelemetry = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('turn_started'), ts, ...turnRef, service: z.string(), model: z.string(), thinking: z.boolean(), effort: z.string().optional(), maxTokens: z.number().int() }),
   z.looseObject({ type: z.literal('turn_ended'), ts, ...turnRef, stopReason: z.string() }),
@@ -385,14 +451,15 @@ export const conversationTelemetry = z.discriminatedUnion('type', [
   }),
 ]);
 
-// conv.v1.{conversationId}.changes
+// conv.v2.{conversationId}.changes.> — each type on its own leaf (Subjects)
 export const conversationChange = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('message'), ts, id: z.string(), ...turnRef, role: openEnum(['user', 'assistant']), from: sender, content: contentBlocks }),
   z.looseObject({ type: z.literal('revision'), ts, messageId: z.string(), content: contentBlocks }),
   z.looseObject({ type: z.literal('tip_moved'), ts, to: z.string() }),
+  z.looseObject({ type: z.literal('query'), ts, queryId: z.string(), reason: openEnum(['completed', 'cancelled', 'aborted']) }),
 ]);
 
-// conv.v1.{conversationId}.deltas — deliberately bare: the envelope's `ts` is
+// conv.v2.{conversationId}.deltas — one flat subject, deliberately bare: the envelope's `ts` is
 // waived on purpose; deltas are ephemeral and the metadata would outweigh the data.
 // `block` marks the stream changing character; `blockType` is an open set
 // mirroring the committed content block types.
@@ -401,7 +468,7 @@ export const conversationDelta = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('block'), blockType: openEnum(['thinking', 'text', 'tool_use']) }),
 ]);
 
-// conv.v1.{conversationId}.requests — a request whose `type` is not defined
+// conv.v2.{conversationId}.requests.> — a request whose `type` is not defined
 // here is still answered: `rejected` with reason `unsupported`. Compliance is
 // answering, not implementing.
 export const conversationRequest = z.discriminatedUnion('type', [
@@ -422,6 +489,22 @@ optional because provenance travels when known; the `id` is the cancel's
 premise and is always required. `say.precondition` has no such asymmetry — it
 is always required; the first message of a new conversation states
 `{ tip: null }` rather than omitting it.
+
+## The v1 tree — superseded, still spoken
+
+v1 differs in shape, not vocabulary: one flat subject per class
+(`conv.v1.{id}.changes`, `.telemetry`, `.deltas`, `.requests`), routing by
+the payload's `type` alone, and no `query` closure change. Every other
+message shape is identical to v2.
+
+v1 speakers remain lawful for as long as they exist — a breaking change is a
+new tree and migration is unhurried (nats-spec, Evolution). Skew is absorbed
+by the single-instance component: a reader serving both trees subscribes to
+both, normalises at ingest (subject tokens where the tree is deep, payload
+`type` where it is flat — the same discriminator either way), and answers
+each conversation's requests on the tree its traffic arrives on. The v1
+fixtures remain the v1 ingest path's test surface until the last v1 speaker
+retires — they retire with v1, not with v2's arrival.
 
 ## Open questions
 

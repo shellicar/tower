@@ -1,0 +1,7 @@
+{"subject":"conv.v2.conv-abc.requests.say","message":{"type":"say","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"text":"now delete it","precondition":{"tip":"m4"}},"reply":{"accepted":true,"id":"q2"}}
+{"subject":"conv.v2.conv-abc.changes.message","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m5","queryId":"q2","turnId":"t3","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"now delete it"}]}}
+{"subject":"conv.v2.conv-abc.telemetry.turn.started","message":{"type":"turn_started","ts":"2026-07-07T21:00:00+10:00","queryId":"q2","turnId":"t3","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}}
+{"subject":"conv.v2.conv-abc.telemetry.turn.ended","message":{"type":"turn_ended","ts":"2026-07-07T21:00:00+10:00","queryId":"q2","turnId":"t3","stopReason":"end_turn"}}
+{"subject":"conv.v2.conv-abc.changes.message","message":{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m6","queryId":"q2","turnId":"t3","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"Deleted."}]}}
+{"subject":"conv.v2.conv-abc.changes.query","message":{"type":"query","ts":"2026-07-07T21:00:00+10:00","queryId":"q2","reason":"completed"}}
+{"subject":"conv.v2.conv-abc.requests.cancel","message":{"type":"cancel","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"id":"q2"},"reply":{"rejected":true,"reason":"already_complete"}}

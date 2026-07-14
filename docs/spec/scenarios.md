@@ -6,7 +6,7 @@ files in `fixtures/` — **this repo is their source of truth**; implementations
 carry verbatim copies, byte-diffable against these files (conformance.md,
 Artifacts). One line per wire message, the subject riding each line; request
 lines carry their reply inline, since a reply has no subject of its own. `ts`
-values and minted ids (`m…`, `q…`, `t…`, `apr-…`, `toolu_…`) are
+values and minted ids (`m…`, `q…`, `t…`, `apr-…`, `toolu_…`, `inst-…`) are
 placeholders: conformance normalises them before comparison, so a fixture is a
 template by construction, never a byte-exact recording. The templates double as
 the specs' worked examples. First implementation contact validates them — where
@@ -26,6 +26,20 @@ wrong, and the fix lands twice.
 
 Each template lists the **required** entries: a producer's capture must contain
 them as a subsequence per subject, extras allowed (add-only honoured).
+
+## The v2 set
+
+`fixtures/v2/` carries the conversation scenarios in the v2 tree
+(conversation-spec, Subjects): leaf subjects spelling each type, and a
+`query` closure change wherever a query closes — completed in scenarios 1,
+2b, and 3; cancelled in scenario 2. Scenario 5's second query never closes
+(still live when the fixture ends) and scenario 7 is one turn's stream
+mid-query, so neither carries a closure. Scenario 6 is approval-concern
+traffic and has no v2 form.
+
+The v1 set is not superseded by the v2 set's arrival: it remains the v1
+ingest path's test surface, and retires with the last v1 speaker
+(conversation-spec, The v1 tree).
 
 ## The two branches
 
@@ -185,3 +199,69 @@ compliant — the marker is additive.
   exactly as before.
 
 Fixture: `fixtures/scenario-7.jsonl`.
+
+## Agent scenarios
+
+`fixtures/agent/` carries the agent concern (agent-spec): servicing facts and
+the folds they drive. `mac` is the world, `inst-…` an agent instance,
+`conv-abc` the conversation it serves. As with the conversation set, `ts` and
+minted ids normalise before comparison; the liveness folds turn on order and
+presence, not on literal timestamps — silence is represented the way approval
+6b represents it, by nothing following.
+
+| Scenario | Fixture |
+|---|---|
+| a1 — world up, fresh conversation | `fixtures/agent/scenario-a1.jsonl` |
+| a2 — clean shutdown | `fixtures/agent/scenario-a2.jsonl` |
+| a3 — stranded | `fixtures/agent/scenario-a3.jsonl` |
+| a4 — chdir | `fixtures/agent/scenario-a4.jsonl` |
+| a5 — resume, then already-attached | `fixtures/agent/scenario-a5.jsonl` |
+
+### a1 — world up, fresh conversation
+
+A process boots, promises a cadence, and attaches to a conversation that has
+no messages yet.
+
+- Exercises: `ready`, `pulse`, `attached` carrying `cwd` — no conversation
+  traffic at all.
+- Asserts: existence-by-attachment — the conversation is a row before its
+  first message; the **alive** fold — attached, pulse fresh.
+
+### a2 — clean shutdown
+
+The instance is serving, then drains.
+
+- Exercises: `drain` accepted; `detached` for the conversation.
+- Asserts: the **released** fold — cleanly detached, a decided fact, distinct
+  from silence.
+
+### a3 — stranded
+
+The instance is serving and pulsing, then goes silent.
+
+- Exercises: `attached`, two `pulse`s, then nothing — no `detached`, no
+  further pulse.
+- Asserts: the **stranded** fold — attached, pulse silent past ~3 × its
+  declared `intervalS`. Stranded is inferred from a broken promise, never
+  published; it reads differently from a2's released for exactly that reason.
+
+### a4 — chdir
+
+Tower moves a live attachment's working directory.
+
+- Exercises: `attached` at one `cwd`, `chdir` accepted, `attached`
+  re-published at the new `cwd`.
+- Asserts: last-write-wins per (instance, conversation) — the attachment's
+  current cwd is the latest `attached`; and that the conversation's change
+  stream emits nothing across the move — the proof cwd is never conversation
+  state.
+
+### a5 — resume, then already-attached
+
+The one `service` verb across two calls against the same conversation.
+
+- Exercises: `service` accepted (history exists, no live attachment → fold
+  and re-attach), `attached`; a second `service` while attached →
+  `rejected: already_attached`.
+- Asserts: the verb dispatches on the record's state, not on the request; the
+  reply confirms the premise (servable / already served), never an outcome.

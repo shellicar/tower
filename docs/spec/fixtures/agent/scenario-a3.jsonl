@@ -1,0 +1,3 @@
+{"subject":"agent.v1.mac.telemetry.attached","message":{"type":"attached","ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","conversationId":"conv-abc","cwd":"~/repos/tower"}}
+{"subject":"agent.v1.mac.telemetry.pulse","message":{"type":"pulse","ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","intervalS":30}}
+{"subject":"agent.v1.mac.telemetry.pulse","message":{"type":"pulse","ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","intervalS":30}}

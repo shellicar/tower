@@ -21,15 +21,16 @@ tree, however convenient the ride would be.
 |---|---|---|
 | conversation | `conv` | `conversation-spec.md` |
 | approval | `approval` | `approval-spec.md` |
+| agent | `agent` | `agent-spec.md` |
 
-Other concerns (process liveness and environment are known ones) get their
+Other concerns (host provisioning and environment are known ones) get their
 namespace and spec when their design pass happens — not before, and never by
 squatting in an existing tree.
 
 ## Namespacing
 
 ```
-{concern}.{version}.{id}.{kind}
+{concern}.{version}.{id}.{class}.{event}
 ```
 
 - **concern** — the top-level namespace, from the registry above. Names the
@@ -37,13 +38,37 @@ squatting in an existing tree.
 - **version** — the major version (`v1`). A breaking change is a new tree; old
   consumers keep working, migration is unhurried.
 - **id** — the entity instance the traffic is about.
-- **kind** — the kind of traffic, last, so wildcards fall where subscribers
-  want them.
+- **class** — the nature of the traffic (committal, observation, ephemeral,
+  ask). Retention, trust, and capture policy divide here.
+- **event** — the message's type, as a subject token.
 
-The two wildcard shapes this ordering buys:
+**The subject carries the taxonomy.** The subject carries everything the
+server might need to route, filter, retain, or authorise on; the payload
+carries only what consumers read after delivery. This is structural, not
+stylistic: NATS routes and filters on subjects only, never payloads. A type
+buried in the payload cannot be filtered server-side, captured selectively by
+a stream, graded by retention, or named in an ACL — it can only be received
+and discarded. The subject is the authoritative discriminator; the payload's
+`type` (see Message structure) remains as self-description, so a message read
+out of a store still says what it is.
+
+**Token depth.** A token earns its place when it is a real axis — something a
+subscription, a stream's capture filter, a retention rule, or a credential
+could plausibly divide on. A token no policy could ever divide on is ceremony.
+
+Wildcard shapes this ordering buys:
 
 - `{concern}.v1.{id}.>` — everything about one entity.
-- `{concern}.v1.*.{kind}` — one kind of traffic, across all entities.
+- `{concern}.v1.*.{class}.>` — one class of traffic, across all entities.
+- `{concern}.v1.*.{class}.{event}` — one event type, across all entities.
+
+**Subscription discipline.** Ordering holds within one subscription, not
+across subscriptions. A stream whose meaning lives in its ordered totality —
+a committal change stream — is consumed whole: fold consumers subscribe
+`{class}.>`, never a set of sibling leaves. This is also what keeps new
+leaves add-only: a wildcard subscriber sees an unknown event type and
+tolerates it; a sibling-set subscriber is silently blind to it, and on a
+committal stream blind means wrong state with no error.
 
 **Why concern-rooted — a decision, not a discovery.** The alternative was
 considered: rooting the tree by plane or mechanism (`tap.v1.conversation.{id}`
@@ -83,6 +108,23 @@ Per the architecture docs:
 
 A concern's spec declares which of its subjects carry which.
 
+## What earns an event
+
+The wire carries facts the state owner witnessed or decided, published once,
+at the grain they occurred. Anything derivable from facts already on the wire
+is never restated — a second statement of one truth is two truths that can
+disagree.
+
+**Consumers are never predicted.** No event is justified or rejected by who
+might read it: consumers are unknowable, and any argument from them is
+invention. The test needs no readers — is this a fact the owner holds
+firsthand, or a derivation of published facts? Witnessed or decided → publish
+it once, on the subject matching its nature. Emergent from absence or
+combination (idle, a fold) → the consumer's own computation, forever.
+
+Add-only makes the asymmetry safe: a missed fact is cheap to add later; a
+restated derivation can never be removed.
+
 ## Evolution
 
 Within a major version, add-only:
@@ -93,6 +135,57 @@ Within a major version, add-only:
 
 Both halves are required; either alone fails. Removing a field or changing a
 meaning is a breaking change: a new tree.
+
+A migration that requires coordinated rollout within a version is a breaking
+change, whatever it is called — deepening a subject silences exact
+subscribers the same as renaming it would. The tree is the mechanism; never
+lockstep.
+
+Version skew is absorbed by the single-instance component. Many-versioned
+components each speak exactly one tree — their own. The component that faces
+both worlds reads both trees and answers each entity on the tree its traffic
+arrives on: the version token in the subject is the discovery — no handshake,
+no capability advertisement, no stored registry to go stale.
+
+## Naming
+
+A field or subject token earns its place by what it *denotes*, not by whether
+it happens to be used as an address.
+
+- **A durable, causal referent** — a place, a working directory, content — is
+  named, and may be keyed in the subject. What is causal is an input to how
+  the entity unfolds: a conversation served in one directory versus another
+  can act differently, the way a message's content changes what follows.
+- **The identifier of such a referent** is a stable, meaningless handle. Its
+  one job is to denote the same thing consistently; the mutable facts about
+  the thing ride as fields, never baked into the id. A world id names a place
+  the way a house is named — rename the street or forward the mail and the
+  house is unchanged, so provenance and host are fields, and a relabel or a
+  migration breaks no reference.
+- **An ephemeral, incidental handle** — a pid, a port, a reply inbox — is how
+  you reach something, not something about it. It is never named in the
+  contract nor baked into an id: it dies and reassigns, and identity is
+  already carried elsewhere. A deployment that wants it (click-to-process)
+  carries it as an open field, which tolerance already permits.
+
+The test needs no guess about consumers: does this denote a durable causal
+thing, the stable handle for one, or an ephemeral way to reach one? Only the
+first two belong in the contract.
+
+## Conformance
+
+The concern is the unit of conformance. An implementation adheres to the
+specs of the concerns it implements, entirely — and may implement none of a
+concern: a producer that never publishes to a concern's tree owes it nothing,
+and readers' folds degrade honestly (a conversation with no agent concern
+behind it simply has no liveness to show). No component is required to be
+forwards compatible — nobody can adhere to a future — and no many-versioned
+component is required to read old trees: backwards compatibility is a
+property of the deployment, purchased once, where skew is absorbed
+(Evolution). Within an implemented concern the finer grains already apply:
+any request may be answered `rejected: unsupported` — compliance is
+answering, not implementing — and tolerance covers unknown types, fields,
+and values.
 
 ## System principles
 
