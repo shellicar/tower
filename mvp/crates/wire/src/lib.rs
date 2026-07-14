@@ -16,9 +16,7 @@ pub use conv::{
     ConvBlock, ConvChange, ConvDelta, ConvTelemetry, Message, Query, Revision, TipMoved, Tolerant,
     ToolUse, TurnAborted, TurnCancelled, TurnEnded, TurnStarted, Usage,
 };
-pub use ids::{
-    ApprovalId, ConversationId, InstanceId, MessageId, QueryId, TurnId, WorldId,
-};
+pub use ids::{ApprovalId, ConversationId, InstanceId, MessageId, QueryId, TurnId, WorldId};
 pub use ingest::{
     AgentEvent, AgentKind, ApprovalEvent, ApprovalKind, Event, EventKind, WireEvent, parse_wire,
 };

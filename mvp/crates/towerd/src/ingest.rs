@@ -22,10 +22,11 @@ use crate::views::ViewQuery;
 
 /// Subjects ingest folds — event subjects only, never `.requests`
 /// (nats-spec, Storage: a stream over requests becomes a second responder).
-const SUBJECTS: [&str; 5] = [
-    "conv.v1.*.telemetry",
-    "conv.v1.*.changes",
-    "conv.v1.*.deltas",
+const SUBJECTS: [&str; 6] = [
+    "conv.v2.*.telemetry.>",
+    "conv.v2.*.changes.>",
+    "conv.v2.*.deltas",
+    "agent.v1.*.telemetry.>",
     "approval.v1.*.lifecycle",
     "approval.v1.*.telemetry",
 ];

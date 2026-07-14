@@ -146,10 +146,10 @@ fn scenario_2_cancelled_turn_commits_no_message_and_the_query_closes_cancelled()
         &e.kind,
         EventKind::Telemetry(wire::ConvTelemetry::TurnCancelled(_))
     )));
-    assert!(!evs.iter().any(|e| matches!(
-        &e.kind,
-        EventKind::Change(ConvChange::Message(_))
-    )));
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(&e.kind, EventKind::Change(ConvChange::Message(_))))
+    );
     // The query still closed — committally, reason cancelled.
     assert!(evs.iter().any(|e| matches!(
         &e.kind,
@@ -299,10 +299,10 @@ fn agent_a1_world_up_fresh_conversation() {
     assert_all_agent_known(&evs);
     // ready, pulse, attached — and the attached carries the conversation before
     // any message exists.
-    assert!(evs.iter().any(|e| matches!(
-        &e.kind,
-        AgentKind::Telemetry(AgentTelemetry::Ready(_))
-    )));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(&e.kind, AgentKind::Telemetry(AgentTelemetry::Ready(_))))
+    );
     assert!(evs.iter().any(|e| matches!(
         &e.kind,
         AgentKind::Telemetry(AgentTelemetry::Attached(a)) if a.conversation_id.0 == "conv-abc"
@@ -313,10 +313,10 @@ fn agent_a1_world_up_fresh_conversation() {
 fn agent_a2_clean_shutdown_detaches() {
     let evs = agent_events(AGENT_A2);
     assert_all_agent_known(&evs);
-    assert!(evs.iter().any(|e| matches!(
-        &e.kind,
-        AgentKind::Telemetry(AgentTelemetry::Detached(_))
-    )));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(&e.kind, AgentKind::Telemetry(AgentTelemetry::Detached(_))))
+    );
 }
 
 #[test]
@@ -325,10 +325,10 @@ fn agent_a3_stranded_is_attached_then_silence() {
     // (pulse silence), never an event. Here we only assert the lines parse.
     let evs = agent_events(AGENT_A3);
     assert_all_agent_known(&evs);
-    assert!(evs.iter().any(|e| matches!(
-        &e.kind,
-        AgentKind::Telemetry(AgentTelemetry::Pulse(_))
-    )));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(&e.kind, AgentKind::Telemetry(AgentTelemetry::Pulse(_))))
+    );
 }
 
 #[test]
@@ -354,10 +354,7 @@ fn agent_a5_resume_then_already_attached() {
     assert_all_agent_known(&evs);
     assert_eq!(
         evs.iter()
-            .filter(|e| matches!(
-                &e.kind,
-                AgentKind::Telemetry(AgentTelemetry::Attached(_))
-            ))
+            .filter(|e| matches!(&e.kind, AgentKind::Telemetry(AgentTelemetry::Attached(_))))
             .count(),
         1
     );

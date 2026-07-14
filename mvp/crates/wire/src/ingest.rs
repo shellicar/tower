@@ -110,7 +110,12 @@ pub fn parse_wire(subject: &str, payload: &[u8]) -> Option<WireEvent> {
     }
     match (concern, version) {
         ("conv", "v2") => Some(WireEvent::Conv(parse_conv(id, class, &event_type, payload))),
-        ("agent", "v1") => Some(WireEvent::Agent(parse_agent(id, class, &event_type, payload))),
+        ("agent", "v1") => Some(WireEvent::Agent(parse_agent(
+            id,
+            class,
+            &event_type,
+            payload,
+        ))),
         ("approval", "v1") => Some(WireEvent::Approval(parse_approval(id, class, payload))),
         _ => None,
     }
@@ -177,7 +182,10 @@ fn conv_kind(class: &str, event_type: &str, value: Value) -> Option<EventKind> {
         // discriminate on the body `type`. Read that out (a short string) before
         // moving `value` into deserialise, so nothing large is cloned.
         "deltas" => {
-            let which = value.get("type").and_then(Value::as_str).map(str::to_string);
+            let which = value
+                .get("type")
+                .and_then(Value::as_str)
+                .map(str::to_string);
             match which.as_deref() {
                 Some("delta") => EventKind::Delta(serde_json::from_value(value).ok()?),
                 Some("block") => EventKind::Block(serde_json::from_value(value).ok()?),
@@ -404,8 +412,9 @@ mod tests {
         let payload = br#"{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","conversationId":"conv-abc","cwd":"~/repos/tower"}"#;
         let event = agent_event("agent.v1.mac.telemetry.attached", payload);
         assert_eq!(event.world, WorldId("mac".into()));
-        let AgentKind::Telemetry(AgentTelemetry::Attached(Attached { conversation_id, .. })) =
-            event.kind
+        let AgentKind::Telemetry(AgentTelemetry::Attached(Attached {
+            conversation_id, ..
+        })) = event.kind
         else {
             panic!("expected attached");
         };

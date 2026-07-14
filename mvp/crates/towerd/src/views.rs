@@ -309,6 +309,10 @@ impl Views {
         let result = match event {
             WireEvent::Conv(e) => self.apply_conv(seq, e),
             WireEvent::Approval(e) => self.apply_approval(seq, e),
+            // The agent liveness fold is a design pass of its own (attachments,
+            // pulses, verdict-on-read); until it lands, agent telemetry only
+            // advances the cursor so replay stays exact.
+            WireEvent::Agent(_) => self.apply_agent(seq),
         };
         if let Err(e) = result {
             // A poisoned frame must not kill the fold; it is logged and the
@@ -392,6 +396,13 @@ impl Views {
         Ok(())
     }
 
+    fn apply_agent(&mut self, seq: u64) -> anyhow::Result<()> {
+        let tx = self.db.transaction()?;
+        tx.execute("UPDATE cursor SET seq = ?1 WHERE id = 1", [seq as i64])?;
+        tx.commit()?;
+        Ok(())
+    }
+
     fn apply_conv(&mut self, seq: u64, event: &Event) -> anyhow::Result<()> {
         let conv = &event.conv;
 
@@ -457,15 +468,16 @@ impl Views {
 
         if let EventKind::Change(change) = &event.kind {
             match change {
-                ConvChange::Message {
-                    ts,
-                    id,
-                    query_id,
-                    turn_id,
-                    role,
-                    from,
-                    content,
-                } => {
+                ConvChange::Message(m) => {
+                    let (ts, id, query_id, turn_id, role, from, content) = (
+                        &m.ts,
+                        &m.id,
+                        &m.query_id,
+                        &m.turn_id,
+                        &m.role,
+                        &m.from,
+                        &m.content,
+                    );
                     let ts_ms = parse_ts(ts)
                         .ok_or_else(|| anyhow::anyhow!("message {id} has unparseable ts {ts}"))?;
                     let mut content = content.clone();
@@ -495,11 +507,8 @@ impl Views {
                         ts: ts_ms,
                     });
                 }
-                ConvChange::Revision {
-                    message_id,
-                    content,
-                    ..
-                } => {
+                ConvChange::Revision(r) => {
+                    let (message_id, content) = (&r.message_id, &r.content);
                     // Last-write-wins per id: content changed under a stable
                     // id; position and ts stay. A revision for a message the
                     // views never saw (pre-retention) is a no-op.
@@ -513,7 +522,10 @@ impl Views {
                 // The tip is the servicer's; v1 views render stored messages
                 // by ts and don't fold reachability. The row touch above is
                 // the tip movement's whole effect here.
-                ConvChange::TipMoved { .. } => {}
+                ConvChange::TipMoved(_) => {}
+                // Query completion: the row touch above (type_name/ts) is its
+                // whole v1 effect; nothing per-message to store.
+                ConvChange::Query(_) => {}
             }
         }
 
@@ -909,12 +921,12 @@ mod tests {
         views.list().unwrap().0
     }
 
-    const MSG_M1: &str = r#"{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m1","queryId":"q1","turnId":"t1","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"read file X and summarise it"}]}"#;
+    const MSG_M1: &str = r#"{"ts":"2026-07-07T21:00:00+10:00","id":"m1","queryId":"q1","turnId":"t1","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"read file X and summarise it"}]}"#;
 
     #[test]
     fn message_lands_in_views_and_row() {
         let (mut views, mut rx) = fresh();
-        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
+        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
 
         let rows = rows_of(&views);
         assert_eq!(rows.len(), 1);
@@ -936,8 +948,8 @@ mod tests {
     #[test]
     fn replay_is_idempotent() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
-        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1)); // at-least-once
+        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
+        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1)); // at-least-once
         let msgs = views
             .conversation(&ConversationId("conv-abc".into()), None)
             .unwrap();
@@ -947,9 +959,9 @@ mod tests {
     #[test]
     fn revision_rewrites_content_in_place() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
-        views.apply(2, &event("conv.v1.conv-abc.changes",
-            r#"{"type":"revision","ts":"2026-07-07T21:01:00+10:00","messageId":"m1","content":[{"type":"text","text":"…trimmed…"}]}"#));
+        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
+        views.apply(2, &event("conv.v2.conv-abc.changes.revision",
+            r#"{"ts":"2026-07-07T21:01:00+10:00","messageId":"m1","content":[{"type":"text","text":"…trimmed…"}]}"#));
         let msgs = views
             .conversation(&ConversationId("conv-abc".into()), None)
             .unwrap();
@@ -960,8 +972,8 @@ mod tests {
     #[test]
     fn telemetry_touches_row_without_storing() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v1.conv-abc.telemetry",
-            r#"{"type":"turn_started","ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}"#));
+        views.apply(1, &event("conv.v2.conv-abc.telemetry.turn.started",
+            r#"{"ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}"#));
         let rows = rows_of(&views);
         assert_eq!(rows[0].last_kind, "turn_started");
         assert!(
@@ -978,7 +990,7 @@ mod tests {
         views.apply(
             1,
             &event(
-                "conv.v1.conv-abc.deltas",
+                "conv.v2.conv-abc.deltas",
                 r#"{"type":"delta","text":"File X"}"#,
             ),
         );
@@ -993,12 +1005,23 @@ mod tests {
     #[test]
     fn after_filters_catch_up() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
-        views.apply(2, &event("conv.v1.conv-abc.changes",
-            r#"{"type":"message","ts":"2026-07-07T21:05:00+10:00","id":"m2","queryId":"q1","turnId":"t1","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"done"}]}"#));
+        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
+        views.apply(2, &event("conv.v2.conv-abc.changes.message",
+            r#"{"ts":"2026-07-07T21:05:00+10:00","id":"m2","queryId":"q1","turnId":"t1","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"done"}]}"#));
+        // The boundary is inclusive: a message tied with the client's
+        // high-water mark is re-sent (client dedupes by id), so the catch-up
+        // from m1's ts carries m1 again plus m2.
         let m1_ts = parse_ts("2026-07-07T21:00:00+10:00").unwrap();
         let msgs = views
             .conversation(&ConversationId("conv-abc".into()), Some(m1_ts))
+            .unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].id.0, "m1");
+        assert_eq!(msgs[1].id.0, "m2");
+
+        // Strictly past m1's ts, only m2 remains.
+        let msgs = views
+            .conversation(&ConversationId("conv-abc".into()), Some(m1_ts + 1))
             .unwrap();
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].id.0, "m2");
@@ -1008,10 +1031,10 @@ mod tests {
     fn heavy_tool_result_is_externalised_and_fetchable() {
         let (mut views, _rx) = fresh();
         let heavy = format!(
-            r#"{{"type":"message","ts":"2026-07-07T21:00:00+10:00","id":"m9","queryId":"q1","turnId":"t2","role":"user","from":{{"kind":"agent"}},"content":[{{"type":"tool_result","tool_use_id":"toolu_01","content":"{}"}}]}}"#,
+            r#"{{"ts":"2026-07-07T21:00:00+10:00","id":"m9","queryId":"q1","turnId":"t2","role":"user","from":{{"kind":"agent"}},"content":[{{"type":"tool_result","tool_use_id":"toolu_01","content":"{}"}}]}}"#,
             "y".repeat(1000)
         );
-        views.apply(1, &event("conv.v1.conv-abc.changes", &heavy));
+        views.apply(1, &event("conv.v2.conv-abc.changes.message", &heavy));
         let msgs = views
             .conversation(&ConversationId("conv-abc".into()), None)
             .unwrap();
@@ -1032,8 +1055,8 @@ mod tests {
         views.apply(
             1,
             &event(
-                "conv.v1.conv-abc.telemetry",
-                r#"{"type":"vibe_shift","ts":"2026-07-07T21:00:00+10:00"}"#,
+                "conv.v2.conv-abc.telemetry.vibe.shift",
+                r#"{"ts":"2026-07-07T21:00:00+10:00"}"#,
             ),
         );
         let rows = rows_of(&views);
@@ -1044,7 +1067,7 @@ mod tests {
     #[test]
     fn titles_set_overwrite_clear_and_survive_rematerialisation() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
+        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
         let conv = ConversationId("conv-abc".into());
 
         // Set, then overwrite (last write wins).
@@ -1067,7 +1090,7 @@ mod tests {
              UPDATE cursor SET seq = 0 WHERE id = 1;",
             )
             .unwrap();
-        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
+        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
         assert_eq!(rows_of(&views)[0].title.as_deref(), Some("tower v1"));
 
         // Empty title clears; the row falls back to untitled.
@@ -1078,7 +1101,7 @@ mod tests {
     #[test]
     fn sync_stream_adopts_resumes_and_rematerialises() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
+        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
         views
             .set_title(&ConversationId("conv-abc".into()), "tower v1")
             .unwrap();
@@ -1089,8 +1112,8 @@ mod tests {
         assert_eq!(rows_of(&views).len(), 1);
 
         // Same incarnation again (every consumer rebuild): resume, touch nothing.
-        views.apply(2, &event("conv.v1.conv-abc.telemetry",
-            r#"{"type":"turn_started","ts":"2026-07-07T21:01:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}"#));
+        views.apply(2, &event("conv.v2.conv-abc.telemetry.turn.started",
+            r#"{"ts":"2026-07-07T21:01:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}"#));
         assert_eq!(views.sync_stream("incarnation-A", 100).unwrap(), 2);
         assert_eq!(rows_of(&views).len(), 1);
 
@@ -1107,7 +1130,7 @@ mod tests {
         assert_eq!(read_cursor(&views.db).unwrap(), 0);
 
         // Replay refills the views; the row comes back already titled.
-        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
+        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
         assert_eq!(rows_of(&views)[0].title.as_deref(), Some("tower v1"));
 
         // And incarnation-B is now home: same again resumes normally.
@@ -1121,7 +1144,7 @@ mod tests {
         // and, unlike rematerialisation, truncates nothing: the views keep
         // what they hold and the idempotent fold refills on top.
         let (mut views, _rx) = fresh();
-        views.apply(23386, &event("conv.v1.conv-abc.changes", MSG_M1));
+        views.apply(23386, &event("conv.v2.conv-abc.changes.message", MSG_M1));
         views
             .set_title(&ConversationId("conv-abc".into()), "tower v1")
             .unwrap();
@@ -1134,7 +1157,7 @@ mod tests {
         assert_eq!(read_cursor(&views.db).unwrap(), 0);
 
         // Same-incarnation arm gets the same protection.
-        views.apply(23386, &event("conv.v1.conv-abc.changes", MSG_M1));
+        views.apply(23386, &event("conv.v2.conv-abc.changes.message", MSG_M1));
         assert_eq!(views.sync_stream("incarnation-A", 628).unwrap(), 0);
     }
 
@@ -1199,7 +1222,7 @@ mod tests {
     #[test]
     fn tags_set_overwrite_clear_and_colour_keys() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
+        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
         let conv = ConversationId("conv-abc".into());
 
         // Set two keys; first use mints each key's colour.
@@ -1245,16 +1268,21 @@ mod tests {
                  UPDATE cursor SET seq = 0 WHERE id = 1;",
             )
             .unwrap();
-        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1));
+        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
         assert_eq!(rows_of(&views)[0].tags.len(), 1);
     }
 
     #[test]
     fn out_of_order_row_touch_never_regresses() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v1.conv-abc.changes", MSG_M1)); // 21:00
-        views.apply(2, &event("conv.v1.conv-abc.telemetry",
-            r#"{"type":"turn_cancelled","ts":"2026-07-07T20:00:00+10:00","queryId":"q0","turnId":"t0"}"#));
+        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1)); // 21:00
+        views.apply(
+            2,
+            &event(
+                "conv.v2.conv-abc.telemetry.turn.cancelled",
+                r#"{"ts":"2026-07-07T20:00:00+10:00","queryId":"q0","turnId":"t0"}"#,
+            ),
+        );
         let rows = rows_of(&views);
         assert_eq!(rows[0].last_kind, "message"); // the earlier ts did not win
     }
