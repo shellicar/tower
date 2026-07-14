@@ -9,13 +9,24 @@ use tokio::sync::mpsc;
 use futures::StreamExt;
 use wire::{ConvRequest, ConversationId, encode_accepted, encode_rejected, now_iso, parse_request};
 
+use std::sync::Arc;
+
 use crate::anthropic;
+use crate::skills::Skills;
+
+/// Tool rounds per query before the bridge gives up — a runaway tool loop
+/// must not spin forever on someone's API bill.
+const MAX_TURNS_PER_QUERY: usize = 16;
 
 pub struct AgentConfig {
     pub conv: ConversationId,
     pub model: String,
     pub system: Option<String>,
     pub auth: crate::anthropic::Auth,
+    /// Scanned at the conversation's FIRST message, then fixed: the
+    /// catalogue must match the reminder committed into the record, and a
+    /// skill added after boot still reaches the next conversation.
+    pub skills_root: std::path::PathBuf,
 }
 
 /// A committed message: id + the API-shaped halves the model call needs.
@@ -30,15 +41,12 @@ struct Live {
     abort: tokio::task::AbortHandle,
 }
 
-/// What a finished turn task reports back for the tree.
+/// What a finished query task reports back for the tree. Both ends carry
+/// every message the query committed (assistant turns AND tool results) —
+/// they are on the wire, so the tree must hold them whatever else happened.
 enum TurnEnd {
-    /// Committed content for the assistant message (already published).
-    Completed {
-        message_id: String,
-        content: Vec<Value>,
-    },
-    Cancelled,
-    Aborted,
+    Completed { messages: Vec<Message> },
+    Aborted { messages: Vec<Message> },
 }
 
 pub async fn run(client: async_nats::Client, config: AgentConfig) {
@@ -55,6 +63,8 @@ pub async fn run(client: async_nats::Client, config: AgentConfig) {
 
     let mut tree: Vec<Message> = Vec::new();
     let mut live: Option<Live> = None;
+    // None until the first message scans the catalogue.
+    let mut skills: Option<Arc<Skills>> = None;
     let (done_tx, mut done_rx) = mpsc::channel::<(String, TurnEnd)>(8);
 
     loop {
@@ -80,14 +90,27 @@ pub async fn run(client: async_nats::Client, config: AgentConfig) {
                             let query = uuid::Uuid::new_v4().to_string();
                             let turn = uuid::Uuid::new_v4().to_string();
                             let message_id = uuid::Uuid::new_v4().to_string();
-                            let content = vec![json!({ "type": "text", "text": text })];
+                            // The first message takes the catalogue snapshot
+                            // and carries the reminder as its FIRST block,
+                            // the said text second — in the committed record,
+                            // so what the model saw is what is stored.
+                            let skills = Arc::clone(skills.get_or_insert_with(|| {
+                                Arc::new(Skills::scan(config.skills_root.clone()))
+                            }));
+                            let mut content = Vec::new();
+                            if tree.is_empty()
+                                && let Some(reminder) = skills.reminder()
+                            {
+                                content.push(json!({ "type": "text", "text": reminder }));
+                            }
+                            content.push(json!({ "type": "text", "text": text }));
 
                             // Commit the user half first — half a chat is not a chat.
                             publish_message(&client, &config.conv, &message_id, &query, &turn,
                                             "user", &from, &content).await;
                             tree.push(Message { id: message_id, role: "user".into(), content });
 
-                            // The turn, abortable.
+                            // The query, abortable.
                             let history: Vec<Value> = tree.iter()
                                 .map(|m| json!({ "role": m.role, "content": m.content }))
                                 .collect();
@@ -97,13 +120,14 @@ pub async fn run(client: async_nats::Client, config: AgentConfig) {
                                 model: config.model.clone(),
                                 system: config.system.clone(),
                                 auth: config.auth.clone(),
+                                skills,
                                 query: query.clone(),
                                 turn,
                             };
                             let done = done_tx.clone();
                             let q = query.clone();
                             let handle = tokio::spawn(async move {
-                                let end = run_turn(ctx, history).await;
+                                let end = run_query(ctx, history).await;
                                 let _ = done.send((q, end)).await;
                             });
                             live = Some(Live { query: query.clone(), abort: handle.abort_handle() });
@@ -171,25 +195,16 @@ pub async fn run(client: async_nats::Client, config: AgentConfig) {
     }
 }
 
-/// Fold one finished turn into the loop's state. The tree-push is
-/// unconditional on purpose: a completed turn's message is already on the
-/// wire — every consumer has it — so the tree must carry it too, whatever
-/// raced it; dropping it would desync the tip from the world forever.
+/// Fold one finished query into the loop's state. The tree-push is
+/// unconditional on purpose: every carried message is already on the wire —
+/// every consumer has it — so the tree must carry it too, whatever raced it;
+/// dropping one would desync the tip from the world forever.
 fn fold_turn_end(tree: &mut Vec<Message>, live: &mut Option<Live>, query: String, end: TurnEnd) {
     if live.as_ref().is_some_and(|l| l.query == query) {
         *live = None;
     }
-    if let TurnEnd::Completed {
-        message_id,
-        content,
-    } = end
-    {
-        tree.push(Message {
-            id: message_id,
-            role: "assistant".into(),
-            content,
-        });
-    }
+    let (TurnEnd::Completed { messages } | TurnEnd::Aborted { messages }) = end;
+    tree.extend(messages);
 }
 
 struct TurnContext {
@@ -198,82 +213,144 @@ struct TurnContext {
     model: String,
     system: Option<String>,
     auth: crate::anthropic::Auth,
+    skills: Arc<Skills>,
     query: String,
     turn: String,
 }
 
-/// One model round: telemetry, the block/delta stream, the commit. Failure is
-/// `turn_aborted` on telemetry — honesty over silence.
-async fn run_turn(ctx: TurnContext, history: Vec<Value>) -> TurnEnd {
+/// One query: turns until the model stops asking for tools. A `tool_use`
+/// stop commits the assistant message, executes the tools, commits the
+/// results as a user-role message (from the agent — the harness produced
+/// them), and runs the next turn; the query closes committally on the turn
+/// that ends any other way. Failure is `turn_aborted` + `changes.query`
+/// aborted — honesty over silence.
+async fn run_query(ctx: TurnContext, mut history: Vec<Value>) -> TurnEnd {
     let TurnContext {
         client,
         conv,
         model,
         system,
         auth,
+        skills,
         query,
         turn,
     } = &ctx;
 
-    publish(
-        client,
-        conv,
-        "telemetry.turn.started",
-        json!({
-            "ts": now_iso(),
-            "queryId": query, "turnId": turn,
-            "service": "anthropic.messages", "model": model,
-            "thinking": false, "maxTokens": anthropic::MAX_TOKENS,
-        }),
-    )
-    .await;
+    let tools: Vec<Value> = if skills.is_empty() {
+        Vec::new()
+    } else {
+        vec![skills.tool_schema()]
+    };
 
-    let outcome =
-        anthropic::stream_turn(client, conv, auth, model, system.as_deref(), &history).await;
+    let mut committed: Vec<Message> = Vec::new();
+    let mut turn_id = turn.clone();
 
-    match outcome {
-        Ok(done) => {
-            publish(
-                client,
-                conv,
-                "telemetry.turn.ended",
-                json!({
-                    "ts": now_iso(),
-                    "queryId": query, "turnId": turn,
-                    "stopReason": done.stop_reason,
-                }),
-            )
-            .await;
-            publish(
-                client,
-                conv,
-                "telemetry.usage",
-                json!({
-                    "ts": now_iso(),
-                    "queryId": query, "turnId": turn,
-                    "service": "anthropic.messages", "model": model,
-                    "inputTokens": done.input_tokens,
-                    "cacheCreationTokens": done.cache_creation_tokens,
-                    "cacheReadTokens": done.cache_read_tokens,
-                    "outputTokens": done.output_tokens,
-                }),
-            )
-            .await;
+    for round in 0.. {
+        publish(
+            client,
+            conv,
+            "telemetry.turn.started",
+            json!({
+                "ts": now_iso(),
+                "queryId": query, "turnId": turn_id,
+                "service": "anthropic.messages", "model": model,
+                "thinking": false, "maxTokens": anthropic::MAX_TOKENS,
+            }),
+        )
+        .await;
 
-            let message_id = uuid::Uuid::new_v4().to_string();
-            publish_message(
-                client,
-                conv,
-                &message_id,
-                query,
-                turn,
-                "assistant",
-                &json!({ "kind": "agent" }),
-                &done.content,
-            )
-            .await;
-            // v0 runs one turn per query (no tools), so the turn's end is the
-            // query's committal closure (conversation-spec, changes.query).
+        let outcome = anthropic::stream_turn(
+            client,
+            conv,
+            auth,
+            model,
+            system.as_deref(),
+            &history,
+            &tools,
+        )
+        .await;
+
+        let done = match outcome {
+            Ok(done) => done,
+            Err(e) => {
+                eprintln!("bridge[{}]: turn aborted: {e:#}", conv.0);
+                publish(
+                    client,
+                    conv,
+                    "telemetry.turn.aborted",
+                    json!({
+                        "ts": now_iso(),
+                        "queryId": query, "turnId": turn_id,
+                    }),
+                )
+                .await;
+                publish(
+                    client,
+                    conv,
+                    "changes.query",
+                    json!({
+                        "ts": now_iso(),
+                        "queryId": query,
+                        "reason": "aborted",
+                    }),
+                )
+                .await;
+                return TurnEnd::Aborted {
+                    messages: committed,
+                };
+            }
+        };
+
+        publish(
+            client,
+            conv,
+            "telemetry.turn.ended",
+            json!({
+                "ts": now_iso(),
+                "queryId": query, "turnId": turn_id,
+                "stopReason": done.stop_reason,
+            }),
+        )
+        .await;
+        publish(
+            client,
+            conv,
+            "telemetry.usage",
+            json!({
+                "ts": now_iso(),
+                "queryId": query, "turnId": turn_id,
+                "service": "anthropic.messages", "model": model,
+                "inputTokens": done.input_tokens,
+                "cacheCreationTokens": done.cache_creation_tokens,
+                "cacheReadTokens": done.cache_read_tokens,
+                "outputTokens": done.output_tokens,
+            }),
+        )
+        .await;
+
+        // Commit the assistant message — whatever the stop reason, this
+        // content is the record.
+        let message_id = uuid::Uuid::new_v4().to_string();
+        publish_message(
+            client,
+            conv,
+            &message_id,
+            query,
+            &turn_id,
+            "assistant",
+            &json!({ "kind": "agent" }),
+            &done.content,
+        )
+        .await;
+        history.push(json!({ "role": "assistant", "content": done.content }));
+        committed.push(Message {
+            id: message_id,
+            role: "assistant".into(),
+            content: done.content.clone(),
+        });
+
+        if done.stop_reason != "tool_use" {
+            // The query's committal closure (conversation-spec, changes.query).
             publish(
                 client,
                 conv,
@@ -285,23 +362,16 @@ async fn run_turn(ctx: TurnContext, history: Vec<Value>) -> TurnEnd {
                 }),
             )
             .await;
-            TurnEnd::Completed {
-                message_id,
-                content: done.content,
-            }
+            return TurnEnd::Completed {
+                messages: committed,
+            };
         }
-        Err(e) => {
-            eprintln!("bridge[{}]: turn aborted: {e:#}", conv.0);
-            publish(
-                client,
-                conv,
-                "telemetry.turn.aborted",
-                json!({
-                    "ts": now_iso(),
-                    "queryId": query, "turnId": turn,
-                }),
-            )
-            .await;
+
+        if round + 1 >= MAX_TURNS_PER_QUERY {
+            eprintln!(
+                "bridge[{}]: query {query} exceeded {MAX_TURNS_PER_QUERY} tool rounds; aborting",
+                conv.0
+            );
             publish(
                 client,
                 conv,
@@ -313,9 +383,58 @@ async fn run_turn(ctx: TurnContext, history: Vec<Value>) -> TurnEnd {
                 }),
             )
             .await;
-            TurnEnd::Aborted
+            return TurnEnd::Aborted {
+                messages: committed,
+            };
         }
+
+        // Execute every tool_use block and commit the results as one
+        // user-role message from the agent — the harness produced them.
+        let mut results: Vec<Value> = Vec::new();
+        for block in done.content.iter().filter(|b| b["type"] == "tool_use") {
+            let id = block["id"].as_str().unwrap_or("");
+            let name = block["name"].as_str().unwrap_or("");
+            let (content, is_error) = match name {
+                "Skill" => {
+                    let skill = block["input"]["skill"].as_str().unwrap_or("");
+                    match skills.invoke(skill) {
+                        Ok(body) => (body, false),
+                        Err(e) => (e, true),
+                    }
+                }
+                other => (format!("unknown tool {other:?}"), true),
+            };
+            results.push(json!({
+                "type": "tool_result",
+                "tool_use_id": id,
+                "content": content,
+                "is_error": is_error,
+            }));
+        }
+
+        let message_id = uuid::Uuid::new_v4().to_string();
+        publish_message(
+            client,
+            conv,
+            &message_id,
+            query,
+            &turn_id,
+            "user",
+            &json!({ "kind": "agent" }),
+            &results,
+        )
+        .await;
+        history.push(json!({ "role": "user", "content": results.clone() }));
+        committed.push(Message {
+            id: message_id,
+            role: "user".into(),
+            content: results,
+        });
+
+        // The next round is a new turn of the same query.
+        turn_id = uuid::Uuid::new_v4().to_string();
     }
+    unreachable!("the tool loop always returns")
 }
 
 /// `leaf` is the class-and-event path after the id — `changes.message`,
@@ -353,9 +472,7 @@ async fn publish_message(
     .await;
 }
 
-// Cancelled turns land here via task abort — the variant exists for the
-// fold's completeness; the abort path publishes turn_cancelled directly.
-#[allow(dead_code)]
-fn _cancelled() -> TurnEnd {
-    TurnEnd::Cancelled
-}
+// Cancelled queries never reach fold_turn_end: the abort kills the task
+// before its done.send, and the cancel arm publishes turn_cancelled and the
+// query closure directly — which is also why TurnEnd has no Cancelled
+// variant to carry.

@@ -6,6 +6,12 @@ members = ["crates/wire", "crates/towerd", "crates/bridge"]
 version = "0.1.0"
 edition = "2024"
 
+# Shared lints; crates opt in with `[lints] workspace = true`.
+[workspace.lints.clippy]
+# `.clone()` on an Arc/Rc reads like a deep copy; `Arc::clone(&x)` says
+# "new handle, same data" at the call site.
+clone_on_ref_ptr = "warn"
+
 # Shared dependencies live here once; crates inherit with `foo.workspace = true`.
 [workspace.dependencies]
 anyhow = "1"
@@ -23,3 +29,7 @@ sha2 = "0.10"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
+# The YAML organisation's own continuation of serde_yaml (github.com/yaml/
+# yaml-serde) — skills frontmatter is YAML, and hand-parsing YAML is an
+# approximation that already bit once (block-scalar descriptions).
+yaml_serde = "0.10"

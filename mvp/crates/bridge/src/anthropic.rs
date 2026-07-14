@@ -60,6 +60,7 @@ pub struct TurnDone {
 
 /// Stream one turn: publish `block`/`delta` as chunks arrive, accumulate the
 /// content blocks for the commit, and return the round's accounting.
+/// `tools` is the API `tools` array; empty = the no-tools call as before.
 pub async fn stream_turn(
     client: &async_nats::Client,
     conv: &ConversationId,
@@ -67,6 +68,7 @@ pub async fn stream_turn(
     model: &str,
     system: Option<&str>,
     messages: &[Value],
+    tools: &[Value],
 ) -> anyhow::Result<TurnDone> {
     // The system array always leads with the Agent SDK identity prefix —
     // subscription (OAuth) access requires it; the spawn's own system prompt
@@ -78,13 +80,16 @@ pub async fn stream_turn(
     if let Some(system) = system {
         system_blocks.push(json!({ "type": "text", "text": system }));
     }
-    let body = json!({
+    let mut body = json!({
         "model": model,
         "max_tokens": MAX_TOKENS,
         "stream": true,
         "system": system_blocks,
         "messages": messages,
     });
+    if !tools.is_empty() {
+        body["tools"] = json!(tools);
+    }
 
     let request = reqwest::Client::new()
         .post("https://api.anthropic.com/v1/messages")
@@ -110,8 +115,11 @@ pub async fn stream_turn(
     };
 
     // The fold state: content blocks accumulate by index (the API streams
-    // them strictly sequentially — order carries the structure).
+    // them strictly sequentially — order carries the structure). A tool_use
+    // block's input streams as `partial_json` chunks; they accumulate here
+    // and fold into the block's `input` when the block closes.
     let mut content: Vec<Value> = Vec::new();
+    let mut open_json = String::new();
     let mut stop_reason = String::from("end_turn");
     let (mut input_tokens, mut cache_creation, mut cache_read, mut output_tokens) = (0, 0, 0, 0);
 
@@ -146,12 +154,12 @@ pub async fn stream_turn(
                     cache_read = usage["cache_read_input_tokens"].as_i64().unwrap_or(0);
                 }
                 "content_block_start" => {
+                    finish_block(&mut content, &mut open_json);
                     let block = &event["content_block"];
                     let block_type = block["type"].as_str().unwrap_or("text").to_string();
                     publish(json!({ "type": "block", "blockType": block_type })).await;
-                    // Seed the accumulating block; tool_use would seed
-                    // id/name here — v0 requests no tools, so text and
-                    // thinking are what arrives.
+                    // Seed the accumulating block — a tool_use start carries
+                    // its id and name; the input arrives as partial_json.
                     content.push(block.clone());
                 }
                 "content_block_delta" => {
@@ -171,6 +179,7 @@ pub async fn stream_turn(
                         match delta["type"].as_str().unwrap_or("") {
                             "text_delta" => append_str(open, "text", text),
                             "thinking_delta" => append_str(open, "thinking", text),
+                            "input_json_delta" => open_json.push_str(text),
                             "signature_delta" => append_str(
                                 open,
                                 "signature",
@@ -198,6 +207,8 @@ pub async fn stream_turn(
         }
     }
 
+    finish_block(&mut content, &mut open_json);
+
     Ok(TurnDone {
         content,
         stop_reason,
@@ -206,6 +217,22 @@ pub async fn stream_turn(
         cache_read_tokens: cache_read,
         output_tokens,
     })
+}
+
+/// Close the open block: a tool_use's accumulated `partial_json` becomes its
+/// `input`. Unparseable JSON leaves the seeded input — the commit stays
+/// well-formed and the model's next turn sees its own tool call as sent.
+fn finish_block(content: &mut [Value], open_json: &mut String) {
+    if open_json.is_empty() {
+        return;
+    }
+    if let Some(open) = content.last_mut()
+        && open["type"] == "tool_use"
+        && let Ok(input) = serde_json::from_str::<Value>(open_json)
+    {
+        open["input"] = input;
+    }
+    open_json.clear();
 }
 
 /// Append a chunk to a string field, creating it if the start event carried

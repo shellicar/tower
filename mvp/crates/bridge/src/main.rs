@@ -20,6 +20,7 @@
 
 mod agent;
 mod anthropic;
+mod skills;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use wire::now_iso;
@@ -51,6 +52,19 @@ async fn main() -> anyhow::Result<()> {
     // standing in it is disposable and mints a fresh instance id per boot.
     let world = std::env::var("BRIDGE_WORLD").unwrap_or_else(|_| "local".into());
     let instance = uuid::Uuid::new_v4().to_string();
+
+    // The skills root; the catalogue itself is scanned per conversation at
+    // its FIRST message — a skill added after boot reaches the next
+    // conversation, while an already-started one keeps the snapshot its
+    // committed reminder describes. BRIDGE_SKILLS overrides the home.
+    let skills_root: std::path::PathBuf = std::env::var("BRIDGE_SKILLS")
+        .unwrap_or_else(|_| {
+            format!(
+                "{}/.claude/skills",
+                std::env::var("HOME").unwrap_or_default()
+            )
+        })
+        .into();
 
     let client = async_nats::connect(&nats_url).await?; // fail-fast
 
@@ -119,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
                 model,
                 system,
                 auth: auth.clone(),
+                skills_root: skills_root.clone(),
             };
             tokio::spawn(agent::run(client.clone(), config));
             // The attachment is what makes the conversation exist for

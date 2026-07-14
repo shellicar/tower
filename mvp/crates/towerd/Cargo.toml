@@ -3,6 +3,9 @@ name = "towerd"
 version.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 wire = { path = "../wire" }
 anyhow.workspace = true
