@@ -129,14 +129,27 @@ async fn main() -> anyhow::Result<()> {
                 .get("system")
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_string);
+            let conv_id = wire::ConversationId(conv.clone());
+            // The fact before the claim: no attach is published and no
+            // conversationId is reported until the subscription exists. A
+            // conversation that cannot hear requests is not spawned in any
+            // meaningful sense.
+            let requests = match agent::subscribe(&client, &conv_id).await {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("bridge: subscribe failed for {conv}: {e}");
+                    println!("{}", serde_json::json!({ "error": "subscribe failed" }));
+                    continue;
+                }
+            };
             let config = agent::AgentConfig {
-                conv: wire::ConversationId(conv.clone()),
+                conv: conv_id,
                 model,
                 system,
                 auth: auth.clone(),
                 skills_root: skills_root.clone(),
             };
-            tokio::spawn(agent::run(client.clone(), config));
+            tokio::spawn(agent::run(client.clone(), requests, config));
             // The attachment is what makes the conversation exist for
             // observers before its first message. cwd is causal (an input to
             // how the conversation unfolds), published when known.

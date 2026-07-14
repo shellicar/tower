@@ -38,16 +38,26 @@ pub struct AgentConfig {
     pub skills_root: std::path::PathBuf,
 }
 
-pub async fn run(client: async_nats::Client, config: AgentConfig) {
-    let subject = format!("conv.v2.{}.requests.>", config.conv.0);
+/// Subscribe to the conversation's requests. main calls this BEFORE
+/// publishing `attached` and before reporting the spawn: a conversation
+/// that cannot hear requests is not spawned in any meaningful sense, so
+/// the claim and the reply both wait for this fact.
+pub async fn subscribe(
+    client: &async_nats::Client,
+    conv: &ConversationId,
+) -> Result<async_nats::Subscriber, async_nats::SubscribeError> {
+    client
+        .subscribe(format!("conv.v2.{}.requests.>", conv.0))
+        .await
+}
+
+pub async fn run(
+    client: async_nats::Client,
+    requests: async_nats::Subscriber,
+    config: AgentConfig,
+) {
     let prefix = format!("conv.v2.{}.requests.", config.conv.0);
-    let mut requests = match client.subscribe(subject).await {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("bridge[{}]: subscribe failed: {e}", config.conv.0);
-            return;
-        }
-    };
+    let mut requests = requests;
     eprintln!("bridge[{}]: serving", config.conv.0);
 
     let mut conversation = Conversation::default();
