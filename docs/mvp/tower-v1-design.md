@@ -295,7 +295,10 @@ async fn main() -> anyhow::Result<()> {
   `changes.query` closure), and always completes its `done` report — so the
   tree can never lose a message the wire has, and the
   cancel-after-completion ordering (scenario 2b) is a deterministic unit
-  test, not a timing accident.
+  test, not a timing accident. The say rides PENDING until the first turn
+  commits (conversation-spec's recommended declaration): a cancel before
+  then revokes the say itself — record untouched, tip unmoved, the same
+  message re-sendable against the premise the sender already knew.
 
 ## Testing
 

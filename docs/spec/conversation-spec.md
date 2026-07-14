@@ -195,9 +195,13 @@ A **cancelled turn**'s assistant message never commits: it existed only as
 deltas and never enters the store; `turn_cancelled` on telemetry is its
 trace. The user-role half — the `say` that opened the query — is the
 implementation's declaration: commit it or not, the record is the answer (see
-Implementation details), which is why scenario 2's fixture omits it as one
-compliant capture. The *query* it ended, though, closed — and closure is
-committal: a `query` change with reason `cancelled` records it.
+Implementation details). **Not committing it is the recommended declaration**:
+a cancel revokes the say, not just the turn it started — committing the user
+half leaves a message its sender revoked in the conversation and moves the
+tip under them, so the released premise is no longer the tip they knew.
+Scenario 2's fixture captures the recommended shape. The *query* it ended,
+though, closed — and closure is committal: a `query` change with reason
+`cancelled` records it.
 
 | Event | Subject | Fields | Notes |
 |---|---|---|---|
@@ -379,7 +383,8 @@ implementation's own, made visible by its commits rather than specified:
 
 - Whether the user-role half of a cancelled turn is committed. The
   implementation declares by committing or not; the record is the answer, and
-  no one has to read its source to know.
+  no one has to read its source to know. Not committing is recommended — the
+  cancel revokes the say, not just the turn (see The change stream).
 - What is actually sent to the model. The request is a *rendering* of the
   reachable state — what the builder ships, and any presentation-time
   transformation, is between the agent and its model.

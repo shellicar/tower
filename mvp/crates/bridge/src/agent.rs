@@ -103,18 +103,26 @@ pub async fn run(
                                 }
                                 content.push(json!({ "type": "text", "text": text }));
 
-                                // Commit the user half first; half a chat is not a chat.
-                                publish_message(&client, &config.conv, &message_id, &query, &turn,
-                                                "user", &from, &content).await;
-                                conversation.start_query(query.clone(), Message {
+                                // The user half is PENDING, not committed:
+                                // the spec's recommended declaration. It
+                                // commits with the first turn's result; a
+                                // query cancelled before then leaves the
+                                // record untouched - the cancel revoked the
+                                // say, not just the turn.
+                                let user = Message {
                                     id: message_id,
                                     role: "user".into(),
                                     content,
-                                });
+                                };
+                                conversation.start_query(query.clone());
 
                                 // The query task, cooperatively cancellable.
                                 let (tx, rx) = watch::channel(false);
                                 cancel_tx = Some(tx);
+                                // The model sees the pending say; the record
+                                // does not, yet.
+                                let mut history = conversation.history();
+                                history.push(json!({ "role": "user", "content": user.content }));
                                 let ctx = TurnContext {
                                     client: client.clone(),
                                     conv: config.conv.clone(),
@@ -124,8 +132,9 @@ pub async fn run(
                                     skills,
                                     query: query.clone(),
                                     turn,
+                                    user,
+                                    user_from: from,
                                 };
-                                let history = conversation.history();
                                 let done = done_tx.clone();
                                 let q = query.clone();
                                 tokio::spawn(async move {
@@ -182,6 +191,9 @@ struct TurnContext {
     skills: Arc<Skills>,
     query: String,
     turn: String,
+    /// The say: turn 1's user half, pending until that turn commits.
+    user: Message,
+    user_from: Value,
 }
 
 /// Resolves when the cancel signal flips; never resolves if it never does
@@ -222,6 +234,8 @@ async fn run_query(
         skills,
         query,
         turn,
+        user,
+        user_from,
     } = &ctx;
 
     let tools: Vec<Value> = if skills.is_empty() {
@@ -231,6 +245,14 @@ async fn run_query(
     };
 
     let mut committed: Vec<Message> = Vec::new();
+    // The say rides pending and commits with the FIRST turn's result: words
+    // are revocable while nothing depends on them, so a query cancelled
+    // before its first commit leaves the record untouched. Tool results are
+    // different (see the tool round below): a committed tool_use without its
+    // tool_result is an INVALID conversation no servicer can continue, so
+    // results commit at execution and a later cancel leaves the record
+    // resting validly on the tool_result - the next say appends after it.
+    let mut pending_user = Some(user.clone());
     let mut turn_id = turn.clone();
 
     for round in 0.. {
@@ -346,6 +368,17 @@ async fn run_query(
         )
         .await;
 
+        // The first successful turn commits the pending say, then the
+        // assistant message: the record gains the pair together, and a query
+        // that never got this far left the record untouched.
+        if let Some(u) = pending_user.take() {
+            publish_message(
+                client, conv, &u.id, query, &turn_id, "user", user_from, &u.content,
+            )
+            .await;
+            committed.push(u);
+        }
+
         // Commit the assistant message: whatever the stop reason, this
         // content is the record.
         let message_id = uuid::Uuid::new_v4().to_string();
@@ -450,6 +483,9 @@ async fn run_query(
             }));
         }
 
+        // The results commit at execution, unlike the say: the committed
+        // tool_use above is unanswerable without them - a record resting on
+        // a bare tool_use is invalid for every future turn.
         let message_id = uuid::Uuid::new_v4().to_string();
         publish_message(
             client,
@@ -479,8 +515,13 @@ async fn run_query(
 /// `telemetry.turn.started`): v2's one-place discriminator.
 async fn publish(client: &async_nats::Client, conv: &ConversationId, leaf: &str, payload: Value) {
     let subject = format!("conv.v2.{}.{leaf}", conv.0);
-    eprintln!("bridge[{}]: → {subject}", conv.0);
     let bytes = serde_json::to_vec(&payload).expect("json! of plain values cannot fail");
+    eprintln!(
+        "{} bridge[{}]: → {subject} ({} B)",
+        now_iso(),
+        conv.0,
+        bytes.len()
+    );
     if let Err(e) = client.publish(subject, bytes.into()).await {
         eprintln!("bridge[{}]: publish failed: {e}", conv.0);
     }
