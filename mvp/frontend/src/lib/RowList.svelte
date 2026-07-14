@@ -180,7 +180,7 @@
   {#each tower.attachedOnly as a (a.conv)}
     <li>
       <button
-        class="flex w-full cursor-pointer justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900 {tower.tab.convs.includes(
+        class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900 {tower.tab.convs.includes(
           a.conv,
         )
           ? 'bg-slate-800'
@@ -190,14 +190,18 @@
             ? tower.closeConversation(a.conv)
             : tower.openConversation(a.conv)}
       >
-        <span class="truncate">
-          {#if verdict(a.conv) === 'stranded'}<span class="text-red-400">● </span
-            >{:else}<span class="text-green-400">● </span>{/if}{a.conv}
+        <span class="flex min-w-0 flex-1 items-center gap-1.5">
+          <span
+            class="h-2 w-2 shrink-0 rounded-full {verdict(a.conv) === 'stranded'
+              ? 'bg-red-400'
+              : 'bg-green-400'}"
+          ></span>
+          <span class="truncate">{a.conv}</span>
         </span>
-        <span class="flex shrink-0 gap-2 text-neutral-500">
-          {#if a.cwd}<span class="truncate">{a.cwd}</span>{/if}
-          <span>served, silent</span>
-        </span>
+        <span class="shrink-0 text-neutral-500">served, silent</span>
+        {#if a.cwd}
+          <span class="w-full truncate pt-0.5 text-xs text-neutral-500">{a.cwd}</span>
+        {/if}
       </button>
     </li>
   {/each}
@@ -227,13 +231,15 @@
               ? tower.closeConversation(row.conv)
               : tower.openConversation(row.conv)}
         >
-          <span class="truncate">
-            {#if tower.pendingByConv.has(row.conv)}<span class="text-amber-300">⚠ </span
-              >{/if}{#if verdict(row.conv) === 'alive'}<span class="text-green-400">● </span
-              >{:else if verdict(row.conv) === 'stranded'}<span class="text-red-400">● </span
-              >{/if}<span
-              class:text-neutral-200={row.title}>{row.title ?? row.conv}</span
-            >
+          <span class="flex min-w-0 items-center gap-1.5">
+            {#if tower.pendingByConv.has(row.conv)}<span class="shrink-0 text-amber-300">⚠</span
+              >{/if}
+            {#if verdict(row.conv) === 'alive'}
+              <span class="h-2 w-2 shrink-0 rounded-full bg-green-400"></span>
+            {:else if verdict(row.conv) === 'stranded'}
+              <span class="h-2 w-2 shrink-0 rounded-full bg-red-400"></span>
+            {/if}
+            <span class="truncate" class:text-neutral-200={row.title}>{row.title ?? row.conv}</span>
           </span>
           <span class="flex shrink-0 gap-2 text-neutral-400">
             <span>{row.lastKind}</span>
