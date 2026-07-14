@@ -6,10 +6,12 @@ import { defineConfig } from 'vite';
 // same TOWER_BIND towerd itself reads (dev.sh sets both), so the pair moves
 // together. Prod: `vite build` → dist/, served by towerd itself.
 const towerd = process.env.TOWER_BIND ?? '127.0.0.1:8080';
+const port = Number(process.env.WEB_PORT ?? 5173);
 
 export default defineConfig({
   plugins: [tailwindcss(), svelte()],
   server: {
+    port,
     proxy: {
       '/ws': { target: `ws://${towerd}`, ws: true },
       '/ref': { target: `http://${towerd}` },

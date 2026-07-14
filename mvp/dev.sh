@@ -11,7 +11,7 @@ cd "$(dirname "$0")"
 # its own port, its own vite port. All overridable from the environment.
 export TOWER_BIND="${TOWER_BIND:-127.0.0.1:8081}"
 export TOWER_DB="${TOWER_DB:-tower-v2.db}"
-WEB_PORT="${WEB_PORT:-5174}"
+export WEB_PORT="${WEB_PORT:-5174}"
 
 # Build/install first so the runs below start together, not serially compiling.
 cargo build --workspace
@@ -28,7 +28,7 @@ run() {
 trap 'kill 0' EXIT INT TERM
 
 run towerd cargo run -q -p towerd
-run web    pnpm --dir frontend dev -- --port "$WEB_PORT"
+run web    pnpm --dir frontend dev
 
 echo "mvp up: web http://localhost:$WEB_PORT · towerd http://$TOWER_BIND (db $TOWER_DB) · Ctrl-C stops everything"
 wait
