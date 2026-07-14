@@ -22,3 +22,5 @@ id!(QueryId);
 id!(TurnId);
 id!(MessageId);
 id!(ApprovalId);
+id!(WorldId);
+id!(InstanceId);

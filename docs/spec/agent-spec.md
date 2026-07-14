@@ -182,7 +182,7 @@ const sender = z.looseObject({
 // agent.v1.{world}.telemetry.>
 export const agentTelemetry = {
   'ready': z.looseObject({ ts, instanceId: z.string(), host: z.string().optional() }),
-  'pulse': z.looseObject({ ts, instanceId: z.string(), intervalS: z.number().positive() }),
+  'pulse': z.looseObject({ ts, instanceId: z.string(), intervalS: z.number().int().positive() }),
   'attached': z.looseObject({ ts, instanceId: z.string(), conversationId: z.string(), cwd: z.string().optional() }),
   'detached': z.looseObject({ ts, instanceId: z.string(), conversationId: z.string() }),
 };
