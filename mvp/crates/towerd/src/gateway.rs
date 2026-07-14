@@ -8,8 +8,9 @@
 use std::time::Duration;
 
 use wire::{
-    AnswerOutcome, ApprovalId, SayCommand, SayOutcome, encode_answer, encode_say,
-    parse_answer_reply, parse_say_reply,
+    AnswerOutcome, ApprovalId, CancelOutcome, ConversationId, QueryId, SayCommand, SayOutcome,
+    encode_answer, encode_cancel, encode_say, parse_answer_reply, parse_cancel_reply,
+    parse_say_reply,
 };
 
 use crate::broker::{Broker, BrokerReply, Clock};
@@ -24,6 +25,28 @@ pub async fn say<B: Broker, C: Clock>(broker: &B, clock: &C, cmd: SayCommand) ->
     {
         BrokerReply::Data(bytes) => parse_say_reply(&bytes),
         BrokerReply::Timeout | BrokerReply::NoResponders => SayOutcome::Unreachable,
+    }
+}
+
+/// Cancel a running query — stop, never rollback: committed messages stand;
+/// the query's remaining work is revoked and its premise freed. Same
+/// disciplines as `say`: no retry, transport silence folds to unreachable,
+/// and the reply confirms acceptance, never outcome — what actually stopped
+/// arrives on the change stream as the query's closure.
+pub async fn cancel<B: Broker, C: Clock>(
+    broker: &B,
+    clock: &C,
+    conv: &ConversationId,
+    query: &QueryId,
+) -> CancelOutcome {
+    let subject = format!("conv.v2.{}.requests.cancel", conv.0);
+    let payload = encode_cancel(query, &clock.now_iso());
+    match broker
+        .request(&subject, payload, Duration::from_secs(5))
+        .await
+    {
+        BrokerReply::Data(bytes) => parse_cancel_reply(&bytes),
+        BrokerReply::Timeout | BrokerReply::NoResponders => CancelOutcome::Unreachable,
     }
 }
 
@@ -121,6 +144,28 @@ mod tests {
                 SayOutcome::Unreachable
             );
         }
+    }
+
+    #[tokio::test]
+    async fn cancel_addresses_the_query_leaf_and_parses_the_reply() {
+        let broker = FakeBroker {
+            reply: BrokerReply::Data(br#"{"accepted":true}"#.to_vec()),
+            seen: Arc::default(),
+        };
+        let outcome = cancel(
+            &broker,
+            &FixedClock,
+            &ConversationId("conv-abc".into()),
+            &QueryId("q7".into()),
+        )
+        .await;
+        assert_eq!(outcome, CancelOutcome::Accepted);
+
+        let seen = broker.seen.lock().unwrap();
+        assert_eq!(seen[0].0, "conv.v2.conv-abc.requests.cancel");
+        let v: serde_json::Value = serde_json::from_slice(&seen[0].1).unwrap();
+        assert_eq!(v["id"], "q7");
+        assert_eq!(v["from"], serde_json::json!({ "kind": "human" }));
     }
 
     #[tokio::test]

@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::{broadcast, oneshot};
 
-use wire::{AnswerOutcome, ApprovalId, ConversationId, SayCommand, SayOutcome};
+use wire::{
+    AnswerOutcome, ApprovalId, CancelOutcome, ConversationId, QueryId, SayCommand, SayOutcome,
+};
 
 use crate::broker::{Broker, Clock};
 use crate::gateway;
@@ -37,6 +39,12 @@ pub enum ClientMsg {
         conv: String,
         text: String,
         tip: Option<String>,
+    },
+    #[serde(rename = "cancel")]
+    Cancel {
+        id: String,
+        conv: String,
+        query: String,
     },
     #[serde(rename = "set_title")]
     SetTitle {
@@ -118,6 +126,20 @@ pub enum ServerMsg {
         query: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
+    },
+    #[serde(rename = "cancel_result")]
+    CancelResult {
+        id: String,
+        outcome: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+    #[serde(rename = "query")]
+    Query {
+        conv: String,
+        #[serde(rename = "queryId")]
+        query_id: String,
+        reason: String,
     },
     #[serde(rename = "message")]
     Message { conv: String, message: WsMessage },
@@ -398,6 +420,15 @@ impl Session {
             ViewEvent::Approval(state) => Some(ServerMsg::Approval(state.into())),
             // Agent facts too: one wire fact, one packet, never gated.
             ViewEvent::Agent(fact) => Some(ServerMsg::Agent(fact.into())),
+            ViewEvent::QueryClosed {
+                conv,
+                query,
+                reason,
+            } if self.watching.contains(&conv) => Some(ServerMsg::Query {
+                conv: conv.0,
+                query_id: query.0,
+                reason,
+            }),
             _ => None,
         }
     }
@@ -476,6 +507,25 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
         ClientMsg::Close { id, conv } => {
             session.close(&conv);
             ServerMsg::Closed { id, conv }
+        }
+        ClientMsg::Cancel { id, conv, query } => {
+            match gateway::cancel(broker, clock, &ConversationId(conv), &QueryId(query)).await {
+                CancelOutcome::Accepted => ServerMsg::CancelResult {
+                    id,
+                    outcome: "accepted",
+                    reason: None,
+                },
+                CancelOutcome::Rejected { reason } => ServerMsg::CancelResult {
+                    id,
+                    outcome: "rejected",
+                    reason: Some(reason),
+                },
+                CancelOutcome::Unreachable => ServerMsg::CancelResult {
+                    id,
+                    outcome: "unreachable",
+                    reason: None,
+                },
+            }
         }
         ClientMsg::Answer {
             id,

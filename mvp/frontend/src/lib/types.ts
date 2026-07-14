@@ -99,6 +99,10 @@ export type ServerMsg =
   | ({ type: 'approval' } & ApprovalState)
   | { type: 'agents'; instances: AgentInstance[]; attachments: AgentAttachment[] }
   | ({ type: 'agent' } & AgentEvent)
+  | { type: 'query'; conv: string; queryId: string; reason: string }
+  | { type: 'cancel_result'; id: string; outcome: 'accepted' }
+  | { type: 'cancel_result'; id: string; outcome: 'rejected'; reason: string }
+  | { type: 'cancel_result'; id: string; outcome: 'unreachable' }
   | { type: 'answer_result'; id: string; outcome: 'accepted' }
   | { type: 'answer_result'; id: string; outcome: 'rejected'; reason: string }
   | { type: 'answer_result'; id: string; outcome: 'unreachable' }
@@ -115,6 +119,7 @@ export type ClientMsg =
   | { type: 'open'; id: string; conv: string; after: Millis | null }
   | { type: 'close'; id: string; conv: string }
   | { type: 'say'; id: string; conv: string; text: string; tip: string | null }
+  | { type: 'cancel'; id: string; conv: string; query: string }
   | { type: 'set_title'; id: string; conv: string; title: string }
   | { type: 'set_tag'; id: string; conv: string; key: string; value: string }
   | { type: 'answer'; id: string; approval: string; approved: boolean };

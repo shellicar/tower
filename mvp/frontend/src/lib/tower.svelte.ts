@@ -22,6 +22,13 @@ export interface StreamSegment {
   text: string;
 }
 
+/** The client's KNOWLEDGE of a conversation's query state — and unknown is
+ *  a real state, rendered as such: towerd stores no query state, so a fresh
+ *  connect knows nothing until evidence arrives (a say_result, streaming
+ *  activity, a `query` closure). The render is a courtesy; the premise
+ *  check is the enforcement. */
+export type QueryState = 'unknown' | 'idle' | 'live';
+
 export interface OpenConversation {
   conv: string;
   /** ts-ordered, deduped by message id. */
@@ -32,7 +39,29 @@ export interface OpenConversation {
   /** Outcome of the last say, shown until the next one. */
   lastSay: string | null;
   loaded: boolean;
+  /** What this client knows about query liveness. */
+  queryState: QueryState;
+  /** The query THIS client started, while live — what cancel targets. */
+  liveQuery: string | null;
+  /** The say in flight: accepted but not yet committed — rendered greyed,
+   *  superseded by its committed message, returned to the editor if the
+   *  query closes without committing it. */
+  pendingSay: string | null;
+  /** A revoked say handed back to the editor; the panel consumes it. */
+  restoreSay: string | null;
 }
+
+const freshOpen = (conv: string): OpenConversation => ({
+  conv,
+  messages: [],
+  streaming: [],
+  lastSay: null,
+  loaded: false,
+  queryState: 'unknown',
+  liveQuery: null,
+  pendingSay: null,
+  restoreSay: null,
+});
 
 /** The rail's view configuration — per profile, like the open set. */
 export interface ViewConfig {
@@ -89,6 +118,8 @@ class Tower {
   #pendingSays = new Map<string, string>();
   /** requestId → approval id, same routing for answer_result. */
   #pendingAnswers = new Map<string, string>();
+  /** requestId → conv, same routing for cancel_result. */
+  #pendingCancels = new Map<string, string>();
   #retryMs = 500;
 
   /** Rows by lastEvent descending — the staleness order is the product. */
@@ -176,13 +207,7 @@ class Tower {
     }
     for (const conv of this.tab.convs) {
       if (!this.open.has(conv)) {
-        this.open.set(conv, {
-          conv,
-          messages: [],
-          streaming: [],
-          lastSay: null,
-          loaded: false,
-        });
+        this.open.set(conv, freshOpen(conv));
         this.#send({ type: 'open', id: this.#id(), conv, after: null });
       }
     }
@@ -219,13 +244,7 @@ class Tower {
     if (!this.#restored) {
       this.#restored = true;
       for (const conv of this.tab.convs) {
-        this.open.set(conv, {
-          conv,
-          messages: [],
-          streaming: [],
-          lastSay: null,
-          loaded: false,
-        });
+        this.open.set(conv, freshOpen(conv));
       }
       this.open = new Map(this.open);
     }
@@ -237,10 +256,14 @@ class Tower {
       this.connected = true;
       this.#retryMs = 500;
       // Re-open everything that was being read, with the high-water mark.
+      // Query state resets to unknown: a fresh connection has no evidence.
       for (const [conv, oc] of this.open) {
         oc.loaded = false;
+        oc.queryState = 'unknown';
+        oc.liveQuery = null;
         this.#send({ type: 'open', id: this.#id(), conv, after: highWater(oc) });
       }
+      this.open = new Map(this.open);
     };
     ws.onmessage = (e) => {
       let msg: ServerMsg;
@@ -265,7 +288,7 @@ class Tower {
       this.saveView();
     }
     if (!this.open.has(conv)) {
-      this.open.set(conv, { conv, messages: [], streaming: [], lastSay: null, loaded: false });
+      this.open.set(conv, freshOpen(conv));
       this.open = new Map(this.open);
     }
     this.#send({ type: 'open', id: this.#id(), conv, after: null });
@@ -329,7 +352,9 @@ class Tower {
   }
 
   /** The tip is this client's view of the latest message id — the premise
-   *  belongs to the sender; null claims the conversation is empty. */
+   *  belongs to the sender; null claims the conversation is empty. The text
+   *  rides as the pending say — greyed until committed, returned to the
+   *  editor if the query closes without committing it. */
   say(conv: string, text: string) {
     const oc = this.open.get(conv);
     if (!oc) return;
@@ -337,7 +362,27 @@ class Tower {
     const id = this.#id();
     this.#pendingSays.set(id, conv);
     oc.lastSay = null;
+    oc.pendingSay = text;
+    this.open = new Map(this.open);
     this.#send({ type: 'say', id, conv, text, tip });
+  }
+
+  /** Cancel the query this client started — stop, never rollback. The reply
+   *  is acceptance only; the outcome arrives as the query's closure. */
+  cancel(conv: string) {
+    const oc = this.open.get(conv);
+    if (!oc?.liveQuery) return;
+    const id = this.#id();
+    this.#pendingCancels.set(id, conv);
+    this.#send({ type: 'cancel', id, conv, query: oc.liveQuery });
+  }
+
+  /** The panel consumed the revoked say. */
+  consumeRestore(conv: string) {
+    const oc = this.open.get(conv);
+    if (!oc) return;
+    oc.restoreSay = null;
+    this.open = new Map(this.open);
   }
 
   #apply(msg: ServerMsg) {
@@ -376,12 +421,23 @@ class Tower {
         insertMessage(oc, msg.message);
         // A committed message supersedes the streaming that preceded it.
         oc.streaming = [];
+        // The committed say supersedes the pending one.
+        if (
+          oc.pendingSay !== null &&
+          msg.message.role === 'user' &&
+          msg.message.query === oc.liveQuery
+        ) {
+          oc.pendingSay = null;
+        }
         this.open = new Map(this.open);
         break;
       }
       case 'streaming': {
         const oc = this.open.get(msg.conv);
         if (!oc) break;
+        // Streaming is evidence a query is live — maybe not ours (liveQuery
+        // stays null), but a say now would be refused stale.
+        oc.queryState = 'live';
         // Append to the current segment; chunks arriving before any marker
         // are text — the mid-turn join renders honestly until corrected.
         const last = oc.streaming[oc.streaming.length - 1];
@@ -403,12 +459,60 @@ class Tower {
         this.#pendingSays.delete(msg.id);
         const oc = conv ? this.open.get(conv) : undefined;
         if (!oc) break;
-        oc.lastSay =
-          msg.outcome === 'accepted'
-            ? null // the answer arrives on the content flow; nothing to show
-            : msg.outcome === 'rejected'
+        if (msg.outcome === 'accepted') {
+          // Ours, live: the pending say stays greyed until its commit.
+          oc.lastSay = null;
+          oc.liveQuery = msg.query;
+          oc.queryState = 'live';
+        } else {
+          // Refused: hand the words back to the editor — nothing is lost.
+          oc.lastSay =
+            msg.outcome === 'rejected'
               ? `rejected: ${msg.reason}` // shown, never branched on
               : 'unreachable — nothing is serving this conversation';
+          if (oc.pendingSay !== null) {
+            oc.restoreSay = oc.pendingSay;
+            oc.pendingSay = null;
+          }
+        }
+        this.open = new Map(this.open);
+        break;
+      }
+      case 'query': {
+        // The committal closure: known-idle now, whoever's query it was. A
+        // pending say the query never committed is revoked — back to the
+        // editor, tip unmoved.
+        const oc = this.open.get(msg.conv);
+        if (!oc) break;
+        oc.queryState = 'idle';
+        if (oc.liveQuery === msg.queryId) oc.liveQuery = null;
+        if (oc.pendingSay !== null) {
+          oc.restoreSay = oc.pendingSay;
+          oc.pendingSay = null;
+        }
+        oc.streaming = [];
+        this.open = new Map(this.open);
+        break;
+      }
+      case 'cancel_result': {
+        const conv = this.#pendingCancels.get(msg.id);
+        this.#pendingCancels.delete(msg.id);
+        const oc = conv ? this.open.get(conv) : undefined;
+        if (!oc) break;
+        // Acceptance only — the outcome is the closure. Refusals shown.
+        if (msg.outcome === 'rejected') oc.lastSay = `cancel rejected: ${msg.reason}`;
+        else if (msg.outcome === 'unreachable') {
+          // Nothing is serving this conversation: no closure will ever
+          // arrive, so holding the lock would strand the input. The words
+          // come home; the state is honestly unknown again.
+          oc.lastSay = 'cancel unreachable — nothing is serving this conversation';
+          oc.liveQuery = null;
+          oc.queryState = 'unknown';
+          if (oc.pendingSay !== null) {
+            oc.restoreSay = oc.pendingSay;
+            oc.pendingSay = null;
+          }
+        }
         this.open = new Map(this.open);
         break;
       }

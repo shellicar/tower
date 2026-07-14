@@ -114,6 +114,21 @@ Response: `say_result`. The *answer* to what was said is not in the response —
 it arrives on the conversation's content flow like everything else, which is
 the wire's own rule (the reply confirms acceptance, never outcome).
 
+### `cancel`
+
+```json
+{ "type": "cancel", "id": "r7", "conv": "c65b902d-…", "query": "7d8022be-…" }
+```
+
+Cancel a running query — stop, never rollback: everything already committed
+stands (the record constitutes the state); the query's remaining work is
+revoked and its premise freed. `query` is the id `say_result` returned — the
+cancel's target is its premise, never "whatever happens to be running".
+towerd forwards it to the servicer as a wire `cancel`, `from` stamped
+`{ "kind": "human" }` bare. Response: `cancel_result`. The outcome — what the
+cancel actually stopped — arrives on the change stream as the query's
+closure, like every other outcome.
+
 ### `answer`
 
 ```json
@@ -221,6 +236,40 @@ One approval's state changed — raised, pulsed, or settled. Upsert by `id`,
 exactly the `row` discipline: awareness is unconditional, an unknown id is a
 new ask being born. `settled` is present only once settled; a settled ask
 leaves the pending count and shows whose decision it was.
+
+### `query` — live, gated by `open`
+
+```json
+{ "type": "query", "conv": "c65b902d-…", "queryId": "7d8022be-…", "reason": "completed" }
+```
+
+The wire's query closure, forwarded: this query will grow no further.
+`reason` is the wire's open set (`completed`, `cancelled`, `aborted`) —
+shown, never branched on beyond display. Same gating as `message`: only for
+open conversations.
+
+**Query state is the client's knowledge, and unknown is a real state.**
+towerd stores no query state — this event is forwarded, not folded — so a
+client knows a query is live only by evidence from its own connection: its
+own `say_result` minted the query, or activity arrived, and no closure has.
+After a fresh connect or reconnect the state is **unknown**, and the client
+renders it as unknown (a badge, shading) rather than pretending idle. The
+render is a courtesy; the premise check is the enforcement — a say sent
+while unknowingly live comes back `rejected: stale`, which itself resolves
+the state to known-live.
+
+### `cancel_result` — response to `cancel`
+
+```json
+{ "type": "cancel_result", "id": "r7", "outcome": "accepted" }
+{ "type": "cancel_result", "id": "r7", "outcome": "rejected", "reason": "already_complete" }
+{ "type": "cancel_result", "id": "r7", "outcome": "unreachable" }
+```
+
+Transport truth, never outcome — `accepted` means the servicer took the
+cancel, not that anything stopped: cancelling something that is finishing
+anyway legitimately closes `completed`. `reason` is an open set
+(`already_complete`, `not_found`, `unsupported`, and anything future).
 
 ### `agents` — once, on connect
 
@@ -501,6 +550,7 @@ export const clientMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('open'),  id: z.string(), conv: z.string(), after: millis.nullable() }),
   z.looseObject({ type: z.literal('close'), id: z.string(), conv: z.string() }),
   z.looseObject({ type: z.literal('say'),   id: z.string(), conv: z.string(), text: z.string(), tip: z.string().nullable() }),
+  z.looseObject({ type: z.literal('cancel'), id: z.string(), conv: z.string(), query: z.string() }),
   z.looseObject({ type: z.literal('set_title'), id: z.string(), conv: z.string(), title: z.string() }),
   z.looseObject({ type: z.literal('set_tag'), id: z.string(), conv: z.string(), key: z.string(), value: z.string() }),
   z.looseObject({ type: z.literal('answer'), id: z.string(), approval: z.string(), approved: z.boolean() }),
@@ -524,7 +574,11 @@ export const serverMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('say_result'),   id: z.string(), outcome: z.literal('accepted'), query: z.string() }),
   z.looseObject({ type: z.literal('say_result'),   id: z.string(), outcome: z.literal('rejected'), reason: z.string() }),
   z.looseObject({ type: z.literal('say_result'),   id: z.string(), outcome: z.literal('unreachable') }),
+  z.looseObject({ type: z.literal('cancel_result'), id: z.string(), outcome: z.literal('accepted') }),
+  z.looseObject({ type: z.literal('cancel_result'), id: z.string(), outcome: z.literal('rejected'), reason: z.string() }),
+  z.looseObject({ type: z.literal('cancel_result'), id: z.string(), outcome: z.literal('unreachable') }),
   z.looseObject({ type: z.literal('message'),      conv: z.string(), message: conversationMessage }),
+  z.looseObject({ type: z.literal('query'),        conv: z.string(), queryId: z.string(), reason: z.string() }),
   z.looseObject({ type: z.literal('streaming'),    conv: z.string(), text: z.string() }),
   z.looseObject({ type: z.literal('stream_block'), conv: z.string(), blockType: z.string() }),
   z.looseObject({ type: z.literal('error'),        id: z.string(), reason: z.string() }),

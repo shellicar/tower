@@ -39,6 +39,50 @@ pub fn encode_say(cmd: &SayCommand, ts: &str) -> Vec<u8> {
     serde_json::to_vec(&payload).expect("json! of plain values cannot fail")
 }
 
+/// The wire `cancel`: revoke a running query by its id — the id is the
+/// cancel's premise (conversation-spec, Requests). `from` stamped
+/// `{ kind: "human" }` bare, exactly as `say`. v2: the leaf
+/// (`requests.cancel`) spells the type; the body carries none.
+pub fn encode_cancel(query: &QueryId, ts: &str) -> Vec<u8> {
+    let payload = json!({
+        "ts": ts,
+        "from": { "kind": "human" },
+        "id": query.0,
+    });
+    serde_json::to_vec(&payload).expect("json! of plain values cannot fail")
+}
+
+/// Reply → outcome for `cancel`. Same three-way honesty as `say`, but
+/// acceptance mints nothing: `accepted` carries no id.
+pub fn parse_cancel_reply(bytes: &[u8]) -> CancelOutcome {
+    let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
+        return CancelOutcome::Rejected {
+            reason: "unintelligible reply".into(),
+        };
+    };
+    if value.get("accepted").and_then(Value::as_bool) == Some(true) {
+        return CancelOutcome::Accepted;
+    }
+    if value.get("rejected").and_then(Value::as_bool) == Some(true) {
+        let reason = value
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or("unspecified")
+            .to_string();
+        return CancelOutcome::Rejected { reason };
+    }
+    CancelOutcome::Rejected {
+        reason: "unintelligible reply".into(),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CancelOutcome {
+    Accepted,
+    Rejected { reason: String },
+    Unreachable,
+}
+
 // ---------------------------------------------------------------------------
 // The servicer direction: what a bridge agent reads off `.requests` and how
 // it answers. The inverse of the client half above, same tolerance: an
@@ -231,6 +275,38 @@ mod tests {
         assert!(matches!(
             parse_request("say", b"not json"),
             ConvRequest::Other { .. }
+        ));
+    }
+
+    #[test]
+    fn cancel_encodes_and_both_directions_meet() {
+        let bytes = encode_cancel(&QueryId("q7".into()), "2026-07-07T21:00:00+10:00");
+        let v: Value = serde_json::from_slice(&bytes).unwrap();
+        // v2: no body type; the leaf (`requests.cancel`) spells it.
+        assert!(v.get("type").is_none());
+        assert_eq!(v["id"], "q7");
+        assert_eq!(v["from"], serde_json::json!({ "kind": "human" }));
+
+        // The servicer parses what the client encoded.
+        assert!(matches!(
+            parse_request("cancel", &bytes),
+            ConvRequest::Cancel { query: QueryId(q), .. } if q == "q7"
+        ));
+
+        // Replies fold to the three-way outcome.
+        assert_eq!(
+            parse_cancel_reply(&encode_accepted(None)),
+            CancelOutcome::Accepted
+        );
+        assert_eq!(
+            parse_cancel_reply(&encode_rejected("already_complete")),
+            CancelOutcome::Rejected {
+                reason: "already_complete".into()
+            }
+        );
+        assert!(matches!(
+            parse_cancel_reply(b"not json"),
+            CancelOutcome::Rejected { .. }
         ));
     }
 

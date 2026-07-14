@@ -21,7 +21,7 @@ pub use ingest::{
     AgentEvent, AgentKind, ApprovalEvent, ApprovalKind, Event, EventKind, WireEvent, parse_wire,
 };
 pub use say::{
-    ConvRequest, SayCommand, SayOutcome, encode_accepted, encode_rejected, encode_say,
-    parse_request, parse_say_reply,
+    CancelOutcome, ConvRequest, SayCommand, SayOutcome, encode_accepted, encode_cancel,
+    encode_rejected, encode_say, parse_cancel_reply, parse_request, parse_say_reply,
 };
 pub use ts::{format_ts, now_iso, parse_ts};

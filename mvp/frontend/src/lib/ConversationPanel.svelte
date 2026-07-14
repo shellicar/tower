@@ -76,6 +76,27 @@
     if (editor && draft !== '') autosize();
   });
 
+  // A revoked say comes back to the editor — the cancel took back the words,
+  // Claude Code's escape behaviour. Prepended so a newer half-typed thought
+  // survives too.
+  $effect(() => {
+    if (oc.restoreSay !== null) {
+      draft = draft ? `${oc.restoreSay}\n${draft}` : oc.restoreSay;
+      tower.consumeRestore(oc.conv);
+      requestAnimationFrame(autosize);
+    }
+  });
+
+  // The client's knowledge of query liveness — unknown is a real state,
+  // rendered as such, never dressed as idle. Only OUR OWN live query
+  // disables the input: it is the one we can cancel, and the one whose
+  // closure we are guaranteed to want. Foreign activity (streaming from
+  // another sender's query) badges but never locks — a submit against it
+  // is refused stale and the words come back, which is self-correcting;
+  // a hard lock with no cancel button would strand the panel if the
+  // servicer died mid-stream.
+  const busy = $derived(oc.liveQuery !== null);
+
   // While anchored, re-pin on any geometry change — catch-up, new message,
   // streaming chunk. While unanchored, never move.
   $effect(() => {
@@ -88,7 +109,7 @@
 
   function submit() {
     const text = draft.trim();
-    if (!text) return;
+    if (!text || busy) return;
     tower.say(oc.conv, text);
     draft = '';
     // Deliberately no re-anchor: a reader scrolled up for a reason stays
@@ -191,6 +212,13 @@
       {#each oc.messages as message (message.id)}
         <MessageView {message} />
       {/each}
+      {#if oc.pendingSay}
+        <!-- The say in flight: accepted, not yet committed — the record
+             doesn't hold it, so it renders greyed, not as a message. -->
+        <div class="my-2 border-l-2 border-neutral-700 pl-2 opacity-50">
+          <div class="whitespace-pre-wrap text-neutral-300">{oc.pendingSay}</div>
+        </div>
+      {/if}
       {#if oc.streaming.length > 0}
         <div class="my-2 border-l-2 border-indigo-800 pl-2">
           {#each oc.streaming as segment, i (i)}
@@ -241,19 +269,31 @@
         </span>
       </div>
     {/each}
-    {#if row}
-      <p class="mb-1.5 text-neutral-500">{row.lastKind} · {age(row.lastEvent)} ago</p>
-    {/if}
+    <p class="mb-1.5 flex items-center gap-2 text-neutral-500">
+      {#if row}<span>{row.lastKind} · {age(row.lastEvent)} ago</span>{/if}
+      {#if oc.queryState === 'unknown'}
+        <span class="rounded border border-neutral-700 px-1.5 text-neutral-500" title="no evidence yet whether a query is running">state unknown</span>
+      {:else if oc.queryState === 'live'}
+        <span class="rounded border border-indigo-800 px-1.5 text-indigo-300">query running</span>
+        {#if oc.liveQuery}
+          <button
+            class="cursor-pointer rounded border border-red-900 px-1.5 text-red-300 hover:bg-red-950"
+            onclick={() => tower.cancel(oc.conv)}>cancel</button
+          >
+        {/if}
+      {/if}
+    </p>
     {#if oc.lastSay}
       <p class="mb-1.5 text-orange-300">{oc.lastSay}</p>
     {/if}
     <textarea
-      class="max-h-48 min-h-16 w-full resize-none border border-neutral-700 bg-neutral-900 px-2 py-1.5"
+      class="max-h-48 min-h-16 w-full resize-none border border-neutral-700 bg-neutral-900 px-2 py-1.5 disabled:opacity-50"
       bind:value={draft}
       bind:this={editor}
       oninput={autosize}
       {onkeydown}
-      placeholder="say… (⌘↩ to send)"
+      disabled={busy}
+      placeholder={busy ? 'query running… (cancel to speak)' : 'say… (⌘↩ to send)'}
     ></textarea>
   </div>
 </section>

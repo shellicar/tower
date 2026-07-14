@@ -47,6 +47,14 @@ pub enum ViewEvent {
     /// it (a pulse never fans out per conversation). Awareness is
     /// unconditional, like `Row`.
     Agent(AgentFact),
+    /// A query closed — the wire's committal closure, forwarded (not
+    /// folded: towerd stores no query state; the client's knowledge is the
+    /// client's). Gated by `open`, like `Message`.
+    QueryClosed {
+        conv: ConversationId,
+        query: QueryId,
+        reason: String,
+    },
 }
 
 /// The agent concern's facts, verdict-free: alive/released/stranded is the
@@ -690,8 +698,8 @@ impl Views {
                 // by ts and don't fold reachability. The row touch above is
                 // the tip movement's whole effect here.
                 ConvChange::TipMoved(_) => {}
-                // Query completion: the row touch above (type_name/ts) is its
-                // whole v1 effect; nothing per-message to store.
+                // Query closure: nothing stored (towerd keeps no query
+                // state); forwarded to sessions after the commit below.
                 ConvChange::Query(_) => {}
             }
         }
@@ -713,6 +721,13 @@ impl Views {
             let _ = self.events.send(ViewEvent::Message {
                 conv: conv.clone(),
                 message,
+            });
+        }
+        if let EventKind::Change(ConvChange::Query(q)) = &event.kind {
+            let _ = self.events.send(ViewEvent::QueryClosed {
+                conv: conv.clone(),
+                query: q.query_id.clone(),
+                reason: q.reason.clone(),
             });
         }
         Ok(())
