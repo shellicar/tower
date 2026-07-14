@@ -33,6 +33,7 @@ async fn publish_agent(
     payload: serde_json::Value,
 ) {
     let subject = format!("agent.v1.{world}.telemetry.{leaf}");
+    eprintln!("bridge: → {subject}");
     let bytes = serde_json::to_vec(&payload).expect("json! of plain values cannot fail");
     if let Err(e) = client.publish(subject, bytes.into()).await {
         eprintln!("bridge: agent telemetry publish failed: {e}");

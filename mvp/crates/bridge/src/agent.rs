@@ -322,6 +322,7 @@ async fn run_turn(ctx: TurnContext, history: Vec<Value>) -> TurnEnd {
 /// `telemetry.turn.started` — v2's one-place discriminator.
 async fn publish(client: &async_nats::Client, conv: &ConversationId, leaf: &str, payload: Value) {
     let subject = format!("conv.v2.{}.{leaf}", conv.0);
+    eprintln!("bridge[{}]: → {subject}", conv.0);
     let bytes = serde_json::to_vec(&payload).expect("json! of plain values cannot fail");
     if let Err(e) = client.publish(subject, bytes.into()).await {
         eprintln!("bridge[{}]: publish failed: {e}", conv.0);
