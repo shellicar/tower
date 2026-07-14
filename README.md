@@ -6,9 +6,12 @@
 
 Tower makes a fleet of LLM sessions visible, addressable, and eventually
 orchestrated, over NATS. This repository holds the design documents, the wire
-specs, and the proof of concept. There is no product build here yet: the specs
-are the deliverable, and implementations live in their own repositories and
-conform to them.
+specs, the proof of concept, and the v1 MVP in [`mvp/`](mvp/): `towerd` (the
+daemon that folds the wire into views), a Svelte frontend (the staleness
+rail — open a conversation, read it, say into it), and `bridge` (a v0 agent
+host serving conversations with the Skill tool). The specs remain the
+contract; other implementations live in their own repositories and conform
+to them.
 
 ## Motivation
 
@@ -29,6 +32,9 @@ The wire contract. One concern per document, structured by the master spec:
   `say`/`cancel` with preconditions.
 - [`docs/spec/approval-spec.md`](docs/spec/approval-spec.md): the approval concern. The
   authorization exchange: raise, answer, settle.
+- [`docs/spec/agent-spec.md`](docs/spec/agent-spec.md): the agent concern. Worlds,
+  instances, and the servicing facts — ready, pulse, attached, detached —
+  that liveness folds from.
 - [`docs/spec/conformance.md`](docs/spec/conformance.md) and
   [`docs/spec/scenarios.md`](docs/spec/scenarios.md): how implementations prove they
   carry the specs, and the fixture scenarios that prove it.
@@ -62,5 +68,8 @@ cd poc
 ## Status
 
 Stage 1 (the tap) shipped in the node CLI and its contract was superseded by
-the concern specs. Stage 2, implementing the specs, is next. See
-[`docs/roadmap.md`](docs/roadmap.md).
+the concern specs. The v1 MVP in [`mvp/`](mvp/) implements them live: the
+conv concern at v2 (leaf subjects, one-place discriminators), agent liveness
+folded into the rail, and the bridge serving real conversations end to end.
+Versions are per concern and coexist on the broker — a pre-v2 tower runs
+beside this one untouched. See [`docs/roadmap.md`](docs/roadmap.md).

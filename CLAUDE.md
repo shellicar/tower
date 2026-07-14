@@ -1,9 +1,10 @@
 # CLAUDE.md
 
-Tower v1 MVP: `towerd` (Rust) + `frontend/` (Svelte) rendering the fleet's
-conversations by staleness — open one, read it, say into it. Hand-built in
-`mvp/`, no mission machinery. The rest of the repo is specs (live contract),
-planning archives, and the poc.
+Tower v1 MVP in `mvp/`: `towerd` (Rust) + `frontend/` (Svelte) rendering the
+fleet's conversations by staleness — open one, read it, say into it — plus
+`bridge`, the v0 agent host that serves conversations (spawn over stdio, the
+messages API over SSE, the Skill tool). Hand-built, no mission machinery. The
+rest of the repo is specs (live contract), planning archives, and the poc.
 
 ## The documents govern
 
@@ -13,8 +14,10 @@ deviations land in the doc first, then the code.
 - `docs/mvp/tower-v1-design.md` — the architecture: seams, schema, decisions.
 - `docs/mvp/tower-ws-spec.md` — the browser contract. The frontend builds
   against this document alone.
-- `docs/spec/` — the wire contract (nats, conversation, approval, conformance,
-  scenarios). Normative schemas live in the specs as zod.
+- `docs/spec/` — the wire contract (nats, conversation, approval, agent,
+  conformance, scenarios). Normative schemas live in the specs as zod.
+  Versions are per concern and coexist: conv is v2, agent and approval are
+  v1 — disjoint subject trees, so old and new towers run side by side.
 - `docs/roadmap.md` — where this sits. `docs/planning/` is archive: read for
   history, never maintain.
 
@@ -27,6 +30,17 @@ deviations land in the doc first, then the code.
   file. Event rows + JetStream cursor commit in one transaction.
 - Never subscribe to or capture a `.requests` subject with JetStream — the
   stream becomes a second responder (see nats-spec, Storage).
+- A message's type is stated exactly once. Routing axis → the subject leaf
+  spells it (`conv.v2.{id}.changes.tip.moved`) and the body carries no
+  `type`; a deliberately flat subject (conv `deltas`, approval) keeps its
+  body `type` — that is correct, not redundant. Duplication is the sin.
+- Liveness is a fold, never declared. towerd stores agent facts (instances,
+  attachments); alive/released/stranded is the client's derivation from
+  `lastPulse` against its own clock — no verdict column, no server tick.
+  Agent facts never touch `rows`: staleness is conversation activity.
+- Existence is a union: an attached-but-message-less conversation is a
+  potential conversation — shown while the attachment lives, gone with it;
+  the first committed message births the ordinary row.
 - Tolerance everywhere: unknown types/fields/enum values are represented
   states (`Unknown`, `Other(String)`), never errors. Serde: no
   `deny_unknown_fields`; open enums via an untagged fallback variant.
@@ -71,12 +85,15 @@ just build     # cargo build --workspace (mvp/)
 just test      # cargo test --workspace
 just check     # cargo clippy + fmt --check
 docker compose up -d        # broker + stream-init (event subjects only)
-cd mvp/frontend && pnpm dev # vite; pnpm build → dist/ served by towerd
+just dev       # towerd + vite together — the v2 stack, beside a v1 tower:
+               # towerd 127.0.0.1:8081, db tower-v2.db, web localhost:5174
 ```
 
 Toolchain pinned by `rust-toolchain.toml`. `just` is the verbs file; scripts
 only for what cargo can't do. Config env vars: `NATS_URL`, `TOWER_BIND`,
-`TOWER_DB`.
+`TOWER_DB`, `TOWER_STREAM` (towerd); `WEB_PORT` (vite); `BRIDGE_WORLD`,
+`BRIDGE_MODEL`, `BRIDGE_SKILLS` (bridge — skills default to
+`~/.claude/skills`, scanned per conversation at its first message).
 
 ## Testing
 
@@ -88,8 +105,8 @@ only for what cargo can't do. Config env vars: `NATS_URL`, `TOWER_BIND`,
 ## Dependencies
 
 Blessed: tokio, axum, async-nats, rusqlite, serde/serde_json, anyhow,
-thiserror; Svelte 5, Vite. A new dependency is a decision — name it and why in
-the commit, don't reach.
+thiserror, reqwest, uuid, yaml_serde; Svelte 5, Vite. A new dependency is a
+decision — name it and why in the commit, don't reach.
 
 ## Conventions
 
