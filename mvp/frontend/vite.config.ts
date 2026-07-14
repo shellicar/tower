@@ -2,14 +2,17 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 
-// Dev: vite serves the SPA; /ws and /ref proxy to a running towerd.
-// Prod: `vite build` → dist/, served by towerd itself.
+// Dev: vite serves the SPA; /ws and /ref proxy to a running towerd — the
+// same TOWER_BIND towerd itself reads (dev.sh sets both), so the pair moves
+// together. Prod: `vite build` → dist/, served by towerd itself.
+const towerd = process.env.TOWER_BIND ?? '127.0.0.1:8080';
+
 export default defineConfig({
   plugins: [tailwindcss(), svelte()],
   server: {
     proxy: {
-      '/ws': { target: 'ws://127.0.0.1:8080', ws: true },
-      '/ref': { target: 'http://127.0.0.1:8080' },
+      '/ws': { target: `ws://${towerd}`, ws: true },
+      '/ref': { target: `http://${towerd}` },
     },
   },
 });
