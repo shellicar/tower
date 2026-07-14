@@ -435,17 +435,25 @@ impl Views {
         let mut stored_message: Option<ConversationMessage> = None;
         let tx = self.db.transaction()?;
 
-        // Staleness: every event with a readable ts touches the row.
-        if let Some(ts) = ts {
-            tx.execute(
-                "INSERT INTO rows (conv, last_event, last_kind) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(conv) DO UPDATE SET
-                     last_event = excluded.last_event,
-                     last_kind  = excluded.last_kind
-                 WHERE excluded.last_event >= rows.last_event",
-                rusqlite::params![conv.0, ts, kind_label],
-            )?;
-        }
+        // Staleness: every event with a readable ts touches the row — but the
+        // guard (WHERE excluded.last_event >= rows.last_event) refuses a
+        // regression. Capture whether the row actually moved, so the broadcast
+        // below never announces a ts the db just refused, which would regress
+        // every live client's row until reconnect.
+        let touched_ts: Option<i64> = match ts {
+            Some(ts) => {
+                let changed = tx.execute(
+                    "INSERT INTO rows (conv, last_event, last_kind) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(conv) DO UPDATE SET
+                         last_event = excluded.last_event,
+                         last_kind  = excluded.last_kind
+                     WHERE excluded.last_event >= rows.last_event",
+                    rusqlite::params![conv.0, ts, kind_label],
+                )? > 0;
+                changed.then_some(ts)
+            }
+            None => None,
+        };
 
         if let EventKind::Change(change) = &event.kind {
             match change {
@@ -512,7 +520,10 @@ impl Views {
         tx.execute("UPDATE cursor SET seq = ?1 WHERE id = 1", [seq as i64])?;
         tx.commit()?;
 
-        if let Some(ts) = ts {
+        // Broadcast the row only if the db actually moved (touched_ts): an
+        // out-of-order event is a no-op in the db, and must be one to clients
+        // too, or they regress until reconnect.
+        if let Some(ts) = touched_ts {
             let _ = self.events.send(ViewEvent::Row(RowChanged {
                 conv: conv.clone(),
                 last_event: ts,
@@ -740,12 +751,14 @@ impl Views {
     ) -> anyhow::Result<Vec<ConversationMessage>> {
         let mut stmt = self.db.prepare_cached(
             "SELECT message_id, query_id, turn_id, role, sender, content, ts
-             FROM messages WHERE conv = ?1 AND ts > ?2 ORDER BY ts",
+             FROM messages WHERE conv = ?1 AND ts >= ?2 ORDER BY ts",
         )?;
-        // `after` None = from the start; the boundary is exclusive of the
-        // client's high-water mark, so a shared timestamp may overlap — the
-        // spec's answer is dedupe by id client-side, and > here keeps the
-        // overlap to exact ties only. i64::MIN stands in for "everything".
+        // `after` None = from the start. The boundary is INCLUSIVE (`>=`): a
+        // message sharing the client's high-water-mark ts is re-sent, and the
+        // spec's answer is dedupe by id client-side, which absorbs that one
+        // duplicate. `>` would instead silently lose a tied message on
+        // reconnect (a sibling at the same ts the client never received).
+        // i64::MIN stands in for "everything".
         let floor = after.unwrap_or(i64::MIN);
         let rows = stmt
             .query_map(rusqlite::params![conv.0, floor], |r| {

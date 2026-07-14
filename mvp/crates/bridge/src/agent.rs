@@ -123,6 +123,18 @@ pub async fn run(client: async_nats::Client, config: AgentConfig) {
                                 encode_rejected("already_complete")
                             }
                             Some(l) if l.query == query.0 => {
+                                // KNOWN RACE (v0-acceptable, not fixed here): if
+                                // run_turn has already published its committed
+                                // message but its done.send has not yet reached
+                                // the drain above, the task still reads as live
+                                // and is aborted. Two harms follow — a
+                                // turn_cancelled for a turn whose message is
+                                // already on the wire, and the abort kills the
+                                // task before done.send, so fold_turn_end never
+                                // runs and this bridge's tree loses a message the
+                                // wire has (the desync fold_turn_end swears off).
+                                // The real fix is cooperative cancellation: no
+                                // hard abort; run_turn always completes done.send.
                                 l.abort.abort();
                                 publish(&client, &config.conv, "telemetry", json!({
                                     "type": "turn_cancelled", "ts": now_iso(),
