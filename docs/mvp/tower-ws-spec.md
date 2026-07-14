@@ -222,6 +222,49 @@ exactly the `row` discipline: awareness is unconditional, an unknown id is a
 new ask being born. `settled` is present only once settled; a settled ask
 leaves the pending count and shows whose decision it was.
 
+### `agents` — once, on connect
+
+```json
+{ "type": "agents",
+  "instances": [
+    { "world": "mac", "instanceId": "inst-1a2f", "host": "mac", "lastPulse": 1760187529000, "intervalS": 30 }
+  ],
+  "attachments": [
+    { "world": "mac", "instanceId": "inst-1a2f", "conv": "c65b902d-…", "cwd": "~/repos/tower", "attachedTs": 1760187514000 }
+  ] }
+```
+
+The servicing snapshot, sent once per connection after `approvals`: every
+instance towerd's fold retains and every live attachment. Facts only, never
+verdicts — **liveness is the client's derivation** (agent-spec: a fold, never
+declared): an attachment whose instance's `lastPulse` lags the client's clock
+by ~3 of that instance's own `intervalS` renders as stranded; a live pulse
+renders as alive; no attachment is released. `intervalS` may be absent (an
+instance that has published `ready` but no pulse yet).
+
+**Existence is a union.** A `conv` present in `attachments` but absent from
+the `list` rows is a *potential* conversation — served, ready to receive, no
+messages yet. Show it in the rail with no staleness (it has no conversation
+activity to claim); it vanishes when its attachment does, and its first
+committed message births the ordinary row. Rows never carry agent facts, and
+agent facts never touch `lastEvent`.
+
+### `agent` — live, unconditional
+
+```json
+{ "type": "agent", "kind": "ready",    "world": "mac", "instanceId": "inst-1a2f", "ts": 1760187514000, "host": "mac" }
+{ "type": "agent", "kind": "pulse",    "world": "mac", "instanceId": "inst-1a2f", "ts": 1760187544000, "intervalS": 30 }
+{ "type": "agent", "kind": "attached", "world": "mac", "instanceId": "inst-1a2f", "ts": 1760187514000, "conv": "c65b902d-…", "cwd": "~/repos/tower" }
+{ "type": "agent", "kind": "detached", "world": "mac", "instanceId": "inst-1a2f", "ts": 1760187600000, "conv": "c65b902d-…" }
+```
+
+One wire fact, one packet — a pulse is one instance fact however many
+conversations the instance serves; it never fans out per conversation.
+Upsert into the client's two maps (`instanceId → pulse`, `conv →
+attachment`); `detached` removes the attachment. `kind` is an open set:
+unknown kinds are skipped, never fatal. `ts` is the fact's wire timestamp in
+millis; for `pulse` it is the new `lastPulse`.
+
 ### `answer_result` — response to `answer`
 
 ```json
@@ -420,6 +463,22 @@ const rowState = z.looseObject({
   tags: z.record(z.string(), z.string()).optional(),
 });
 
+const agentInstance = z.looseObject({
+  world: z.string(),
+  instanceId: z.string(),
+  host: z.string().optional(),
+  lastPulse: millis,
+  intervalS: z.number().int().optional(),
+});
+
+const agentAttachment = z.looseObject({
+  world: z.string(),
+  instanceId: z.string(),
+  conv: z.string(),
+  cwd: z.string().optional(),
+  attachedTs: millis,
+});
+
 const approvalState = z.looseObject({
   id: z.string(),
   ask: z.looseObject({ type: z.string() }),
@@ -455,6 +514,9 @@ export const serverMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('title_set'),    id: z.string(), conv: z.string() }),
   z.looseObject({ type: z.literal('tag_set'),      id: z.string(), conv: z.string() }),
   z.looseObject({ type: z.literal('approvals'),    approvals: z.array(approvalState) }),
+  z.looseObject({ type: z.literal('agents'),       instances: z.array(agentInstance), attachments: z.array(agentAttachment) }),
+  z.looseObject({ type: z.literal('agent'),        kind: z.string(), world: z.string(), instanceId: z.string(), ts: millis,
+                  conv: z.string().optional(), cwd: z.string().optional(), intervalS: z.number().int().optional(), host: z.string().optional() }),
   z.looseObject({ type: z.literal('approval') }).and(approvalState),
   z.looseObject({ type: z.literal('answer_result'), id: z.string(), outcome: z.literal('accepted') }),
   z.looseObject({ type: z.literal('answer_result'), id: z.string(), outcome: z.literal('rejected'), reason: z.string() }),

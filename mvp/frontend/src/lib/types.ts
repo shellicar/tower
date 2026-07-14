@@ -58,6 +58,35 @@ export interface ApprovalState {
   settled?: { approved: boolean; by: Sender; ts: Millis };
 }
 
+export interface AgentInstance {
+  world: string;
+  instanceId: string;
+  host?: string;
+  lastPulse: Millis;
+  /** The instance's own promise; absent until its first pulse. */
+  intervalS?: number;
+}
+
+export interface AgentAttachment {
+  world: string;
+  instanceId: string;
+  conv: string;
+  cwd?: string;
+  attachedTs: Millis;
+}
+
+/** One agent wire fact, flat; `kind` is an open set — unknown kinds skipped. */
+export interface AgentEvent {
+  kind: string;
+  world: string;
+  instanceId: string;
+  ts: Millis;
+  conv?: string;
+  cwd?: string;
+  intervalS?: number;
+  host?: string;
+}
+
 // towerd → client
 export type ServerMsg =
   | { type: 'list'; rows: RowState[]; tagKeys?: Record<string, string> }
@@ -68,6 +97,8 @@ export type ServerMsg =
   | { type: 'tag_set'; id: string; conv: string }
   | { type: 'approvals'; approvals: ApprovalState[] }
   | ({ type: 'approval' } & ApprovalState)
+  | { type: 'agents'; instances: AgentInstance[]; attachments: AgentAttachment[] }
+  | ({ type: 'agent' } & AgentEvent)
   | { type: 'answer_result'; id: string; outcome: 'accepted' }
   | { type: 'answer_result'; id: string; outcome: 'rejected'; reason: string }
   | { type: 'answer_result'; id: string; outcome: 'unreachable' }

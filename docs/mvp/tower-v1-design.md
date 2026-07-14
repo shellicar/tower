@@ -126,6 +126,24 @@ CREATE TABLE messages (
 );
 CREATE INDEX messages_by_conv_ts ON messages (conv, ts);
 
+CREATE TABLE agent_instances (
+    world       TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    host        TEXT,
+    last_pulse  INTEGER NOT NULL,              -- unix millis, UTC; ready seeds it
+    interval_s  INTEGER,                       -- the instance's own promise; NULL until its first pulse
+    PRIMARY KEY (world, instance_id)
+);
+
+CREATE TABLE agent_attachments (
+    world       TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    conv        TEXT NOT NULL,
+    cwd         TEXT,
+    attached_ts INTEGER NOT NULL,              -- unix millis, UTC
+    PRIMARY KEY (world, instance_id, conv)     -- racing servicers are representable, not an error
+);
+
 CREATE TABLE refs (
     id    TEXT PRIMARY KEY,                     -- sha256 of the bytes
     hint  TEXT NOT NULL,                        -- media type or block kind
@@ -136,6 +154,13 @@ CREATE TABLE refs (
 - `ts` parsed once to UTC millis: wire timestamps carry mixed offsets; strings misorder.
 - PK `(conv, message_id)` + `INSERT OR REPLACE` = idempotent replay; at-least-once delivery is safe.
 - `sender`/`content` opaque JSON; tower renders, never interprets. Deltas are not stored.
+- Two agent tables, never one: the pulse is one fact per instance (agent-spec —
+  restating it per conversation is the forbidden restatement). `attached`
+  upserts an attachment row; `detached` deletes it — a released attachment is
+  absence, and what a fold retains of dead instances is its own retention
+  policy (agent-spec, What consumers may assume). No verdict column exists:
+  alive/released/stranded is never stored, because stored liveness is false
+  the moment it is written.
 - Heavy values are externalised at apply time into `refs` (content-addressed,
   deduped) and replaced in place by `{ "$ref": id, "size", "hint" }` — an
   opaque id, never a URL (routes are the client's; ids are the data's).
@@ -243,6 +268,22 @@ async fn main() -> anyhow::Result<()> {
   shown honestly (first answer wins — losing the race to the terminal is
   information, not an error).
 
+- **Agent liveness** is consumed like approvals: ingest folds
+  `agent.v1.*.telemetry.>` into the two derived agent tables (both in the
+  rematerialise truncation set — fully rebuildable from replay). **The verdict
+  is the client's**: alive/released/stranded derives from `lastPulse` against
+  the client's own clock, ~3 of the instance's own declared `intervalS` — the
+  approval-void pattern; no time-driven state in the Views loop, no server
+  tick. Agent facts never touch `rows`: staleness stays honestly "last
+  conversation activity", and each wire fact ships as exactly one WS packet —
+  a pulse is one instance fact, never a fan-out per served conversation.
+  **Existence is a client union**: an attached-but-message-less conversation
+  is a *potential* conversation — ready to receive, transient. It appears in
+  the rail while its attachment lives and vanishes with it; its first
+  committed message births the ordinary row. The rows table never hears agent
+  events, so short-lived attach/detach cycles (spawn probes, quick tasks)
+  leave no tombstone rows behind.
+
 ## Testing
 
 - `wire`: pure fold tests, inputs = the conformance fixtures in `../spec/scenarios.md`.
@@ -263,7 +304,7 @@ async fn main() -> anyhow::Result<()> {
 
 ## Out of scope v1
 
-- "Go to pane" (needs attachment telemetry).
+- "Go to pane" (attachment telemetry is folded now; the jump itself is still out).
 - Mission grouping, org filtering, multiple towers.
 - Auth / public serving; binds locally.
 - `history` request.

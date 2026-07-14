@@ -13,8 +13,9 @@ use serde_json::Value;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use wire::{
-    ApprovalEvent, ApprovalId, ApprovalKind, ApprovalLifecycle, ConvChange, ConversationId, Event,
-    EventKind, MessageId, QueryId, TurnId, WireEvent, parse_ts,
+    AgentEvent, AgentKind, AgentTelemetry, ApprovalEvent, ApprovalId, ApprovalKind,
+    ApprovalLifecycle, ConvChange, ConversationId, Event, EventKind, InstanceId, MessageId,
+    QueryId, TurnId, WireEvent, WorldId, parse_ts,
 };
 
 use crate::refs::{Blob, externalise};
@@ -42,7 +43,66 @@ pub enum ViewEvent {
     /// An approval's state changed — raised, pulsed, or settled. Awareness
     /// is unconditional, like `Row`.
     Approval(ApprovalState),
+    /// One agent wire fact — one packet, however many conversations ride on
+    /// it (a pulse never fans out per conversation). Awareness is
+    /// unconditional, like `Row`.
+    Agent(AgentFact),
 }
+
+/// The agent concern's facts, verdict-free: alive/released/stranded is the
+/// client's derivation from `last_pulse` against its own clock (the
+/// approval-void pattern) — stored liveness would be false the moment it is
+/// written.
+#[derive(Debug, Clone)]
+pub enum AgentFact {
+    Ready {
+        world: WorldId,
+        instance: InstanceId,
+        ts: i64,
+        host: Option<String>,
+    },
+    Pulse {
+        world: WorldId,
+        instance: InstanceId,
+        ts: i64,
+        interval_s: i64,
+    },
+    Attached {
+        world: WorldId,
+        instance: InstanceId,
+        ts: i64,
+        conv: ConversationId,
+        cwd: Option<String>,
+    },
+    Detached {
+        world: WorldId,
+        instance: InstanceId,
+        ts: i64,
+        conv: ConversationId,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentInstanceState {
+    pub world: WorldId,
+    pub instance: InstanceId,
+    pub host: Option<String>,
+    pub last_pulse: i64,
+    /// The instance's own promise; `None` until its first pulse.
+    pub interval_s: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentAttachmentState {
+    pub world: WorldId,
+    pub instance: InstanceId,
+    pub conv: ConversationId,
+    pub cwd: Option<String>,
+    pub attached_ts: i64,
+}
+
+/// `agents`'s answer: every retained instance and every live attachment.
+pub type AgentsSnapshot = (Vec<AgentInstanceState>, Vec<AgentAttachmentState>);
 
 #[derive(Debug, Clone)]
 pub struct ApprovalState {
@@ -127,6 +187,10 @@ pub enum ViewQuery {
     /// derivation from `last_pulse`; a dead holder's ask is information).
     Approvals {
         reply: oneshot::Sender<Vec<ApprovalState>>,
+    },
+    /// The servicing snapshot: facts only, never verdicts.
+    Agents {
+        reply: oneshot::Sender<AgentsSnapshot>,
     },
     /// Ingest's reconcile, on every consumer build: "the stream I found was
     /// created at `created` and its sequences end at `last_seq` — where do I
@@ -223,6 +287,27 @@ const MIGRATIONS: &[&str] = &[
          key    TEXT PRIMARY KEY,
          colour TEXT NOT NULL
      );",
+    // 6 — agent liveness: two tables, never one (the pulse is one fact per
+    // instance; per-conversation copies are the restatement agent-spec
+    // forbids). Derived from agent.v1.*.telemetry.> — in the rematerialise
+    // truncation set. No verdict column: alive/released/stranded is the
+    // client's derivation.
+    "CREATE TABLE agent_instances (
+         world       TEXT NOT NULL,
+         instance_id TEXT NOT NULL,
+         host        TEXT,
+         last_pulse  INTEGER NOT NULL,
+         interval_s  INTEGER,
+         PRIMARY KEY (world, instance_id)
+     );
+     CREATE TABLE agent_attachments (
+         world       TEXT NOT NULL,
+         instance_id TEXT NOT NULL,
+         conv        TEXT NOT NULL,
+         cwd         TEXT,
+         attached_ts INTEGER NOT NULL,
+         PRIMARY KEY (world, instance_id, conv)
+     );",
 ];
 
 pub fn apply_schema(db: &Connection) -> anyhow::Result<()> {
@@ -309,10 +394,7 @@ impl Views {
         let result = match event {
             WireEvent::Conv(e) => self.apply_conv(seq, e),
             WireEvent::Approval(e) => self.apply_approval(seq, e),
-            // The agent liveness fold is a design pass of its own (attachments,
-            // pulses, verdict-on-read); until it lands, agent telemetry only
-            // advances the cursor so replay stays exact.
-            WireEvent::Agent(_) => self.apply_agent(seq),
+            WireEvent::Agent(e) => self.apply_agent(seq, e),
         };
         if let Err(e) = result {
             // A poisoned frame must not kill the fold; it is logged and the
@@ -396,10 +478,95 @@ impl Views {
         Ok(())
     }
 
-    fn apply_agent(&mut self, seq: u64) -> anyhow::Result<()> {
+    /// The agent fold (agent-spec, Telemetry): `ready`/`pulse` upsert the
+    /// instance's one liveness fact; `attached` upserts, `detached` deletes —
+    /// a released attachment is absence. Never touches `rows`: staleness is
+    /// conversation activity, and these are facts about the instance.
+    fn apply_agent(&mut self, seq: u64, event: &AgentEvent) -> anyhow::Result<()> {
+        let world = &event.world;
         let tx = self.db.transaction()?;
+        let fact = match &event.kind {
+            AgentKind::Telemetry(AgentTelemetry::Ready(r)) => {
+                let ts_ms = parse_ts(&r.ts)
+                    .ok_or_else(|| anyhow::anyhow!("ready has unparseable ts {}", r.ts))?;
+                tx.execute(
+                    "INSERT INTO agent_instances (world, instance_id, host, last_pulse)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(world, instance_id) DO UPDATE SET
+                         host       = excluded.host,
+                         last_pulse = max(agent_instances.last_pulse, excluded.last_pulse)",
+                    rusqlite::params![world.0, r.instance_id.0, r.host, ts_ms],
+                )?;
+                Some(AgentFact::Ready {
+                    world: world.clone(),
+                    instance: r.instance_id.clone(),
+                    ts: ts_ms,
+                    host: r.host.clone(),
+                })
+            }
+            AgentKind::Telemetry(AgentTelemetry::Pulse(p)) => {
+                let ts_ms = parse_ts(&p.ts)
+                    .ok_or_else(|| anyhow::anyhow!("pulse has unparseable ts {}", p.ts))?;
+                // A pulse for an instance never seen ready (pre-retention)
+                // still creates it: the pulse is self-describing.
+                tx.execute(
+                    "INSERT INTO agent_instances (world, instance_id, last_pulse, interval_s)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(world, instance_id) DO UPDATE SET
+                         last_pulse = max(agent_instances.last_pulse, excluded.last_pulse),
+                         interval_s = excluded.interval_s",
+                    rusqlite::params![world.0, p.instance_id.0, ts_ms, p.interval_s],
+                )?;
+                Some(AgentFact::Pulse {
+                    world: world.clone(),
+                    instance: p.instance_id.clone(),
+                    ts: ts_ms,
+                    interval_s: p.interval_s,
+                })
+            }
+            AgentKind::Telemetry(AgentTelemetry::Attached(a)) => {
+                let ts_ms = parse_ts(&a.ts)
+                    .ok_or_else(|| anyhow::anyhow!("attached has unparseable ts {}", a.ts))?;
+                // Re-attach (chdir's new cwd) is last-write-wins in place.
+                tx.execute(
+                    "INSERT OR REPLACE INTO agent_attachments
+                         (world, instance_id, conv, cwd, attached_ts)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![world.0, a.instance_id.0, a.conversation_id.0, a.cwd, ts_ms],
+                )?;
+                Some(AgentFact::Attached {
+                    world: world.clone(),
+                    instance: a.instance_id.clone(),
+                    ts: ts_ms,
+                    conv: a.conversation_id.clone(),
+                    cwd: a.cwd.clone(),
+                })
+            }
+            AgentKind::Telemetry(AgentTelemetry::Detached(d)) => {
+                let ts_ms = parse_ts(&d.ts)
+                    .ok_or_else(|| anyhow::anyhow!("detached has unparseable ts {}", d.ts))?;
+                tx.execute(
+                    "DELETE FROM agent_attachments
+                     WHERE world = ?1 AND instance_id = ?2 AND conv = ?3",
+                    rusqlite::params![world.0, d.instance_id.0, d.conversation_id.0],
+                )?;
+                Some(AgentFact::Detached {
+                    world: world.clone(),
+                    instance: d.instance_id.clone(),
+                    ts: ts_ms,
+                    conv: d.conversation_id.clone(),
+                })
+            }
+            // Unknown agent traffic: represented at ingest, nothing to fold;
+            // the cursor still advances.
+            AgentKind::Unknown { .. } => None,
+        };
         tx.execute("UPDATE cursor SET seq = ?1 WHERE id = 1", [seq as i64])?;
         tx.commit()?;
+
+        if let Some(fact) = fact {
+            let _ = self.events.send(ViewEvent::Agent(fact));
+        }
         Ok(())
     }
 
@@ -576,6 +743,9 @@ impl Views {
             ViewQuery::Approvals { reply } => {
                 let _ = reply.send(self.approvals().unwrap_or_default());
             }
+            ViewQuery::Agents { reply } => {
+                let _ = reply.send(self.agents().unwrap_or_default());
+            }
             ViewQuery::SetTitle { conv, title, reply } => {
                 if let Err(e) = self.set_title(&conv, &title) {
                     eprintln!("views: set_title failed for {conv}: {e:#}");
@@ -641,6 +811,7 @@ impl Views {
                 tx.execute_batch(
                     "DELETE FROM rows; DELETE FROM messages; DELETE FROM refs;
                      DELETE FROM approvals;
+                     DELETE FROM agent_instances; DELETE FROM agent_attachments;
                      UPDATE cursor SET seq = 0 WHERE id = 1;",
                 )?;
                 tx.execute("UPDATE stream SET created = ?1 WHERE id = 1", [created])?;
@@ -866,6 +1037,38 @@ impl Views {
             last_pulse: row.get(3)?,
             settled,
         }))
+    }
+
+    fn agents(&self) -> anyhow::Result<AgentsSnapshot> {
+        let mut stmt = self.db.prepare_cached(
+            "SELECT world, instance_id, host, last_pulse, interval_s FROM agent_instances",
+        )?;
+        let instances = stmt
+            .query_map([], |r| {
+                Ok(AgentInstanceState {
+                    world: WorldId(r.get(0)?),
+                    instance: InstanceId(r.get(1)?),
+                    host: r.get(2)?,
+                    last_pulse: r.get(3)?,
+                    interval_s: r.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut stmt = self.db.prepare_cached(
+            "SELECT world, instance_id, conv, cwd, attached_ts FROM agent_attachments",
+        )?;
+        let attachments = stmt
+            .query_map([], |r| {
+                Ok(AgentAttachmentState {
+                    world: WorldId(r.get(0)?),
+                    instance: InstanceId(r.get(1)?),
+                    conv: ConversationId(r.get(2)?),
+                    cwd: r.get(3)?,
+                    attached_ts: r.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((instances, attachments))
     }
 
     fn get_ref(&self, id: &str) -> anyhow::Result<Option<(String, Vec<u8>)>> {
@@ -1270,6 +1473,90 @@ mod tests {
             .unwrap();
         views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
         assert_eq!(rows_of(&views)[0].tags.len(), 1);
+    }
+
+    #[test]
+    fn agent_fold_ready_pulse_attach_detach() {
+        let (mut views, mut rx) = fresh();
+
+        // Scenario a1: ready seeds the instance, the pulse declares the
+        // promise, attached makes the conversation exist for observers.
+        views.apply(
+            1,
+            &event(
+                "agent.v1.mac.telemetry.ready",
+                r#"{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","host":"mac"}"#,
+            ),
+        );
+        views.apply(
+            2,
+            &event(
+                "agent.v1.mac.telemetry.pulse",
+                r#"{"ts":"2026-07-07T21:00:30+10:00","instanceId":"inst-1a2f","intervalS":30}"#,
+            ),
+        );
+        views.apply(3, &event("agent.v1.mac.telemetry.attached",
+            r#"{"ts":"2026-07-07T21:00:30+10:00","instanceId":"inst-1a2f","conversationId":"conv-abc","cwd":"~/repos/tower"}"#));
+
+        let (instances, attachments) = views.agents().unwrap();
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].instance.0, "inst-1a2f");
+        assert_eq!(instances[0].host.as_deref(), Some("mac"));
+        assert_eq!(instances[0].interval_s, Some(30));
+        assert!(instances[0].last_pulse > 0);
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].conv.0, "conv-abc");
+        assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower"));
+
+        // Agent facts never touch rows: no conversation activity happened.
+        assert!(rows_of(&views).is_empty());
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            ViewEvent::Agent(AgentFact::Ready { .. })
+        ));
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            ViewEvent::Agent(AgentFact::Pulse { .. })
+        ));
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            ViewEvent::Agent(AgentFact::Attached { .. })
+        ));
+
+        // An out-of-order pulse never regresses the liveness fact.
+        let fresh_pulse = instances[0].last_pulse;
+        views.apply(
+            4,
+            &event(
+                "agent.v1.mac.telemetry.pulse",
+                r#"{"ts":"2026-07-07T20:59:00+10:00","instanceId":"inst-1a2f","intervalS":30}"#,
+            ),
+        );
+        let (instances, _) = views.agents().unwrap();
+        assert_eq!(instances[0].last_pulse, fresh_pulse);
+
+        // Scenario a2: detached deletes — a released attachment is absence.
+        views.apply(5, &event("agent.v1.mac.telemetry.detached",
+            r#"{"ts":"2026-07-07T21:01:00+10:00","instanceId":"inst-1a2f","conversationId":"conv-abc"}"#));
+        let (instances, attachments) = views.agents().unwrap();
+        assert_eq!(instances.len(), 1); // the instance fact survives
+        assert!(attachments.is_empty());
+        assert_eq!(read_cursor(&views.db).unwrap(), 5);
+    }
+
+    #[test]
+    fn agent_tables_are_derived_and_rematerialise() {
+        let (mut views, _rx) = fresh();
+        views.apply(1, &event("agent.v1.mac.telemetry.attached",
+            r#"{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","conversationId":"conv-abc","cwd":"~/repos/tower"}"#));
+        assert_eq!(views.sync_stream("incarnation-A", 100).unwrap(), 1);
+
+        // A recreated stream truncates the agent tables with the other
+        // derived views — fully rebuildable from replay.
+        assert_eq!(views.sync_stream("incarnation-B", 100).unwrap(), 0);
+        let (instances, attachments) = views.agents().unwrap();
+        assert!(instances.is_empty());
+        assert!(attachments.is_empty());
     }
 
     #[test]

@@ -4,6 +4,8 @@
 // list, re-open what was being read with `after` so history travels once.
 
 import type {
+  AgentAttachment,
+  AgentInstance,
   ApprovalState,
   ClientMsg,
   ConversationMessage,
@@ -63,6 +65,13 @@ class Tower {
   rows = $state<Map<string, RowState>>(new Map());
   open = $state<Map<string, OpenConversation>>(new Map());
   approvals = $state<Map<string, ApprovalState>>(new Map());
+  /** Instance liveness facts, keyed world/instanceId. Facts only — the
+   *  verdict (alive/stranded) is derived where rendered, against the
+   *  renderer's clock. */
+  agentInstances = $state<Map<string, AgentInstance>>(new Map());
+  /** Live attachments, keyed world/instanceId/conv — racing servicers are
+   *  representable. `detached` removes; absence is released. */
+  agentAttachments = $state<Map<string, AgentAttachment>>(new Map());
   /** key → colour, from the list snapshot — the shared colour language. */
   tagKeys = $state<Record<string, string>>({});
   tabs = $state<Tab[]>(readTabs());
@@ -85,6 +94,37 @@ class Tower {
   /** Rows by lastEvent descending — the staleness order is the product. */
   get ordered(): RowState[] {
     return [...this.rows.values()].sort((a, b) => b.lastEvent - a.lastEvent);
+  }
+
+  /** conv → its live attachments (usually one; racing servicers show all). */
+  get attachmentsByConv(): Map<string, AgentAttachment[]> {
+    const map = new Map<string, AgentAttachment[]>();
+    for (const a of this.agentAttachments.values()) {
+      const list = map.get(a.conv);
+      if (list) list.push(a);
+      else map.set(a.conv, [a]);
+    }
+    return map;
+  }
+
+  /** Existence is a union: conversations that are only an attachment —
+   *  served, ready to receive, no messages yet. Potential conversations;
+   *  they vanish when the attachment does. */
+  get attachedOnly(): AgentAttachment[] {
+    return [...this.attachmentsByConv.entries()]
+      .filter(([conv]) => !this.rows.has(conv))
+      .map(([, list]) => list[0]);
+  }
+
+  /** The freshest pulse serving this conv, with its promise — the facts a
+   *  renderer judges against its own clock (~3×intervalS = stranded). */
+  liveness(conv: string): { lastPulse: Millis; intervalS?: number } | null {
+    let best: AgentInstance | null = null;
+    for (const a of this.attachmentsByConv.get(conv) ?? []) {
+      const inst = this.agentInstances.get(`${a.world}/${a.instanceId}`);
+      if (inst && (!best || inst.lastPulse > best.lastPulse)) best = inst;
+    }
+    return best ? { lastPulse: best.lastPulse, intervalS: best.intervalS } : null;
   }
 
   /** The active tab; tabs always number at least one. */
@@ -382,6 +422,45 @@ class Tower {
         const { type: _type, ...state } = msg;
         this.approvals.set(state.id, state);
         this.approvals = new Map(this.approvals);
+        break;
+      }
+      case 'agents': {
+        // The servicing snapshot replaces both maps — once per connection.
+        this.agentInstances = new Map(
+          msg.instances.map((i) => [`${i.world}/${i.instanceId}`, i]),
+        );
+        this.agentAttachments = new Map(
+          msg.attachments.map((a) => [`${a.world}/${a.instanceId}/${a.conv}`, a]),
+        );
+        break;
+      }
+      case 'agent': {
+        // One wire fact, one packet. `kind` is an open set: unknown kinds
+        // are skipped, never fatal.
+        const ikey = `${msg.world}/${msg.instanceId}`;
+        if (msg.kind === 'ready' || msg.kind === 'pulse') {
+          const held = this.agentInstances.get(ikey);
+          this.agentInstances.set(ikey, {
+            world: msg.world,
+            instanceId: msg.instanceId,
+            host: msg.host ?? held?.host,
+            lastPulse: Math.max(msg.ts, held?.lastPulse ?? 0),
+            intervalS: msg.intervalS ?? held?.intervalS,
+          });
+          this.agentInstances = new Map(this.agentInstances);
+        } else if (msg.kind === 'attached' && msg.conv) {
+          this.agentAttachments.set(`${ikey}/${msg.conv}`, {
+            world: msg.world,
+            instanceId: msg.instanceId,
+            conv: msg.conv,
+            cwd: msg.cwd,
+            attachedTs: msg.ts,
+          });
+          this.agentAttachments = new Map(this.agentAttachments);
+        } else if (msg.kind === 'detached' && msg.conv) {
+          this.agentAttachments.delete(`${ikey}/${msg.conv}`);
+          this.agentAttachments = new Map(this.agentAttachments);
+        }
         break;
       }
       case 'answer_result': {

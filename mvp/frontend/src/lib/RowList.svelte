@@ -20,6 +20,17 @@
   const heat = (ts: number) =>
     now - ts < 3_600_000 ? 'text-green-400' : now - ts < 21_600_000 ? 'text-yellow-500' : 'text-neutral-500';
 
+  /** The liveness verdict, derived here against this client's clock — facts
+   *  come from the store, the judgement is the renderer's (agent-spec: a
+   *  fold, never declared). Stranded = silence past ~3 of the instance's own
+   *  declared interval; no declared interval yet = no verdict to pass. */
+  const verdict = (conv: string): 'alive' | 'stranded' | null => {
+    const l = tower.liveness(conv);
+    if (!l) return null; // no live attachment: released or never served
+    if (l.intervalS && now - l.lastPulse > 3 * l.intervalS * 1000) return 'stranded';
+    return 'alive';
+  };
+
   // ---- the view machine: filter → group → sort, all from tags ----
   const keys = $derived(Object.keys(tower.tagKeys).sort());
 
@@ -162,6 +173,34 @@
 </div>
 
 <ul>
+  <!-- Potential conversations: attached, no messages yet — served, silent.
+       Transient by design: they vanish with the attachment; the first
+       committed message births an ordinary row below. No staleness — they
+       have no conversation activity to claim. -->
+  {#each tower.attachedOnly as a (a.conv)}
+    <li>
+      <button
+        class="flex w-full cursor-pointer justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900 {tower.tab.convs.includes(
+          a.conv,
+        )
+          ? 'bg-slate-800'
+          : ''}"
+        onclick={() =>
+          tower.tab.convs.includes(a.conv)
+            ? tower.closeConversation(a.conv)
+            : tower.openConversation(a.conv)}
+      >
+        <span class="truncate">
+          {#if verdict(a.conv) === 'stranded'}<span class="text-red-400">● </span
+            >{:else}<span class="text-green-400">● </span>{/if}{a.conv}
+        </span>
+        <span class="flex shrink-0 gap-2 text-neutral-500">
+          {#if a.cwd}<span class="truncate">{a.cwd}</span>{/if}
+          <span>served, silent</span>
+        </span>
+      </button>
+    </li>
+  {/each}
   {#each sections as section (section.label ?? '')}
     {#if section.label !== null}
       <li
@@ -189,7 +228,10 @@
               : tower.openConversation(row.conv)}
         >
           <span class="truncate">
-            {#if tower.pendingByConv.has(row.conv)}<span class="text-amber-300">⚠ </span>{/if}<span
+            {#if tower.pendingByConv.has(row.conv)}<span class="text-amber-300">⚠ </span
+              >{/if}{#if verdict(row.conv) === 'alive'}<span class="text-green-400">● </span
+              >{:else if verdict(row.conv) === 'stranded'}<span class="text-red-400">● </span
+              >{/if}<span
               class:text-neutral-200={row.title}>{row.title ?? row.conv}</span
             >
           </span>

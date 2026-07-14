@@ -13,7 +13,8 @@ use wire::{AnswerOutcome, ApprovalId, ConversationId, SayCommand, SayOutcome};
 use crate::broker::{Broker, Clock};
 use crate::gateway;
 use crate::views::{
-    ApprovalState, ConversationMessage, RowState, ViewEvent, ViewQuery, ViewsHandle,
+    AgentAttachmentState, AgentFact, AgentInstanceState, ApprovalState, ConversationMessage,
+    RowState, ViewEvent, ViewQuery, ViewsHandle,
 };
 
 // ---------------------------------------------------------------------------
@@ -95,6 +96,13 @@ pub enum ServerMsg {
     Approvals { approvals: Vec<WsApproval> },
     #[serde(rename = "approval")]
     Approval(WsApproval),
+    #[serde(rename = "agents")]
+    Agents {
+        instances: Vec<WsAgentInstance>,
+        attachments: Vec<WsAgentAttachment>,
+    },
+    #[serde(rename = "agent")]
+    Agent(WsAgent),
     #[serde(rename = "answer_result")]
     AnswerResult {
         id: String,
@@ -175,6 +183,129 @@ impl From<ApprovalState> for WsApproval {
                 by: s.by,
                 ts: s.ts,
             }),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct WsAgentInstance {
+    pub world: String,
+    #[serde(rename = "instanceId")]
+    pub instance_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(rename = "lastPulse")]
+    pub last_pulse: i64,
+    /// Absent until the instance's first pulse declares its promise.
+    #[serde(rename = "intervalS", skip_serializing_if = "Option::is_none")]
+    pub interval_s: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WsAgentAttachment {
+    pub world: String,
+    #[serde(rename = "instanceId")]
+    pub instance_id: String,
+    pub conv: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(rename = "attachedTs")]
+    pub attached_ts: i64,
+}
+
+/// One wire fact, one packet — flat, `kind` an open set to the client.
+#[derive(Debug, Serialize)]
+pub struct WsAgent {
+    pub kind: &'static str,
+    pub world: String,
+    #[serde(rename = "instanceId")]
+    pub instance_id: String,
+    pub ts: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conv: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(rename = "intervalS", skip_serializing_if = "Option::is_none")]
+    pub interval_s: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+}
+
+impl From<AgentFact> for WsAgent {
+    fn from(f: AgentFact) -> Self {
+        let base = |kind, world: wire::WorldId, instance: wire::InstanceId, ts| WsAgent {
+            kind,
+            world: world.0,
+            instance_id: instance.0,
+            ts,
+            conv: None,
+            cwd: None,
+            interval_s: None,
+            host: None,
+        };
+        match f {
+            AgentFact::Ready {
+                world,
+                instance,
+                ts,
+                host,
+            } => WsAgent {
+                host,
+                ..base("ready", world, instance, ts)
+            },
+            AgentFact::Pulse {
+                world,
+                instance,
+                ts,
+                interval_s,
+            } => WsAgent {
+                interval_s: Some(interval_s),
+                ..base("pulse", world, instance, ts)
+            },
+            AgentFact::Attached {
+                world,
+                instance,
+                ts,
+                conv,
+                cwd,
+            } => WsAgent {
+                conv: Some(conv.0),
+                cwd,
+                ..base("attached", world, instance, ts)
+            },
+            AgentFact::Detached {
+                world,
+                instance,
+                ts,
+                conv,
+            } => WsAgent {
+                conv: Some(conv.0),
+                ..base("detached", world, instance, ts)
+            },
+        }
+    }
+}
+
+impl From<AgentInstanceState> for WsAgentInstance {
+    fn from(i: AgentInstanceState) -> Self {
+        WsAgentInstance {
+            world: i.world.0,
+            instance_id: i.instance.0,
+            host: i.host,
+            last_pulse: i.last_pulse,
+            interval_s: i.interval_s,
+        }
+    }
+}
+
+impl From<AgentAttachmentState> for WsAgentAttachment {
+    fn from(a: AgentAttachmentState) -> Self {
+        WsAgentAttachment {
+            world: a.world.0,
+            instance_id: a.instance.0,
+            conv: a.conv.0,
+            cwd: a.cwd,
+            attached_ts: a.attached_ts,
         }
     }
 }
@@ -265,6 +396,8 @@ impl Session {
             }
             // Approvals are awareness, like rows: unconditional.
             ViewEvent::Approval(state) => Some(ServerMsg::Approval(state.into())),
+            // Agent facts too: one wire fact, one packet, never gated.
+            ViewEvent::Agent(fact) => Some(ServerMsg::Agent(fact.into())),
             _ => None,
         }
     }
@@ -496,6 +629,28 @@ pub async fn run_session<B: Broker, C: Clock>(
     let Ok(approvals) = rx.await else { return };
     let snapshot = ServerMsg::Approvals {
         approvals: approvals.into_iter().map(Into::into).collect(),
+    };
+    if send(&mut sink, &snapshot).await.is_err() {
+        return;
+    }
+
+    // The servicing snapshot, once, right after `approvals`. Facts only;
+    // the verdict (alive/released/stranded) is the client's derivation.
+    let (tx, rx) = oneshot::channel();
+    if views
+        .queries
+        .send(ViewQuery::Agents { reply: tx })
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let Ok((instances, attachments)) = rx.await else {
+        return;
+    };
+    let snapshot = ServerMsg::Agents {
+        instances: instances.into_iter().map(Into::into).collect(),
+        attachments: attachments.into_iter().map(Into::into).collect(),
     };
     if send(&mut sink, &snapshot).await.is_err() {
         return;
