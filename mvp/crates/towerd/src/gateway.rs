@@ -15,7 +15,8 @@ use wire::{
 use crate::broker::{Broker, BrokerReply, Clock};
 
 pub async fn say<B: Broker, C: Clock>(broker: &B, clock: &C, cmd: SayCommand) -> SayOutcome {
-    let subject = format!("conv.v1.{}.requests", cmd.conv.0);
+    // v2: the leaf spells the operation; the body carries no type.
+    let subject = format!("conv.v2.{}.requests.say", cmd.conv.0);
     let payload = encode_say(&cmd, &clock.now_iso());
     match broker
         .request(&subject, payload, Duration::from_secs(5))
@@ -102,7 +103,7 @@ mod tests {
         );
 
         let seen = broker.seen.lock().unwrap();
-        assert_eq!(seen[0].0, "conv.v1.conv-abc.requests");
+        assert_eq!(seen[0].0, "conv.v2.conv-abc.requests.say");
         let v: serde_json::Value = serde_json::from_slice(&seen[0].1).unwrap();
         assert_eq!(v["precondition"]["tip"], "m4");
         assert_eq!(v["from"], serde_json::json!({ "kind": "human" }));

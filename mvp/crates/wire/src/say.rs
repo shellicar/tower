@@ -27,9 +27,10 @@ pub enum SayOutcome {
 
 /// The wire `say`: `from` stamped `{ kind: "human" }` bare — towerd knows a
 /// human clicked and, in v1, no more; fabricating a userId is non-compliant.
+/// v2: the subject leaf (`requests.say`) spells the type; the body carries
+/// none (the discriminator lives in one place).
 pub fn encode_say(cmd: &SayCommand, ts: &str) -> Vec<u8> {
     let payload = json!({
-        "type": "say",
         "ts": ts,
         "from": { "kind": "human" },
         "text": cmd.text,
@@ -58,25 +59,22 @@ pub enum ConvRequest {
         query: QueryId,
         from: serde_json::Value,
     },
-    /// Anything else — answered `unsupported`, carrying the type for logs.
+    /// Anything else — answered `unsupported`, carrying the leaf for logs.
     Other { type_name: String },
 }
 
-/// Bytes → request. Unparseable bytes are `Other` (answered `unsupported`):
-/// a servicer must answer everything addressed to it.
-pub fn parse_request(bytes: &[u8]) -> ConvRequest {
+/// (leaf, bytes) → request. v2: the subject leaf spells the operation
+/// (`conv.v2.{id}.requests.say` → `"say"`), the body carries no type — the
+/// explicit leaf→variant match, exactly as ingest parses events. Unparseable
+/// bytes are `Other` (answered `unsupported`): a servicer must answer
+/// everything addressed to it.
+pub fn parse_request(leaf: &str, bytes: &[u8]) -> ConvRequest {
+    let type_name = leaf.to_string();
     let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
-        return ConvRequest::Other {
-            type_name: "unparseable".into(),
-        };
+        return ConvRequest::Other { type_name };
     };
-    let type_name = value
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or("?")
-        .to_string();
     let from = value.get("from").cloned().unwrap_or(Value::Null);
-    match type_name.as_str() {
+    match leaf {
         "say" => {
             let Some(text) = value.get("text").and_then(Value::as_str) else {
                 return ConvRequest::Other { type_name };
@@ -167,7 +165,8 @@ mod tests {
     fn encodes_the_fixture_shape() {
         let bytes = encode_say(&cmd(Some("m4")), "2026-07-07T21:00:00+10:00");
         let v: Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(v["type"], "say");
+        // v2: no body type — the subject leaf (`requests.say`) spells it.
+        assert!(v.get("type").is_none());
         assert_eq!(v["from"], serde_json::json!({ "kind": "human" }));
         assert_eq!(v["text"], "okay, delete it");
         assert_eq!(v["precondition"]["tip"], "m4");
@@ -204,7 +203,7 @@ mod tests {
     fn requests_parse_both_directions() {
         // The client encoder and the servicer parser meet in the middle.
         let bytes = encode_say(&cmd(Some("m4")), "2026-07-07T21:00:00+10:00");
-        let ConvRequest::Say { text, tip, from } = parse_request(&bytes) else {
+        let ConvRequest::Say { text, tip, from } = parse_request("say", &bytes) else {
             panic!("expected say");
         };
         assert_eq!(text, "okay, delete it");
@@ -214,22 +213,23 @@ mod tests {
         // Null tip decodes as the empty-conversation premise.
         let bytes = encode_say(&cmd(None), "2026-07-07T21:00:00+10:00");
         assert!(matches!(
-            parse_request(&bytes),
+            parse_request("say", &bytes),
             ConvRequest::Say { tip: None, .. }
         ));
 
-        // Cancel, and the unsupported fallback.
-        let cancel = br#"{"type":"cancel","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human"},"id":"q2"}"#;
+        // Cancel, and the unsupported fallback (an unknown leaf is still
+        // answered; the body needs no type to say so).
+        let cancel = br#"{"ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human"},"id":"q2"}"#;
         assert!(matches!(
-            parse_request(cancel),
+            parse_request("cancel", cancel),
             ConvRequest::Cancel { query: QueryId(q), .. } if q == "q2"
         ));
         assert!(matches!(
-            parse_request(br#"{"type":"revise"}"#),
+            parse_request("revise", br#"{"ts":"2026-07-07T21:00:00+10:00"}"#),
             ConvRequest::Other { .. }
         ));
         assert!(matches!(
-            parse_request(b"not json"),
+            parse_request("say", b"not json"),
             ConvRequest::Other { .. }
         ));
     }

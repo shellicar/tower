@@ -1,6 +1,7 @@
-//! One conversation: the servicer discipline on `.requests`, the event
-//! subjects produced per the conversation spec, an in-memory tree with a tip.
-//! The turn runs as its own task so `cancel` can abort it honestly.
+//! One conversation: the servicer discipline on `.requests.>`, the v2 event
+//! subjects produced per the conversation spec (the leaf spells the type;
+//! bodies carry none), an in-memory tree with a tip. The turn runs as its
+//! own task so `cancel` can abort it honestly.
 
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -41,7 +42,8 @@ enum TurnEnd {
 }
 
 pub async fn run(client: async_nats::Client, config: AgentConfig) {
-    let subject = format!("conv.v1.{}.requests", config.conv.0);
+    let subject = format!("conv.v2.{}.requests.>", config.conv.0);
+    let prefix = format!("conv.v2.{}.requests.", config.conv.0);
     let mut requests = match client.subscribe(subject).await {
         Ok(s) => s,
         Err(e) => {
@@ -64,7 +66,9 @@ pub async fn run(client: async_nats::Client, config: AgentConfig) {
             maybe = requests.next() => {
                 let Some(msg) = maybe else { break };
                 let Some(reply_to) = msg.reply.clone() else { continue };
-                let response = match parse_request(&msg.payload) {
+                // v2: the leaf spells the operation — read it off the subject.
+                let leaf = msg.subject.strip_prefix(prefix.as_str()).unwrap_or("");
+                let response = match parse_request(leaf, &msg.payload) {
                     ConvRequest::Say { text, tip, from } => {
                         // The premise check: the sender's tip must be the tree's,
                         // and no query may be live against it (scenario 5: a live
@@ -136,12 +140,19 @@ pub async fn run(client: async_nats::Client, config: AgentConfig) {
                                 // The real fix is cooperative cancellation: no
                                 // hard abort; run_turn always completes done.send.
                                 l.abort.abort();
-                                publish(&client, &config.conv, "telemetry", json!({
-                                    "type": "turn_cancelled", "ts": now_iso(),
+                                publish(&client, &config.conv, "telemetry.turn.cancelled", json!({
+                                    "ts": now_iso(),
                                     "queryId": l.query,
                                     // The turn id lives in the aborted task; the
                                     // cancelled marker carries the query's identity.
                                     "turnId": l.query,
+                                })).await;
+                                // The committal closure: the query ended, reason
+                                // cancelled (conversation-spec, changes.query).
+                                publish(&client, &config.conv, "changes.query", json!({
+                                    "ts": now_iso(),
+                                    "queryId": l.query,
+                                    "reason": "cancelled",
                                 })).await;
                                 live = None;
                                 encode_accepted(None)
@@ -207,9 +218,9 @@ async fn run_turn(ctx: TurnContext, history: Vec<Value>) -> TurnEnd {
     publish(
         client,
         conv,
-        "telemetry",
+        "telemetry.turn.started",
         json!({
-            "type": "turn_started", "ts": now_iso(),
+            "ts": now_iso(),
             "queryId": query, "turnId": turn,
             "service": "anthropic.messages", "model": model,
             "thinking": false, "maxTokens": anthropic::MAX_TOKENS,
@@ -225,9 +236,9 @@ async fn run_turn(ctx: TurnContext, history: Vec<Value>) -> TurnEnd {
             publish(
                 client,
                 conv,
-                "telemetry",
+                "telemetry.turn.ended",
                 json!({
-                    "type": "turn_ended", "ts": now_iso(),
+                    "ts": now_iso(),
                     "queryId": query, "turnId": turn,
                     "stopReason": done.stop_reason,
                 }),
@@ -236,9 +247,9 @@ async fn run_turn(ctx: TurnContext, history: Vec<Value>) -> TurnEnd {
             publish(
                 client,
                 conv,
-                "telemetry",
+                "telemetry.usage",
                 json!({
-                    "type": "usage", "ts": now_iso(),
+                    "ts": now_iso(),
                     "queryId": query, "turnId": turn,
                     "service": "anthropic.messages", "model": model,
                     "inputTokens": done.input_tokens,
@@ -261,6 +272,19 @@ async fn run_turn(ctx: TurnContext, history: Vec<Value>) -> TurnEnd {
                 &done.content,
             )
             .await;
+            // v0 runs one turn per query (no tools), so the turn's end is the
+            // query's committal closure (conversation-spec, changes.query).
+            publish(
+                client,
+                conv,
+                "changes.query",
+                json!({
+                    "ts": now_iso(),
+                    "queryId": query,
+                    "reason": "completed",
+                }),
+            )
+            .await;
             TurnEnd::Completed {
                 message_id,
                 content: done.content,
@@ -271,10 +295,21 @@ async fn run_turn(ctx: TurnContext, history: Vec<Value>) -> TurnEnd {
             publish(
                 client,
                 conv,
-                "telemetry",
+                "telemetry.turn.aborted",
                 json!({
-                    "type": "turn_aborted", "ts": now_iso(),
+                    "ts": now_iso(),
                     "queryId": query, "turnId": turn,
+                }),
+            )
+            .await;
+            publish(
+                client,
+                conv,
+                "changes.query",
+                json!({
+                    "ts": now_iso(),
+                    "queryId": query,
+                    "reason": "aborted",
                 }),
             )
             .await;
@@ -283,8 +318,10 @@ async fn run_turn(ctx: TurnContext, history: Vec<Value>) -> TurnEnd {
     }
 }
 
-async fn publish(client: &async_nats::Client, conv: &ConversationId, kind: &str, payload: Value) {
-    let subject = format!("conv.v1.{}.{kind}", conv.0);
+/// `leaf` is the class-and-event path after the id — `changes.message`,
+/// `telemetry.turn.started` — v2's one-place discriminator.
+async fn publish(client: &async_nats::Client, conv: &ConversationId, leaf: &str, payload: Value) {
+    let subject = format!("conv.v2.{}.{leaf}", conv.0);
     let bytes = serde_json::to_vec(&payload).expect("json! of plain values cannot fail");
     if let Err(e) = client.publish(subject, bytes.into()).await {
         eprintln!("bridge[{}]: publish failed: {e}", conv.0);
@@ -305,9 +342,9 @@ async fn publish_message(
     publish(
         client,
         conv,
-        "changes",
+        "changes.message",
         json!({
-            "type": "message", "ts": now_iso(),
+            "ts": now_iso(),
             "id": id, "queryId": query, "turnId": turn,
             "role": role, "from": from, "content": content,
         }),

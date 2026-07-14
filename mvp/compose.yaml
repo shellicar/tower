@@ -40,7 +40,7 @@ services:
             echo 'stream conv-approval already exists'; exit 0
           fi
           nats --server nats://nats:4222 stream add conv-approval \
-            --subjects 'conv.v1.*.changes,conv.v1.*.deltas,conv.v1.*.telemetry,approval.v1.*.lifecycle,approval.v1.*.telemetry' \
+            --subjects 'conv.v1.*.changes,conv.v1.*.deltas,conv.v1.*.telemetry,conv.v2.*.changes.>,conv.v2.*.deltas,conv.v2.*.telemetry.>,agent.v1.*.telemetry.>,approval.v1.*.lifecycle,approval.v1.*.telemetry' \
             --storage file --retention limits --max-age 30d --discard old --defaults \
             && exit 0
           echo "nats not ready, retrying ($$i)..."; sleep 1

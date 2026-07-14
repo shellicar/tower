@@ -97,7 +97,9 @@ pub async fn stream_turn(
         anyhow::bail!("messages API {status}: {text}");
     }
 
-    let deltas_subject = format!("conv.v1.{}.deltas", conv.0);
+    // v2's one deliberately flat subject: delta and block keep their body
+    // `type` — the leaf does not spell it here.
+    let deltas_subject = format!("conv.v2.{}.deltas", conv.0);
     let publish = |payload: Value| {
         let client = client.clone();
         let subject = deltas_subject.clone();

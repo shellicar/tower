@@ -79,33 +79,33 @@ async fn scripted_publisher_reaches_the_ws_client() {
     };
 
     publish(
-        format!("conv.v1.{conv}.changes"),
-        json!({"type":"message","ts":ts,"id":"m1","queryId":"q1","turnId":"t1","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"read file X and summarise it"}]}),
+        format!("conv.v2.{conv}.changes.message"),
+        json!({"ts":ts,"id":"m1","queryId":"q1","turnId":"t1","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"read file X and summarise it"}]}),
     )
     .await;
     publish(
-        format!("conv.v1.{conv}.telemetry"),
-        json!({"type":"turn_started","ts":ts,"queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}),
+        format!("conv.v2.{conv}.telemetry.turn.started"),
+        json!({"ts":ts,"queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}),
     )
     .await;
     publish(
-        format!("conv.v1.{conv}.changes"),
-        json!({"type":"message","ts":ts,"id":"m2","queryId":"q1","turnId":"t1","role":"assistant","from":{"kind":"agent"},"content":[{"type":"tool_use","id":"toolu_01ABC","name":"ReadFile","input":{"path":"X"}}]}),
+        format!("conv.v2.{conv}.changes.message"),
+        json!({"ts":ts,"id":"m2","queryId":"q1","turnId":"t1","role":"assistant","from":{"kind":"agent"},"content":[{"type":"tool_use","id":"toolu_01ABC","name":"ReadFile","input":{"path":"X"}}]}),
     )
     .await;
     publish(
-        format!("conv.v1.{conv}.changes"),
-        json!({"type":"message","ts":ts,"id":"m3","queryId":"q1","turnId":"t2","role":"user","from":{"kind":"agent"},"content":[{"type":"tool_result","tool_use_id":"toolu_01ABC","content":"…file contents…"}]}),
+        format!("conv.v2.{conv}.changes.message"),
+        json!({"ts":ts,"id":"m3","queryId":"q1","turnId":"t2","role":"user","from":{"kind":"agent"},"content":[{"type":"tool_result","tool_use_id":"toolu_01ABC","content":"…file contents…"}]}),
     )
     .await;
     publish(
-        format!("conv.v1.{conv}.deltas"),
+        format!("conv.v2.{conv}.deltas"),
         json!({"type":"delta","text":"File X contains"}),
     )
     .await;
     publish(
-        format!("conv.v1.{conv}.changes"),
-        json!({"type":"message","ts":ts,"id":"m4","queryId":"q1","turnId":"t2","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"File X contains a summary of…"}]}),
+        format!("conv.v2.{conv}.changes.message"),
+        json!({"ts":ts,"id":"m4","queryId":"q1","turnId":"t2","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"File X contains a summary of…"}]}),
     )
     .await;
 
