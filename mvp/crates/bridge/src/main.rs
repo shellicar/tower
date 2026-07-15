@@ -129,6 +129,15 @@ async fn main() -> anyhow::Result<()> {
     // The transit object store attachments resolve from; must name the same
     // bucket the tower deployment uploads into.
     let attach_bucket = std::env::var("BRIDGE_ATTACH_BUCKET").unwrap_or_else(|_| "attach".into());
+    // Extended thinking: on by default; BRIDGE_THINKING_BUDGET=0 disables.
+    let thinking_budget = match std::env::var("BRIDGE_THINKING_BUDGET")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+    {
+        Some(0) => None,
+        Some(n) => Some(n),
+        None => Some(4096),
+    };
 
     let client = async_nats::connect(&nats_url).await?; // fail-fast
 
@@ -212,6 +221,7 @@ async fn main() -> anyhow::Result<()> {
                 auth: auth.clone(),
                 skills_root: skills_root.clone(),
                 attach_bucket: attach_bucket.clone(),
+                thinking_budget,
             };
             tokio::spawn(agent::run(
                 client.clone(),
@@ -273,6 +283,7 @@ async fn main() -> anyhow::Result<()> {
                 auth: auth.clone(),
                 skills_root: skills_root.clone(),
                 attach_bucket: attach_bucket.clone(),
+                thinking_budget,
             };
             tokio::spawn(agent::run(
                 client.clone(),

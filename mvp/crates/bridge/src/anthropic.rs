@@ -61,6 +61,9 @@ pub struct TurnDone {
 /// Stream one turn: publish `block`/`delta` as chunks arrive, accumulate the
 /// content blocks for the commit, and return the round's accounting.
 /// `tools` is the API `tools` array; empty = the no-tools call as before.
+/// `thinking_budget` enables extended thinking when Some — the stream and
+/// fold paths already carry thinking blocks; this is the ask.
+#[allow(clippy::too_many_arguments)]
 pub async fn stream_turn(
     client: &async_nats::Client,
     conv: &ConversationId,
@@ -69,6 +72,7 @@ pub async fn stream_turn(
     system: Option<&str>,
     messages: &[Value],
     tools: &[Value],
+    thinking_budget: Option<i64>,
 ) -> anyhow::Result<TurnDone> {
     // The system array always leads with the Agent SDK identity prefix;
     // subscription (OAuth) access requires it. The spawn's own system prompt
@@ -89,6 +93,12 @@ pub async fn stream_turn(
     });
     if !tools.is_empty() {
         body["tools"] = json!(tools);
+    }
+    if let Some(budget) = thinking_budget {
+        // The API requires budget < max_tokens; clamp rather than error — a
+        // misconfigured budget should degrade, not kill every turn.
+        let budget = budget.clamp(1024, MAX_TOKENS - 1024);
+        body["thinking"] = json!({ "type": "enabled", "budget_tokens": budget });
     }
 
     let request = reqwest::Client::new()

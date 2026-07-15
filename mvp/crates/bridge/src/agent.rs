@@ -38,6 +38,8 @@ pub struct AgentConfig {
     pub skills_root: std::path::PathBuf,
     /// The transit object store attachments resolve from (objects.rs).
     pub attach_bucket: String,
+    /// Extended thinking budget; None = thinking off.
+    pub thinking_budget: Option<i64>,
 }
 
 /// Subscribe to the conversation's requests. main calls this BEFORE
@@ -154,6 +156,7 @@ pub async fn run(
                                     turn,
                                     user,
                                     user_from: from,
+                                    thinking_budget: config.thinking_budget,
                                 };
                                 let done = done_tx.clone();
                                 let q = query.clone();
@@ -214,6 +217,7 @@ struct TurnContext {
     /// The say: turn 1's user half, pending until that turn commits.
     user: Message,
     user_from: Value,
+    thinking_budget: Option<i64>,
 }
 
 /// Resolves when the cancel signal flips; never resolves if it never does
@@ -258,6 +262,7 @@ async fn run_query(
         turn,
         user,
         user_from,
+        thinking_budget,
     } = &ctx;
 
     // Bash always; Skill only when a catalogue exists.
@@ -286,7 +291,7 @@ async fn run_query(
                 "ts": now_iso(),
                 "queryId": query, "turnId": turn_id,
                 "service": "anthropic.messages", "model": model,
-                "thinking": false, "maxTokens": anthropic::MAX_TOKENS,
+                "thinking": thinking_budget.is_some(), "maxTokens": anthropic::MAX_TOKENS,
             }),
         )
         .await;
@@ -303,6 +308,7 @@ async fn run_query(
                 system.as_deref(),
                 &history,
                 &tools,
+                *thinking_budget,
             ) => outcome,
             _ = cancelled(&mut cancel) => {
                 publish(
