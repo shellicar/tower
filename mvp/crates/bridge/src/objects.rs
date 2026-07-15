@@ -84,3 +84,48 @@ async fn resolve_one(
         "source": { "type": "base64", "media_type": media_type, "data": data },
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{is_object_source, resolve_one};
+    use serde_json::json;
+
+    #[test]
+    fn object_sources_are_recognised() {
+        assert!(is_object_source(&json!({
+            "type": "image",
+            "source": { "type": "object", "id": "x" },
+        })));
+        assert!(!is_object_source(&json!({ "type": "text", "text": "hi" })));
+        assert!(!is_object_source(&json!({
+            "type": "image",
+            "source": { "type": "base64", "data": "..." },
+        })));
+    }
+
+    #[tokio::test]
+    async fn without_a_store_the_block_degrades_to_a_stated_placeholder() {
+        // The record still holds the reference block; the repair is
+        // re-attaching. The placeholder states what the block itself carries.
+        let block = json!({
+            "type": "image",
+            "source": { "type": "object", "id": "abc", "mediaType": "image/png", "size": 2048 },
+        });
+        let out = resolve_one(None, &block).await;
+        assert_eq!(out["type"], "text");
+        let text = out["text"].as_str().unwrap();
+        assert!(text.contains("image/png"), "media type absent: {text:?}");
+        assert!(text.contains("2048"), "size absent: {text:?}");
+    }
+
+    #[tokio::test]
+    async fn a_source_without_an_id_is_a_placeholder_too() {
+        let block = json!({
+            "type": "document",
+            "source": { "type": "object", "mediaType": "application/pdf", "size": 10 },
+        });
+        let out = resolve_one(None, &block).await;
+        assert_eq!(out["type"], "text");
+        assert!(out["text"].as_str().unwrap().contains("application/pdf"));
+    }
+}

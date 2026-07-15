@@ -144,3 +144,69 @@ pub async fn run_bash(command: &str, cancel: &mut watch::Receiver<bool>) -> (Str
     content.push_str(&verdict);
     (content, is_error)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::run_bash;
+    use tokio::sync::watch;
+
+    // A cancel receiver that never fires: the human is not cancelling.
+    fn no_cancel() -> watch::Receiver<bool> {
+        watch::channel(false).1
+    }
+
+    #[tokio::test]
+    async fn echo_succeeds_and_carries_stdout() {
+        let mut cancel = no_cancel();
+        let (content, is_error) = run_bash("echo hello", &mut cancel).await;
+        assert!(!is_error);
+        assert!(content.contains("hello"), "stdout absent: {content:?}");
+    }
+
+    #[tokio::test]
+    async fn a_nonzero_exit_is_an_error() {
+        let mut cancel = no_cancel();
+        let (content, is_error) = run_bash("exit 3", &mut cancel).await;
+        assert!(is_error);
+        // The verdict carries the exit status.
+        assert!(content.contains('3'), "status absent: {content:?}");
+    }
+
+    #[tokio::test]
+    async fn stderr_is_captured_and_labelled() {
+        let mut cancel = no_cancel();
+        // The command still exits 0; only its stderr carried anything.
+        let (content, is_error) = run_bash("echo oops 1>&2", &mut cancel).await;
+        assert!(!is_error);
+        assert!(
+            content.contains("stderr:"),
+            "stderr not labelled: {content:?}"
+        );
+        assert!(content.contains("oops"));
+    }
+
+    #[tokio::test]
+    async fn output_over_the_cap_is_truncated() {
+        let mut cancel = no_cancel();
+        // Well over MAX_OUTPUT_BYTES (100 KB) of stdout.
+        let (content, is_error) = run_bash("yes x | head -c 200000", &mut cancel).await;
+        assert!(!is_error);
+        assert!(
+            content.contains("[output truncated at 100 KB]"),
+            "no truncation notice present"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_preset_cancel_kills_the_command_and_still_fills_the_slot() {
+        // Cancel already high: the command never finishes, and the result
+        // slot is still filled - a bare tool_use would be an invalid record.
+        let (_tx, mut cancel) = watch::channel(true);
+        let (content, is_error) = run_bash("sleep 30", &mut cancel).await;
+        assert!(is_error);
+        assert!(
+            content.contains("cancelled by user"),
+            "not reported cancelled: {content:?}"
+        );
+    }
+}
