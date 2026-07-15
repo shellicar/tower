@@ -51,6 +51,58 @@ pub enum AnswerOutcome {
     Unreachable,
 }
 
+// ---------------------------------------------------------------------------
+// The holder direction: what an agent that raises asks publishes, and how it
+// reads the answers addressed to it. The consumer side above folds these.
+// ---------------------------------------------------------------------------
+
+/// The raise: the ask verbatim (a `tool_use` ask carries name and input — an
+/// ask is unreviewable without its payload) plus correlation to the work it
+/// interrupts.
+pub fn encode_raised(ask: &Value, correlation: &Value, ts: &str) -> Vec<u8> {
+    let payload = json!({
+        "type": "raised",
+        "ts": ts,
+        "ask": ask,
+        "correlation": correlation,
+    });
+    serde_json::to_vec(&payload).expect("json! of plain values cannot fail")
+}
+
+/// The settlement: `by` is pass-through provenance — the answerer's `from`,
+/// echoed verbatim, never authored by the holder.
+pub fn encode_settled(approved: bool, by: &Value, ts: &str) -> Vec<u8> {
+    let payload = json!({
+        "type": "settled",
+        "ts": ts,
+        "approved": approved,
+        "by": by,
+    });
+    serde_json::to_vec(&payload).expect("json! of plain values cannot fail")
+}
+
+/// The pending ask's own pulse (~15s while pending): raised + pulse =
+/// pending; pulse silence = stale, displayed void. The ask asserts its own
+/// liveness, whoever holds it.
+pub fn encode_heartbeat(ts: &str) -> Vec<u8> {
+    let payload = json!({ "type": "heartbeat", "ts": ts });
+    serde_json::to_vec(&payload).expect("json! of plain values cannot fail")
+}
+
+/// An answer as the holder reads it off `.requests`: `approved` is the
+/// verdict, `from` the answerer's provenance (echoed onto `settled`).
+/// `None` = not an intelligible answer — reply rejected, never crash: a
+/// holder must answer everything addressed to it.
+pub fn parse_answer(bytes: &[u8]) -> Option<(bool, Value)> {
+    let value = serde_json::from_slice::<Value>(bytes).ok()?;
+    if value.get("type").and_then(Value::as_str) != Some("answer") {
+        return None;
+    }
+    let approved = value.get("approved").and_then(Value::as_bool)?;
+    let from = value.get("from").cloned().unwrap_or(Value::Null);
+    Some((approved, from))
+}
+
 /// The wire `answer`: `approved` verbatim, `from` stamped `{ kind: "human" }`
 /// bare — tower knows a human clicked and, in v1, no more.
 pub fn encode_answer(approved: bool, ts: &str) -> Vec<u8> {
@@ -92,6 +144,42 @@ mod tests {
     use super::*;
     use crate::conv::Tolerant;
     use serde_json::json;
+
+    #[test]
+    fn holder_side_meets_the_consumer_side() {
+        // What the holder raises, the consumer parses — the two directions
+        // meet on the wire.
+        let ask = json!({ "type": "tool_use", "name": "Bash", "input": { "command": "echo hi" } });
+        let correlation = json!({ "conversationId": "conv-abc", "queryId": "q1" });
+        let bytes = encode_raised(&ask, &correlation, "2026-07-07T15:03:00+10:00");
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        let parsed = Tolerant::<ApprovalLifecycle>::parse(value).unwrap();
+        assert!(matches!(
+            parsed,
+            Tolerant::Known(ApprovalLifecycle::Raised { ask: ref a, .. }) if a == &ask
+        ));
+
+        let by = json!({ "kind": "human", "userId": "stephen" });
+        let bytes = encode_settled(false, &by, "2026-07-07T15:03:40+10:00");
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(matches!(
+            Tolerant::<ApprovalLifecycle>::parse(value).unwrap(),
+            Tolerant::Known(ApprovalLifecycle::Settled {
+                approved: false,
+                ..
+            })
+        ));
+
+        // The holder reads what the gateway sends.
+        let answer = encode_answer(true, "2026-07-07T15:03:38+10:00");
+        let (approved, from) = parse_answer(&answer).unwrap();
+        assert!(approved);
+        assert_eq!(from, json!({ "kind": "human" }));
+
+        // Non-answers are None, never a crash.
+        assert!(parse_answer(b"not json").is_none());
+        assert!(parse_answer(br#"{"type":"other"}"#).is_none());
+    }
 
     #[test]
     fn raised_parses_with_ask_and_correlation_verbatim() {

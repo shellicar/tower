@@ -11,7 +11,10 @@ pub mod say;
 pub mod ts;
 
 pub use agent::{AgentTelemetry, Attached, Detached, Pulse, Ready};
-pub use approval::{AnswerOutcome, ApprovalLifecycle, encode_answer, parse_answer_reply};
+pub use approval::{
+    AnswerOutcome, ApprovalLifecycle, encode_answer, encode_heartbeat, encode_raised,
+    encode_settled, parse_answer, parse_answer_reply,
+};
 pub use conv::{
     ConvBlock, ConvChange, ConvDelta, ConvTelemetry, Message, Query, Revision, TipMoved, Tolerant,
     ToolUse, TurnAborted, TurnCancelled, TurnEnded, TurnStarted, Usage,

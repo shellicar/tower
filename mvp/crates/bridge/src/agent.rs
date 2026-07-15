@@ -198,7 +198,9 @@ struct TurnContext {
 
 /// Resolves when the cancel signal flips; never resolves if it never does
 /// (a dropped sender means nobody can cancel any more, not "cancelled").
-async fn cancelled(rx: &mut watch::Receiver<bool>) {
+/// Shared with exec (a running command races it) and approval (a pending
+/// ask races it): one cancel semantics everywhere.
+pub(crate) async fn cancelled(rx: &mut watch::Receiver<bool>) {
     loop {
         if *rx.borrow_and_update() {
             return;
@@ -238,11 +240,11 @@ async fn run_query(
         user_from,
     } = &ctx;
 
-    let tools: Vec<Value> = if skills.is_empty() {
-        Vec::new()
-    } else {
-        vec![skills.tool_schema()]
-    };
+    // Bash always; Skill only when a catalogue exists.
+    let mut tools: Vec<Value> = vec![crate::exec::bash_schema()];
+    if !skills.is_empty() {
+        tools.push(skills.tool_schema());
+    }
 
     let mut committed: Vec<Message> = Vec::new();
     // The say rides pending and commits with the FIRST turn's result: words
@@ -465,12 +467,65 @@ async fn run_query(
         for block in done.content.iter().filter(|b| b["type"] == "tool_use") {
             let id = block["id"].as_str().unwrap_or("");
             let name = block["name"].as_str().unwrap_or("");
+            // The action, observed before it runs (conversation-spec,
+            // Telemetry): `input` included — the action is unreviewable
+            // without the payload.
+            publish(
+                client,
+                conv,
+                "telemetry.tool.use",
+                json!({
+                    "ts": now_iso(),
+                    "queryId": query, "turnId": turn_id,
+                    "id": id, "name": name, "input": block["input"],
+                }),
+            )
+            .await;
             let (content, is_error) = match name {
                 "Skill" => {
                     let skill = block["input"]["skill"].as_str().unwrap_or("");
                     match skills.invoke(skill) {
                         Ok(body) => (body, false),
                         Err(e) => (e, true),
+                    }
+                }
+                // Every Bash call gates behind a human approval in v1 -
+                // `echo hello` included. Policy (auto-approve, blocklists)
+                // is future work; wait-forever is sane precisely because
+                // the ask is visible and the query cancellable.
+                "Bash" => {
+                    let approval_id = uuid::Uuid::new_v4().to_string();
+                    let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                    let correlation = json!({
+                        "conversationId": conv.0,
+                        "queryId": query,
+                        "turnId": turn_id,
+                        "toolUseId": id,
+                    });
+                    match crate::approval::gate(
+                        client,
+                        &approval_id,
+                        &ask,
+                        &correlation,
+                        &mut cancel,
+                    )
+                    .await
+                    {
+                        crate::approval::Verdict::Approved => {
+                            let command = block["input"]["command"].as_str().unwrap_or("");
+                            crate::exec::run_bash(command, &mut cancel).await
+                        }
+                        crate::approval::Verdict::Denied { by } => {
+                            (format!("denied by {by}"), true)
+                        }
+                        // The slot still gets its result: a committed
+                        // tool_use without one is an invalid conversation.
+                        // The cancel flag is set, so the between-rounds
+                        // check below closes the query cancelled right
+                        // after these results commit.
+                        crate::approval::Verdict::Cancelled => {
+                            ("cancelled by user before approval".to_string(), true)
+                        }
                     }
                 }
                 other => (format!("unknown tool {other:?}"), true),

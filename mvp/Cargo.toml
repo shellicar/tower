@@ -29,6 +29,9 @@ sha2 = "0.10"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
+# Process-group kill for the Bash tool's cancellation (kill(-pgid)): tokio's
+# own kill() reaches only the direct child, never the tree.
+libc = "0.2"
 # The YAML organisation's own continuation of serde_yaml (github.com/yaml/
 # yaml-serde) — skills frontmatter is YAML, and hand-parsing YAML is an
 # approximation that already bit once (block-scalar descriptions).

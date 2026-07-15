@@ -6,15 +6,17 @@ edition.workspace = true
 [lints]
 workspace = true
 
-# The bridge agent v0: a converse-only agent host proving the conversation
-# concern end to end without claude-sdk-cli — stdio spawn control, the
-# servicer discipline on NATS, the messages API over SSE. Deliberate cuts:
-# no tools (hence no approvals), no persistence, no compaction.
+# The bridge agent: an agent host proving the concerns end to end without
+# claude-sdk-cli. Stdio spawn control, the servicer discipline on NATS, the
+# messages API over SSE, the Skill tool, and Bash gated behind the approval
+# concern (every command asks, v1). Deliberate cuts: no persistence, no
+# compaction.
 [dependencies]
 wire = { path = "../wire" }
 anyhow.workspace = true
 async-nats.workspace = true
 futures.workspace = true
+libc.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -20,7 +20,9 @@
 
 mod agent;
 mod anthropic;
+mod approval;
 mod decisions;
+mod exec;
 mod skills;
 
 use tokio::io::{AsyncBufReadExt, BufReader};

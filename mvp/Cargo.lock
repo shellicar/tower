@@ -160,6 +160,7 @@ dependencies = [
  "anyhow",
  "async-nats",
  "futures",
+ "libc",
  "reqwest",
  "serde",
  "serde_json",
