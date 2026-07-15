@@ -1,8 +1,59 @@
 <script lang="ts">
   import MessageView from './MessageView.svelte';
   import { tower, type OpenConversation } from './tower.svelte';
+  import type { AttachmentRef } from './types';
 
   let { oc }: { oc: OpenConversation } = $props();
+
+  // Attachments ride as chips beside the editor: uploaded eagerly (the
+  // transit store's TTL cleans up abandons), included in the next say,
+  // cleared with it. State is only ever ASSIGNED, never mutated across an
+  // await - the whole batch settles, then one write each.
+  let attachments = $state<AttachmentRef[]>([]);
+  let uploading = $state(false);
+  let uploadNote = $state('');
+  let fileInput: HTMLInputElement | undefined = $state();
+
+  async function addFiles(list: Iterable<File>) {
+    const files = [...list];
+    if (files.length === 0) return;
+    uploading = true;
+    const settled = await Promise.allSettled(files.map((f) => tower.upload(f)));
+    const won: AttachmentRef[] = [];
+    const lost: string[] = [];
+    for (const r of settled) {
+      if (r.status === 'fulfilled') won.push(r.value);
+      else lost.push(r.reason instanceof Error ? r.reason.message : String(r.reason));
+    }
+    attachments = [...attachments, ...won];
+    uploadNote = lost.length > 0 ? `upload failed: ${lost.join('; ')}` : '';
+    uploading = false;
+  }
+
+  function removeAttachment(i: number) {
+    attachments = attachments.filter((_, j) => j !== i);
+  }
+
+  // Paste-to-attach: a screenshot in the clipboard is the usual workflow.
+  // Only file-bearing pastes are intercepted; text pastes stay the
+  // textarea's own.
+  function onpaste(e: ClipboardEvent) {
+    const files = [...(e.clipboardData?.items ?? [])]
+      .filter((item) => item.kind === 'file')
+      .map((item) => item.getAsFile())
+      .filter((f): f is File => f !== null);
+    if (files.length > 0) {
+      e.preventDefault();
+      addFiles(files);
+    }
+  }
+
+  function sizeLabel(n?: number): string {
+    if (!n) return '';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   // The draft survives a refresh: half-typed thoughts are the reader's own
   // in-flight state — exactly what the client's local storage is for.
@@ -76,12 +127,17 @@
     if (editor && draft !== '') autosize();
   });
 
-  // A revoked say comes back to the editor — the cancel took back the words,
-  // Claude Code's escape behaviour. Prepended so a newer half-typed thought
-  // survives too.
+  // A revoked say comes back whole — words to the editor (prepended so a
+  // newer half-typed thought survives), files back to the chips. The cancel
+  // took back the say; nothing is lost.
   $effect(() => {
-    if (oc.restoreSay !== null) {
-      draft = draft ? `${oc.restoreSay}\n${draft}` : oc.restoreSay;
+    if (oc.restoreSay !== null || oc.restoreAttachments.length > 0) {
+      if (oc.restoreSay !== null) {
+        draft = draft ? `${oc.restoreSay}\n${draft}` : oc.restoreSay;
+      }
+      if (oc.restoreAttachments.length > 0) {
+        attachments = [...oc.restoreAttachments, ...attachments];
+      }
       tower.consumeRestore(oc.conv);
       requestAnimationFrame(autosize);
     }
@@ -109,8 +165,10 @@
 
   function submit() {
     const text = draft.trim();
-    if (!text || busy) return;
-    tower.say(oc.conv, text);
+    if (!text || busy || uploading) return;
+    tower.say(oc.conv, text, attachments);
+    attachments = [];
+    uploadNote = '';
     draft = '';
     // Deliberately no re-anchor: a reader scrolled up for a reason stays
     // exactly where they are.
@@ -288,14 +346,54 @@
     {#if oc.lastSay}
       <p class="mb-1.5 text-orange-300">{oc.lastSay}</p>
     {/if}
+    {#if uploadNote}
+      <p class="mb-1.5 text-orange-300">{uploadNote}</p>
+    {/if}
+    {#if attachments.length > 0 || uploading}
+      <p class="mb-1.5 flex flex-wrap items-center gap-1.5">
+        {#each attachments as a, i}
+          <span
+            class="flex items-center gap-1 rounded border border-neutral-700 px-1.5 text-neutral-300"
+          >
+            📎 {a.source.mediaType ?? a.type} · {sizeLabel(a.source.size)}
+            <button
+              class="cursor-pointer text-neutral-500 hover:text-neutral-200"
+              onclick={() => removeAttachment(i)}>×</button
+            >
+          </span>
+        {/each}
+        {#if uploading}
+          <span class="text-neutral-500">uploading…</span>
+        {/if}
+      </p>
+    {/if}
     <textarea
       class="max-h-48 min-h-16 w-full resize-none border border-neutral-700 bg-neutral-900 px-2 py-1.5 disabled:opacity-50"
       bind:value={draft}
       bind:this={editor}
       oninput={autosize}
       {onkeydown}
+      {onpaste}
       disabled={busy}
       placeholder={busy ? 'query running… (cancel to speak)' : 'say… (⌘↩ to send)'}
     ></textarea>
+    <div class="mt-1">
+      <button
+        class="cursor-pointer rounded border border-neutral-700 px-1.5 text-neutral-400 hover:text-neutral-200"
+        title="attach a file (or paste an image)"
+        onclick={() => fileInput?.click()}>📎 attach</button
+      >
+      <input
+        class="hidden"
+        type="file"
+        multiple
+        bind:this={fileInput}
+        onchange={(e) => {
+          const files = (e.currentTarget as HTMLInputElement).files;
+          if (files) addFiles(files);
+          (e.currentTarget as HTMLInputElement).value = '';
+        }}
+      />
+    </div>
   </div>
 </section>

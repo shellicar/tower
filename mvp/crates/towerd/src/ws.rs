@@ -39,6 +39,9 @@ pub enum ClientMsg {
         conv: String,
         text: String,
         tip: Option<String>,
+        /// Reference blocks from POST /attachment, forwarded verbatim.
+        #[serde(default)]
+        attachments: Vec<serde_json::Value>,
     },
     #[serde(rename = "cancel")]
     Cancel {
@@ -589,11 +592,13 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
             conv,
             text,
             tip,
+            attachments,
         } => {
             let cmd = SayCommand {
                 conv: ConversationId(conv),
                 text,
                 tip: tip.map(wire::MessageId),
+                attachments,
             };
             match gateway::say(broker, clock, cmd).await {
                 SayOutcome::Accepted { query } => ServerMsg::SayResult {

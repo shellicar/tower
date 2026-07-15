@@ -15,6 +15,7 @@ export default defineConfig({
     proxy: {
       '/ws': { target: `ws://${towerd}`, ws: true },
       '/ref': { target: `http://${towerd}` },
+      '/attachment': { target: `http://${towerd}` },
     },
   },
 });

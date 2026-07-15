@@ -16,6 +16,9 @@ pub struct SayCommand {
     pub conv: ConversationId,
     pub text: String,
     pub tip: Option<MessageId>,
+    /// Reference blocks, verbatim (conversation-spec, `attachments`): bytes
+    /// never ride a subject; the servicer resolves at its own edge.
+    pub attachments: Vec<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -30,12 +33,15 @@ pub enum SayOutcome {
 /// v2: the subject leaf (`requests.say`) spells the type; the body carries
 /// none (the discriminator lives in one place).
 pub fn encode_say(cmd: &SayCommand, ts: &str) -> Vec<u8> {
-    let payload = json!({
+    let mut payload = json!({
         "ts": ts,
         "from": { "kind": "human" },
         "text": cmd.text,
         "precondition": { "tip": cmd.tip.as_ref().map(|t| t.0.as_str()) },
     });
+    if !cmd.attachments.is_empty() {
+        payload["attachments"] = json!(cmd.attachments);
+    }
     serde_json::to_vec(&payload).expect("json! of plain values cannot fail")
 }
 
@@ -98,6 +104,8 @@ pub enum ConvRequest {
         /// conversation is empty").
         tip: Option<MessageId>,
         from: serde_json::Value,
+        /// Reference blocks, verbatim; empty when the say carried none.
+        attachments: Vec<Value>,
     },
     Cancel {
         query: QueryId,
@@ -128,10 +136,17 @@ pub fn parse_request(leaf: &str, bytes: &[u8]) -> ConvRequest {
                 .and_then(|p| p.get("tip"))
                 .and_then(Value::as_str)
                 .map(|t| MessageId(t.to_string()));
+            // Verbatim: the servicer decides what a source kind means.
+            let attachments = value
+                .get("attachments")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
             ConvRequest::Say {
                 text: text.to_string(),
                 tip,
                 from,
+                attachments,
             }
         }
         "cancel" => match value.get("id").and_then(Value::as_str) {
@@ -202,6 +217,7 @@ mod tests {
             conv: ConversationId("conv-abc".into()),
             text: "okay, delete it".into(),
             tip: tip.map(|t| MessageId(t.into())),
+            attachments: Vec::new(),
         }
     }
 
@@ -247,12 +263,31 @@ mod tests {
     fn requests_parse_both_directions() {
         // The client encoder and the servicer parser meet in the middle.
         let bytes = encode_say(&cmd(Some("m4")), "2026-07-07T21:00:00+10:00");
-        let ConvRequest::Say { text, tip, from } = parse_request("say", &bytes) else {
+        let ConvRequest::Say {
+            text,
+            tip,
+            from,
+            attachments,
+        } = parse_request("say", &bytes)
+        else {
             panic!("expected say");
         };
         assert_eq!(text, "okay, delete it");
         assert_eq!(tip, Some(MessageId("m4".into())));
         assert_eq!(from, serde_json::json!({ "kind": "human" }));
+        assert!(attachments.is_empty());
+
+        // Attachments ride verbatim, both directions.
+        let mut with_attach = cmd(Some("m4"));
+        with_attach.attachments = vec![serde_json::json!({
+            "type": "image",
+            "source": { "type": "object", "id": "att-1", "mediaType": "image/png", "size": 42 }
+        })];
+        let bytes = encode_say(&with_attach, "2026-07-07T21:00:00+10:00");
+        let ConvRequest::Say { attachments, .. } = parse_request("say", &bytes) else {
+            panic!("expected say");
+        };
+        assert_eq!(attachments, with_attach.attachments);
 
         // Null tip decodes as the empty-conversation premise.
         let bytes = encode_say(&cmd(None), "2026-07-07T21:00:00+10:00");

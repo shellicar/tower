@@ -108,6 +108,7 @@ mod tests {
             conv: ConversationId("conv-abc".into()),
             text: "okay, delete it".into(),
             tip: Some(MessageId("m4".into())),
+            attachments: Vec::new(),
         }
     }
 

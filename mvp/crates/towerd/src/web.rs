@@ -19,15 +19,105 @@ pub struct AppState<B: Broker, C: Clock> {
     pub broker: B,
     pub clock: C,
     pub dist: std::path::PathBuf,
+    /// The transit object store for attachments (ws-spec, POST /attachment).
+    /// Optional: tests and object-store-less deployments run without it and
+    /// the route answers 503 honestly.
+    pub attach: Option<async_nats::jetstream::object_store::ObjectStore>,
 }
 
 pub fn router<B: Broker, C: Clock>(state: AppState<B, C>) -> Router {
     Router::new()
         .route("/ws", get(ws_upgrade::<B, C>))
         .route("/ref/{id}", get(get_ref::<B, C>))
+        .route(
+            "/attachment",
+            axum::routing::post(post_attachment::<B, C>)
+                // The default 2 MB body cap is smaller than a phone photo;
+                // the transit store's own limits are the real bound.
+                .layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
+        .route("/attachment/{id}", get(get_attachment::<B, C>))
         .route("/", get(serve_index::<B, C>))
         .route("/{*path}", get(serve_asset::<B, C>))
         .with_state(state)
+}
+
+/// Upload one attachment's bytes into the transit store. The id is minted
+/// random — nothing lives long enough for content-addressing to buy
+/// anything — and the store's TTL is the cleanup (no delete call exists).
+async fn post_attachment<B: Broker, C: Clock>(
+    State(state): State<AppState<B, C>>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let Some(store) = &state.attach else {
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "no attachment store configured",
+        )
+            .into_response();
+    };
+    let media_type = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
+    let id = format!("att-{}", uuid::Uuid::new_v4());
+    let size = body.len();
+    let mut reader = body.as_ref();
+    // The media type rides as object metadata so the preview route can
+    // serve an honest Content-Type later.
+    let meta = async_nats::jetstream::object_store::ObjectMetadata {
+        name: id.clone(),
+        description: Some(media_type.clone()),
+        ..Default::default()
+    };
+    if let Err(e) = store.put(meta, &mut reader).await {
+        eprintln!("attachment put failed: {e}");
+        return (
+            axum::http::StatusCode::BAD_GATEWAY,
+            "attachment store put failed",
+        )
+            .into_response();
+    }
+    axum::Json(serde_json::json!({ "id": id, "mediaType": media_type, "size": size }))
+        .into_response()
+}
+
+/// Preview an attachment while its object lives. Transit semantics on
+/// purpose: past the store's TTL this honestly 404s — the record's chip
+/// still states what was attached; the bytes were for the model.
+async fn get_attachment<B: Broker, C: Clock>(
+    State(state): State<AppState<B, C>>,
+    Path(id): Path<String>,
+) -> Response {
+    let Some(store) = &state.attach else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    let Ok(mut object) = store.get(&id).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let content_type = object
+        .info
+        .description
+        .clone()
+        .unwrap_or_else(|| "application/octet-stream".into());
+    let mut bytes = Vec::new();
+    {
+        use tokio::io::AsyncReadExt;
+        if object.read_to_end(&mut bytes).await.is_err() {
+            return StatusCode::BAD_GATEWAY.into_response();
+        }
+    }
+    (
+        [
+            (header::CONTENT_TYPE, content_type),
+            // Short-lived by nature: the object expires with the transit TTL.
+            (header::CACHE_CONTROL, "private, max-age=300".into()),
+        ],
+        bytes,
+    )
+        .into_response()
 }
 
 async fn ws_upgrade<B: Broker, C: Clock>(

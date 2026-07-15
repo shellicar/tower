@@ -101,6 +101,10 @@ saying which key it belongs to.
 
 ```json
 { "type": "say", "id": "r3", "conv": "c65b902d-…", "text": "hello", "tip": "a439d18e-…" }
+{ "type": "say", "id": "r4", "conv": "c65b902d-…", "text": "what does this show?", "tip": "a439d18e-…",
+  "attachments": [
+    { "type": "image", "source": { "type": "object", "id": "att-7c9e…", "mediaType": "image/png", "size": 48213 } }
+  ] }
 ```
 
 Speak into a conversation. towerd forwards it to the conversation's servicer
@@ -113,6 +117,11 @@ fresher knowledge. `tip: null` is the claim "this conversation is empty"
 Response: `say_result`. The *answer* to what was said is not in the response —
 it arrives on the conversation's content flow like everything else, which is
 the wire's own rule (the reply confirms acceptance, never outcome).
+
+`attachments` carries reference blocks from prior `POST /attachment` uploads
+(below), forwarded verbatim — bytes never ride the WS or the wire. The
+committed message will carry the same reference blocks; rendering them is the
+client's policy, like every ref.
 
 ### `cancel`
 
@@ -459,6 +468,31 @@ Everything else about the message — its ids, its position, the tip — is
 unaffected: externalisation never falsifies position, and a client that never
 fetches a single ref still reads the whole dialogue.
 
+## Attachments — `POST /attachment`
+
+```
+POST /attachment           body = the bytes, Content-Type = the media type
+  → 200 { "id": "att-7c9e…", "mediaType": "image/png", "size": 48213 }
+```
+
+Upload happens over HTTP — the WS stays light — and eagerly, at attach time:
+the client uploads when the user picks the file, holds the returned reference,
+and includes it in the eventual `say`'s `attachments`. towerd puts the bytes
+into the deployment's **transit** object store (conversation-spec: transit,
+not storage — the servicer fetches at its own edge; ids are opaque and
+short-lived; the store's TTL is the cleanup, so an upload the user abandons
+costs nothing and needs no delete call). The id is minted random — nothing is
+kept long enough for content-addressing to buy anything.
+
+```
+GET /attachment/{id}   → the bytes (Content-Type from upload) — while the object lives
+```
+
+Preview, with transit semantics on purpose: past the store's TTL this
+honestly 404s. The committed chip still states what was attached (type,
+size); the bytes were for the model, and the repair — as everywhere — is
+re-attaching.
+
 ## Tolerance
 
 The wire's evolution rules, both directions: producers only add — new message
@@ -549,7 +583,11 @@ const approvalState = z.looseObject({
 export const clientMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('open'),  id: z.string(), conv: z.string(), after: millis.nullable() }),
   z.looseObject({ type: z.literal('close'), id: z.string(), conv: z.string() }),
-  z.looseObject({ type: z.literal('say'),   id: z.string(), conv: z.string(), text: z.string(), tip: z.string().nullable() }),
+  z.looseObject({ type: z.literal('say'),   id: z.string(), conv: z.string(), text: z.string(), tip: z.string().nullable(),
+                  attachments: z.array(z.looseObject({
+                    type: z.string(),
+                    source: z.looseObject({ type: z.string(), id: z.string(), mediaType: z.string().optional(), size: z.number().int().optional() }),
+                  })).optional() }),
   z.looseObject({ type: z.literal('cancel'), id: z.string(), conv: z.string(), query: z.string() }),
   z.looseObject({ type: z.literal('set_title'), id: z.string(), conv: z.string(), title: z.string() }),
   z.looseObject({ type: z.literal('set_tag'), id: z.string(), conv: z.string(), key: z.string(), value: z.string() }),

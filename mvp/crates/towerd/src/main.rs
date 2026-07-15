@@ -43,7 +43,35 @@ async fn main() -> anyhow::Result<()> {
         events_tx,
     ));
 
-    // Web: axum serves frontend dist/ + /ws + /ref/{id}.
+    // The transit object store for attachments: get-or-create with the
+    // configured TTL. Transit, not storage — expiry IS the cleanup.
+    let attach_bucket = std::env::var("TOWER_ATTACH_BUCKET").unwrap_or_else(|_| "attach".into());
+    let attach_ttl_s: u64 = std::env::var("TOWER_ATTACH_TTL_S")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3600);
+    let js = async_nats::jetstream::new(client.clone());
+    let attach = match js.get_object_store(&attach_bucket).await {
+        Ok(store) => Some(store),
+        Err(_) => match js
+            .create_object_store(async_nats::jetstream::object_store::Config {
+                bucket: attach_bucket.clone(),
+                description: Some("tower attachment transit".into()),
+                max_age: std::time::Duration::from_secs(attach_ttl_s),
+                ..Default::default()
+            })
+            .await
+        {
+            Ok(store) => Some(store),
+            Err(e) => {
+                // Uploads answer 503; everything else works. Honest degrade.
+                eprintln!("towerd: attachment store unavailable: {e}");
+                None
+            }
+        },
+    };
+
+    // Web: axum serves frontend dist/ + /ws + /ref/{id} + /attachment.
     let state = web::AppState {
         views: ViewsHandle {
             queries: queries_tx,
@@ -54,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
         dist: std::env::var("TOWER_DIST")
             .unwrap_or_else(|_| "frontend/dist".into())
             .into(),
+        attach,
     };
     let app = web::router(state);
     let listener = tokio::net::TcpListener::bind(&bind).await?;

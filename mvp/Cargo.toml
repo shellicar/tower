@@ -32,6 +32,9 @@ uuid = { version = "1", features = ["v4"] }
 # Process-group kill for the Bash tool's cancellation (kill(-pgid)): tokio's
 # own kill() reaches only the direct child, never the tree.
 libc = "0.2"
+# Attachment resolution: object-store bytes inline into the model request as
+# base64 (the API's own encoding for binary sources).
+base64 = "0.22"
 # The YAML organisation's own continuation of serde_yaml (github.com/yaml/
 # yaml-serde) — skills frontmatter is YAML, and hand-parsing YAML is an
 # approximation that already bit once (block-scalar descriptions).

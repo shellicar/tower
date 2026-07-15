@@ -254,14 +254,13 @@ terminal appears on the change stream the same as one that arrived over
 | `say` | `from`, `text`, `precondition` | `accepted` + `id` \| `rejected` + `reason` | start a new query against a known state; `from` is the sender identity — locally-typed input carries `{ kind: human }` the same way, so no speaker is ever anonymous; the reply acknowledges acceptance only — the answer appears on the change stream like any other turn |
 | `cancel` | `id` | `accepted` \| `rejected` + `reason` | revoke an accepted piece of state by its id — in v1, a running query; whatever kinds acceptance creates later. Its target *is* its premise: never "cancel whatever happens to be running". Rejection reasons are honest: `not_found`, `already_complete`, `unsupported` |
 
-**The `say` message, concretely.** v1 carries text only — a plain string.
-Anything richer (images, attachments) is the terminal's job for now; rich
-content arrives under add-only when the content vocabulary
-(`content-vocabulary.md`) gets its design pass. The committed `message` on the
-change stream still carries full content blocks — the record holds what the
-conversation actually contains; only the inbound ask is text-only. The premise
-is encoded exactly as the preconditions section writes it: one key naming the
-kind.
+**The `say` message, concretely.** It carries text — a plain string — plus
+optionally `attachments` (below), which arrived under add-only exactly as
+promised; fully general rich content still waits on the content vocabulary
+(`content-vocabulary.md`) design pass. The committed `message` on the change
+stream carries full content blocks — the record holds what the conversation
+actually contains. The premise is encoded exactly as the preconditions
+section writes it: one key naming the kind.
 
 ```json
 // conv.v2.conv-abc.requests.say
@@ -287,6 +286,36 @@ rest is non-compliant. `{ "kind": "human" }` alone is valid: it is exactly what
 a terminal that knows a human typed — but not which human — publishes. The
 worked example above shows a sender that did know its `userId`; that field is
 illustrative, not required.
+
+**`attachments`** — optional; files riding with the say. Bytes never travel
+on a subject (the broker's payload limit alone forbids it): the sender puts
+them in the deployment's transit object store first and the say carries
+reference blocks, API-shaped with an `object` source:
+
+```json
+{
+  "ts": "2026-07-07T17:20:04+10:00",
+  "from": { "kind": "human" },
+  "text": "what does this diagram show?",
+  "attachments": [
+    { "type": "image",
+      "source": { "type": "object", "id": "att-7c9e…", "mediaType": "image/png", "size": 48213 } }
+  ],
+  "precondition": { "tip": "m4" }
+}
+```
+
+The servicer resolves at request-build: fetch the object at its own edge,
+inline the bytes for the model. The **committed message carries the
+reference block verbatim, never the bytes** — the record stays light and
+wire-legal. The store is transit, not storage: ids are opaque and
+short-lived (deployment configuration names the bucket and its expiry), and
+bytes are the servicer's private state once fetched. An object that no
+longer resolves — an adopted conversation past the transit window — renders
+in the request as a stated placeholder (media type and size, from the block
+itself); the record still holds the block, and the repair is re-attaching.
+Unknown `source.type` values get the same placeholder treatment — source
+kinds are an open set (`base64` beside `object` would be add-only).
 
 Two candidates follow from this design and are named, not designed:
 
@@ -480,7 +509,16 @@ export const conversationDelta = z.discriminatedUnion('type', [
 // conv.v2.{conversationId}.requests.> — a leaf not listed is still answered:
 // `rejected` with reason `unsupported`. Compliance is answering, not implementing.
 export const conversationRequest = {
-  'say': z.looseObject({ ts, from: sender, text: z.string(), precondition: z.looseObject({ tip: z.string().nullable() }) }),
+  'say': z.looseObject({
+    ts, from: sender, text: z.string(),
+    // Reference blocks only — bytes never ride a subject. source.type is an
+    // open set; unresolvable sources render as stated placeholders.
+    attachments: z.array(z.looseObject({
+      type: z.string(),
+      source: z.looseObject({ type: z.string(), id: z.string(), mediaType: z.string().optional(), size: z.number().int().optional() }),
+    })).optional(),
+    precondition: z.looseObject({ tip: z.string().nullable() }),
+  }),
   'cancel': z.looseObject({ ts, from: sender.optional(), id: z.string() }),
 };
 

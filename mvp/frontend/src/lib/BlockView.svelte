@@ -12,6 +12,25 @@
     const s = typeof value === 'string' ? value : JSON.stringify(value);
     return s === undefined ? '' : s.length > max ? s.slice(0, max) + '…' : s;
   }
+
+  // An attachment reference block: bytes lived in the transit store and are
+  // the servicer's once fetched. The chip states the fact (type, size); a
+  // click previews via GET /attachment/{id} WHILE the object lives — past
+  // the transit TTL the fetch honestly 404s and the chip stays a fact.
+  const objectSource = $derived(
+    (block.source as { type?: string; id?: string; mediaType?: string; size?: number } | undefined)
+      ?.type === 'object'
+      ? (block.source as { id?: string; mediaType?: string; size?: number })
+      : null,
+  );
+  let previewFailed = $state(false);
+
+  function sizeLabel(n?: number): string {
+    if (!n) return '';
+    if (n < 1024) return `· ${n} B`;
+    if (n < 1024 * 1024) return `· ${Math.round(n / 1024)} KB`;
+    return `· ${(n / (1024 * 1024)).toFixed(1)} MB`;
+  }
 </script>
 
 {#if block.type === 'text'}
@@ -52,12 +71,36 @@
 {:else if block.type === 'image'}
   {#if isRef(block.source)}
     <RefView ref={block.source} label="🖼 image" image />
+  {:else if objectSource}
+    <details>
+      <summary class="cursor-pointer text-neutral-500"
+        >📎 {objectSource.mediaType ?? 'image'} {sizeLabel(objectSource.size)} (attachment)</summary
+      >
+      {#if previewFailed}
+        <span class="text-neutral-500">preview expired — the transit object is gone</span>
+      {:else}
+        <img
+          class="my-1 max-h-96 max-w-full"
+          src={`/attachment/${objectSource.id}`}
+          alt={objectSource.mediaType ?? 'attachment'}
+          onerror={() => (previewFailed = true)}
+        />
+      {/if}
+    </details>
   {:else}
     <span class="text-neutral-500">🖼 image (inline)</span>
   {/if}
 {:else if block.type === 'document'}
   {#if isRef(block.source)}
     <RefView ref={block.source} label="📄 document" />
+  {:else if objectSource}
+    <a
+      class="text-neutral-500 hover:text-neutral-300"
+      href={`/attachment/${objectSource.id}`}
+      target="_blank"
+      rel="noreferrer"
+      >📎 {objectSource.mediaType ?? 'document'} {sizeLabel(objectSource.size)} (attachment)</a
+    >
   {:else}
     <span class="text-neutral-500">📄 document (inline)</span>
   {/if}

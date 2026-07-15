@@ -36,6 +36,8 @@ pub struct AgentConfig {
     /// catalogue must match the reminder committed into the record, and a
     /// skill added after boot still reaches the next conversation.
     pub skills_root: std::path::PathBuf,
+    /// The transit object store attachments resolve from (objects.rs).
+    pub attach_bucket: String,
 }
 
 /// Subscribe to the conversation's requests. main calls this BEFORE
@@ -85,7 +87,7 @@ pub async fn run(
                 // v2: the leaf spells the operation; read it off the subject.
                 let leaf = msg.subject.strip_prefix(prefix.as_str()).unwrap_or("");
                 let response = match parse_request(leaf, &msg.payload) {
-                    ConvRequest::Say { text, tip, from } => {
+                    ConvRequest::Say { text, tip, from, attachments } => {
                         match conversation.on_say(tip.as_ref().map(|t| t.0.as_str())) {
                             SayDecision::Stale => encode_rejected("stale"),
                             SayDecision::Accept => {
@@ -105,6 +107,13 @@ pub async fn run(
                                 {
                                     content.push(json!({ "type": "text", "text": reminder }));
                                 }
+                                // Reference blocks verbatim: the COMMITTED
+                                // message carries these, never bytes. The
+                                // model-facing render resolves them below,
+                                // over the WHOLE history - the tree and any
+                                // adopted record hold reference blocks too,
+                                // and the API must never see one.
+                                content.extend(attachments.iter().cloned());
                                 content.push(json!({ "type": "text", "text": text }));
 
                                 // The user half is PENDING, not committed:
@@ -124,9 +133,16 @@ pub async fn run(
                                 let (tx, rx) = watch::channel(false);
                                 cancel_tx = Some(tx);
                                 // The model sees the pending say; the record
-                                // does not, yet.
+                                // does not, yet. Resolution runs over the
+                                // full render at this edge (objects.rs).
                                 let mut history = conversation.history();
                                 history.push(json!({ "role": "user", "content": user.content }));
+                                crate::objects::resolve_history(
+                                    &client,
+                                    &config.attach_bucket,
+                                    &mut history,
+                                )
+                                .await;
                                 let ctx = TurnContext {
                                     client: client.clone(),
                                     conv: config.conv.clone(),

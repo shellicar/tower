@@ -7,6 +7,7 @@ import type {
   AgentAttachment,
   AgentInstance,
   ApprovalState,
+  AttachmentRef,
   ClientMsg,
   ConversationMessage,
   Millis,
@@ -47,8 +48,12 @@ export interface OpenConversation {
    *  superseded by its committed message, returned to the editor if the
    *  query closes without committing it. */
   pendingSay: string | null;
+  /** The attachments riding with the pending say — same lifecycle. */
+  pendingAttachments: AttachmentRef[];
   /** A revoked say handed back to the editor; the panel consumes it. */
   restoreSay: string | null;
+  /** The revoked say's attachments, handed back as chips. */
+  restoreAttachments: AttachmentRef[];
 }
 
 const freshOpen = (conv: string): OpenConversation => ({
@@ -60,7 +65,9 @@ const freshOpen = (conv: string): OpenConversation => ({
   queryState: 'unknown',
   liveQuery: null,
   pendingSay: null,
+  pendingAttachments: [],
   restoreSay: null,
+  restoreAttachments: [],
 });
 
 /** The rail's view configuration — per profile, like the open set. */
@@ -280,9 +287,11 @@ class Tower {
     }
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
+    console.log('tower: connecting', `${proto}://${location.host}/ws`);
     this.#ws = ws;
 
     ws.onopen = () => {
+      console.log('tower: connected; re-opening', [...this.open.keys()]);
       this.connected = true;
       this.#retryMs = 500;
       // Re-open everything that was being read, with the high-water mark.
@@ -299,12 +308,19 @@ class Tower {
       let msg: ServerMsg;
       try {
         msg = JSON.parse(e.data);
-      } catch {
+      } catch (err) {
+        console.error('tower: unparseable frame', err, e.data);
         return; // tolerance: unparseable frames are skipped, never fatal
       }
-      this.#apply(msg);
+      console.log('tower: ←', msg.type, 'conv' in msg ? msg.conv : '');
+      try {
+        this.#apply(msg);
+      } catch (err) {
+        console.error('tower: apply failed on frame', msg.type, err, msg);
+      }
     };
-    ws.onclose = () => {
+    ws.onclose = (e) => {
+      console.log('tower: socket closed', e.code, e.reason);
       this.connected = false;
       this.#ws = null;
       setTimeout(() => this.connect(), this.#retryMs);
@@ -385,7 +401,7 @@ class Tower {
    *  belongs to the sender; null claims the conversation is empty. The text
    *  rides as the pending say — greyed until committed, returned to the
    *  editor if the query closes without committing it. */
-  say(conv: string, text: string) {
+  say(conv: string, text: string, attachments: AttachmentRef[] = []) {
     const oc = this.open.get(conv);
     if (!oc) return;
     const tip = oc.messages.length > 0 ? oc.messages[oc.messages.length - 1].id : null;
@@ -393,8 +409,57 @@ class Tower {
     this.#pendingSays.set(id, conv);
     oc.lastSay = null;
     oc.pendingSay = text;
+    oc.pendingAttachments = attachments;
     this.open = new Map(this.open);
-    this.#send({ type: 'say', id, conv, text, tip });
+    this.#send({
+      type: 'say',
+      id,
+      conv,
+      text,
+      tip,
+      ...(attachments.length > 0 ? { attachments } : {}),
+    });
+  }
+
+  /** The pending say comes home: words to the editor, files to the chips.
+   *  One path for every failure shape — rejection, unreachable, revocation. */
+  #restorePending(oc: OpenConversation) {
+    if (oc.pendingSay !== null) {
+      oc.restoreSay = oc.pendingSay;
+      oc.pendingSay = null;
+    }
+    if (oc.pendingAttachments.length > 0) {
+      oc.restoreAttachments = [...oc.restoreAttachments, ...oc.pendingAttachments];
+      oc.pendingAttachments = [];
+    }
+  }
+
+  /** Upload one file's bytes; the returned reference rides the eventual say.
+   *  Eager (at attach time): the transit store's TTL cleans up abandons. */
+  async upload(file: File): Promise<AttachmentRef> {
+    console.log('tower: uploading', file.name || '(clipboard)', file.type, file.size, 'B');
+    let response: Response;
+    try {
+      response = await fetch('/attachment', {
+        method: 'POST',
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        body: file,
+      });
+    } catch (err) {
+      console.error('tower: upload transport failed', err);
+      throw err;
+    }
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      console.error('tower: upload rejected', response.status, body);
+      throw new Error(`upload failed: ${response.status} ${body}`.trim());
+    }
+    const meta = (await response.json()) as { id: string; mediaType: string; size: number };
+    console.log('tower: uploaded', meta.id, meta.mediaType, meta.size, 'B');
+    return {
+      type: meta.mediaType.startsWith('image/') ? 'image' : 'document',
+      source: { type: 'object', id: meta.id, mediaType: meta.mediaType, size: meta.size },
+    };
   }
 
   /** Cancel the query this client started — stop, never rollback. The reply
@@ -407,11 +472,12 @@ class Tower {
     this.#send({ type: 'cancel', id, conv, query: oc.liveQuery });
   }
 
-  /** The panel consumed the revoked say. */
+  /** The panel consumed the revoked say and its attachments. */
   consumeRestore(conv: string) {
     const oc = this.open.get(conv);
     if (!oc) return;
     oc.restoreSay = null;
+    oc.restoreAttachments = [];
     this.open = new Map(this.open);
   }
 
@@ -451,13 +517,14 @@ class Tower {
         insertMessage(oc, msg.message);
         // A committed message supersedes the streaming that preceded it.
         oc.streaming = [];
-        // The committed say supersedes the pending one.
+        // The committed say supersedes the pending one, files included.
         if (
           oc.pendingSay !== null &&
           msg.message.role === 'user' &&
           msg.message.query === oc.liveQuery
         ) {
           oc.pendingSay = null;
+          oc.pendingAttachments = [];
         }
         this.open = new Map(this.open);
         break;
@@ -495,15 +562,12 @@ class Tower {
           oc.liveQuery = msg.query;
           oc.queryState = 'live';
         } else {
-          // Refused: hand the words back to the editor — nothing is lost.
+          // Refused: hand the words AND files back — nothing is lost.
           oc.lastSay =
             msg.outcome === 'rejected'
               ? `rejected: ${msg.reason}` // shown, never branched on
               : 'unreachable — nothing is serving this conversation';
-          if (oc.pendingSay !== null) {
-            oc.restoreSay = oc.pendingSay;
-            oc.pendingSay = null;
-          }
+          this.#restorePending(oc);
         }
         this.open = new Map(this.open);
         break;
@@ -516,10 +580,13 @@ class Tower {
         if (!oc) break;
         oc.queryState = 'idle';
         if (oc.liveQuery === msg.queryId) oc.liveQuery = null;
-        if (oc.pendingSay !== null) {
-          oc.restoreSay = oc.pendingSay;
-          oc.pendingSay = null;
+        // A closure that isn't completion is feedback the reader needs —
+        // an aborted query otherwise fails in silence. Reason shown
+        // verbatim; suppressing the happy path is display policy only.
+        if (msg.reason !== 'completed') {
+          oc.lastSay = `query ${msg.reason}`;
         }
+        this.#restorePending(oc);
         oc.streaming = [];
         this.open = new Map(this.open);
         break;
@@ -538,10 +605,7 @@ class Tower {
           oc.lastSay = 'cancel unreachable — nothing is serving this conversation';
           oc.liveQuery = null;
           oc.queryState = 'unknown';
-          if (oc.pendingSay !== null) {
-            oc.restoreSay = oc.pendingSay;
-            oc.pendingSay = null;
-          }
+          this.#restorePending(oc);
         }
         this.open = new Map(this.open);
         break;
@@ -625,7 +689,10 @@ class Tower {
 
   #send(msg: ClientMsg) {
     if (this.#ws?.readyState === WebSocket.OPEN) {
+      console.log('tower: →', msg.type, 'conv' in msg ? msg.conv : '', 'id' in msg ? msg.id : '');
       this.#ws.send(JSON.stringify(msg));
+    } else {
+      console.warn('tower: send dropped (socket not open)', msg.type);
     }
   }
 

@@ -75,6 +75,14 @@ export interface AgentAttachment {
   attachedTs: Millis;
 }
 
+/** A reference block for an uploaded attachment (POST /attachment): bytes
+ *  live in the transit object store; the say and the committed message carry
+ *  only this. */
+export interface AttachmentRef {
+  type: string; // image | document
+  source: { type: 'object'; id: string; mediaType?: string; size?: number };
+}
+
 /** One agent wire fact, flat; `kind` is an open set — unknown kinds skipped. */
 export interface AgentEvent {
   kind: string;
@@ -118,7 +126,14 @@ export type ServerMsg =
 export type ClientMsg =
   | { type: 'open'; id: string; conv: string; after: Millis | null }
   | { type: 'close'; id: string; conv: string }
-  | { type: 'say'; id: string; conv: string; text: string; tip: string | null }
+  | {
+      type: 'say';
+      id: string;
+      conv: string;
+      text: string;
+      tip: string | null;
+      attachments?: AttachmentRef[];
+    }
   | { type: 'cancel'; id: string; conv: string; query: string }
   | { type: 'set_title'; id: string; conv: string; title: string }
   | { type: 'set_tag'; id: string; conv: string; key: string; value: string }

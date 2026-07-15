@@ -159,6 +159,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-nats",
+ "base64",
  "futures",
  "libc",
  "reqwest",
@@ -1892,6 +1893,7 @@ dependencies = [
  "sha2",
  "tokio",
  "tokio-tungstenite",
+ "uuid",
  "wire",
 ]
 

@@ -32,6 +32,7 @@ mod anthropic;
 mod approval;
 mod decisions;
 mod exec;
+mod objects;
 mod skills;
 
 use futures::StreamExt;
@@ -125,6 +126,9 @@ async fn main() -> anyhow::Result<()> {
             )
         })
         .into();
+    // The transit object store attachments resolve from; must name the same
+    // bucket the tower deployment uploads into.
+    let attach_bucket = std::env::var("BRIDGE_ATTACH_BUCKET").unwrap_or_else(|_| "attach".into());
 
     let client = async_nats::connect(&nats_url).await?; // fail-fast
 
@@ -207,6 +211,7 @@ async fn main() -> anyhow::Result<()> {
                 system,
                 auth: auth.clone(),
                 skills_root: skills_root.clone(),
+                attach_bucket: attach_bucket.clone(),
             };
             tokio::spawn(agent::run(
                 client.clone(),
@@ -267,6 +272,7 @@ async fn main() -> anyhow::Result<()> {
                 system: None,
                 auth: auth.clone(),
                 skills_root: skills_root.clone(),
+                attach_bucket: attach_bucket.clone(),
             };
             tokio::spawn(agent::run(
                 client.clone(),

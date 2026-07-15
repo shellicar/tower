@@ -51,6 +51,7 @@ async fn scripted_publisher_reaches_the_ws_client() {
     ));
 
     let state = web::AppState {
+        attach: None,
         views: ViewsHandle {
             queries: queries_tx,
             events: view_events_tx,
