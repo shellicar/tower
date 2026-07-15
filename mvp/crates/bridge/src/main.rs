@@ -96,7 +96,11 @@ async fn publish_agent(
 ) {
     let subject = format!("agent.v1.{world}.telemetry.{leaf}");
     let bytes = serde_json::to_vec(&payload).expect("json! of plain values cannot fail");
-    eprintln!("{} bridge: → {subject} ({} B)", now_iso(), bytes.len());
+    // The pulse fires every PULSE_INTERVAL_S; logging it is pure noise. The
+    // facts worth seeing are ready/attached/detached.
+    if leaf != "pulse" {
+        eprintln!("{} bridge: → {subject} ({} B)", now_iso(), bytes.len());
+    }
     if let Err(e) = client.publish(subject, bytes.into()).await {
         eprintln!("bridge: agent telemetry publish failed: {e}");
     }
