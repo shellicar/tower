@@ -242,6 +242,20 @@ async fn accept_say(
         skills.get_or_insert_with(|| Arc::new(Skills::scan(config.skills_root.clone()))),
     );
     let mut content = Vec::new();
+    // Self-heal a broken tip. A prior servicer that died after committing a
+    // tool_use but before its tool_result leaves the record ending on a
+    // dangling tool_use, which the API rejects. Answer each with an abandoned
+    // result, carried on this say's user message ahead of its text (tool_result
+    // blocks lead): one honest, valid message - the outcome of the tool_use
+    // (no result), never a claim about what the tool did.
+    for id in conversation.dangling_tool_uses() {
+        content.push(json!({
+            "type": "tool_result",
+            "tool_use_id": id,
+            "content": "abandoned: the servicer was restarted before this tool completed",
+            "is_error": true,
+        }));
+    }
     if conversation.is_empty()
         && let Some(reminder) = skills.reminder()
     {

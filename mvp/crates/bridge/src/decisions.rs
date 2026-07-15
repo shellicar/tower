@@ -124,6 +124,29 @@ impl Conversation {
     pub fn is_empty(&self) -> bool {
         self.tree.is_empty()
     }
+
+    /// The `tool_use` ids at the tip that never got a result. A hard process
+    /// death commits a `tool_use` but cannot fill its result slot (the cancel
+    /// path fills it; a crash publishes nothing), so an adopted record can end
+    /// on a dangling `tool_use` - which the API rejects on the next turn. The
+    /// next say answers them with a synthesised "abandoned" result: the honest
+    /// outcome of the tool_USE (this harness has no result), never a claim
+    /// about the tool. A tip assistant message carrying `tool_use` blocks is
+    /// always dangling - had they been answered, the tool_result user message
+    /// would be the tip instead.
+    pub fn dangling_tool_uses(&self) -> Vec<String> {
+        let Some(last) = self.tree.last() else {
+            return Vec::new();
+        };
+        if last.role != "assistant" {
+            return Vec::new();
+        }
+        last.content
+            .iter()
+            .filter(|b| b["type"] == "tool_use")
+            .filter_map(|b| b["id"].as_str().map(str::to_string))
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -252,5 +275,43 @@ mod tests {
             conversation.on_cancel("q2"),
             CancelDecision::AlreadyComplete
         );
+    }
+
+    /// A hard death leaves the tip an assistant message carrying a tool_use
+    /// with no result. dangling_tool_uses names those ids so the next say can
+    /// fill them; a text tip or a tool_result tip has nothing to fill.
+    #[test]
+    fn dangling_tool_uses_finds_the_unanswered_tip() {
+        assert!(Conversation::default().dangling_tool_uses().is_empty());
+        let done = Conversation::adopt(vec![msg("m1", "user"), msg("m2", "assistant")]);
+        assert!(done.dangling_tool_uses().is_empty());
+
+        let broken = Conversation::adopt(vec![
+            msg("m1", "user"),
+            Message {
+                id: "m2".into(),
+                role: "assistant".into(),
+                content: vec![
+                    json!({ "type": "text", "text": "running it" }),
+                    json!({ "type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {} }),
+                ],
+            },
+        ]);
+        assert_eq!(broken.dangling_tool_uses(), vec!["toolu_1".to_string()]);
+
+        let mut healed = broken;
+        healed.on_query_end(
+            "q".into(),
+            QueryEnd::Completed {
+                messages: vec![Message {
+                    id: "m3".into(),
+                    role: "user".into(),
+                    content: vec![
+                        json!({ "type": "tool_result", "tool_use_id": "toolu_1", "content": "ok" }),
+                    ],
+                }],
+            },
+        );
+        assert!(healed.dangling_tool_uses().is_empty());
     }
 }
