@@ -537,17 +537,23 @@ class Tower {
         oc.queryState = 'live';
         // Append to the current segment; chunks arriving before any marker
         // are text — the mid-turn join renders honestly until corrected.
+        // IMMUTABLE update, deliberately: mutating the segment in place
+        // keeps its identity, and a keyed render never re-reads a plain
+        // object whose identity didn't change — the stream displays only
+        // at the end. New array, new segment, every chunk.
         const last = oc.streaming[oc.streaming.length - 1];
-        if (last) last.text += msg.text;
-        else oc.streaming.push({ blockType: 'text', text: msg.text });
+        oc.streaming = last
+          ? [...oc.streaming.slice(0, -1), { ...last, text: last.text + msg.text }]
+          : [{ blockType: 'text', text: msg.text }];
         this.open = new Map(this.open);
         break;
       }
       case 'stream_block': {
         const oc = this.open.get(msg.conv);
         if (!oc) break;
-        // The stream changed character: open a new segment.
-        oc.streaming.push({ blockType: msg.blockType, text: '' });
+        // The stream changed character: open a new segment (immutably,
+        // same reason as `streaming` above).
+        oc.streaming = [...oc.streaming, { blockType: msg.blockType, text: '' }];
         this.open = new Map(this.open);
         break;
       }
