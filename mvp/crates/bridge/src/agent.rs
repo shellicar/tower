@@ -55,6 +55,70 @@ pub async fn subscribe(
         .await
 }
 
+/// A publisher bound to one conversation: every event carries the same
+/// client and id, so the call sites spell only the leaf and the body. This
+/// is the shell's one door onto the wire for a served conversation.
+struct Publisher {
+    client: async_nats::Client,
+    conv: ConversationId,
+}
+
+impl Publisher {
+    fn new(client: &async_nats::Client, conv: &ConversationId) -> Self {
+        Self {
+            client: client.clone(),
+            conv: conv.clone(),
+        }
+    }
+
+    fn client(&self) -> &async_nats::Client {
+        &self.client
+    }
+
+    fn conv(&self) -> &ConversationId {
+        &self.conv
+    }
+
+    /// `leaf` is the class-and-event path after the id (`changes.message`,
+    /// `telemetry.turn.started`): v2's one-place discriminator.
+    async fn event(&self, leaf: &str, payload: Value) {
+        let subject = format!("conv.v2.{}.{leaf}", self.conv.0);
+        let bytes = serde_json::to_vec(&payload).expect("json! of plain values cannot fail");
+        eprintln!(
+            "{} bridge[{}]: → {subject} ({} B)",
+            now_iso(),
+            self.conv.0,
+            bytes.len()
+        );
+        if let Err(e) = self.client.publish(subject, bytes.into()).await {
+            eprintln!("bridge[{}]: publish failed: {e}", self.conv.0);
+        }
+    }
+
+    /// Commit a message to the record (`changes.message`): the change stream
+    /// constitutes the conversation, so this is the only publish that moves
+    /// the tip.
+    async fn message(
+        &self,
+        id: &str,
+        query: &str,
+        turn: &str,
+        role: &str,
+        from: &Value,
+        content: &[Value],
+    ) {
+        self.event(
+            "changes.message",
+            json!({
+                "ts": now_iso(),
+                "id": id, "queryId": query, "turnId": turn,
+                "role": role, "from": from, "content": content,
+            }),
+        )
+        .await;
+    }
+}
+
 /// `conversation` is the servicer's starting tree: `Conversation::default()`
 /// for a spawn, an adopted record for a revival - the loop is identical
 /// either way, because the record constitutes the conversation.
@@ -93,77 +157,18 @@ pub async fn run(
                         match conversation.on_say(tip.as_ref().map(|t| t.0.as_str())) {
                             SayDecision::Stale => encode_rejected("stale"),
                             SayDecision::Accept => {
-                                let query = uuid::Uuid::new_v4().to_string();
-                                let turn = uuid::Uuid::new_v4().to_string();
-                                let message_id = uuid::Uuid::new_v4().to_string();
-                                // The first message takes the catalogue snapshot
-                                // and carries the reminder as its FIRST block,
-                                // the said text second. It lives in the committed
-                                // record, so what the model saw is what is stored.
-                                let skills = Arc::clone(skills.get_or_insert_with(|| {
-                                    Arc::new(Skills::scan(config.skills_root.clone()))
-                                }));
-                                let mut content = Vec::new();
-                                if conversation.is_empty()
-                                    && let Some(reminder) = skills.reminder()
-                                {
-                                    content.push(json!({ "type": "text", "text": reminder }));
-                                }
-                                // Reference blocks verbatim: the COMMITTED
-                                // message carries these, never bytes. The
-                                // model-facing render resolves them below,
-                                // over the WHOLE history - the tree and any
-                                // adopted record hold reference blocks too,
-                                // and the API must never see one.
-                                content.extend(attachments.iter().cloned());
-                                content.push(json!({ "type": "text", "text": text }));
-
-                                // The user half is PENDING, not committed:
-                                // the spec's recommended declaration. It
-                                // commits with the first turn's result; a
-                                // query cancelled before then leaves the
-                                // record untouched - the cancel revoked the
-                                // say, not just the turn.
-                                let user = Message {
-                                    id: message_id,
-                                    role: "user".into(),
-                                    content,
-                                };
-                                conversation.start_query(query.clone());
-
-                                // The query task, cooperatively cancellable.
-                                let (tx, rx) = watch::channel(false);
-                                cancel_tx = Some(tx);
-                                // The model sees the pending say; the record
-                                // does not, yet. Resolution runs over the
-                                // full render at this edge (objects.rs).
-                                let mut history = conversation.history();
-                                history.push(json!({ "role": "user", "content": user.content }));
-                                crate::objects::resolve_history(
+                                let (query, tx) = accept_say(
                                     &client,
-                                    &config.attach_bucket,
-                                    &mut history,
+                                    &config,
+                                    &mut conversation,
+                                    &mut skills,
+                                    &done_tx,
+                                    text,
+                                    from,
+                                    attachments,
                                 )
                                 .await;
-                                let ctx = TurnContext {
-                                    client: client.clone(),
-                                    conv: config.conv.clone(),
-                                    model: config.model.clone(),
-                                    system: config.system.clone(),
-                                    auth: config.auth.clone(),
-                                    skills,
-                                    query: query.clone(),
-                                    turn,
-                                    user,
-                                    user_from: from,
-                                    thinking_budget: config.thinking_budget,
-                                };
-                                let done = done_tx.clone();
-                                let q = query.clone();
-                                tokio::spawn(async move {
-                                    let end = run_query(ctx, history, rx).await;
-                                    let _ = done.send((q, end)).await;
-                                });
+                                cancel_tx = Some(tx);
                                 encode_accepted(Some(&query))
                             }
                         }
@@ -203,6 +208,87 @@ pub async fn run(
             }
         }
     }
+}
+
+/// Accept a say: mint the query's ids, snapshot the skills catalogue on the
+/// first message, build the pending user turn, resolve its attachments for
+/// the model, and spawn the query task. Returns the query id (echoed to the
+/// sender as `accepted`) and its cancel sender (the shell's I/O half of the
+/// fold's cancel tracking).
+///
+/// The user half is PENDING, not committed: the spec's recommended
+/// declaration. It commits with the first turn's result; a query cancelled
+/// before then leaves the record untouched - the cancel revoked the say, not
+/// just the turn.
+#[allow(clippy::too_many_arguments)]
+async fn accept_say(
+    client: &async_nats::Client,
+    config: &AgentConfig,
+    conversation: &mut Conversation,
+    skills: &mut Option<Arc<Skills>>,
+    done_tx: &mpsc::Sender<(String, QueryEnd)>,
+    text: String,
+    from: Value,
+    attachments: Vec<Value>,
+) -> (String, watch::Sender<bool>) {
+    let query = uuid::Uuid::new_v4().to_string();
+    let turn = uuid::Uuid::new_v4().to_string();
+    let message_id = uuid::Uuid::new_v4().to_string();
+
+    // The first message takes the catalogue snapshot and carries the
+    // reminder as its FIRST block, the said text second. It lives in the
+    // committed record, so what the model saw is what is stored.
+    let skills = Arc::clone(
+        skills.get_or_insert_with(|| Arc::new(Skills::scan(config.skills_root.clone()))),
+    );
+    let mut content = Vec::new();
+    if conversation.is_empty()
+        && let Some(reminder) = skills.reminder()
+    {
+        content.push(json!({ "type": "text", "text": reminder }));
+    }
+    // Reference blocks verbatim: the COMMITTED message carries these, never
+    // bytes. The model-facing render resolves them below, over the WHOLE
+    // history - the tree and any adopted record hold reference blocks too,
+    // and the API must never see one.
+    content.extend(attachments);
+    content.push(json!({ "type": "text", "text": text }));
+
+    let user = Message {
+        id: message_id,
+        role: "user".into(),
+        content,
+    };
+    conversation.start_query(query.clone());
+
+    // The query task, cooperatively cancellable.
+    let (tx, rx) = watch::channel(false);
+    // The model sees the pending say; the record does not, yet. Resolution
+    // runs over the full render at this edge (objects.rs).
+    let mut history = conversation.history();
+    history.push(json!({ "role": "user", "content": user.content }));
+    crate::objects::resolve_history(client, &config.attach_bucket, &mut history).await;
+
+    let ctx = TurnContext {
+        client: client.clone(),
+        conv: config.conv.clone(),
+        model: config.model.clone(),
+        system: config.system.clone(),
+        auth: config.auth.clone(),
+        skills,
+        query: query.clone(),
+        turn,
+        user,
+        user_from: from,
+        thinking_budget: config.thinking_budget,
+    };
+    let done = done_tx.clone();
+    let q = query.clone();
+    tokio::spawn(async move {
+        let end = run_query(ctx, history, rx).await;
+        let _ = done.send((q, end)).await;
+    });
+    (query, tx)
 }
 
 struct TurnContext {
@@ -264,6 +350,7 @@ async fn run_query(
         user_from,
         thinking_budget,
     } = &ctx;
+    let pubr = Publisher::new(client, conv);
 
     // Bash always; Skill only when a catalogue exists.
     let mut tools: Vec<Value> = vec![crate::exec::bash_schema()];
@@ -283,9 +370,7 @@ async fn run_query(
     let mut turn_id = turn.clone();
 
     for round in 0.. {
-        publish(
-            client,
-            conv,
+        pubr.event(
             "telemetry.turn.started",
             json!({
                 "ts": now_iso(),
@@ -311,30 +396,17 @@ async fn run_query(
                 *thinking_budget,
             ) => outcome,
             _ = cancelled(&mut cancel) => {
-                publish(
-                    client,
-                    conv,
+                pubr.event(
                     "telemetry.turn.cancelled",
-                    json!({
-                        "ts": now_iso(),
-                        "queryId": query, "turnId": turn_id,
-                    }),
+                    json!({ "ts": now_iso(), "queryId": query, "turnId": turn_id }),
                 )
                 .await;
-                publish(
-                    client,
-                    conv,
+                pubr.event(
                     "changes.query",
-                    json!({
-                        "ts": now_iso(),
-                        "queryId": query,
-                        "reason": "cancelled",
-                    }),
+                    json!({ "ts": now_iso(), "queryId": query, "reason": "cancelled" }),
                 )
                 .await;
-                return QueryEnd::Cancelled {
-                    messages: committed,
-                };
+                return QueryEnd::Cancelled { messages: committed };
             }
         };
 
@@ -342,25 +414,14 @@ async fn run_query(
             Ok(done) => done,
             Err(e) => {
                 eprintln!("bridge[{}]: turn aborted: {e:#}", conv.0);
-                publish(
-                    client,
-                    conv,
+                pubr.event(
                     "telemetry.turn.aborted",
-                    json!({
-                        "ts": now_iso(),
-                        "queryId": query, "turnId": turn_id,
-                    }),
+                    json!({ "ts": now_iso(), "queryId": query, "turnId": turn_id }),
                 )
                 .await;
-                publish(
-                    client,
-                    conv,
+                pubr.event(
                     "changes.query",
-                    json!({
-                        "ts": now_iso(),
-                        "queryId": query,
-                        "reason": "aborted",
-                    }),
+                    json!({ "ts": now_iso(), "queryId": query, "reason": "aborted" }),
                 )
                 .await;
                 return QueryEnd::Aborted {
@@ -369,9 +430,7 @@ async fn run_query(
             }
         };
 
-        publish(
-            client,
-            conv,
+        pubr.event(
             "telemetry.turn.ended",
             json!({
                 "ts": now_iso(),
@@ -380,9 +439,7 @@ async fn run_query(
             }),
         )
         .await;
-        publish(
-            client,
-            conv,
+        pubr.event(
             "telemetry.usage",
             json!({
                 "ts": now_iso(),
@@ -400,19 +457,15 @@ async fn run_query(
         // assistant message: the record gains the pair together, and a query
         // that never got this far left the record untouched.
         if let Some(u) = pending_user.take() {
-            publish_message(
-                client, conv, &u.id, query, &turn_id, "user", user_from, &u.content,
-            )
-            .await;
+            pubr.message(&u.id, query, &turn_id, "user", user_from, &u.content)
+                .await;
             committed.push(u);
         }
 
         // Commit the assistant message: whatever the stop reason, this
         // content is the record.
         let message_id = uuid::Uuid::new_v4().to_string();
-        publish_message(
-            client,
-            conv,
+        pubr.message(
             &message_id,
             query,
             &turn_id,
@@ -430,15 +483,9 @@ async fn run_query(
 
         if done.stop_reason != "tool_use" {
             // The query's committal closure (conversation-spec, changes.query).
-            publish(
-                client,
-                conv,
+            pubr.event(
                 "changes.query",
-                json!({
-                    "ts": now_iso(),
-                    "queryId": query,
-                    "reason": "completed",
-                }),
+                json!({ "ts": now_iso(), "queryId": query, "reason": "completed" }),
             )
             .await;
             return QueryEnd::Completed {
@@ -450,15 +497,9 @@ async fn run_query(
         // that just ended stands (its commits are on the wire), so there is
         // no turn to mark cancelled, only the query's closure.
         if *cancel.borrow() {
-            publish(
-                client,
-                conv,
+            pubr.event(
                 "changes.query",
-                json!({
-                    "ts": now_iso(),
-                    "queryId": query,
-                    "reason": "cancelled",
-                }),
+                json!({ "ts": now_iso(), "queryId": query, "reason": "cancelled" }),
             )
             .await;
             return QueryEnd::Cancelled {
@@ -471,15 +512,9 @@ async fn run_query(
                 "bridge[{}]: query {query} exceeded {MAX_TURNS_PER_QUERY} tool rounds; aborting",
                 conv.0
             );
-            publish(
-                client,
-                conv,
+            pubr.event(
                 "changes.query",
-                json!({
-                    "ts": now_iso(),
-                    "queryId": query,
-                    "reason": "aborted",
-                }),
+                json!({ "ts": now_iso(), "queryId": query, "reason": "aborted" }),
             )
             .await;
             return QueryEnd::Aborted {
@@ -487,90 +522,16 @@ async fn run_query(
             };
         }
 
-        // Execute every tool_use block and commit the results as one
-        // user-role message from the agent: the harness produced them.
-        let mut results: Vec<Value> = Vec::new();
-        for block in done.content.iter().filter(|b| b["type"] == "tool_use") {
-            let id = block["id"].as_str().unwrap_or("");
-            let name = block["name"].as_str().unwrap_or("");
-            // The action, observed before it runs (conversation-spec,
-            // Telemetry): `input` included — the action is unreviewable
-            // without the payload.
-            publish(
-                client,
-                conv,
-                "telemetry.tool.use",
-                json!({
-                    "ts": now_iso(),
-                    "queryId": query, "turnId": turn_id,
-                    "id": id, "name": name, "input": block["input"],
-                }),
-            )
-            .await;
-            let (content, is_error) = match name {
-                "Skill" => {
-                    let skill = block["input"]["skill"].as_str().unwrap_or("");
-                    match skills.invoke(skill) {
-                        Ok(body) => (body, false),
-                        Err(e) => (e, true),
-                    }
-                }
-                // Every Bash call gates behind a human approval in v1 -
-                // `echo hello` included. Policy (auto-approve, blocklists)
-                // is future work; wait-forever is sane precisely because
-                // the ask is visible and the query cancellable.
-                "Bash" => {
-                    let approval_id = uuid::Uuid::new_v4().to_string();
-                    let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
-                    let correlation = json!({
-                        "conversationId": conv.0,
-                        "queryId": query,
-                        "turnId": turn_id,
-                        "toolUseId": id,
-                    });
-                    match crate::approval::gate(
-                        client,
-                        &approval_id,
-                        &ask,
-                        &correlation,
-                        &mut cancel,
-                    )
-                    .await
-                    {
-                        crate::approval::Verdict::Approved => {
-                            let command = block["input"]["command"].as_str().unwrap_or("");
-                            crate::exec::run_bash(command, &mut cancel).await
-                        }
-                        crate::approval::Verdict::Denied { by } => {
-                            (format!("denied by {by}"), true)
-                        }
-                        // The slot still gets its result: a committed
-                        // tool_use without one is an invalid conversation.
-                        // The cancel flag is set, so the between-rounds
-                        // check below closes the query cancelled right
-                        // after these results commit.
-                        crate::approval::Verdict::Cancelled => {
-                            ("cancelled by user before approval".to_string(), true)
-                        }
-                    }
-                }
-                other => (format!("unknown tool {other:?}"), true),
-            };
-            results.push(json!({
-                "type": "tool_result",
-                "tool_use_id": id,
-                "content": content,
-                "is_error": is_error,
-            }));
-        }
-
-        // The results commit at execution, unlike the say: the committed
+        // Execute the tool_use blocks and commit the results as one
+        // user-role message from the agent: the harness produced them. The
+        // results commit at execution, unlike the say: the committed
         // tool_use above is unanswerable without them - a record resting on
         // a bare tool_use is invalid for every future turn.
+        let results =
+            run_tool_round(&pubr, skills, query, &turn_id, &done.content, &mut cancel).await;
+
         let message_id = uuid::Uuid::new_v4().to_string();
-        publish_message(
-            client,
-            conv,
+        pubr.message(
             &message_id,
             query,
             &turn_id,
@@ -592,42 +553,80 @@ async fn run_query(
     unreachable!("the tool loop always returns")
 }
 
-/// `leaf` is the class-and-event path after the id (`changes.message`,
-/// `telemetry.turn.started`): v2's one-place discriminator.
-async fn publish(client: &async_nats::Client, conv: &ConversationId, leaf: &str, payload: Value) {
-    let subject = format!("conv.v2.{}.{leaf}", conv.0);
-    let bytes = serde_json::to_vec(&payload).expect("json! of plain values cannot fail");
-    eprintln!(
-        "{} bridge[{}]: → {subject} ({} B)",
-        now_iso(),
-        conv.0,
-        bytes.len()
-    );
-    if let Err(e) = client.publish(subject, bytes.into()).await {
-        eprintln!("bridge[{}]: publish failed: {e}", conv.0);
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn publish_message(
-    client: &async_nats::Client,
-    conv: &ConversationId,
-    id: &str,
+/// One tool round: execute every `tool_use` block in the just-committed
+/// assistant turn and return the `tool_result` blocks, in order. The action
+/// is published as telemetry before it runs (`input` included - the action
+/// is unreviewable without the payload). The slot is ALWAYS filled: a
+/// committed tool_use without its result is an invalid conversation the
+/// caller must still be able to close.
+async fn run_tool_round(
+    pubr: &Publisher,
+    skills: &Skills,
     query: &str,
-    turn: &str,
-    role: &str,
-    from: &Value,
+    turn_id: &str,
     content: &[Value],
-) {
-    publish(
-        client,
-        conv,
-        "changes.message",
-        json!({
-            "ts": now_iso(),
-            "id": id, "queryId": query, "turnId": turn,
-            "role": role, "from": from, "content": content,
-        }),
-    )
-    .await;
+    cancel: &mut watch::Receiver<bool>,
+) -> Vec<Value> {
+    let mut results: Vec<Value> = Vec::new();
+    for block in content.iter().filter(|b| b["type"] == "tool_use") {
+        let id = block["id"].as_str().unwrap_or("");
+        let name = block["name"].as_str().unwrap_or("");
+        // The action, observed before it runs (conversation-spec, Telemetry).
+        pubr.event(
+            "telemetry.tool.use",
+            json!({
+                "ts": now_iso(),
+                "queryId": query, "turnId": turn_id,
+                "id": id, "name": name, "input": block["input"],
+            }),
+        )
+        .await;
+        let (content, is_error) = match name {
+            "Skill" => {
+                let skill = block["input"]["skill"].as_str().unwrap_or("");
+                match skills.invoke(skill) {
+                    Ok(body) => (body, false),
+                    Err(e) => (e, true),
+                }
+            }
+            // Every Bash call gates behind a human approval in v1 -
+            // `echo hello` included. Policy (auto-approve, blocklists) is
+            // future work; wait-forever is sane precisely because the ask
+            // is visible and the query cancellable.
+            "Bash" => {
+                let approval_id = uuid::Uuid::new_v4().to_string();
+                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                let correlation = json!({
+                    "conversationId": pubr.conv().0,
+                    "queryId": query,
+                    "turnId": turn_id,
+                    "toolUseId": id,
+                });
+                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                    .await
+                {
+                    crate::approval::Verdict::Approved => {
+                        let command = block["input"]["command"].as_str().unwrap_or("");
+                        crate::exec::run_bash(command, cancel).await
+                    }
+                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
+                    // The slot still gets its result: a committed tool_use
+                    // without one is an invalid conversation. The cancel
+                    // flag is set, so the caller's between-rounds check
+                    // closes the query cancelled right after these commit.
+                    crate::approval::Verdict::Cancelled => {
+                        ("cancelled by user before approval".to_string(), true)
+                    }
+                }
+            }
+            other => (format!("unknown tool {other:?}"), true),
+        };
+        results.push(json!({
+            "type": "tool_result",
+            "tool_use_id": id,
+            "content": content,
+            "is_error": is_error,
+        }));
+    }
+    results
 }
