@@ -313,6 +313,39 @@ async fn main() -> anyhow::Result<()> {
 - _(none currently — the bridge's untestable-decisions debt was paid by the
   `Conversation` fold; see Decisions, Cancellation is cooperative.)_
 
+## Open: retirement and the warden (designed in conversation, unbuilt)
+
+Auto-adopting every sleeping conversation (committed changes, no live
+attachment) needs a way to say "don't". The shape settled with the SC,
+waiting for a fresh sitting to build:
+
+- **Retired is conversation truth, in the record**: a committal state
+  change committed by the state owner. Tower tags can't serve here — a
+  warden reading another concern's private view state is the cross-concern
+  join the specs forbid. Hiding/dimming retired rows stays tower-local
+  (tags, filters); truth and preference are different jobs.
+- **`requests.retire`, no precondition** — deliberately unlike cancel. A
+  precondition protects an intent whose meaning depends on state (cancel,
+  eyes closed, must name its query). Retire's intent is state-invariant:
+  idle, mid-query, sleeping — "be done" means the same thing, so there is
+  nothing to protect. Ctrl-C/Alt-F4, not escape. Idempotent; anyone
+  connected may retire (connection is authority, as for answer).
+- **The implied sequence**: signal the live query down (its `cancelled`
+  closure lands like any cancel), commit `state: retired`, publish
+  `detached` (which the bridge currently never publishes at all), end the
+  task.
+- **Recommission = adoption committing the counter-change** (`state:
+  active`). Retirement is advisory to wardens, never a lock: a manual adopt
+  ignores it, and "saying into it unretires it" becomes true when
+  requester-driven resurrection exists (the gateway alone sees
+  no-responders; a wildcard adopt-listener is the second-responder disease
+  and is ruled out).
+- Deferred-retire ("retire when done") is a different verb, add-only, no
+  use case yet.
+
+Building this is conversation-spec surgery (a state change kind + the
+retire request) before any code.
+
 ## Out of scope v1
 
 - "Go to pane" (attachment telemetry is folded now; the jump itself is still out).
