@@ -8,7 +8,7 @@ import { Approvals } from './concerns/approvals.svelte';
 import { Conversations } from './concerns/conversation.svelte';
 import { Rail } from './concerns/rail.svelte';
 import { View } from './concerns/view.svelte';
-import { Transport } from './core/transport';
+import { Transport } from './core/transport.svelte';
 
 export const transport = new Transport();
 export const conversations = new Conversations(transport);

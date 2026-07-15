@@ -8,7 +8,7 @@
 // the rail/rows concern (the component reads it), not folded here.
 
 import { type Clock, approvalVoid, systemClock } from '../core/time';
-import type { Transport } from '../core/transport';
+import type { Transport } from '../core/transport.svelte';
 import type { ApprovalState, ServerMsg } from '../types';
 
 export class Approvals {

@@ -7,7 +7,7 @@
 // only consumer, and a seam appears at the second (Decision 2, default owned).
 
 import { type Clock, approvalVoid, livenessVerdict, systemClock } from '../core/time';
-import type { Transport } from '../core/transport';
+import type { Transport } from '../core/transport.svelte';
 import type { AgentAttachment, AgentInstance, Millis, RowState, ServerMsg } from '../types';
 
 export class Rail {

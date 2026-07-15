@@ -11,7 +11,7 @@
 // architecture answers) a $state write mutated across an await can freeze the
 // flush. Assign, never mutate in place; the #update helper enforces it.
 
-import type { Transport } from '../core/transport';
+import type { Transport } from '../core/transport.svelte';
 import type { AttachmentRef, ConversationMessage, ServerMsg } from '../types';
 
 /** One stretch of the in-flight stream: the marker said what it is, the chunks
