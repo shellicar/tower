@@ -54,6 +54,19 @@ pub struct Conversation {
 }
 
 impl Conversation {
+    /// Adoption: seed the tree from the record's committed messages. This is
+    /// the recovery reconciliation (conversation-spec, the committal-grain
+    /// open question): recovered behind the published record, reconcile up
+    /// to it. No validity check - a record ending broken (a dangling
+    /// tool_use) is served as it is; the next turn's outcome says so.
+    pub fn adopt(messages: Vec<Message>) -> Conversation {
+        Conversation {
+            tree: messages,
+            live: None,
+            last_ended: None,
+        }
+    }
+
     /// The premise check: the sender's tip must be the tree's, and no query
     /// may be live against it. A live acceptance makes the same premise
     /// stale (scenario 5).
@@ -193,6 +206,20 @@ mod tests {
         // Cancel is idempotent while live: a second click signals again.
         assert_eq!(conversation.on_cancel("q1"), CancelDecision::Signal);
         assert_eq!(conversation.on_cancel("q9"), CancelDecision::NotFound);
+    }
+
+    /// Adoption seeds the tree; the tip is the record's last message and
+    /// the premise discipline continues from it.
+    #[test]
+    fn adopted_record_continues_from_its_tip() {
+        let mut conversation = Conversation::adopt(vec![msg("m1", "user"), msg("m2", "assistant")]);
+        assert_eq!(conversation.history().len(), 2);
+        assert_eq!(conversation.on_say(Some("m2")), SayDecision::Accept);
+        assert_eq!(conversation.on_say(Some("m1")), SayDecision::Stale);
+        assert_eq!(conversation.on_say(None), SayDecision::Stale);
+        assert_eq!(conversation.on_cancel("q9"), CancelDecision::NotFound);
+        conversation.start_query("q1".into());
+        assert_eq!(conversation.on_cancel("q1"), CancelDecision::Signal);
     }
 
     /// A cancelled or aborted query's committed messages still enter the

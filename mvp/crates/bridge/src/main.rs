@@ -5,6 +5,15 @@
 //!
 //!   $ echo '{"spawn": {}}' | bridge
 //!   {"conversationId":"…"}
+//!   $ echo '{"adopt": {"conversationId": "…"}}' | bridge
+//!   {"conversationId":"…","adoptedMessages":12}
+//!
+//! `adopt` revives a conversation whose holder died: the record outlives
+//! the servicer, so a fresh instance replays the committed messages from
+//! the capture stream, seeds its tree, and serves on. The recovery
+//! reconciliation, live: recovered behind the published record, reconcile
+//! up to it. No validity precondition - a record ending broken (a dangling
+//! tool_use) is served as it is, and the next turn's outcome says so.
 //!
 //! Each spawn services `conv.v2.{id}.requests.>` and produces the v2 event
 //! subjects until the process ends. No persistence: v0 conversations die
@@ -25,10 +34,58 @@ mod decisions;
 mod exec;
 mod skills;
 
+use futures::StreamExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use wire::now_iso;
 
 const PULSE_INTERVAL_S: i64 = 30;
+
+/// Replay a conversation's committed messages from the capture stream, in
+/// stream order (= commit order). Messages only: telemetry and deltas are
+/// observation, and this bridge publishes no revisions or tip movements to
+/// fold (a deliberate v0 cut, stated here so the gap is a sentence, not a
+/// surprise).
+async fn replay_conversation(
+    client: &async_nats::Client,
+    stream_name: &str,
+    conv: &str,
+) -> anyhow::Result<Vec<decisions::Message>> {
+    let js = async_nats::jetstream::new(client.clone());
+    let stream = js.get_stream(stream_name).await.map_err(|e| {
+        anyhow::anyhow!("capture stream {stream_name:?} unavailable: {e} (adopt needs the capture)")
+    })?;
+    let consumer = stream
+        .create_consumer(async_nats::jetstream::consumer::pull::Config {
+            filter_subject: format!("conv.v2.{conv}.changes.message"),
+            deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
+            ..Default::default()
+        })
+        .await?;
+    // num_pending at creation is the full backlog: read exactly that many.
+    let pending = consumer.cached_info().num_pending as usize;
+    let mut messages = Vec::with_capacity(pending);
+    if pending == 0 {
+        return Ok(messages);
+    }
+    let mut batch = consumer.fetch().max_messages(pending).messages().await?;
+    while let Some(msg) = batch.next().await {
+        let msg = msg.map_err(|e| anyhow::anyhow!("replay read failed: {e}"))?;
+        // Tolerance: frames that don't parse as a message change are skipped
+        // (they can't be - the filter is exact - but never crash on a frame).
+        let Some(wire::WireEvent::Conv(event)) = wire::parse_wire(&msg.subject, &msg.payload)
+        else {
+            continue;
+        };
+        if let wire::EventKind::Change(wire::ConvChange::Message(m)) = event.kind {
+            messages.push(decisions::Message {
+                id: m.id.0,
+                role: m.role,
+                content: m.content,
+            });
+        }
+    }
+    Ok(messages)
+}
 
 async fn publish_agent(
     client: &async_nats::Client,
@@ -151,7 +208,12 @@ async fn main() -> anyhow::Result<()> {
                 auth: auth.clone(),
                 skills_root: skills_root.clone(),
             };
-            tokio::spawn(agent::run(client.clone(), requests, config));
+            tokio::spawn(agent::run(
+                client.clone(),
+                requests,
+                config,
+                decisions::Conversation::default(),
+            ));
             // The attachment is what makes the conversation exist for
             // observers before its first message. cwd is causal (an input to
             // how the conversation unfolds), published when known.
@@ -165,6 +227,66 @@ async fn main() -> anyhow::Result<()> {
             }
             publish_agent(&client, &world, "attached", attached).await;
             println!("{}", serde_json::json!({ "conversationId": conv }));
+        } else if let Some(adopt) = value.get("adopt") {
+            let Some(conv) = adopt
+                .get("conversationId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+            else {
+                println!(
+                    "{}",
+                    serde_json::json!({ "error": "adopt needs conversationId" })
+                );
+                continue;
+            };
+            let stream_name =
+                std::env::var("BRIDGE_STREAM").unwrap_or_else(|_| "conv-approval".into());
+            let messages = match replay_conversation(&client, &stream_name, &conv).await {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("bridge: adopt failed for {conv}: {e:#}");
+                    println!("{}", serde_json::json!({ "error": "replay failed" }));
+                    continue;
+                }
+            };
+            let adopted = messages.len();
+            let conv_id = wire::ConversationId(conv.clone());
+            // Same discipline as spawn: the fact (subscription) before the
+            // claim (attached) and the reply.
+            let requests = match agent::subscribe(&client, &conv_id).await {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("bridge: subscribe failed for {conv}: {e}");
+                    println!("{}", serde_json::json!({ "error": "subscribe failed" }));
+                    continue;
+                }
+            };
+            let config = agent::AgentConfig {
+                conv: conv_id,
+                model: default_model.clone(),
+                system: None,
+                auth: auth.clone(),
+                skills_root: skills_root.clone(),
+            };
+            tokio::spawn(agent::run(
+                client.clone(),
+                requests,
+                config,
+                decisions::Conversation::adopt(messages),
+            ));
+            let mut attached = serde_json::json!({
+                "ts": now_iso(),
+                "instanceId": instance,
+                "conversationId": conv,
+            });
+            if let Ok(cwd) = std::env::current_dir() {
+                attached["cwd"] = serde_json::json!(cwd.to_string_lossy());
+            }
+            publish_agent(&client, &world, "attached", attached).await;
+            println!(
+                "{}",
+                serde_json::json!({ "conversationId": conv, "adoptedMessages": adopted })
+            );
         } else {
             println!("{}", serde_json::json!({ "error": "unsupported" }));
         }

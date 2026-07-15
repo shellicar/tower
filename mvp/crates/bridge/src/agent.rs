@@ -51,16 +51,20 @@ pub async fn subscribe(
         .await
 }
 
+/// `conversation` is the servicer's starting tree: `Conversation::default()`
+/// for a spawn, an adopted record for a revival - the loop is identical
+/// either way, because the record constitutes the conversation.
 pub async fn run(
     client: async_nats::Client,
     requests: async_nats::Subscriber,
     config: AgentConfig,
+    conversation: Conversation,
 ) {
     let prefix = format!("conv.v2.{}.requests.", config.conv.0);
     let mut requests = requests;
     eprintln!("bridge[{}]: serving", config.conv.0);
 
-    let mut conversation = Conversation::default();
+    let mut conversation = conversation;
     // The live query's cancel signal, the shell's I/O half of what the
     // fold tracks; dropped when the query's end folds.
     let mut cancel_tx: Option<watch::Sender<bool>> = None;
