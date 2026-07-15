@@ -12,7 +12,7 @@
 // flush. Assign, never mutate in place; the #update helper enforces it.
 
 import type { Transport } from '../core/transport';
-import type { AttachmentRef, ConversationMessage, Millis, ServerMsg } from '../types';
+import type { AttachmentRef, ConversationMessage, ServerMsg } from '../types';
 
 /** One stretch of the in-flight stream: the marker said what it is, the chunks
  *  accumulate into it. blockType is an open set — styled, never branched on. */
@@ -46,13 +46,9 @@ export interface ConversationState {
   restoreAttachments: AttachmentRef[];
   /** Outcome of the last say, shown until the next. */
   lastSay: string | null;
-  // Header facts, this concern's own slice of the row stream (title reflects
-  // on the next `list`, matching the wire's "refresh is the propagation" for
-  // annotations; a shared annotations store is the cheap consolidation if a
-  // live in-client rename is ever wanted).
-  title: string | undefined;
-  lastKind: string | null;
-  lastEvent: Millis | null;
+  // Header facts (title, lastKind, lastEvent) are NOT held here: the panel
+  // reads them from the shared rail/rows concern, so a rename reflects live in
+  // both the rail and the panel (Decision 2).
 }
 
 const fresh = (conv: string): ConversationState => ({
@@ -67,9 +63,6 @@ const fresh = (conv: string): ConversationState => ({
   restoreSay: null,
   restoreAttachments: [],
   lastSay: null,
-  title: undefined,
-  lastKind: null,
-  lastEvent: null,
 });
 
 /** Insert in ts order, dedupe by id (boundary overlap is expected). Same id =
@@ -197,27 +190,6 @@ export class Conversations {
 
   #fold(event: ServerMsg): void {
     switch (event.type) {
-      case 'list':
-        for (const r of event.rows) {
-          if (this.#open.has(r.conv)) {
-            this.#update(r.conv, (o) => ({
-              ...o,
-              title: r.title,
-              lastKind: r.lastKind,
-              lastEvent: r.lastEvent,
-            }));
-          }
-        }
-        break;
-      case 'row':
-        if (this.#open.has(event.conv)) {
-          this.#update(event.conv, (o) => ({
-            ...o,
-            lastKind: event.lastKind,
-            lastEvent: event.lastEvent,
-          }));
-        }
-        break;
       case 'conversation':
         if (this.#open.has(event.conv)) {
           this.#update(event.conv, (o) => {

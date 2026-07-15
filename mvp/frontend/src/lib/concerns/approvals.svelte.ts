@@ -1,11 +1,11 @@
 // concerns/approvals.svelte.ts — the approvals' owned store (docs/mvp/
-// frontend-architecture.md). It folds its OWN slice of the approval stream and,
-// separately, conversation titles from `list` (its own lookup, so it needs no
-// other concern to label an ask). Void is derived against its clock. answer is
-// an id-correlated request; the settlement itself arrives as an `approval`
-// event like any other. This is the "shared value" case done by events, not a
-// shared store: the badge, the view, the rail marker, and the panel each fold
-// what they need from the same stream — no surface is shared.
+// frontend-architecture.md). It folds its OWN slice of the approval stream:
+// void is derived against its clock, answer is an id-correlated request, and
+// the settlement arrives as an `approval` event like any other. This is the
+// "shared value" done by events, not a shared store: the badge, the view, the
+// rail marker, and the panel each fold what they need from the same stream —
+// no approval surface is shared. The conversation LABEL for an ask comes from
+// the rail/rows concern (the component reads it), not folded here.
 
 import { type Clock, approvalVoid, systemClock } from '../core/time';
 import type { Transport } from '../core/transport';
@@ -13,9 +13,6 @@ import type { ApprovalState, ServerMsg } from '../types';
 
 export class Approvals {
   #approvals = $state<Map<string, ApprovalState>>(new Map());
-  /** conv → title, this concern's own lookup for labelling an ask (from
-   *  `list`; refreshes on reconnect, matching the wire's title semantics). */
-  #titles = $state<Map<string, string>>(new Map());
   /** Transient outcome of the last answer per approval id, for display. */
   #answerNotes = $state<Map<string, string>>(new Map());
   #now = $state(0);
@@ -44,11 +41,6 @@ export class Approvals {
         this.#approvals = next;
         break;
       }
-      case 'list':
-        this.#titles = new Map(
-          event.rows.filter((r) => r.title !== undefined).map((r) => [r.conv, r.title as string]),
-        );
-        break;
       default:
         break; // not this concern's
     }
@@ -79,13 +71,6 @@ export class Approvals {
 
   answerNote(id: string): string | undefined {
     return this.#answerNotes.get(id);
-  }
-
-  /** The ask's conversation label — title if named, else the id. */
-  convLabel(a: ApprovalState): string | null {
-    const conv = a.correlation?.conversationId;
-    if (!conv) return null;
-    return this.#titles.get(conv) ?? conv;
   }
 
   /** Answer a pending approval. First valid answer wins; losing the race comes

@@ -126,6 +126,16 @@ export class Rail {
     return this.#tagKeys;
   }
 
+  /** The row for one conversation — its header facts and annotations. Read by
+   *  the open panel's header and the approvals labels: a component may read any
+   *  concern, so this is the one shared annotations store, not a copy per
+   *  concern (Decision 2, sharing worth the risk — live rename across rail and
+   *  panel is a real requirement, and annotations are low-churn, not a hot
+   *  async fold). */
+  row(conv: string): RowState | undefined {
+    return this.#rows.get(conv);
+  }
+
   /** The liveness verdict for a conversation, folded here against the rail's
    *  own clock — facts in, judgement out (agent-spec: a fold, never declared).
    *  null = no live attachment (released or never served). */

@@ -1,9 +1,12 @@
 <script lang="ts">
   import MessageView from './MessageView.svelte';
-  import { tower, type OpenConversation } from './tower.svelte';
+  import { approvals, conversations, rail, view } from './app';
+  import { age } from './core/time';
+  import { uploadAttachment } from './core/uploads';
+  import type { ConversationState } from './concerns/conversation.svelte';
   import type { AttachmentRef } from './types';
 
-  let { oc }: { oc: OpenConversation } = $props();
+  let { oc }: { oc: ConversationState } = $props();
 
   // Attachments ride as chips beside the editor: uploaded eagerly (the
   // transit store's TTL cleans up abandons), included in the next say,
@@ -18,7 +21,7 @@
     const files = [...list];
     if (files.length === 0) return;
     uploading = true;
-    const settled = await Promise.allSettled(files.map((f) => tower.upload(f)));
+    const settled = await Promise.allSettled(files.map((f) => uploadAttachment(f)));
     const won: AttachmentRef[] = [];
     const lost: string[] = [];
     for (const r of settled) {
@@ -138,7 +141,7 @@
       if (oc.restoreAttachments.length > 0) {
         attachments = [...oc.restoreAttachments, ...attachments];
       }
-      tower.consumeRestore(oc.conv);
+      conversations.consumeRestore(oc.conv);
       requestAnimationFrame(autosize);
     }
   });
@@ -166,7 +169,7 @@
   function submit() {
     const text = draft.trim();
     if (!text || busy || uploading) return;
-    tower.say(oc.conv, text, attachments);
+    conversations.say(oc.conv, text, attachments);
     attachments = [];
     uploadNote = '';
     draft = '';
@@ -186,15 +189,13 @@
   // The conversation's latest wire event — the same staleness fact the list
   // shows, put where the reader is looking. `lastKind` is display fodder
   // (an open set): shown verbatim, never branched on.
-  const row = $derived(tower.rows.get(oc.conv));
+  const row = $derived(rail.row(oc.conv));
 
   // Pending asks belonging to this conversation — the in-context answer
   // surface for the cases where the list line alone isn't enough.
   // Live asks only: a void ask is not actionable here (answering a corpse
   // yields unreachable); it waits in the approvals view for dismissal.
-  const pendingHere = $derived(
-    tower.liveApprovals.filter((a) => a.correlation?.conversationId === oc.conv),
-  );
+  const pendingHere = $derived(approvals.liveForConv(oc.conv));
 
   // The header is the title's editor: click the name, type, Enter or blur
   // lands it (empty clears — back to the id). Escape abandons.
@@ -210,7 +211,7 @@
     if (!editingTitle) return;
     editingTitle = false;
     const title = titleDraft.trim();
-    if (title !== (row?.title ?? '')) tower.setTitle(oc.conv, title);
+    if (title !== (row?.title ?? '')) rail.setTitle(oc.conv, title);
   }
 
   function titleKeydown(e: KeyboardEvent) {
@@ -228,13 +229,6 @@
     return () => clearInterval(t);
   });
 
-  function age(ts: number): string {
-    const s = Math.max(0, Math.floor((now - ts) / 1000));
-    if (s < 60) return `${s}s`;
-    if (s < 3600) return `${Math.floor(s / 60)}m`;
-    if (s < 86400) return `${Math.floor(s / 3600)}h`;
-    return `${Math.floor(s / 86400)}d`;
-  }
 </script>
 
 <section class="flex h-full min-w-[480px] flex-1 flex-col border-r border-neutral-700">
@@ -260,7 +254,7 @@
     {/if}
     <button
       class="cursor-pointer text-base text-neutral-400 hover:text-neutral-200"
-      onclick={() => tower.closeConversation(oc.conv)}>×</button
+      onclick={() => view.closeConversation(oc.conv)}>×</button
     >
   </header>
 
@@ -313,24 +307,24 @@
       <div class="mb-1.5 flex items-center justify-between gap-2 border border-amber-900 bg-amber-950/30 px-2 py-1">
         <span class="truncate text-amber-200">
           ⚠ {a.ask.name ?? a.ask.type}
-          {#if tower.answerNotes.get(a.id)}
-            <span class="text-orange-300"> · {tower.answerNotes.get(a.id)}</span>
+          {#if approvals.answerNote(a.id)}
+            <span class="text-orange-300"> · {approvals.answerNote(a.id)}</span>
           {/if}
         </span>
         <span class="flex shrink-0 gap-2">
           <button
             class="cursor-pointer border border-green-800 px-2 text-green-300 hover:bg-green-950"
-            onclick={() => tower.answer(a.id, true)}>approve</button
+            onclick={() => approvals.answer(a.id, true)}>approve</button
           >
           <button
             class="cursor-pointer border border-red-900 px-2 text-red-300 hover:bg-red-950"
-            onclick={() => tower.answer(a.id, false)}>deny</button
+            onclick={() => approvals.answer(a.id, false)}>deny</button
           >
         </span>
       </div>
     {/each}
     <p class="mb-1.5 flex items-center gap-2 text-neutral-500">
-      {#if row}<span>{row.lastKind} · {age(row.lastEvent)} ago</span>{/if}
+      {#if row}<span>{row.lastKind} · {age(now, row.lastEvent)} ago</span>{/if}
       {#if oc.queryState === 'unknown'}
         <span class="rounded border border-neutral-700 px-1.5 text-neutral-500" title="no evidence yet whether a query is running">state unknown</span>
       {:else if oc.queryState === 'live'}
@@ -338,7 +332,7 @@
         {#if oc.liveQuery}
           <button
             class="cursor-pointer rounded border border-red-900 px-1.5 text-red-300 hover:bg-red-950"
-            onclick={() => tower.cancel(oc.conv)}>cancel</button
+            onclick={() => conversations.cancel(oc.conv)}>cancel</button
           >
         {/if}
       {/if}
