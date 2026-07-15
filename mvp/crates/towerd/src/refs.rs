@@ -83,6 +83,12 @@ fn externalise_block(block: &mut Value, store: &mut dyn FnMut(Blob)) {
             if let Some(source) = obj.get_mut("source")
                 && !source.is_null()
                 && source.get("$ref").is_none()
+                // Only sources carrying bytes deserve externalisation. An
+                // attachment reference (`source.type: "object"` — ~100 B of
+                // id and facts) must stay inline: wrapping it in a $ref
+                // buries the reference inside a reference and the client
+                // renders garbage.
+                && source.get("data").is_some()
             {
                 *source = make_ref(source, &hint, store);
             }
@@ -167,6 +173,20 @@ mod tests {
         assert!(source["$ref"].as_str().unwrap().starts_with("sha256-"));
         assert_eq!(source["hint"], "image/png");
         assert!(source["size"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn attachment_reference_sources_stay_inline() {
+        // The transit-attachment reference block (conversation-spec, say
+        // attachments): no bytes, nothing to externalise.
+        let mut content = vec![json!({
+            "type": "image",
+            "source": { "type": "object", "id": "att-7c9e", "mediaType": "image/png", "size": 48213 }
+        })];
+        let blobs = run(&mut content);
+        assert!(blobs.is_empty());
+        assert_eq!(content[0]["source"]["type"], "object");
+        assert_eq!(content[0]["source"]["id"], "att-7c9e");
     }
 
     #[test]
