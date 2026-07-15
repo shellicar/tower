@@ -107,6 +107,9 @@ class Tower {
   active = $state<number>(readActiveTab());
   /** Whether the approvals view is showing — pure view state. */
   approvalsOpen = $state(false);
+  /** The store's clock, for time-derived states (approval void). Ticks
+   *  coarsely; second-precision belongs to the components that display it. */
+  now = $state(Date.now());
   /** Transient outcome of the last answer per approval id, for display. */
   answerNotes = $state<Map<string, string>>(new Map());
   connected = $state(false);
@@ -118,6 +121,7 @@ class Tower {
   #pendingSays = new Map<string, string>();
   /** requestId → approval id, same routing for answer_result. */
   #pendingAnswers = new Map<string, string>();
+  #ticking = false;
   /** requestId → conv, same routing for cancel_result. */
   #pendingCancels = new Map<string, string>();
   #retryMs = 500;
@@ -228,16 +232,42 @@ class Tower {
       .sort((a, b) => a.raisedTs - b.raisedTs);
   }
 
-  /** Conversations with a pending ask, for the rail's marker. */
+  /** Void is this client's derivation: the pulse is ~15s while pending, so
+   *  ~3 missed pulses reads as "the holder died". A void ask is evidence,
+   *  not a demand — it leaves the actionable surfaces and waits, dimmed,
+   *  to be dismissed. */
+  isVoid(a: ApprovalState): boolean {
+    return this.now - a.lastPulse > 45_000;
+  }
+
+  /** The asks actually waiting on a human: pending AND alive. */
+  get liveApprovals(): ApprovalState[] {
+    return this.pendingApprovals.filter((a) => !this.isVoid(a));
+  }
+
+  /** Drop an ask from this client's view — local, not an answer: nobody
+   *  settles an abandoned ask. If its holder ever pulses again, the next
+   *  approval event resurrects it, which is exactly right. */
+  dismiss(approval: string) {
+    this.approvals.delete(approval);
+    this.approvals = new Map(this.approvals);
+  }
+
+  /** Conversations with a live pending ask, for the rail's marker. */
   get pendingByConv(): Set<string> {
     const set = new Set<string>();
-    for (const a of this.pendingApprovals) {
+    for (const a of this.liveApprovals) {
       if (a.correlation?.conversationId) set.add(a.correlation.conversationId);
     }
     return set;
   }
 
   connect() {
+    // The derivation clock starts with the app, connection or not.
+    if (!this.#ticking) {
+      this.#ticking = true;
+      setInterval(() => (this.now = Date.now()), 2_000);
+    }
     // A refresh keeps what was being read: the tabs survive in localStorage,
     // and reconnect's re-open path does the rest — for the ACTIVE tab only;
     // background tabs are cold and re-fetch on switch.

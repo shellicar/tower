@@ -132,8 +132,10 @@
 
   // Pending asks belonging to this conversation — the in-context answer
   // surface for the cases where the list line alone isn't enough.
+  // Live asks only: a void ask is not actionable here (answering a corpse
+  // yields unreachable); it waits in the approvals view for dismissal.
   const pendingHere = $derived(
-    tower.pendingApprovals.filter((a) => a.correlation?.conversationId === oc.conv),
+    tower.liveApprovals.filter((a) => a.correlation?.conversationId === oc.conv),
   );
 
   // The header is the title's editor: click the name, type, Enter or blur

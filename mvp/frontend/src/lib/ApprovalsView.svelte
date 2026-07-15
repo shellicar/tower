@@ -4,19 +4,17 @@
 
   // The one-click answer surface: pending asks oldest-first, the
   // decision-relevant payload on the line, the conversation as context.
-  // Void is this client's derivation: the pulse is ~15s while pending, so
-  // ~3 missed pulses reads as "the holder died" — greyed, never dropped.
-  const VOID_AFTER_MS = 45_000;
+  // Void is the store's derivation (~3 missed pulses = the holder died):
+  // a void ask keeps approve/deny off the line — answering a corpse only
+  // yields `unreachable` — and offers dismiss instead, a local drop, not
+  // an answer (nobody settles an abandoned ask).
+  const isVoid = (a: ApprovalState) => tower.isVoid(a);
 
   let now = $state(Date.now());
   $effect(() => {
     const t = setInterval(() => (now = Date.now()), 1_000);
     return () => clearInterval(t);
   });
-
-  function isVoid(a: ApprovalState): boolean {
-    return now - a.lastPulse > VOID_AFTER_MS;
-  }
 
   function age(ts: number): string {
     const s = Math.max(0, Math.floor((now - ts) / 1000));
@@ -53,7 +51,10 @@
 
 <section class="flex h-full min-w-[480px] flex-1 flex-col border-r border-neutral-700">
   <header class="flex items-center justify-between border-b border-neutral-700 px-3 py-2">
-    <span class="text-amber-300">approvals · {tower.pendingApprovals.length} pending</span>
+    <span class="text-amber-300">
+      approvals · {tower.liveApprovals.length} pending{#if tower.pendingApprovals.length > tower.liveApprovals.length}
+        · {tower.pendingApprovals.length - tower.liveApprovals.length} void{/if}
+    </span>
     <button
       class="cursor-pointer text-base text-neutral-400 hover:text-neutral-200"
       onclick={() => (tower.approvalsOpen = false)}>×</button
@@ -84,20 +85,25 @@
             <span class="text-neutral-500">no conversation</span>
           {/if}
           <span class="flex shrink-0 gap-2">
-            {#if isVoid(a)}
-              <span class="text-neutral-500">void — holder silent</span>
-            {/if}
             {#if tower.answerNotes.get(a.id)}
               <span class="text-orange-300">{tower.answerNotes.get(a.id)}</span>
             {/if}
-            <button
-              class="cursor-pointer border border-green-800 px-2 text-green-300 hover:bg-green-950"
-              onclick={() => tower.answer(a.id, true)}>approve</button
-            >
-            <button
-              class="cursor-pointer border border-red-900 px-2 text-red-300 hover:bg-red-950"
-              onclick={() => tower.answer(a.id, false)}>deny</button
-            >
+            {#if isVoid(a)}
+              <span class="text-neutral-500">void — holder silent</span>
+              <button
+                class="cursor-pointer border border-neutral-700 px-2 text-neutral-400 hover:bg-neutral-800"
+                onclick={() => tower.dismiss(a.id)}>dismiss</button
+              >
+            {:else}
+              <button
+                class="cursor-pointer border border-green-800 px-2 text-green-300 hover:bg-green-950"
+                onclick={() => tower.answer(a.id, true)}>approve</button
+              >
+              <button
+                class="cursor-pointer border border-red-900 px-2 text-red-300 hover:bg-red-950"
+                onclick={() => tower.answer(a.id, false)}>deny</button
+              >
+            {/if}
           </span>
         </div>
       </article>
