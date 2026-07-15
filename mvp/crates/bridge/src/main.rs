@@ -102,6 +102,49 @@ async fn publish_agent(
     }
 }
 
+/// Serve a conversation: subscribe (the fact before the claim - a
+/// conversation that cannot hear requests is not spawned in any meaningful
+/// sense, so the claim and the reply both wait for this fact), spawn the
+/// agent loop on the seeded tree, and publish `attached` so observers see
+/// the conversation exist before its first message. Shared by spawn (a fresh
+/// tree) and adopt (a replayed record), and by the future warden before a
+/// third caller copies the wiring.
+///
+/// Returns the conversation id on success (the caller writes the stdout
+/// reply); None means the subscription could not be made - the error line is
+/// already written, so the caller moves on.
+async fn serve_conversation(
+    client: &async_nats::Client,
+    world: &str,
+    instance: &str,
+    config: agent::AgentConfig,
+    conversation: decisions::Conversation,
+) -> Option<String> {
+    let conv = config.conv.0.clone();
+    let requests = match agent::subscribe(client, &config.conv).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("bridge: subscribe failed for {conv}: {e}");
+            println!("{}", serde_json::json!({ "error": "subscribe failed" }));
+            return None;
+        }
+    };
+    tokio::spawn(agent::run(client.clone(), requests, config, conversation));
+    // The attachment is what makes the conversation exist for observers
+    // before its first message. cwd is causal (an input to how the
+    // conversation unfolds), published when known.
+    let mut attached = serde_json::json!({
+        "ts": now_iso(),
+        "instanceId": instance,
+        "conversationId": conv,
+    });
+    if let Ok(cwd) = std::env::current_dir() {
+        attached["cwd"] = serde_json::json!(cwd.to_string_lossy());
+    }
+    publish_agent(client, world, "attached", attached).await;
+    Some(conv)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
@@ -201,21 +244,8 @@ async fn main() -> anyhow::Result<()> {
                 .get("system")
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_string);
-            let conv_id = wire::ConversationId(conv.clone());
-            // The fact before the claim: no attach is published and no
-            // conversationId is reported until the subscription exists. A
-            // conversation that cannot hear requests is not spawned in any
-            // meaningful sense.
-            let requests = match agent::subscribe(&client, &conv_id).await {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("bridge: subscribe failed for {conv}: {e}");
-                    println!("{}", serde_json::json!({ "error": "subscribe failed" }));
-                    continue;
-                }
-            };
             let config = agent::AgentConfig {
-                conv: conv_id,
+                conv: wire::ConversationId(conv.clone()),
                 model,
                 system,
                 auth: auth.clone(),
@@ -223,24 +253,17 @@ async fn main() -> anyhow::Result<()> {
                 attach_bucket: attach_bucket.clone(),
                 thinking_budget,
             };
-            tokio::spawn(agent::run(
-                client.clone(),
-                requests,
+            let Some(conv) = serve_conversation(
+                &client,
+                &world,
+                &instance,
                 config,
                 decisions::Conversation::default(),
-            ));
-            // The attachment is what makes the conversation exist for
-            // observers before its first message. cwd is causal (an input to
-            // how the conversation unfolds), published when known.
-            let mut attached = serde_json::json!({
-                "ts": now_iso(),
-                "instanceId": instance,
-                "conversationId": conv,
-            });
-            if let Ok(cwd) = std::env::current_dir() {
-                attached["cwd"] = serde_json::json!(cwd.to_string_lossy());
-            }
-            publish_agent(&client, &world, "attached", attached).await;
+            )
+            .await
+            else {
+                continue;
+            };
             println!("{}", serde_json::json!({ "conversationId": conv }));
         } else if let Some(adopt) = value.get("adopt") {
             let Some(conv) = adopt
@@ -265,19 +288,8 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
             let adopted = messages.len();
-            let conv_id = wire::ConversationId(conv.clone());
-            // Same discipline as spawn: the fact (subscription) before the
-            // claim (attached) and the reply.
-            let requests = match agent::subscribe(&client, &conv_id).await {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("bridge: subscribe failed for {conv}: {e}");
-                    println!("{}", serde_json::json!({ "error": "subscribe failed" }));
-                    continue;
-                }
-            };
             let config = agent::AgentConfig {
-                conv: conv_id,
+                conv: wire::ConversationId(conv.clone()),
                 model: default_model.clone(),
                 system: None,
                 auth: auth.clone(),
@@ -285,21 +297,17 @@ async fn main() -> anyhow::Result<()> {
                 attach_bucket: attach_bucket.clone(),
                 thinking_budget,
             };
-            tokio::spawn(agent::run(
-                client.clone(),
-                requests,
+            let Some(conv) = serve_conversation(
+                &client,
+                &world,
+                &instance,
                 config,
                 decisions::Conversation::adopt(messages),
-            ));
-            let mut attached = serde_json::json!({
-                "ts": now_iso(),
-                "instanceId": instance,
-                "conversationId": conv,
-            });
-            if let Ok(cwd) = std::env::current_dir() {
-                attached["cwd"] = serde_json::json!(cwd.to_string_lossy());
-            }
-            publish_agent(&client, &world, "attached", attached).await;
+            )
+            .await
+            else {
+                continue;
+            };
             println!(
                 "{}",
                 serde_json::json!({ "conversationId": conv, "adoptedMessages": adopted })
