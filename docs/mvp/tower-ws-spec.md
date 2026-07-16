@@ -417,6 +417,44 @@ ephemeral, exactly as on the wire: never stored, no ids, superseded entirely
 by the committed `message` that follows. A client that ignores `streaming`
 is correct, just less alive.
 
+### `usage` — live, gated by `open`
+
+```json
+{ "type": "usage", "conv": "c65b902d-…", "model": "claude-sonnet-4-5",
+  "inputTokens": 9700, "outputTokens": 418700,
+  "cacheCreationTokens": 2100000, "cacheCreation5mTokens": 100000, "cacheCreation1hTokens": 2000000,
+  "cacheReadTokens": 66300000, "turns": 174, "contextTokens": 740500 }
+```
+
+The conversation's running cost surface. towerd folds every turn's wire
+`telemetry.usage` into per-conversation totals — the token counts are
+**cumulative over the conversation** and `turns` counts the turns folded — and
+emits the whole snapshot, **absolute never incremental**: the client replaces
+what it holds, it never sums. Summing is towerd's job precisely because a
+turn's usage streams cumulatively on the wire; a client adding frames would
+double-count. Sent once on `open` (the current totals) and again on every turn
+while open — same gating as `message`, because this is per-conversation
+content, not fleet awareness. A conversation with no usage yet gets no frame;
+absent means zero.
+
+`model` and `contextTokens` are the **latest** turn's, not sums: `contextTokens`
+is that turn's `inputTokens + cacheCreationTokens + cacheReadTokens` — the
+current prompt's occupancy of the context window (the whole prompt, cache
+included), which the next turn replaces, so it cannot be a running total.
+
+`cacheCreation5mTokens` and `cacheCreation1hTokens` are the 5m/1h breakdown of
+`cacheCreationTokens` (each cumulative), forwarded from the wire's optional
+split; they let the client price cache-creation at each TTL's own write rate
+instead of assuming one. Both are 0 when the producer never reported the split.
+
+Facts only — the client owns the policy. `$` comes from a per-model price
+table, `used/max (%)` from `contextTokens ÷ the model's window`; towerd ships
+neither a dollar nor a percentage, the same facts-not-verdicts rule staleness
+and liveness already keep. (Usage also touches staleness unconditionally: a
+usage wire event advances `lastEvent` with `lastKind: "usage"` on the `row`,
+like any activity — that is awareness and is not gated; this frame is the
+content.)
+
 ### `error` — response to anything unrecognised or malformed
 
 ```json
@@ -619,6 +657,12 @@ export const serverMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('query'),        conv: z.string(), queryId: z.string(), reason: z.string() }),
   z.looseObject({ type: z.literal('streaming'),    conv: z.string(), text: z.string() }),
   z.looseObject({ type: z.literal('stream_block'), conv: z.string(), blockType: z.string() }),
+  z.looseObject({ type: z.literal('usage'),        conv: z.string(), model: z.string(),
+                  inputTokens: z.number().int(), outputTokens: z.number().int(),
+                  cacheCreationTokens: z.number().int(),
+                  cacheCreation5mTokens: z.number().int(), cacheCreation1hTokens: z.number().int(),
+                  cacheReadTokens: z.number().int(),
+                  turns: z.number().int(), contextTokens: z.number().int() }),
   z.looseObject({ type: z.literal('error'),        id: z.string(), reason: z.string() }),
 ]);
 ```

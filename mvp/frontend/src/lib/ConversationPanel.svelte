@@ -1,7 +1,8 @@
 <script lang="ts">
   import MessageView from './MessageView.svelte';
-  import { approvals, conversations, rail, view } from './app';
+  import { approvals, conversations, rail, usage, view } from './app';
   import { age } from './core/time';
+  import { formatTokens, formatUsd, priceUsage } from './core/pricing';
   import { uploadAttachment } from './core/uploads';
   import type { ConversationState } from './concerns/conversation.svelte';
   import type { AttachmentRef } from './types';
@@ -191,6 +192,12 @@
   // (an open set): shown verbatim, never branched on.
   const row = $derived(rail.row(oc.conv));
 
+  // The conversation's cost surface: towerd ships the token facts, priced
+  // here ($ and context %) — the client owns that policy. Absent until the
+  // first turn commits usage; absent means zero, so the line simply hides.
+  const usageSnapshot = $derived(usage.get(oc.conv));
+  const priced = $derived(usageSnapshot ? priceUsage(usageSnapshot) : undefined);
+
   // Pending asks belonging to this conversation — the in-context answer
   // surface for the cases where the list line alone isn't enough.
   // Live asks only: a void ask is not actionable here (answering a corpse
@@ -337,6 +344,22 @@
         {/if}
       {/if}
     </p>
+    {#if usageSnapshot && priced}
+      <p
+        class="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-neutral-500"
+        title={usageSnapshot.model}
+      >
+        <span>in {formatTokens(usageSnapshot.inputTokens)}</span>
+        <span title="cache write">↑{formatTokens(usageSnapshot.cacheCreationTokens)}</span>
+        <span title="cache read">↓{formatTokens(usageSnapshot.cacheReadTokens)}</span>
+        <span>out {formatTokens(usageSnapshot.outputTokens)}</span>
+        <span class="text-neutral-300">{formatUsd(priced.costUsd)}</span>
+        <span title="context window used">
+          ctx {formatTokens(priced.contextUsed)}/{formatTokens(priced.contextMax)} ({priced.contextPct.toFixed(1)}%)
+        </span>
+        <span>turns {usageSnapshot.turns}</span>
+      </p>
+    {/if}
     {#if oc.lastSay}
       <p class="mb-1.5 text-orange-300">{oc.lastSay}</p>
     {/if}

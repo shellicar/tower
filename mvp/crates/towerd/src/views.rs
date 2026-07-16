@@ -14,8 +14,8 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use wire::{
     AgentEvent, AgentKind, AgentTelemetry, ApprovalEvent, ApprovalId, ApprovalKind,
-    ApprovalLifecycle, ConvChange, ConversationId, Event, EventKind, InstanceId, MessageId,
-    QueryId, TurnId, WireEvent, WorldId, parse_ts,
+    ApprovalLifecycle, ConvChange, ConvTelemetry, ConversationId, Event, EventKind, InstanceId,
+    MessageId, QueryId, TurnId, WireEvent, WorldId, parse_ts,
 };
 
 use crate::refs::{Blob, externalise};
@@ -55,6 +55,11 @@ pub enum ViewEvent {
         query: QueryId,
         reason: String,
     },
+    /// The conversation's running cost surface — cumulative token totals, the
+    /// turn count, and the latest turn's context size and model. Folded
+    /// (towerd accumulates), gated by `open` like `Message`. Absolute
+    /// snapshot: the client replaces what it holds, never sums.
+    Usage(UsageState),
 }
 
 /// The agent concern's facts, verdict-free: alive/released/stranded is the
@@ -159,6 +164,25 @@ pub struct ConversationMessage {
     pub ts: i64,
 }
 
+/// One conversation's usage fold: cumulative token totals + turn count, plus
+/// the latest turn's context size and model. Facts only; the client prices
+/// the dollar and the context percentage.
+#[derive(Debug, Clone)]
+pub struct UsageState {
+    pub conv: ConversationId,
+    pub input_tokens: i64,
+    pub cache_creation_tokens: i64,
+    /// The 5m/1h split of cache_creation, cumulative like the total. Both 0
+    /// when the producer never reported the breakdown.
+    pub cache_creation_5m_tokens: i64,
+    pub cache_creation_1h_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub output_tokens: i64,
+    pub turns: i64,
+    pub context_tokens: i64,
+    pub model: String,
+}
+
 /// `list`'s answer: the rows and the key→colour map (the shared colour
 /// language), one round trip.
 pub type ListSnapshot = (Vec<RowState>, Vec<(String, String)>);
@@ -172,6 +196,11 @@ pub enum ViewQuery {
         /// The client's high-water mark; `None` = from the start.
         after: Option<i64>,
         reply: oneshot::Sender<Vec<ConversationMessage>>,
+    },
+    /// The conversation's usage snapshot for `open`; `None` if no usage yet.
+    Usage {
+        conv: ConversationId,
+        reply: oneshot::Sender<Option<UsageState>>,
     },
     Ref {
         id: String,
@@ -316,6 +345,27 @@ const MIGRATIONS: &[&str] = &[
          attached_ts INTEGER NOT NULL,
          PRIMARY KEY (world, instance_id, conv)
      );",
+    // 7 — usage: the per-conversation cost surface, a materialised view
+    // folded from conv.v2.*.telemetry usage. The four token counts are
+    // cumulative over the conversation; `turns` counts the folded usage
+    // events; `model` and `context_tokens` are the LATEST turn's (the current
+    // prompt size, not a sum). In the rematerialise truncation set. Facts
+    // only — the dollar and the context percentage are the client's policy.
+    "CREATE TABLE usage (
+         conv                  TEXT PRIMARY KEY,
+         input_tokens          INTEGER NOT NULL,
+         cache_creation_tokens INTEGER NOT NULL,
+         cache_read_tokens     INTEGER NOT NULL,
+         output_tokens         INTEGER NOT NULL,
+         turns                 INTEGER NOT NULL,
+         context_tokens        INTEGER NOT NULL,
+         model                 TEXT NOT NULL
+     );",
+    // 8 — the 5m/1h split of cache_creation (conversation-spec's optional
+    // cacheCreation{5m,1h}Tokens). Added after 7 shipped, so ALTER not edit;
+    // default 0 covers rows and producers that never carried the split.
+    "ALTER TABLE usage ADD COLUMN cache_creation_5m_tokens INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE usage ADD COLUMN cache_creation_1h_tokens INTEGER NOT NULL DEFAULT 0;",
 ];
 
 pub fn apply_schema(db: &Connection) -> anyhow::Result<()> {
@@ -335,6 +385,33 @@ pub fn read_cursor(db: &Connection) -> anyhow::Result<u64> {
         db.query_row("SELECT seq FROM cursor WHERE id = 1", [], |r| {
             r.get::<_, i64>(0)
         })? as u64,
+    )
+}
+
+/// The conversation's usage row as a snapshot. Errors with `QueryReturnedNoRows`
+/// when the conversation has no usage yet; callers that want an `Option` wrap
+/// with `.optional()`.
+fn read_usage_row(db: &Connection, conv: &ConversationId) -> rusqlite::Result<UsageState> {
+    db.query_row(
+        "SELECT input_tokens, cache_creation_tokens, cache_creation_5m_tokens,
+                cache_creation_1h_tokens, cache_read_tokens, output_tokens,
+                turns, context_tokens, model
+         FROM usage WHERE conv = ?1",
+        [&conv.0],
+        |r| {
+            Ok(UsageState {
+                conv: conv.clone(),
+                input_tokens: r.get(0)?,
+                cache_creation_tokens: r.get(1)?,
+                cache_creation_5m_tokens: r.get(2)?,
+                cache_creation_1h_tokens: r.get(3)?,
+                cache_read_tokens: r.get(4)?,
+                output_tokens: r.get(5)?,
+                turns: r.get(6)?,
+                context_tokens: r.get(7)?,
+                model: r.get(8)?,
+            })
+        },
     )
 }
 
@@ -704,6 +781,50 @@ impl Views {
             }
         }
 
+        // Usage fold: each per-turn usage telemetry accumulates into the
+        // conversation's running totals. The fold is additive, so it must be
+        // applied exactly once — safe because the cursor advances past every
+        // event and rematerialisation truncates this table before replay. The
+        // totals are read back for the absolute snapshot the broadcast carries.
+        let mut usage_snapshot: Option<UsageState> = None;
+        if let EventKind::Telemetry(ConvTelemetry::Usage(u)) = &event.kind {
+            let context = u.input_tokens + u.cache_creation_tokens + u.cache_read_tokens;
+            let cc5 = u.cache_creation_5m_tokens.unwrap_or(0);
+            let cc1h = u.cache_creation_1h_tokens.unwrap_or(0);
+            tx.execute(
+                "INSERT INTO usage
+                     (conv, input_tokens, cache_creation_tokens, cache_creation_5m_tokens,
+                      cache_creation_1h_tokens, cache_read_tokens, output_tokens, turns,
+                      context_tokens, model)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9)
+                 ON CONFLICT(conv) DO UPDATE SET
+                     input_tokens = usage.input_tokens + excluded.input_tokens,
+                     cache_creation_tokens =
+                         usage.cache_creation_tokens + excluded.cache_creation_tokens,
+                     cache_creation_5m_tokens =
+                         usage.cache_creation_5m_tokens + excluded.cache_creation_5m_tokens,
+                     cache_creation_1h_tokens =
+                         usage.cache_creation_1h_tokens + excluded.cache_creation_1h_tokens,
+                     cache_read_tokens = usage.cache_read_tokens + excluded.cache_read_tokens,
+                     output_tokens = usage.output_tokens + excluded.output_tokens,
+                     turns = usage.turns + 1,
+                     context_tokens = excluded.context_tokens,
+                     model = excluded.model",
+                rusqlite::params![
+                    conv.0,
+                    u.input_tokens,
+                    u.cache_creation_tokens,
+                    cc5,
+                    cc1h,
+                    u.cache_read_tokens,
+                    u.output_tokens,
+                    context,
+                    u.model,
+                ],
+            )?;
+            usage_snapshot = Some(read_usage_row(&tx, conv)?);
+        }
+
         tx.execute("UPDATE cursor SET seq = ?1 WHERE id = 1", [seq as i64])?;
         tx.commit()?;
 
@@ -730,6 +851,9 @@ impl Views {
                 reason: q.reason.clone(),
             });
         }
+        if let Some(snapshot) = usage_snapshot {
+            let _ = self.events.send(ViewEvent::Usage(snapshot));
+        }
         Ok(())
     }
 
@@ -751,6 +875,9 @@ impl Views {
             }
             ViewQuery::Conversation { conv, after, reply } => {
                 let _ = reply.send(self.conversation(&conv, after).unwrap_or_default());
+            }
+            ViewQuery::Usage { conv, reply } => {
+                let _ = reply.send(self.usage(&conv).unwrap_or_default());
             }
             ViewQuery::Ref { id, reply } => {
                 let _ = reply.send(self.get_ref(&id).ok().flatten());
@@ -825,7 +952,7 @@ impl Views {
                 let tx = self.db.transaction()?;
                 tx.execute_batch(
                     "DELETE FROM rows; DELETE FROM messages; DELETE FROM refs;
-                     DELETE FROM approvals;
+                     DELETE FROM approvals; DELETE FROM usage;
                      DELETE FROM agent_instances; DELETE FROM agent_attachments;
                      UPDATE cursor SET seq = 0 WHERE id = 1;",
                 )?;
@@ -881,6 +1008,11 @@ impl Views {
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// The conversation's usage snapshot; `None` when it has no usage yet.
+    fn usage(&self, conv: &ConversationId) -> anyhow::Result<Option<UsageState>> {
+        Ok(read_usage_row(&self.db, conv).optional()?)
     }
 
     fn set_title(&self, conv: &ConversationId, title: &str) -> anyhow::Result<()> {
@@ -1200,6 +1332,46 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn usage_fold_accumulates_and_snapshots() {
+        let (mut views, mut rx) = fresh();
+        let conv = ConversationId("conv-abc".into());
+        // No usage yet: the snapshot is absent, and absent means zero.
+        assert!(views.usage(&conv).unwrap().is_none());
+
+        views.apply(1, &event("conv.v2.conv-abc.telemetry.usage",
+            r#"{"ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","inputTokens":100,"cacheCreationTokens":20,"cacheCreation5mTokens":3,"cacheCreation1hTokens":17,"cacheReadTokens":5,"outputTokens":40}"#));
+        // The second frame omits the split (an older producer) — it must not
+        // regress the running totals: absent reads as 0, so they hold.
+        views.apply(2, &event("conv.v2.conv-abc.telemetry.usage",
+            r#"{"ts":"2026-07-07T21:01:00+10:00","queryId":"q2","turnId":"t2","service":"anthropic.messages","model":"claude-opus-4-6","inputTokens":200,"cacheCreationTokens":0,"cacheReadTokens":300,"outputTokens":10}"#));
+
+        let u = views.usage(&conv).unwrap().unwrap();
+        // The four token counts are cumulative over the conversation.
+        assert_eq!(u.input_tokens, 300);
+        assert_eq!(u.cache_creation_tokens, 20);
+        // The 5m/1h split accumulates alongside the total.
+        assert_eq!(u.cache_creation_5m_tokens, 3);
+        assert_eq!(u.cache_creation_1h_tokens, 17);
+        assert_eq!(u.cache_read_tokens, 305);
+        assert_eq!(u.output_tokens, 50);
+        assert_eq!(u.turns, 2);
+        // Context and model are the LATEST turn's, not sums: context is that
+        // turn's whole prompt (input + cacheCreation + cacheRead).
+        assert_eq!(u.context_tokens, 200 + 0 + 300);
+        assert_eq!(u.model, "claude-opus-4-6");
+
+        // Each usage event broadcasts one Usage snapshot (content) alongside
+        // the row touch (staleness).
+        let mut usage_broadcasts = 0;
+        while let Ok(ev) = rx.try_recv() {
+            if let ViewEvent::Usage(_) = ev {
+                usage_broadcasts += 1;
+            }
+        }
+        assert_eq!(usage_broadcasts, 2);
     }
 
     #[test]

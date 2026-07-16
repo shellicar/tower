@@ -125,6 +125,13 @@ pub struct Usage {
     pub input_tokens: i64,
     #[serde(rename = "cacheCreationTokens")]
     pub cache_creation_tokens: i64,
+    /// The 5m/1h breakdown of `cache_creation_tokens`, when the service
+    /// reported it (message_start's `usage.cache_creation`). Optional per
+    /// conversation-spec: report what you know, fabricate nothing.
+    #[serde(rename = "cacheCreation5mTokens", default)]
+    pub cache_creation_5m_tokens: Option<i64>,
+    #[serde(rename = "cacheCreation1hTokens", default)]
+    pub cache_creation_1h_tokens: Option<i64>,
     #[serde(rename = "cacheReadTokens")]
     pub cache_read_tokens: i64,
     #[serde(rename = "outputTokens")]

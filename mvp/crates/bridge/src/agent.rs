@@ -461,6 +461,8 @@ async fn run_query(
                 "service": "anthropic.messages", "model": model,
                 "inputTokens": done.input_tokens,
                 "cacheCreationTokens": done.cache_creation_tokens,
+                "cacheCreation5mTokens": done.cache_creation_5m_tokens,
+                "cacheCreation1hTokens": done.cache_creation_1h_tokens,
                 "cacheReadTokens": done.cache_read_tokens,
                 "outputTokens": done.output_tokens,
             }),

@@ -83,6 +83,24 @@ export interface AttachmentRef {
   source: { type: 'object'; id: string; mediaType?: string; size?: number };
 }
 
+/** The conversation's running cost surface, folded by towerd. Token totals
+ *  are cumulative over the conversation; `model` and `contextTokens` are the
+ *  latest turn's. Facts only — the client derives $ and context % (policy). */
+export interface UsageSnapshot {
+  conv: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  /** The 5m/1h breakdown of cacheCreationTokens; 0 when the producer never
+   *  reported the split. Priced at each TTL's own write rate. */
+  cacheCreation5mTokens: number;
+  cacheCreation1hTokens: number;
+  cacheReadTokens: number;
+  turns: number;
+  contextTokens: number;
+}
+
 /** One agent wire fact, flat; `kind` is an open set — unknown kinds skipped. */
 export interface AgentEvent {
   kind: string;
@@ -120,6 +138,7 @@ export type ServerMsg =
   | { type: 'message'; conv: string; message: ConversationMessage }
   | { type: 'streaming'; conv: string; text: string }
   | { type: 'stream_block'; conv: string; blockType: string }
+  | ({ type: 'usage' } & UsageSnapshot)
   | { type: 'error'; id: string; reason: string };
 
 // client → towerd

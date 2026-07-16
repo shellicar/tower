@@ -54,6 +54,11 @@ pub struct TurnDone {
     pub stop_reason: String,
     pub input_tokens: i64,
     pub cache_creation_tokens: i64,
+    /// The 5m/1h split of cache_creation_tokens, from message_start's
+    /// `usage.cache_creation`. We write only 1h breakpoints, so 1h should carry
+    /// it and 5m sit at ~0 — publishing both is how that stays observable.
+    pub cache_creation_5m_tokens: i64,
+    pub cache_creation_1h_tokens: i64,
     pub cache_read_tokens: i64,
     pub output_tokens: i64,
 }
@@ -83,6 +88,30 @@ pub async fn stream_turn(
     })];
     if let Some(system) = system {
         system_blocks.push(json!({ "type": "text", "text": system }));
+    }
+    // Cache breakpoints, 1h TTL. Prompt caching is prefix-based over the
+    // canonical order tools → system → messages; a breakpoint caches everything
+    // before it. Two earn their keep: the last system block caches the static
+    // prefix (tools + system, identical every turn), and the last block of the
+    // last message caches the conversation prefix so far — moving it each turn
+    // extends the cache incrementally and reads the previous turn's write.
+    // Without these the cache_creation/cache_read tokens sit at ~0.
+    //
+    // 1h, not the 5m default: a human-paced conversation easily gaps past five
+    // minutes, and a lapsed cache is a full re-read at full price. Cache READS
+    // dominate the bill, so the higher 1h write price is cheap insurance — 5m
+    // is a coin-flip not worth taking. The 1h TTL is GA; no beta header.
+    if let Some(last) = system_blocks.last_mut() {
+        last["cache_control"] = json!({ "type": "ephemeral", "ttl": "1h" });
+    }
+    // Clone before marking: the caller's message tree is not ours to mutate.
+    let mut messages = messages.to_vec();
+    if let Some(block) = messages
+        .last_mut()
+        .and_then(|m| m["content"].as_array_mut())
+        .and_then(|blocks| blocks.last_mut())
+    {
+        block["cache_control"] = json!({ "type": "ephemeral", "ttl": "1h" });
     }
     let mut body = json!({
         "model": model,
@@ -132,6 +161,7 @@ pub async fn stream_turn(
     let mut open_json = String::new();
     let mut stop_reason = String::from("end_turn");
     let (mut input_tokens, mut cache_creation, mut cache_read, mut output_tokens) = (0, 0, 0, 0);
+    let (mut cache_creation_5m, mut cache_creation_1h) = (0, 0);
 
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
@@ -162,6 +192,11 @@ pub async fn stream_turn(
                     input_tokens = usage["input_tokens"].as_i64().unwrap_or(0);
                     cache_creation = usage["cache_creation_input_tokens"].as_i64().unwrap_or(0);
                     cache_read = usage["cache_read_input_tokens"].as_i64().unwrap_or(0);
+                    // The breakdown lives on the message_start usage object
+                    // (message_delta's usage has no cache_creation object).
+                    let cc = &usage["cache_creation"];
+                    cache_creation_5m = cc["ephemeral_5m_input_tokens"].as_i64().unwrap_or(0);
+                    cache_creation_1h = cc["ephemeral_1h_input_tokens"].as_i64().unwrap_or(0);
                 }
                 "content_block_start" => {
                     finish_block(&mut content, &mut open_json);
@@ -224,6 +259,8 @@ pub async fn stream_turn(
         stop_reason,
         input_tokens,
         cache_creation_tokens: cache_creation,
+        cache_creation_5m_tokens: cache_creation_5m,
+        cache_creation_1h_tokens: cache_creation_1h,
         cache_read_tokens: cache_read,
         output_tokens,
     })

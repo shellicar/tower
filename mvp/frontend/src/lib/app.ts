@@ -7,6 +7,7 @@
 import { Approvals } from './concerns/approvals.svelte';
 import { Conversations } from './concerns/conversation.svelte';
 import { Rail } from './concerns/rail.svelte';
+import { Usage } from './concerns/usage.svelte';
 import { View } from './concerns/view.svelte';
 import { Transport } from './core/transport.svelte';
 
@@ -14,6 +15,7 @@ export const transport = new Transport();
 export const conversations = new Conversations(transport);
 export const rail = new Rail(transport);
 export const approvals = new Approvals(transport);
+export const usage = new Usage(transport);
 export const view = new View(conversations);
 
 transport.connect();

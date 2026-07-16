@@ -16,7 +16,7 @@ use crate::broker::{Broker, Clock};
 use crate::gateway;
 use crate::views::{
     AgentAttachmentState, AgentFact, AgentInstanceState, ApprovalState, ConversationMessage,
-    RowState, ViewEvent, ViewQuery, ViewsHandle,
+    RowState, UsageState, ViewEvent, ViewQuery, ViewsHandle,
 };
 
 // ---------------------------------------------------------------------------
@@ -154,6 +154,8 @@ pub enum ServerMsg {
         #[serde(rename = "blockType")]
         block_type: String,
     },
+    #[serde(rename = "usage")]
+    Usage(WsUsage),
     #[serde(rename = "error")]
     Error { id: String, reason: String },
 }
@@ -346,6 +348,47 @@ pub struct WsMessage {
     pub ts: i64,
 }
 
+/// The conversation's usage snapshot — facts only; the client prices the
+/// dollar and the context percentage. Token totals are cumulative; `model`
+/// and `contextTokens` are the latest turn's.
+#[derive(Debug, Serialize)]
+pub struct WsUsage {
+    pub conv: String,
+    pub model: String,
+    #[serde(rename = "inputTokens")]
+    pub input_tokens: i64,
+    #[serde(rename = "outputTokens")]
+    pub output_tokens: i64,
+    #[serde(rename = "cacheCreationTokens")]
+    pub cache_creation_tokens: i64,
+    #[serde(rename = "cacheCreation5mTokens")]
+    pub cache_creation_5m_tokens: i64,
+    #[serde(rename = "cacheCreation1hTokens")]
+    pub cache_creation_1h_tokens: i64,
+    #[serde(rename = "cacheReadTokens")]
+    pub cache_read_tokens: i64,
+    pub turns: i64,
+    #[serde(rename = "contextTokens")]
+    pub context_tokens: i64,
+}
+
+impl From<UsageState> for WsUsage {
+    fn from(u: UsageState) -> Self {
+        WsUsage {
+            conv: u.conv.0,
+            model: u.model,
+            input_tokens: u.input_tokens,
+            output_tokens: u.output_tokens,
+            cache_creation_tokens: u.cache_creation_tokens,
+            cache_creation_5m_tokens: u.cache_creation_5m_tokens,
+            cache_creation_1h_tokens: u.cache_creation_1h_tokens,
+            cache_read_tokens: u.cache_read_tokens,
+            turns: u.turns,
+            context_tokens: u.context_tokens,
+        }
+    }
+}
+
 impl From<RowState> for WsRow {
     fn from(r: RowState) -> Self {
         WsRow {
@@ -432,6 +475,10 @@ impl Session {
                 query_id: query.0,
                 reason,
             }),
+            // Usage is folded content, gated by open like `Message`.
+            ViewEvent::Usage(state) if self.watching.contains(&state.conv) => {
+                Some(ServerMsg::Usage(state.into()))
+            }
             _ => None,
         }
     }
@@ -455,14 +502,14 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
     broker: &B,
     clock: &C,
     text: &str,
-) -> ServerMsg {
+) -> Vec<ServerMsg> {
     let value: Value = match serde_json::from_str(text) {
         Ok(v) => v,
         Err(_) => {
-            return ServerMsg::Error {
+            return vec![ServerMsg::Error {
                 id: request_id(text),
                 reason: "malformed".into(),
-            };
+            }];
         }
     };
     let id = value
@@ -473,10 +520,10 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
     let msg: ClientMsg = match serde_json::from_value(value) {
         Ok(m) => m,
         Err(_) => {
-            return ServerMsg::Error {
+            return vec![ServerMsg::Error {
                 id,
                 reason: "unsupported".into(),
-            };
+            }];
         }
     };
 
@@ -490,67 +537,91 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
                 reply: tx,
             };
             if views.queries.send(query).await.is_err() {
-                return ServerMsg::Error {
+                return vec![ServerMsg::Error {
                     id,
                     reason: "views unavailable".into(),
-                };
+                }];
             }
-            match rx.await {
-                Ok(messages) => ServerMsg::Conversation {
-                    id,
-                    conv,
-                    messages: messages.into_iter().map(Into::into).collect(),
-                },
-                Err(_) => ServerMsg::Error {
-                    id,
-                    reason: "views unavailable".into(),
-                },
+            let messages = match rx.await {
+                Ok(messages) => messages,
+                Err(_) => {
+                    return vec![ServerMsg::Error {
+                        id,
+                        reason: "views unavailable".into(),
+                    }];
+                }
+            };
+            // The catch-up first, then the usage snapshot (absent until the
+            // first turn). Both are open-gated content and open just began,
+            // so both belong to this reply.
+            let mut frames = vec![ServerMsg::Conversation {
+                id,
+                conv: conv.clone(),
+                messages: messages.into_iter().map(Into::into).collect(),
+            }];
+            let (tx, rx) = oneshot::channel();
+            if views
+                .queries
+                .send(ViewQuery::Usage {
+                    conv: ConversationId(conv),
+                    reply: tx,
+                })
+                .await
+                .is_ok()
+                && let Ok(Some(state)) = rx.await
+            {
+                frames.push(ServerMsg::Usage(state.into()));
             }
+            frames
         }
         ClientMsg::Close { id, conv } => {
             session.close(&conv);
-            ServerMsg::Closed { id, conv }
+            vec![ServerMsg::Closed { id, conv }]
         }
         ClientMsg::Cancel { id, conv, query } => {
-            match gateway::cancel(broker, clock, &ConversationId(conv), &QueryId(query)).await {
-                CancelOutcome::Accepted => ServerMsg::CancelResult {
-                    id,
-                    outcome: "accepted",
-                    reason: None,
+            vec![
+                match gateway::cancel(broker, clock, &ConversationId(conv), &QueryId(query)).await {
+                    CancelOutcome::Accepted => ServerMsg::CancelResult {
+                        id,
+                        outcome: "accepted",
+                        reason: None,
+                    },
+                    CancelOutcome::Rejected { reason } => ServerMsg::CancelResult {
+                        id,
+                        outcome: "rejected",
+                        reason: Some(reason),
+                    },
+                    CancelOutcome::Unreachable => ServerMsg::CancelResult {
+                        id,
+                        outcome: "unreachable",
+                        reason: None,
+                    },
                 },
-                CancelOutcome::Rejected { reason } => ServerMsg::CancelResult {
-                    id,
-                    outcome: "rejected",
-                    reason: Some(reason),
-                },
-                CancelOutcome::Unreachable => ServerMsg::CancelResult {
-                    id,
-                    outcome: "unreachable",
-                    reason: None,
-                },
-            }
+            ]
         }
         ClientMsg::Answer {
             id,
             approval,
             approved,
-        } => match gateway::answer(broker, clock, &ApprovalId(approval), approved).await {
-            AnswerOutcome::Accepted => ServerMsg::AnswerResult {
-                id,
-                outcome: "accepted",
-                reason: None,
+        } => vec![
+            match gateway::answer(broker, clock, &ApprovalId(approval), approved).await {
+                AnswerOutcome::Accepted => ServerMsg::AnswerResult {
+                    id,
+                    outcome: "accepted",
+                    reason: None,
+                },
+                AnswerOutcome::Rejected { reason } => ServerMsg::AnswerResult {
+                    id,
+                    outcome: "rejected",
+                    reason: Some(reason),
+                },
+                AnswerOutcome::Unreachable => ServerMsg::AnswerResult {
+                    id,
+                    outcome: "unreachable",
+                    reason: None,
+                },
             },
-            AnswerOutcome::Rejected { reason } => ServerMsg::AnswerResult {
-                id,
-                outcome: "rejected",
-                reason: Some(reason),
-            },
-            AnswerOutcome::Unreachable => ServerMsg::AnswerResult {
-                id,
-                outcome: "unreachable",
-                reason: None,
-            },
-        },
+        ],
         ClientMsg::SetTag {
             id,
             conv,
@@ -565,12 +636,12 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
                 reply: tx,
             };
             if views.queries.send(query).await.is_err() || rx.await.is_err() {
-                return ServerMsg::Error {
+                return vec![ServerMsg::Error {
                     id,
                     reason: "views unavailable".into(),
-                };
+                }];
             }
-            ServerMsg::TagSet { id, conv }
+            vec![ServerMsg::TagSet { id, conv }]
         }
         ClientMsg::SetTitle { id, conv, title } => {
             let (tx, rx) = oneshot::channel();
@@ -580,12 +651,12 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
                 reply: tx,
             };
             if views.queries.send(query).await.is_err() || rx.await.is_err() {
-                return ServerMsg::Error {
+                return vec![ServerMsg::Error {
                     id,
                     reason: "views unavailable".into(),
-                };
+                }];
             }
-            ServerMsg::TitleSet { id, conv }
+            vec![ServerMsg::TitleSet { id, conv }]
         }
         ClientMsg::Say {
             id,
@@ -600,7 +671,7 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
                 tip: tip.map(wire::MessageId),
                 attachments,
             };
-            match gateway::say(broker, clock, cmd).await {
+            vec![match gateway::say(broker, clock, cmd).await {
                 SayOutcome::Accepted { query } => ServerMsg::SayResult {
                     id,
                     outcome: "accepted",
@@ -619,7 +690,7 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
                     query: None,
                     reason: None,
                 },
-            }
+            }]
         }
     }
 }
@@ -732,10 +803,12 @@ pub async fn run_session<B: Broker, C: Clock>(
             frame = stream.next() => {
                 match frame {
                     Some(Ok(WsFrame::Text(text))) => {
-                        let response =
+                        let responses =
                             handle_client_text(&mut session, &views, &broker, &clock, &text).await;
-                        if send(&mut sink, &response).await.is_err() {
-                            return;
+                        for response in &responses {
+                            if send(&mut sink, response).await.is_err() {
+                                return;
+                            }
                         }
                     }
                     Some(Ok(WsFrame::Close(_))) | None => return,
@@ -828,6 +901,33 @@ mod tests {
             v,
             serde_json::json!({
                 "type": "row", "conv": "c1", "lastEvent": 5, "lastKind": "delta"
+            })
+        );
+    }
+
+    #[test]
+    fn usage_frame_serialises_to_the_spec_shape() {
+        let frame = ServerMsg::Usage(WsUsage {
+            conv: "c1".into(),
+            model: "claude-sonnet-4-5".into(),
+            input_tokens: 9700,
+            output_tokens: 418700,
+            cache_creation_tokens: 2_100_000,
+            cache_creation_5m_tokens: 100_000,
+            cache_creation_1h_tokens: 2_000_000,
+            cache_read_tokens: 66_300_000,
+            turns: 174,
+            context_tokens: 740_500,
+        });
+        let v: Value = serde_json::from_str(&serde_json::to_string(&frame).unwrap()).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({
+                "type": "usage", "conv": "c1", "model": "claude-sonnet-4-5",
+                "inputTokens": 9700, "outputTokens": 418700,
+                "cacheCreationTokens": 2_100_000, "cacheCreation5mTokens": 100_000,
+                "cacheCreation1hTokens": 2_000_000, "cacheReadTokens": 66_300_000,
+                "turns": 174, "contextTokens": 740_500
             })
         );
     }
