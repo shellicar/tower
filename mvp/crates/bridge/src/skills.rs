@@ -1,9 +1,13 @@
-//! Skills: the catalogue is scanned per conversation at its first message
-//! and then fixed for that conversation; the body is read fresh at invoke
-//! time. A skill is `{root}/{dir}/SKILL.md` with YAML frontmatter carrying
+//! Skills: the catalogue is re-scanned per say. The first say of a
+//! conversation commits the full catalogue reminder and records the delta
+//! baseline; each later say commits a delta reminder naming the skills whose
+//! SKILL.md content changed since the last scan (removals are silent). The body
+//! is read fresh at invoke time. A skill is `{root}/{dir}/SKILL.md` with YAML
+//! frontmatter carrying
 //! `name` and `description`; the body below the frontmatter is what the
 //! Skill tool returns, stripped of the frontmatter.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::Deserialize;
@@ -21,6 +25,9 @@ pub struct SkillMeta {
     pub name: String,
     pub description: String,
     path: PathBuf,
+    /// Hash of the whole SKILL.md (frontmatter + body), so a body-only edit —
+    /// invisible to the catalogue line — still registers as a change.
+    hash: u64,
 }
 
 pub struct Skills {
@@ -56,10 +63,12 @@ impl Skills {
                 eprintln!("bridge: skill {name} has no description; skipped");
                 continue;
             };
+            let hash = content_hash(&text);
             list.push(SkillMeta {
                 name,
                 description,
                 path,
+                hash,
             });
         }
         list.sort_by(|a, b| a.name.cmp(&b.name));
@@ -84,6 +93,36 @@ impl Skills {
         }
         text.push_str("</system-reminder>\n\n");
         Some(text)
+    }
+
+    /// The delta baseline: every skill's name mapped to its content hash. The
+    /// first say records this and stays silent; later says diff against it.
+    pub fn baseline(&self) -> HashMap<String, u64> {
+        self.list.iter().map(|s| (s.name.clone(), s.hash)).collect()
+    }
+
+    /// Diff a fresh scan against a prior baseline. Returns a `<system-reminder>`
+    /// naming the skills whose SKILL.md content changed or is new, or None when
+    /// none did. Removals are deliberately silent: pointing the directory at an
+    /// empty path announces nothing, and pointing it back re-advertises every
+    /// skill as new. A body-only edit still surfaces — the hash covers the whole
+    /// file, so a skill loaded earlier is re-announced as stale even when its
+    /// catalogue line is unchanged.
+    pub fn delta(&self, previous: &HashMap<String, u64>) -> Option<String> {
+        let mut updated: Vec<String> = self
+            .list
+            .iter()
+            .filter(|s| previous.get(&s.name) != Some(&s.hash))
+            .map(|s| format!("- {}: {}", s.name, s.description))
+            .collect();
+        if updated.is_empty() {
+            return None;
+        }
+        updated.sort();
+        Some(format!(
+            "<system-reminder>\nThe following skills have been updated:\n\n{}\n</system-reminder>\n\n",
+            updated.join("\n")
+        ))
     }
 
     /// The Skill tool, for the API's `tools` array.
@@ -137,6 +176,16 @@ fn split_frontmatter(text: &str) -> (&str, &str) {
         Some((front, tail)) => (front, tail.split_once('\n').map_or("", |(_, b)| b)),
         None => ("", text),
     }
+}
+
+/// A content hash of a whole SKILL.md, for change detection across scans.
+/// Non-cryptographic (std DefaultHasher): the need is "did the bytes change",
+/// not integrity, so no new dependency is pulled for a SHA.
+fn content_hash(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[cfg(test)]
@@ -210,5 +259,69 @@ mod tests {
         let skills = Skills::scan(std::env::temp_dir().join("bridge-skills-test-missing"));
         assert!(skills.is_empty());
         assert!(skills.reminder().is_none());
+    }
+
+    #[test]
+    fn delta_surfaces_changed_and_added_but_never_removed() {
+        let dir = skills_dir(
+            "delta",
+            &[
+                ("alpha", "---\nname: alpha\ndescription: first\n---\nbody one\n"),
+                ("beta", "---\nname: beta\ndescription: second\n---\nbody two\n"),
+            ],
+        );
+        let base = Skills::scan(dir.clone()).baseline();
+
+        // Body-only edit to alpha (its catalogue line is unchanged), beta
+        // removed, gamma added.
+        std::fs::write(
+            dir.join("alpha").join("SKILL.md"),
+            "---\nname: alpha\ndescription: first\n---\nbody one CHANGED\n",
+        )
+        .unwrap();
+        let _ = std::fs::remove_dir_all(dir.join("beta"));
+        std::fs::create_dir_all(dir.join("gamma")).unwrap();
+        std::fs::write(
+            dir.join("gamma").join("SKILL.md"),
+            "---\nname: gamma\ndescription: third\n---\nbody three\n",
+        )
+        .unwrap();
+
+        let delta = Skills::scan(dir.clone()).delta(&base).unwrap();
+        assert!(delta.contains("The following skills have been updated:"));
+        assert!(delta.contains("- alpha: first"));
+        assert!(delta.contains("- gamma: third"));
+        // Removals are silent: beta is gone, but the delta never says so.
+        assert!(!delta.contains("- beta"));
+        assert!(!delta.contains("no longer available"));
+
+        // A baseline that already matches the current scan yields no delta.
+        let current = Skills::scan(dir.clone()).baseline();
+        assert!(Skills::scan(dir.clone()).delta(&current).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn emptying_then_refilling_is_silent_then_readvertises() {
+        let dir = skills_dir(
+            "refill",
+            &[("alpha", "---\nname: alpha\ndescription: first\n---\nbody\n")],
+        );
+        let base = Skills::scan(dir.clone()).baseline();
+
+        // Point at an empty directory: nothing is announced, baseline empties.
+        let empty =
+            std::env::temp_dir().join(format!("bridge-skills-empty-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&empty);
+        std::fs::create_dir_all(&empty).unwrap();
+        let empty_scan = Skills::scan(empty.clone());
+        assert!(empty_scan.delta(&base).is_none());
+        let empty_base = empty_scan.baseline();
+
+        // Point back: alpha is new against the empty baseline, so it re-advertises.
+        let delta = Skills::scan(dir.clone()).delta(&empty_base).unwrap();
+        assert!(delta.contains("- alpha: first"));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&empty);
     }
 }

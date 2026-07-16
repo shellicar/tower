@@ -17,6 +17,7 @@ use tokio::sync::{mpsc, watch};
 use futures::StreamExt;
 use wire::{ConvRequest, ConversationId, encode_accepted, encode_rejected, now_iso, parse_request};
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::anthropic;
@@ -32,10 +33,12 @@ pub struct AgentConfig {
     pub model: String,
     pub system: Option<String>,
     pub auth: crate::anthropic::Auth,
-    /// Scanned at the conversation's FIRST message, then fixed: the
-    /// catalogue must match the reminder committed into the record, and a
-    /// skill added after boot still reaches the next conversation.
-    pub skills_root: std::path::PathBuf,
+    /// The skills directory, shared and mutable so a stdio `skills` control
+    /// line can repoint it live. Re-scanned per say: the first say commits the
+    /// full catalogue and records the delta baseline; later says commit a
+    /// delta when a SKILL.md changed. A repoint surfaces as a delta on the
+    /// next say of every running conversation.
+    pub skills_root: Arc<std::sync::RwLock<std::path::PathBuf>>,
     /// The transit object store attachments resolve from (objects.rs).
     pub attach_bucket: String,
     /// Extended thinking budget; None = thinking off.
@@ -136,8 +139,9 @@ pub async fn run(
     // The live query's cancel signal, the shell's I/O half of what the
     // fold tracks; dropped when the query's end folds.
     let mut cancel_tx: Option<watch::Sender<bool>> = None;
-    // None until the first message scans the catalogue.
-    let mut skills: Option<Arc<Skills>> = None;
+    // The delta baseline: name→content-hash from the last scan. None until the
+    // first say records it (which stays silent; the full catalogue leads instead).
+    let mut skill_hashes: Option<HashMap<String, u64>> = None;
     let (done_tx, mut done_rx) = mpsc::channel::<(String, QueryEnd)>(8);
 
     loop {
@@ -161,7 +165,7 @@ pub async fn run(
                                     &client,
                                     &config,
                                     &mut conversation,
-                                    &mut skills,
+                                    &mut skill_hashes,
                                     &done_tx,
                                     text,
                                     from,
@@ -225,7 +229,7 @@ async fn accept_say(
     client: &async_nats::Client,
     config: &AgentConfig,
     conversation: &mut Conversation,
-    skills: &mut Option<Arc<Skills>>,
+    skill_hashes: &mut Option<HashMap<String, u64>>,
     done_tx: &mpsc::Sender<(String, QueryEnd)>,
     text: String,
     from: Value,
@@ -235,12 +239,26 @@ async fn accept_say(
     let turn = uuid::Uuid::new_v4().to_string();
     let message_id = uuid::Uuid::new_v4().to_string();
 
-    // The first message takes the catalogue snapshot and carries the
-    // reminder as its FIRST block, the said text second. It lives in the
-    // committed record, so what the model saw is what is stored.
-    let skills = Arc::clone(
-        skills.get_or_insert_with(|| Arc::new(Skills::scan(config.skills_root.clone()))),
-    );
+    // Re-scan the (possibly repointed) skills directory for this say. The scan
+    // is what this query's Skill tool resolves against, so a repoint takes
+    // effect immediately. The reminder committed lives in the record, so what
+    // the model saw is what is stored: the first say leads with the full
+    // catalogue (a genuinely empty conversation — an adopted record's replayed
+    // first message already carries it) and records the delta baseline silently;
+    // later says carry a delta when a SKILL.md changed since the last scan.
+    let root = config.skills_root.read().unwrap().clone();
+    let skills = Arc::new(Skills::scan(root));
+    let reminder: Option<String> = match skill_hashes.as_ref() {
+        None => {
+            if conversation.is_empty() {
+                skills.reminder()
+            } else {
+                None
+            }
+        }
+        Some(prev) => skills.delta(prev),
+    };
+    *skill_hashes = Some(skills.baseline());
     let mut content = Vec::new();
     // Self-heal a broken tip. A prior servicer that died after committing a
     // tool_use but before its tool_result leaves the record ending on a
@@ -256,9 +274,7 @@ async fn accept_say(
             "is_error": true,
         }));
     }
-    if conversation.is_empty()
-        && let Some(reminder) = skills.reminder()
-    {
+    if let Some(reminder) = reminder {
         content.push(json!({ "type": "text", "text": reminder }));
     }
     // Reference blocks verbatim: the COMMITTED message carries these, never

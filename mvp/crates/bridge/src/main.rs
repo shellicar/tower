@@ -7,6 +7,8 @@
 //!   {"conversationId":"…"}
 //!   $ echo '{"adopt": {"conversationId": "…"}}' | bridge
 //!   {"conversationId":"…","adoptedMessages":12}
+//!   $ echo '{"skills": {"dir": "/path/to/skills"}}' | bridge
+//!   {"skillsDir":"/path/to/skills"}
 //!
 //! `adopt` revives a conversation whose holder died: the record outlives
 //! the servicer, so a fresh instance replays the committed messages from
@@ -34,6 +36,8 @@ mod decisions;
 mod exec;
 mod objects;
 mod skills;
+
+use std::sync::{Arc, RwLock};
 
 use futures::StreamExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -160,18 +164,14 @@ async fn main() -> anyhow::Result<()> {
     let world = std::env::var("BRIDGE_WORLD").unwrap_or_else(|_| "local".into());
     let instance = uuid::Uuid::new_v4().to_string();
 
-    // The skills root; the catalogue itself is scanned per conversation at
-    // its FIRST message, so a skill added after boot reaches the next
-    // conversation, while an already-started one keeps the snapshot its
-    // committed reminder describes. BRIDGE_SKILLS overrides the home.
-    let skills_root: std::path::PathBuf = std::env::var("BRIDGE_SKILLS")
-        .unwrap_or_else(|_| {
-            format!(
-                "{}/.claude/skills",
-                std::env::var("HOME").unwrap_or_default()
-            )
-        })
+    // The skills root, shared and mutable so a stdio `skills` control line can
+    // repoint it live. The catalogue is re-scanned per say; a repoint surfaces
+    // as a delta on the next say of every running conversation, and reaches new
+    // spawns whole. BRIDGE_SKILLS sets the initial value, overriding the home.
+    let initial_skills_root: std::path::PathBuf = std::env::var("BRIDGE_SKILLS")
+        .unwrap_or_else(|_| format!("{}/.claude/skills", std::env::var("HOME").unwrap_or_default()))
         .into();
+    let skills_root = Arc::new(RwLock::new(initial_skills_root));
     // The transit object store attachments resolve from; must name the same
     // bucket the tower deployment uploads into.
     let attach_bucket = std::env::var("BRIDGE_ATTACH_BUCKET").unwrap_or_else(|_| "attach".into());
@@ -252,7 +252,7 @@ async fn main() -> anyhow::Result<()> {
                 model,
                 system,
                 auth: auth.clone(),
-                skills_root: skills_root.clone(),
+                skills_root: Arc::clone(&skills_root),
                 attach_bucket: attach_bucket.clone(),
                 thinking_budget,
             };
@@ -296,7 +296,7 @@ async fn main() -> anyhow::Result<()> {
                 model: default_model.clone(),
                 system: None,
                 auth: auth.clone(),
-                skills_root: skills_root.clone(),
+                skills_root: Arc::clone(&skills_root),
                 attach_bucket: attach_bucket.clone(),
                 thinking_budget,
             };
@@ -314,6 +314,21 @@ async fn main() -> anyhow::Result<()> {
             println!(
                 "{}",
                 serde_json::json!({ "conversationId": conv, "adoptedMessages": adopted })
+            );
+        } else if let Some(skills) = value.get("skills") {
+            // Repoint the skills directory live. The change reaches every
+            // running conversation on its next say (as a delta) and new spawns
+            // whole; nothing already committed is touched.
+            let Some(dir) = skills.get("dir").and_then(serde_json::Value::as_str) else {
+                println!("{}", serde_json::json!({ "error": "skills needs dir" }));
+                continue;
+            };
+            let path: std::path::PathBuf = dir.into();
+            *skills_root.write().unwrap() = path.clone();
+            eprintln!("bridge: skills dir → {}", path.display());
+            println!(
+                "{}",
+                serde_json::json!({ "skillsDir": path.to_string_lossy() })
             );
         } else {
             println!("{}", serde_json::json!({ "error": "unsupported" }));
