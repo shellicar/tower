@@ -126,9 +126,27 @@ pub fn conv_of(a: &WsApproval) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
-/// The ask's kind, for a one-line label — `ask.type`, an open set.
+/// The ask's kind — `ask.type`, an open set.
 pub fn ask_kind(a: &WsApproval) -> &str {
     a.ask.get("type").and_then(Value::as_str).unwrap_or("ask")
+}
+
+/// The reviewable label: a `tool_use` ask carries the tool `name` (approval-
+/// spec); anything else falls back to its kind.
+pub fn ask_label(a: &WsApproval) -> &str {
+    a.ask
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| ask_kind(a))
+}
+
+/// The ask's raw `input`, rendered compact — the reviewable primitive today
+/// (approval-spec: raw tool input, read against tool knowledge). None when the
+/// ask carries no input.
+pub fn ask_input(a: &WsApproval) -> Option<String> {
+    a.ask
+        .get("input")
+        .map(|v| serde_json::to_string(v).unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -195,6 +213,22 @@ mod tests {
             reason: Some("already_settled".into()),
         });
         assert_eq!(a.answer_note("p1"), Some("rejected: already_settled"));
+    }
+
+    #[test]
+    fn ask_label_and_input_read_the_tool_use_payload() {
+        let mut ask = ask("p1", "c", 1, 100_000, false);
+        ask.ask = json!({ "type": "tool_use", "name": "Bash", "input": { "command": "ls -la" } });
+        assert_eq!(ask_label(&ask), "Bash");
+        assert_eq!(ask_input(&ask).as_deref(), Some(r#"{"command":"ls -la"}"#));
+    }
+
+    #[test]
+    fn an_unknown_ask_falls_back_to_its_kind() {
+        let mut ask = ask("p1", "c", 1, 100_000, false);
+        ask.ask = json!({ "type": "some_future_ask" });
+        assert_eq!(ask_label(&ask), "some_future_ask");
+        assert_eq!(ask_input(&ask), None);
     }
 
     #[test]

@@ -15,7 +15,7 @@
 use eframe::egui;
 use serde_json::Value;
 
-use crate::concerns::approvals::{Approvals, ask_kind, conv_of};
+use crate::concerns::approvals::{Approvals, ask_input, ask_label, conv_of};
 use crate::concerns::conversation::{ConversationState, Conversations, QueryState};
 use crate::concerns::rail::Rail;
 use crate::time::{Liveness, Millis, age};
@@ -195,27 +195,34 @@ impl eframe::App for TowerApp {
                 ui.heading("Approvals");
                 for a in &live {
                     let conv = conv_of(a).unwrap_or("");
-                    let label = self
+                    let clabel = self
                         .rail
                         .row(conv)
                         .and_then(|r| r.title.clone())
                         .unwrap_or_else(|| short(conv));
-                    ui.horizontal(|ui| {
-                        ui.label(format!("{label} \u{00B7} {}", ask_kind(a)));
-                        if ui.button("Approve").clicked() {
-                            answer = Some((a.id.clone(), true));
-                        }
-                        if ui.button("Deny").clicked() {
-                            answer = Some((a.id.clone(), false));
-                        }
-                        if let Some(note) = self.approvals.answer_note(&a.id) {
-                            ui.weak(note);
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.colored_label(egui::Color32::from_rgb(234, 179, 8), "\u{26A0}");
+                            ui.strong(ask_label(a));
+                            ui.weak(format!("\u{00B7} {clabel}"));
+                            if ui.button("Approve").clicked() {
+                                answer = Some((a.id.clone(), true));
+                            }
+                            if ui.button("Deny").clicked() {
+                                answer = Some((a.id.clone(), false));
+                            }
+                            if let Some(note) = self.approvals.answer_note(&a.id) {
+                                ui.weak(note);
+                            }
+                        });
+                        if let Some(input) = ask_input(a) {
+                            ui.monospace(truncate(&input, 600));
                         }
                     });
                 }
                 for a in &voided {
                     ui.horizontal(|ui| {
-                        ui.weak(format!("{} \u{00B7} holder gone", ask_kind(a)));
+                        ui.weak(format!("{} \u{00B7} holder gone", ask_label(a)));
                         if ui.button("Dismiss").clicked() {
                             dismiss = Some(a.id.clone());
                         }
@@ -266,16 +273,19 @@ impl eframe::App for TowerApp {
             // In-context answer surface: this conversation's live asks (also
             // in the global view below — each surface folds its own slice).
             for a in self.approvals.live_for_conv(&conv, now) {
-                ui.horizontal(|ui| {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(234, 179, 8),
-                        format!("\u{26A0} {}", ask_kind(a)),
-                    );
-                    if ui.button("Approve").clicked() {
-                        answer = Some((a.id.clone(), true));
-                    }
-                    if ui.button("Deny").clicked() {
-                        answer = Some((a.id.clone(), false));
+                ui.group(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.colored_label(egui::Color32::from_rgb(234, 179, 8), "\u{26A0}");
+                        ui.strong(ask_label(a));
+                        if ui.button("Approve").clicked() {
+                            answer = Some((a.id.clone(), true));
+                        }
+                        if ui.button("Deny").clicked() {
+                            answer = Some((a.id.clone(), false));
+                        }
+                    });
+                    if let Some(input) = ask_input(a) {
+                        ui.monospace(truncate(&input, 600));
                     }
                 });
             }
@@ -371,6 +381,10 @@ fn message_text(content: &[Value]) -> String {
                     parts.push(t.to_owned());
                 }
             }
+            Some("tool_use") => {
+                let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
+                parts.push(format!("[tool_use: {name}]"));
+            }
             Some(other) => parts.push(format!("[{other}]")),
             None => parts.push("[block]".to_owned()),
         }
@@ -389,6 +403,17 @@ fn status_label(status: Status) -> &'static str {
 /// The staleness id, shortened for the rail. Titled rows never reach here.
 fn short(conv: &str) -> String {
     conv.chars().take(8).collect()
+}
+
+/// Cap a long value for a compact display — the raw input is the interim
+/// reviewable primitive (approval-spec); the content vocabulary is later.
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_owned()
+    } else {
+        let head: String = s.chars().take(max).collect();
+        format!("{head}\u{2026}")
+    }
 }
 
 /// Staleness heat: fresh green, cooling yellow, cold grey — the control's
