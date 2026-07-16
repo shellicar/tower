@@ -15,7 +15,7 @@
 //! any shared correlation appears if a second consumer ever needs it.
 
 use ewebsock::{WsEvent, WsMessage, WsReceiver, WsSender};
-use ws_types::ServerMsg;
+use ws_types::{ClientMsg, ServerMsg};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -25,24 +25,41 @@ pub enum Status {
 }
 
 pub struct Transport {
-    /// Held only to keep the socket open — nothing is sent until the say slice.
-    _sender: WsSender,
+    sender: WsSender,
     receiver: WsReceiver,
     status: Status,
+    next_id: u64,
 }
 
 impl Transport {
     pub fn connect(ws_url: &str) -> Result<Self, String> {
         let (sender, receiver) = ewebsock::connect(ws_url, ewebsock::Options::default())?;
         Ok(Self {
-            _sender: sender,
+            sender,
             receiver,
             status: Status::Connecting,
+            next_id: 1,
         })
     }
 
     pub fn status(&self) -> Status {
         self.status
+    }
+
+    /// A client-minted request id; any unique string (ws-spec). One counter
+    /// for the whole client, so ids never collide across concerns.
+    pub fn next_id(&mut self) -> String {
+        let id = format!("r{}", self.next_id);
+        self.next_id += 1;
+        id
+    }
+
+    /// Fire-and-forget send. Frames are JSON text (the ws-spec wire form).
+    pub fn send(&mut self, msg: &ClientMsg) {
+        match serde_json::to_string(msg) {
+            Ok(text) => self.sender.send(WsMessage::Text(text)),
+            Err(err) => web_log(&format!("transport: failed to encode {msg:?}: {err}")),
+        }
     }
 
     /// Drain everything the socket has produced since last frame, decoding text

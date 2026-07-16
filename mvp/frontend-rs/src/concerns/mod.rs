@@ -4,4 +4,5 @@
 //! itself, so a sibling reach does not compile. The composition root (the app)
 //! knows every concern; the concerns are blind to each other.
 
+pub mod conversation;
 pub mod rail;

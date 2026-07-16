@@ -107,7 +107,10 @@ impl Rail {
             }
             ServerMsg::Agent(fact) => self.fold_agent(fact),
             ServerMsg::Approvals { approvals } => {
-                self.asks = approvals.iter().map(|a| (a.id.clone(), ask_of(a))).collect();
+                self.asks = approvals
+                    .iter()
+                    .map(|a| (a.id.clone(), ask_of(a)))
+                    .collect();
             }
             ServerMsg::Approval(a) => {
                 self.asks.insert(a.id.clone(), ask_of(a));
@@ -155,6 +158,14 @@ impl Rail {
         rows
     }
 
+    /// The row for one conversation — its header facts and annotations. Read by
+    /// the open panel's header while the render also draws the conversation
+    /// concern: both `&`, so this shared read needs no shared store (Decision 2,
+    /// the read/write split Rust gives for free).
+    pub fn row(&self, conv: &str) -> Option<&WsRow> {
+        self.rows.get(conv)
+    }
+
     /// The liveness verdict for a conversation — facts in, judgement out
     /// (agent-spec: a fold, never declared). None = no live attachment.
     pub fn verdict(&self, conv: &str, now: Millis) -> Option<Liveness> {
@@ -166,7 +177,10 @@ impl Rail {
         self.attachments
             .values()
             .filter(|a| a.conv == conv)
-            .filter_map(|a| self.instances.get(&format!("{}/{}", a.world, a.instance_id)))
+            .filter_map(|a| {
+                self.instances
+                    .get(&format!("{}/{}", a.world, a.instance_id))
+            })
             .max_by_key(|i| i.last_pulse)
     }
 
@@ -284,7 +298,10 @@ mod tests {
             host: None,
         }));
         assert_eq!(rail.verdict("a", 100_000), Some(Liveness::Alive));
-        assert_eq!(rail.verdict("a", 100_000 + 46_000), Some(Liveness::Stranded));
+        assert_eq!(
+            rail.verdict("a", 100_000 + 46_000),
+            Some(Liveness::Stranded)
+        );
         assert_eq!(rail.verdict("unknown", 100_000), None);
     }
 

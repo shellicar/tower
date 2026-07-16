@@ -60,7 +60,10 @@ mod tests {
     fn stranded_past_three_intervals() {
         // interval 15s → stranded after 45s of silence.
         let now = 100_000;
-        assert_eq!(liveness_verdict(now, now - 44_000, Some(15)), Liveness::Alive);
+        assert_eq!(
+            liveness_verdict(now, now - 44_000, Some(15)),
+            Liveness::Alive
+        );
         assert_eq!(
             liveness_verdict(now, now - 46_000, Some(15)),
             Liveness::Stranded

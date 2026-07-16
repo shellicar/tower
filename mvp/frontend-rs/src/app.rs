@@ -4,11 +4,18 @@
 //! renders by *reading* the concerns — reads are `&`, so it can read several at
 //! once while drawing, and no draw can mutate a concern.
 //!
+//! Actions (open a conversation, say, cancel) are gathered during the render
+//! (which only reads) and applied after: the concern mutates and returns the
+//! `ClientMsg`, and the app — sole owner of the transport and the id mint —
+//! sends it. So a concern never touches the socket.
+//!
 //! Wasm-only in practice: the render loop runs in the browser. The concern
 //! folds and the transport decode are native-testable without any of this.
 
 use eframe::egui;
+use serde_json::Value;
 
+use crate::concerns::conversation::{ConversationState, Conversations, QueryState};
 use crate::concerns::rail::Rail;
 use crate::time::{Liveness, Millis, age};
 use crate::transport::{Status, Transport};
@@ -16,6 +23,12 @@ use crate::transport::{Status, Transport};
 pub struct TowerApp {
     transport: Transport,
     rail: Rail,
+    conversations: Conversations,
+    /// The one conversation the panel shows — the view concern (tabs) will own
+    /// this later; for now the panel holds one open at a time.
+    open_conv: Option<String>,
+    /// Local UI state: the say editor's buffer.
+    draft: String,
 }
 
 impl TowerApp {
@@ -23,7 +36,55 @@ impl TowerApp {
         Ok(Self {
             transport: Transport::connect(ws_url)?,
             rail: Rail::default(),
+            conversations: Conversations::default(),
+            open_conv: None,
+            draft: String::new(),
         })
+    }
+
+    /// Switch the panel to a conversation: close the previous (only the active
+    /// one stays open), open the new. Each action mints an id and sends.
+    fn open_conversation(&mut self, conv: &str) {
+        if self.open_conv.as_deref() == Some(conv) {
+            return;
+        }
+        if let Some(prev) = self.open_conv.take() {
+            let id = self.transport.next_id();
+            if let Some(msg) = self.conversations.close(&prev, id) {
+                self.transport.send(&msg);
+            }
+        }
+        let id = self.transport.next_id();
+        if let Some(msg) = self.conversations.open(conv, id) {
+            self.transport.send(&msg);
+        }
+        self.open_conv = Some(conv.to_owned());
+        self.draft.clear();
+    }
+
+    fn send_current(&mut self) {
+        let Some(conv) = self.open_conv.clone() else {
+            return;
+        };
+        let text = std::mem::take(&mut self.draft);
+        if text.trim().is_empty() {
+            self.draft = text; // nothing to send; keep whatever was there
+            return;
+        }
+        let id = self.transport.next_id();
+        if let Some(msg) = self.conversations.say(&conv, text, id) {
+            self.transport.send(&msg);
+        }
+    }
+
+    fn cancel_current(&mut self) {
+        let Some(conv) = self.open_conv.clone() else {
+            return;
+        };
+        let id = self.transport.next_id();
+        if let Some(msg) = self.conversations.cancel(&conv, id) {
+            self.transport.send(&msg);
+        }
     }
 }
 
@@ -33,10 +94,25 @@ impl eframe::App for TowerApp {
         // its own slice. A concern reaches only itself — the signature says so.
         for msg in self.transport.drain() {
             self.rail.apply(&msg);
+            self.conversations.apply(&msg);
+        }
+
+        // A rejected or revoked say comes home to the editor: pull its words
+        // back into the draft if the box is empty, then consume the restore.
+        if self.draft.is_empty()
+            && let Some(conv) = self.open_conv.clone()
+            && let Some(restore) = self
+                .conversations
+                .get(&conv)
+                .and_then(|oc| oc.restore_say.clone())
+        {
+            self.draft = restore;
+            self.conversations.consume_restore(&conv);
         }
 
         let now = now_millis();
 
+        let mut to_open: Option<String> = None;
         egui::SidePanel::left("rail")
             .default_width(300.0)
             .show(ctx, |ui| {
@@ -44,22 +120,22 @@ impl eframe::App for TowerApp {
                 ui.label(status_label(self.transport.status()));
                 ui.separator();
 
-                // Reading several facets of ONE concern here; all `&`, so the
-                // render can hold them together without any of them being able
-                // to mutate the rail.
                 let pending = self.rail.pending_by_conv(now);
-
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for row in self.rail.ordered() {
+                        let selected = self.open_conv.as_deref() == Some(&row.conv);
                         ui.horizontal(|ui| {
-                            ui.colored_label(heat_color(now, row.last_event), "●");
+                            ui.colored_label(heat_color(now, row.last_event), "\u{25CF}");
                             if let Some(liveness) = self.rail.verdict(&row.conv, now) {
-                                ui.colored_label(liveness_color(liveness), "◆");
+                                ui.colored_label(liveness_color(liveness), "\u{25C6}");
                             }
                             if pending.contains(&row.conv) {
-                                ui.colored_label(egui::Color32::from_rgb(234, 179, 8), "⚠");
+                                ui.colored_label(egui::Color32::from_rgb(234, 179, 8), "\u{26A0}");
                             }
-                            ui.label(row.title.clone().unwrap_or_else(|| short(&row.conv)));
+                            let label = row.title.clone().unwrap_or_else(|| short(&row.conv));
+                            if ui.selectable_label(selected, label).clicked() {
+                                to_open = Some(row.conv.clone());
+                            }
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| ui.weak(age(now, row.last_event)),
@@ -67,31 +143,153 @@ impl eframe::App for TowerApp {
                         });
                     }
 
-                    // Potential conversations: attached, no row yet — served,
-                    // silent. Transient; they vanish with the attachment.
                     let potential = self.rail.attached_only();
                     if !potential.is_empty() {
                         ui.separator();
                         ui.weak("potential");
                         for conv in potential {
-                            ui.weak(short(conv));
+                            if ui.selectable_label(false, short(conv)).clicked() {
+                                to_open = Some(conv.to_owned());
+                            }
                         }
                     }
                 });
             });
 
+        // The conversation panel: reads the conversation concern and the rail
+        // (its header title) at once — both `&`, the annotations-shared read
+        // that needs no shared store in Rust.
+        let mut send = false;
+        let mut cancel = false;
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.weak("Open a conversation from the rail.");
+            let Some(conv) = self.open_conv.clone() else {
+                ui.weak("Open a conversation from the rail.");
+                return;
+            };
+            let header = self
+                .rail
+                .row(&conv)
+                .and_then(|r| r.title.clone())
+                .unwrap_or_else(|| short(&conv));
+            ui.heading(header);
+
+            let Some(oc) = self.conversations.get(&conv) else {
+                ui.weak("opening\u{2026}");
+                return;
+            };
+            if !oc.loaded {
+                ui.weak("loading\u{2026}");
+            }
+
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .stick_to_bottom(true)
+                .max_height(ui.available_height() - 64.0)
+                .show(ui, |ui| {
+                    for m in &oc.messages {
+                        render_message(ui, &m.role, &m.content);
+                    }
+                    render_streaming(ui, oc);
+                    if let Some(pending) = &oc.pending_say {
+                        ui.weak(format!("you (sending\u{2026}) \u{203A} {pending}"));
+                    }
+                });
+
+            ui.separator();
+            if let Some(note) = &oc.last_say {
+                ui.weak(note);
+            }
+            let live = oc.query_state == QueryState::Live;
+            ui.horizontal(|ui| {
+                let editor = ui.add(
+                    egui::TextEdit::singleline(&mut self.draft)
+                        .hint_text("say something\u{2026}")
+                        .desired_width(ui.available_width() - 140.0),
+                );
+                let entered = editor.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if ui.button("Send").clicked() || entered {
+                    send = true;
+                }
+                if live && ui.button("Cancel").clicked() {
+                    cancel = true;
+                }
+            });
         });
+
+        if let Some(conv) = to_open {
+            self.open_conversation(&conv);
+        }
+        if send {
+            self.send_current();
+        }
+        if cancel {
+            self.cancel_current();
+        }
 
         // New socket data must show without user input.
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
 }
 
+/// Render one committed message: role tint, then its text; non-text blocks
+/// collapse to a labelled placeholder (the full content vocabulary is later).
+fn render_message(ui: &mut egui::Ui, role: &str, content: &[Value]) {
+    let (who, tint) = match role {
+        "user" => ("you", egui::Color32::from_rgb(125, 211, 252)),
+        "assistant" => ("agent", egui::Color32::from_rgb(196, 181, 253)),
+        other => (other, egui::Color32::GRAY),
+    };
+    ui.horizontal_wrapped(|ui| {
+        ui.colored_label(tint, format!("{who} \u{203A}"));
+        ui.label(message_text(content));
+    });
+}
+
+fn render_streaming(ui: &mut egui::Ui, oc: &ConversationState) {
+    if oc.streaming.is_empty() {
+        return;
+    }
+    for (i, seg) in oc.streaming.iter().enumerate() {
+        let last = i + 1 == oc.streaming.len();
+        ui.horizontal_wrapped(|ui| {
+            ui.colored_label(egui::Color32::from_rgb(196, 181, 253), "agent \u{203A}");
+            // The block marker is an open set — labelled, never branched on;
+            // `text` stays plain.
+            if seg.block_type != "text" {
+                ui.weak(format!("[{}]", seg.block_type));
+            }
+            // A cursor on the segment being streamed into (the last one).
+            let body = if last {
+                format!("{}\u{2588}", seg.text)
+            } else {
+                seg.text.clone()
+            };
+            ui.label(body);
+        });
+    }
+}
+
+/// Join the text blocks; anything else (tool_use, tool_result, image, $ref)
+/// shows as a placeholder line — interim until the content vocabulary lands.
+fn message_text(content: &[Value]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for block in content {
+        match block.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                if let Some(t) = block.get("text").and_then(Value::as_str) {
+                    parts.push(t.to_owned());
+                }
+            }
+            Some(other) => parts.push(format!("[{other}]")),
+            None => parts.push("[block]".to_owned()),
+        }
+    }
+    parts.join("\n")
+}
+
 fn status_label(status: Status) -> &'static str {
     match status {
-        Status::Connecting => "connecting…",
+        Status::Connecting => "connecting\u{2026}",
         Status::Connected => "connected",
         Status::Closed => "disconnected",
     }
