@@ -1,0 +1,30 @@
+# The Rust-WASM frontend: the side-by-side control's twin (docs/mvp/
+# frontend-architecture.md). Same architecture as mvp/frontend (Svelte), so the
+# comparison isolates what the LANGUAGE buys. A detached workspace of its own —
+# it is trunk/wasm-built, kept out of the mvp workspace so `just build` stays
+# native and fast; the shared WS contract arrives as a path dependency on
+# ws-types, the one definition both sides use (drift impossible).
+[workspace]
+
+[package]
+name = "tower-frontend"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# egui/eframe: immediate mode — render pulls each frame, no reactive graph, so
+# a concern's state is plain owned data folded by value (the whole point).
+eframe = "0.31"
+egui = "0.31"
+# ewebsock: the socket as a channel pair, try_recv drained each frame — the one
+# real concurrency boundary, and the maxim (share by communicating) already
+# honoured here by the library.
+ewebsock = "0.8"
+serde_json = "1"
+ws-types = { path = "../crates/ws-types" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Document", "Element", "HtmlCanvasElement", "Location", "Window", "console"] }
