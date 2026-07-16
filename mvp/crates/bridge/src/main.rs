@@ -154,8 +154,7 @@ async fn main() -> anyhow::Result<()> {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
     // ANTHROPIC_API_KEY when set; otherwise the Claude Code OAuth token.
     let auth = anthropic::Auth::resolve()?;
-    let default_model =
-        std::env::var("BRIDGE_MODEL").unwrap_or_else(|_| "claude-sonnet-5".into());
+    let default_model = std::env::var("BRIDGE_MODEL").unwrap_or_else(|_| "claude-sonnet-5".into());
     // The world is a durable name for a place, deployer-chosen; the process
     // standing in it is disposable and mints a fresh instance id per boot.
     let world = std::env::var("BRIDGE_WORLD").unwrap_or_else(|_| "local".into());
