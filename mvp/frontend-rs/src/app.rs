@@ -15,6 +15,7 @@
 use eframe::egui;
 use serde_json::Value;
 
+use crate::concerns::approvals::{Approvals, ask_kind, conv_of};
 use crate::concerns::conversation::{ConversationState, Conversations, QueryState};
 use crate::concerns::rail::Rail;
 use crate::time::{Liveness, Millis, age};
@@ -24,6 +25,7 @@ pub struct TowerApp {
     transport: Transport,
     rail: Rail,
     conversations: Conversations,
+    approvals: Approvals,
     /// The one conversation the panel shows — the view concern (tabs) will own
     /// this later; for now the panel holds one open at a time.
     open_conv: Option<String>,
@@ -37,6 +39,7 @@ impl TowerApp {
             transport: Transport::connect(ws_url)?,
             rail: Rail::default(),
             conversations: Conversations::default(),
+            approvals: Approvals::default(),
             open_conv: None,
             draft: String::new(),
         })
@@ -86,6 +89,16 @@ impl TowerApp {
             self.transport.send(&msg);
         }
     }
+
+    fn answer_approval(&mut self, approval_id: &str, approved: bool) {
+        let id = self.transport.next_id();
+        let msg = self.approvals.answer(approval_id, approved, id);
+        self.transport.send(&msg);
+    }
+
+    fn dismiss_approval(&mut self, approval_id: &str) {
+        self.approvals.dismiss(approval_id);
+    }
 }
 
 impl eframe::App for TowerApp {
@@ -95,6 +108,7 @@ impl eframe::App for TowerApp {
         for msg in self.transport.drain() {
             self.rail.apply(&msg);
             self.conversations.apply(&msg);
+            self.approvals.apply(&msg);
         }
 
         // A rejected or revoked say comes home to the editor: pull its words
@@ -118,6 +132,13 @@ impl eframe::App for TowerApp {
             .show(ctx, |ui| {
                 ui.heading("Tower");
                 ui.label(status_label(self.transport.status()));
+                let awaiting = self.approvals.live(now).len();
+                if awaiting > 0 {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(234, 179, 8),
+                        format!("\u{26A0} {awaiting} awaiting approval"),
+                    );
+                }
                 ui.separator();
 
                 let pending = self.rail.pending_by_conv(now);
@@ -155,6 +176,53 @@ impl eframe::App for TowerApp {
                     }
                 });
             });
+
+        // The approvals VIEW — the whole live set across conversations, each
+        // read with its conversation label from the RAIL concern (both `&`,
+        // Decision 2's shared value via events, no shared store). Added before
+        // the central panel so it claims the bottom strip.
+        let mut answer: Option<(String, bool)> = None;
+        let mut dismiss: Option<String> = None;
+        let live = self.approvals.live(now);
+        let voided: Vec<_> = self
+            .approvals
+            .pending()
+            .into_iter()
+            .filter(|a| self.approvals.is_void(a, now))
+            .collect();
+        if !live.is_empty() || !voided.is_empty() {
+            egui::TopBottomPanel::bottom("approvals").show(ctx, |ui| {
+                ui.heading("Approvals");
+                for a in &live {
+                    let conv = conv_of(a).unwrap_or("");
+                    let label = self
+                        .rail
+                        .row(conv)
+                        .and_then(|r| r.title.clone())
+                        .unwrap_or_else(|| short(conv));
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{label} \u{00B7} {}", ask_kind(a)));
+                        if ui.button("Approve").clicked() {
+                            answer = Some((a.id.clone(), true));
+                        }
+                        if ui.button("Deny").clicked() {
+                            answer = Some((a.id.clone(), false));
+                        }
+                        if let Some(note) = self.approvals.answer_note(&a.id) {
+                            ui.weak(note);
+                        }
+                    });
+                }
+                for a in &voided {
+                    ui.horizontal(|ui| {
+                        ui.weak(format!("{} \u{00B7} holder gone", ask_kind(a)));
+                        if ui.button("Dismiss").clicked() {
+                            dismiss = Some(a.id.clone());
+                        }
+                    });
+                }
+            });
+        }
 
         // The conversation panel: reads the conversation concern and the rail
         // (its header title) at once — both `&`, the annotations-shared read
@@ -195,6 +263,23 @@ impl eframe::App for TowerApp {
                     }
                 });
 
+            // In-context answer surface: this conversation's live asks (also
+            // in the global view below — each surface folds its own slice).
+            for a in self.approvals.live_for_conv(&conv, now) {
+                ui.horizontal(|ui| {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(234, 179, 8),
+                        format!("\u{26A0} {}", ask_kind(a)),
+                    );
+                    if ui.button("Approve").clicked() {
+                        answer = Some((a.id.clone(), true));
+                    }
+                    if ui.button("Deny").clicked() {
+                        answer = Some((a.id.clone(), false));
+                    }
+                });
+            }
+
             ui.separator();
             if let Some(note) = &oc.last_say {
                 ui.weak(note);
@@ -224,6 +309,12 @@ impl eframe::App for TowerApp {
         }
         if cancel {
             self.cancel_current();
+        }
+        if let Some((id, approved)) = answer {
+            self.answer_approval(&id, approved);
+        }
+        if let Some(id) = dismiss {
+            self.dismiss_approval(&id);
         }
 
         // New socket data must show without user input.
