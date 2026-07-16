@@ -134,7 +134,9 @@ impl Conversations {
         // Optimistic: greyed pending say.
         oc.last_say = None;
         oc.pending_say = Some(text.clone());
-        oc.pending_attachments = Vec::new();
+        // The accumulated uploads ride this say and stay pending until the
+        // committed message supersedes them (or a failure hands them back).
+        let attachments = oc.pending_attachments.clone();
         self.pending.insert(
             id.clone(),
             Pending::Say {
@@ -146,8 +148,18 @@ impl Conversations {
             conv: conv.to_owned(),
             text,
             tip,
-            attachments: Vec::new(),
+            attachments,
         })
+    }
+
+    /// Fold an uploaded attachment reference into the open conversation's
+    /// pending set — it rides the next say. Called by the app when an upload
+    /// completes, arriving over a channel: the async boundary is handled by
+    /// communicating, not by a shared mutable write across an await.
+    pub fn attach(&mut self, conv: &str, refs: Vec<Value>) {
+        if let Some(oc) = self.open.get_mut(conv) {
+            oc.pending_attachments.extend(refs);
+        }
     }
 
     pub fn cancel(&mut self, conv: &str, id: String) -> Option<ClientMsg> {
@@ -430,6 +442,33 @@ mod tests {
             message: msg("m1", "q9", "user", 5),
         });
         assert_eq!(c.get("a").unwrap().pending_say, None);
+    }
+
+    #[test]
+    fn attachments_ride_the_say_and_clear_on_commit() {
+        let mut c = Conversations::default();
+        open(&mut c, "a");
+        c.attach(
+            "a",
+            vec![json!({ "type": "image", "source": { "type": "object", "id": "o1" } })],
+        );
+        let out = c.say("a", "look".into(), "req1".into()).unwrap();
+        match out {
+            ClientMsg::Say { attachments, .. } => assert_eq!(attachments.len(), 1),
+            _ => panic!("expected a say"),
+        }
+        assert_eq!(c.get("a").unwrap().pending_attachments.len(), 1); // still pending
+        c.apply(&ServerMsg::SayResult {
+            id: "req1".into(),
+            outcome: "accepted".into(),
+            query: Some("q9".into()),
+            reason: None,
+        });
+        c.apply(&ServerMsg::Message {
+            conv: "a".into(),
+            message: msg("m1", "q9", "user", 5),
+        });
+        assert!(c.get("a").unwrap().pending_attachments.is_empty()); // committed clears
     }
 
     #[test]

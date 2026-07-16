@@ -12,6 +12,8 @@
 //! Wasm-only in practice: the render loop runs in the browser. The concern
 //! folds and the transport decode are native-testable without any of this.
 
+use std::sync::mpsc::{Receiver, Sender};
+
 use eframe::egui;
 use serde_json::Value;
 
@@ -20,6 +22,7 @@ use crate::concerns::conversation::{ConversationState, Conversations, QueryState
 use crate::concerns::rail::Rail;
 use crate::time::{Liveness, Millis, age};
 use crate::transport::{Status, Transport};
+use crate::uploads::{self, Upload};
 
 pub struct TowerApp {
     transport: Transport,
@@ -31,10 +34,15 @@ pub struct TowerApp {
     open_conv: Option<String>,
     /// Local UI state: the say editor's buffer.
     draft: String,
+    /// The upload boundary's return channel: an async upload sends its ref
+    /// here, drained each frame and folded into the conversation concern.
+    uploads_tx: Sender<Upload>,
+    uploads_rx: Receiver<Upload>,
 }
 
 impl TowerApp {
     pub fn new(ws_url: &str) -> Result<Self, String> {
+        let (uploads_tx, uploads_rx) = std::sync::mpsc::channel();
         Ok(Self {
             transport: Transport::connect(ws_url)?,
             rail: Rail::default(),
@@ -42,6 +50,8 @@ impl TowerApp {
             approvals: Approvals::default(),
             open_conv: None,
             draft: String::new(),
+            uploads_tx,
+            uploads_rx,
         })
     }
 
@@ -109,6 +119,13 @@ impl eframe::App for TowerApp {
             self.rail.apply(&msg);
             self.conversations.apply(&msg);
             self.approvals.apply(&msg);
+        }
+
+        // Completed uploads arrive over the channel — the async boundary reaches
+        // the app as a message; fold each into its conversation.
+        while let Ok(upload) = self.uploads_rx.try_recv() {
+            self.conversations
+                .attach(&upload.conv, vec![upload.attachment]);
         }
 
         // A rejected or revoked say comes home to the editor: pull its words
@@ -295,15 +312,21 @@ impl eframe::App for TowerApp {
                 ui.weak(note);
             }
             let live = oc.query_state == QueryState::Live;
+            if !oc.pending_attachments.is_empty() {
+                ui.weak(format!("{} attached", oc.pending_attachments.len()));
+            }
             ui.horizontal(|ui| {
                 let editor = ui.add(
                     egui::TextEdit::singleline(&mut self.draft)
                         .hint_text("say something\u{2026}")
-                        .desired_width(ui.available_width() - 140.0),
+                        .desired_width(ui.available_width() - 200.0),
                 );
                 let entered = editor.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if ui.button("Send").clicked() || entered {
                     send = true;
+                }
+                if ui.button("Attach").clicked() {
+                    uploads::pick_and_upload(conv.clone(), self.uploads_tx.clone());
                 }
                 if live && ui.button("Cancel").clicked() {
                     cancel = true;

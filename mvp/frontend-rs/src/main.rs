@@ -12,9 +12,11 @@ mod concerns;
 mod time;
 mod transport;
 
-// Browser-only: it drives eframe's canvas and reads the JS wall clock.
+// Browser-only: the render loop, and the async attachment upload.
 #[cfg(target_arch = "wasm32")]
 mod app;
+#[cfg(target_arch = "wasm32")]
+mod uploads;
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
