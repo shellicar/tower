@@ -1,0 +1,15 @@
+[package]
+name = "ws-types"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+# The browser contract (docs/mvp/tower-ws-spec.md), shared by the producer
+# (towerd) and the Rust-WASM consumer so the two cannot drift. Pure serde, no
+# I/O — every field derives both directions: towerd serialises ServerMsg /
+# deserialises ClientMsg, the frontend does the mirror.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

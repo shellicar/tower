@@ -8,6 +8,7 @@ workspace = true
 
 [dependencies]
 wire = { path = "../wire" }
+ws-types = { path = "../ws-types" }
 anyhow.workspace = true
 async-nats.workspace = true
 axum.workspace = true
