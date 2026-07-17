@@ -401,8 +401,8 @@ async fn run_query(
     } = &ctx;
     let pubr = Publisher::new(client, conv);
 
-    // Bash always; Skill only when a catalogue exists.
-    let mut tools: Vec<Value> = vec![crate::exec::bash_schema()];
+    // Bash and Read always; Skill only when a catalogue exists.
+    let mut tools: Vec<Value> = vec![crate::exec::bash_schema(), crate::exec::read_schema()];
     if !skills.is_empty() {
         tools.push(skills.tool_schema());
     }
@@ -672,6 +672,11 @@ async fn run_tool_round(
                         ("cancelled by user before approval".to_string(), true)
                     }
                 }
+            }
+            // Read is read-only: no approval gate.
+            "Read" => {
+                let path = block["input"]["path"].as_str().unwrap_or("");
+                crate::exec::run_read(path).await
             }
             other => (format!("unknown tool {other:?}"), true),
         };
