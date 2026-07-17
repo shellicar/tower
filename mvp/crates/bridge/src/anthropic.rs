@@ -150,7 +150,10 @@ pub async fn stream_turn(
         // The API requires budget < max_tokens; clamp rather than error — a
         // misconfigured budget should degrade, not kill every turn.
         let budget = budget.clamp(1024, MAX_TOKENS - 1024);
-        body["thinking"] = json!({ "type": "enabled", "budget_tokens": budget });
+        // `display: summarized` is required or newer models emit the signature
+        // with no thinking text — the block arrives empty and renders blank.
+        body["thinking"] =
+            json!({ "type": "enabled", "budget_tokens": budget, "display": "summarized" });
     }
 
     let request = reqwest::Client::new()
