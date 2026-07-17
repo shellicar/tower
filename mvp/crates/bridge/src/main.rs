@@ -321,6 +321,13 @@ fn c_flag(args: &[String]) -> Option<String> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Which build this is: the cheapest guard against running a stale binary.
+    eprintln!(
+        "bridge {} ({}) built {}",
+        env!("CARGO_PKG_VERSION"),
+        env!("BRIDGE_GIT_HASH"),
+        env!("BRIDGE_BUILD_TIME"),
+    );
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
     // ANTHROPIC_API_KEY when set; otherwise the Claude Code OAuth token.
     let auth = anthropic::Auth::resolve()?;
