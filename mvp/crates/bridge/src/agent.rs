@@ -31,7 +31,14 @@ const MAX_TURNS_PER_QUERY: usize = 16;
 pub struct AgentConfig {
     pub conv: ConversationId,
     pub model: String,
-    pub system: Option<String>,
+    /// The system prompt cell, shared and read fresh each turn so a stdio
+    /// `system` control line reaches even a running conversation. Never
+    /// persisted to the record.
+    pub system: Arc<std::sync::RwLock<Option<String>>>,
+    /// The user-context cell, shared; read once at a conversation's birth and
+    /// committed to the record as a reminder block. A later change reaches only
+    /// conversations spawned after it.
+    pub context: Arc<std::sync::RwLock<Option<String>>>,
     pub auth: crate::anthropic::Auth,
     /// The skills directory, shared and mutable so a stdio `skills` control
     /// line can repoint it live. Re-scanned per say: the first say commits the
@@ -248,9 +255,12 @@ async fn accept_say(
     // later says carry a delta when a SKILL.md changed since the last scan.
     let root = config.skills_root.read().unwrap().clone();
     let skills = Arc::new(Skills::scan(root));
+    // Birth: a genuinely empty conversation. The full skills catalogue and the
+    // user-context block both ride the opening message, and only at birth.
+    let birth = conversation.is_empty();
     let reminder: Option<String> = match skill_hashes.as_ref() {
         None => {
-            if conversation.is_empty() {
+            if birth {
                 skills.reminder()
             } else {
                 None
@@ -276,6 +286,15 @@ async fn accept_say(
     }
     if let Some(reminder) = reminder {
         content.push(json!({ "type": "text", "text": reminder }));
+    }
+    // The user-context block sits after the catalogue and, like it, only at
+    // birth; committed to the record, so revive replays it and no restart can
+    // invalidate it.
+    if birth && let Some(ctx) = config.context.read().unwrap().clone() {
+        content.push(json!({
+            "type": "text",
+            "text": format!("<system-reminder>\n{ctx}\n</system-reminder>\n\n"),
+        }));
     }
     // Reference blocks verbatim: the COMMITTED message carries these, never
     // bytes. The model-facing render resolves them below, over the WHOLE
@@ -303,7 +322,7 @@ async fn accept_say(
         client: client.clone(),
         conv: config.conv.clone(),
         model: config.model.clone(),
-        system: config.system.clone(),
+        system: Arc::clone(&config.system),
         auth: config.auth.clone(),
         skills,
         query: query.clone(),
@@ -325,7 +344,7 @@ struct TurnContext {
     client: async_nats::Client,
     conv: ConversationId,
     model: String,
-    system: Option<String>,
+    system: Arc<std::sync::RwLock<Option<String>>>,
     auth: crate::anthropic::Auth,
     skills: Arc<Skills>,
     query: String,
@@ -414,6 +433,9 @@ async fn run_query(
         // The turn races the cancel signal: a mid-stream cancel abandons the
         // model call. Nothing of this turn committed, so the cancelled
         // marker (real turn id) tells the exact truth.
+        // Read the system prompt fresh each turn: a stdio `system` change
+        // reaches even a running conversation, here, on its next turn.
+        let system = system.read().unwrap().clone();
         let outcome = tokio::select! {
             outcome = anthropic::stream_turn(
                 client,

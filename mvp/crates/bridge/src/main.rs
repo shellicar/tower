@@ -153,6 +153,172 @@ async fn serve_conversation(
     Some(conv)
 }
 
+/// The host's shared config and live cells. Every control line — from `-c` or
+/// live stdin — reads through this; the cells are what a `skills`, `system`,
+/// or `context` line repoints without a restart.
+struct Host {
+    client: async_nats::Client,
+    world: String,
+    instance: String,
+    default_model: String,
+    auth: anthropic::Auth,
+    skills_root: Arc<RwLock<std::path::PathBuf>>,
+    system: Arc<RwLock<Option<String>>>,
+    context: Arc<RwLock<Option<String>>>,
+    attach_bucket: String,
+    thinking_budget: Option<i64>,
+}
+
+impl Host {
+    /// Build the config for a new or adopted conversation from the live cells.
+    fn config(&self, conv: &str, model: String) -> agent::AgentConfig {
+        agent::AgentConfig {
+            conv: wire::ConversationId(conv.to_string()),
+            model,
+            system: Arc::clone(&self.system),
+            context: Arc::clone(&self.context),
+            auth: self.auth.clone(),
+            skills_root: Arc::clone(&self.skills_root),
+            attach_bucket: self.attach_bucket.clone(),
+            thinking_budget: self.thinking_budget,
+        }
+    }
+
+    /// Carry out one control line, writing its single response to stdout.
+    async fn handle(&self, value: serde_json::Value) {
+        if let Some(spawn) = value.get("spawn") {
+            let conv = uuid::Uuid::new_v4().to_string();
+            let model = spawn
+                .get("model")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(&self.default_model)
+                .to_string();
+            let config = self.config(&conv, model);
+            let Some(conv) = serve_conversation(
+                &self.client,
+                &self.world,
+                &self.instance,
+                config,
+                decisions::Conversation::default(),
+            )
+            .await
+            else {
+                return;
+            };
+            println!("{}", serde_json::json!({ "conversationId": conv }));
+        } else if let Some(adopt) = value.get("adopt") {
+            let Some(conv) = adopt
+                .get("conversationId")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+            else {
+                println!(
+                    "{}",
+                    serde_json::json!({ "error": "adopt needs conversationId" })
+                );
+                return;
+            };
+            let stream_name =
+                std::env::var("BRIDGE_STREAM").unwrap_or_else(|_| "conv-approval".into());
+            let messages = match replay_conversation(&self.client, &stream_name, &conv).await {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("bridge: adopt failed for {conv}: {e:#}");
+                    println!("{}", serde_json::json!({ "error": "replay failed" }));
+                    return;
+                }
+            };
+            let adopted = messages.len();
+            let config = self.config(&conv, self.default_model.clone());
+            let Some(conv) = serve_conversation(
+                &self.client,
+                &self.world,
+                &self.instance,
+                config,
+                decisions::Conversation::adopt(messages),
+            )
+            .await
+            else {
+                return;
+            };
+            println!(
+                "{}",
+                serde_json::json!({ "conversationId": conv, "adoptedMessages": adopted })
+            );
+        } else if let Some(skills) = value.get("skills") {
+            // Repoint the skills directory live. The change reaches every
+            // running conversation on its next say (as a delta) and new spawns
+            // whole; nothing already committed is touched.
+            let Some(dir) = skills.get("dir").and_then(serde_json::Value::as_str) else {
+                println!("{}", serde_json::json!({ "error": "skills needs dir" }));
+                return;
+            };
+            let path: std::path::PathBuf = dir.into();
+            *self.skills_root.write().unwrap() = path.clone();
+            eprintln!("bridge: skills dir → {}", path.display());
+            println!(
+                "{}",
+                serde_json::json!({ "skillsDir": path.to_string_lossy() })
+            );
+        } else if let Some(system) = value.get("system") {
+            // The API system prompt, read fresh each turn; never persisted.
+            let Some(text) = system.as_str() else {
+                println!(
+                    "{}",
+                    serde_json::json!({ "error": "system needs a string" })
+                );
+                return;
+            };
+            *self.system.write().unwrap() = Some(text.to_string());
+            eprintln!("bridge: system prompt set ({} chars)", text.len());
+            println!("{}", serde_json::json!({ "system": "set" }));
+        } else if let Some(context) = value.get("context") {
+            // User context, injected at a conversation's birth and committed.
+            let Some(text) = context.as_str() else {
+                println!(
+                    "{}",
+                    serde_json::json!({ "error": "context needs a string" })
+                );
+                return;
+            };
+            *self.context.write().unwrap() = Some(text.to_string());
+            eprintln!("bridge: context set ({} chars)", text.len());
+            println!("{}", serde_json::json!({ "context": "set" }));
+        } else {
+            println!("{}", serde_json::json!({ "error": "unsupported" }));
+        }
+    }
+}
+
+/// Parse one control line and hand it to the host. Shared by the -c batch and
+/// the live stdin loop, so both surfaces answer identically.
+async fn handle_line(host: &Host, line: &str) {
+    let line = line.trim();
+    if line.is_empty() {
+        return;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        println!("{}", serde_json::json!({ "error": "unparseable" }));
+        return;
+    };
+    host.handle(value).await;
+}
+
+/// The -c batch: `-c <lines>` or `-c=<lines>`, newline-separated control lines
+/// run before stdin takes over. None when the flag is absent.
+fn c_flag(args: &[String]) -> Option<String> {
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "-c" {
+            return it.next().cloned();
+        }
+        if let Some(v) = a.strip_prefix("-c=") {
+            return Some(v.to_string());
+        }
+    }
+    None
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
@@ -165,13 +331,10 @@ async fn main() -> anyhow::Result<()> {
     let instance = uuid::Uuid::new_v4().to_string();
 
     // The skills root, shared and mutable so a stdio `skills` control line can
-    // repoint it live. The catalogue is re-scanned per say; a repoint surfaces
-    // as a delta on the next say of every running conversation, and reaches new
-    // spawns whole. BRIDGE_SKILLS sets the initial value, overriding the home.
-    let initial_skills_root: std::path::PathBuf = std::env::var("BRIDGE_SKILLS")
-        .unwrap_or_else(|_| format!("{}/.claude/skills", std::env::var("HOME").unwrap_or_default()))
-        .into();
-    let skills_root = Arc::new(RwLock::new(initial_skills_root));
+    // repoint it live. No default: until a `skills` line (from -c or live
+    // stdin) points it somewhere, the catalogue is empty and the Skill tool is
+    // not offered. An empty path scans to an empty catalogue.
+    let skills_root = Arc::new(RwLock::new(std::path::PathBuf::new()));
     // The transit object store attachments resolve from; must name the same
     // bucket the tower deployment uploads into.
     let attach_bucket = std::env::var("BRIDGE_ATTACH_BUCKET").unwrap_or_else(|_| "attach".into());
@@ -221,118 +384,40 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // The stdio control loop: one JSON object per line in, one per line out.
-    // Unknown control lines are answered with an error line; compliance is
-    // answering, on every surface.
-    let mut lines = BufReader::new(tokio::io::stdin()).lines();
-    eprintln!("bridge: ready (model {default_model}); spawn with {{\"spawn\":{{}}}}");
+    // Host: the shared config and live cells every control line reads. One
+    // grammar, two delivery points — the -c batch, then live stdin.
+    let host = Host {
+        client: client.clone(),
+        world,
+        instance,
+        default_model,
+        auth,
+        skills_root,
+        system: Arc::new(RwLock::new(None)),
+        context: Arc::new(RwLock::new(None)),
+        attach_bucket,
+        thinking_budget,
+    };
 
+    // -c: a batch of control lines run before stdin takes over. Each writes its
+    // response to stdout, so a launcher reads back a spawn's conversationId.
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(batch) = c_flag(&args) {
+        for line in batch.lines() {
+            handle_line(&host, line).await;
+        }
+    }
+
+    // The live stdio control loop: one JSON object per line in, one per line
+    // out. Unknown lines are answered; compliance is answering, on every
+    // surface.
+    eprintln!(
+        "bridge: ready (model {}); spawn with {{\"spawn\":{{}}}}",
+        host.default_model
+    );
+    let mut lines = BufReader::new(tokio::io::stdin()).lines();
     while let Some(line) = lines.next_line().await? {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-            println!("{}", serde_json::json!({ "error": "unparseable" }));
-            continue;
-        };
-        if let Some(spawn) = value.get("spawn") {
-            let conv = uuid::Uuid::new_v4().to_string();
-            let model = spawn
-                .get("model")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or(&default_model)
-                .to_string();
-            let system = spawn
-                .get("system")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-            let config = agent::AgentConfig {
-                conv: wire::ConversationId(conv.clone()),
-                model,
-                system,
-                auth: auth.clone(),
-                skills_root: Arc::clone(&skills_root),
-                attach_bucket: attach_bucket.clone(),
-                thinking_budget,
-            };
-            let Some(conv) = serve_conversation(
-                &client,
-                &world,
-                &instance,
-                config,
-                decisions::Conversation::default(),
-            )
-            .await
-            else {
-                continue;
-            };
-            println!("{}", serde_json::json!({ "conversationId": conv }));
-        } else if let Some(adopt) = value.get("adopt") {
-            let Some(conv) = adopt
-                .get("conversationId")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-            else {
-                println!(
-                    "{}",
-                    serde_json::json!({ "error": "adopt needs conversationId" })
-                );
-                continue;
-            };
-            let stream_name =
-                std::env::var("BRIDGE_STREAM").unwrap_or_else(|_| "conv-approval".into());
-            let messages = match replay_conversation(&client, &stream_name, &conv).await {
-                Ok(m) => m,
-                Err(e) => {
-                    eprintln!("bridge: adopt failed for {conv}: {e:#}");
-                    println!("{}", serde_json::json!({ "error": "replay failed" }));
-                    continue;
-                }
-            };
-            let adopted = messages.len();
-            let config = agent::AgentConfig {
-                conv: wire::ConversationId(conv.clone()),
-                model: default_model.clone(),
-                system: None,
-                auth: auth.clone(),
-                skills_root: Arc::clone(&skills_root),
-                attach_bucket: attach_bucket.clone(),
-                thinking_budget,
-            };
-            let Some(conv) = serve_conversation(
-                &client,
-                &world,
-                &instance,
-                config,
-                decisions::Conversation::adopt(messages),
-            )
-            .await
-            else {
-                continue;
-            };
-            println!(
-                "{}",
-                serde_json::json!({ "conversationId": conv, "adoptedMessages": adopted })
-            );
-        } else if let Some(skills) = value.get("skills") {
-            // Repoint the skills directory live. The change reaches every
-            // running conversation on its next say (as a delta) and new spawns
-            // whole; nothing already committed is touched.
-            let Some(dir) = skills.get("dir").and_then(serde_json::Value::as_str) else {
-                println!("{}", serde_json::json!({ "error": "skills needs dir" }));
-                continue;
-            };
-            let path: std::path::PathBuf = dir.into();
-            *skills_root.write().unwrap() = path.clone();
-            eprintln!("bridge: skills dir → {}", path.display());
-            println!(
-                "{}",
-                serde_json::json!({ "skillsDir": path.to_string_lossy() })
-            );
-        } else {
-            println!("{}", serde_json::json!({ "error": "unsupported" }));
-        }
+        handle_line(&host, &line).await;
     }
     // stdin closed: keep serving what was spawned until killed.
     std::future::pending::<()>().await;
