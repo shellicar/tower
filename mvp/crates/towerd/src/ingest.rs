@@ -81,6 +81,19 @@ async fn consume(
         .await
         .map_err(|_| anyhow::anyhow!("views did not answer the stream sync"))?;
 
+    // The resume position against the head: the one number that tells a stalled
+    // or lagging towerd apart from an idle one. `behind` is how many events must
+    // be folded before the views reflect the current stream.
+    let behind = last_seq.saturating_sub(cursor);
+    eprintln!(
+        "ingest: stream sync — head seq {last_seq}, resuming from {} ({behind} behind)",
+        if cursor == 0 {
+            "start".to_string()
+        } else {
+            format!("seq {cursor}")
+        }
+    );
+
     let consumer: async_nats::jetstream::consumer::Consumer<
         async_nats::jetstream::consumer::pull::Config,
     > = stream
@@ -101,12 +114,37 @@ async fn consume(
 
     let mut messages = consumer.messages().await?;
 
+    // Catch-up feedback: while behind the head, log progress every few seconds
+    // and announce the crossing to live; once caught up, go quiet — one line per
+    // event would drown the log. `last_seq` is the head at consumer build, so
+    // "caught up" means folded past everything that existed when we started.
+    let mut caught_up = cursor >= last_seq;
+    if caught_up {
+        eprintln!("ingest: at head (seq {last_seq}), tailing live");
+    }
+    let mut folded: u64 = 0;
+    let mut last_log = std::time::Instant::now();
+
     while let Some(message) = messages.next().await {
         let message = message?;
         let info = message
             .info()
             .map_err(|e| anyhow::anyhow!("no stream info: {e}"))?;
         let seq = info.stream_sequence;
+
+        folded += 1;
+        if !caught_up {
+            if seq >= last_seq {
+                caught_up = true;
+                eprintln!("ingest: caught up at seq {seq} ({folded} folded), tailing live");
+            } else if last_log.elapsed() >= std::time::Duration::from_secs(2) {
+                eprintln!(
+                    "ingest: folding — seq {seq}/{last_seq} ({} behind, {folded} folded)",
+                    last_seq - seq
+                );
+                last_log = std::time::Instant::now();
+            }
+        }
 
         // Ack immediately: delivery bookkeeping only — position truth is the
         // views' cursor, committed with the rows.

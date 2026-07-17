@@ -19,6 +19,11 @@ async fn main() -> anyhow::Result<()> {
     // the default matches the deployed capture stream's name.
     let stream = std::env::var("TOWER_STREAM").unwrap_or_else(|_| "conv-approval".into());
 
+    // Which db, stream, broker and port this instance is: the first thing to
+    // know when more than one towerd runs on a machine (v1 beside v2, a stray
+    // from a dead run). Without it a mismatched backend is invisible.
+    eprintln!("towerd: db {db_path} · stream {stream} · nats {nats_url} · bind {bind}");
+
     // Storage first: the schema must exist before the views thread starts.
     let db = rusqlite::Connection::open(&db_path)?;
     apply_schema(&db)?;
