@@ -12,41 +12,64 @@ use wire::ConversationId;
 pub const MAX_TOKENS: i64 = 8192;
 
 /// Both ways of being allowed in: a platform API key, or the Claude Code
-/// subscription's OAuth token (bearer + the oauth beta header). v0 does not
-/// refresh; an expired token fails the turn honestly (`turn_aborted`).
+/// subscription's OAuth token (bearer + the oauth beta header). The credential
+/// is held as its SOURCE, never the secret: it is read fresh on every request,
+/// so nothing sits at rest in memory and a token the file has since been
+/// refreshed with is picked up. v0 does not refresh the token itself — an
+/// expired one still fails the turn honestly (`turn_aborted`); the bridge only
+/// reads what the file holds now.
 #[derive(Clone)]
 pub enum Auth {
-    ApiKey(String),
-    OAuth(String),
+    /// `ANTHROPIC_API_KEY`, read from the environment at each request.
+    ApiKey,
+    /// The Claude Code credentials file, read at each request.
+    OAuth { path: String },
 }
 
 impl Auth {
-    /// `ANTHROPIC_API_KEY` wins when set; otherwise the Claude Code
-    /// credentials file (`~/.claude/.credentials.json`).
+    /// Decide the source (`ANTHROPIC_API_KEY` wins), failing fast if neither is
+    /// present or the file carries no token — a misconfiguration surfaces at
+    /// startup, not on the first turn. The secret read to validate is dropped,
+    /// never stored.
     pub fn resolve() -> anyhow::Result<Auth> {
-        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-            return Ok(Auth::ApiKey(key));
+        if std::env::var_os("ANTHROPIC_API_KEY").is_some() {
+            return Ok(Auth::ApiKey);
         }
         let home = std::env::var("HOME").map_err(|_| anyhow::anyhow!("HOME not set"))?;
         let path = format!("{home}/.claude/.credentials.json");
-        let bytes = std::fs::read(&path).map_err(|e| {
-            anyhow::anyhow!("no ANTHROPIC_API_KEY and no credentials at {path}: {e}")
-        })?;
-        let creds: Value = serde_json::from_slice(&bytes)?;
-        let token = creds["claudeAiOauth"]["accessToken"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("{path} has no claudeAiOauth.accessToken"))?;
-        Ok(Auth::OAuth(token.to_string()))
+        read_oauth_token(&path)?; // validate now, discard the secret
+        Ok(Auth::OAuth { path })
     }
 
-    fn apply(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        match self {
-            Auth::ApiKey(key) => request.header("x-api-key", key),
-            Auth::OAuth(token) => request
-                .header("authorization", format!("Bearer {token}"))
+    /// Read the current credential and set the auth header. Fresh per request:
+    /// the secret exists only for the duration of this call.
+    fn apply(&self, request: reqwest::RequestBuilder) -> anyhow::Result<reqwest::RequestBuilder> {
+        Ok(match self {
+            Auth::ApiKey => {
+                let key = std::env::var("ANTHROPIC_API_KEY")
+                    .map_err(|_| anyhow::anyhow!("ANTHROPIC_API_KEY is no longer set"))?;
+                request.header("x-api-key", key)
+            }
+            Auth::OAuth { path } => request
+                .header(
+                    "authorization",
+                    format!("Bearer {}", read_oauth_token(path)?),
+                )
                 .header("anthropic-beta", "oauth-2025-04-20"),
-        }
+        })
     }
+}
+
+/// Read the current OAuth access token out of the Claude Code credentials file.
+/// Called per request; the returned string is used and dropped, never held.
+fn read_oauth_token(path: &str) -> anyhow::Result<String> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| anyhow::anyhow!("no ANTHROPIC_API_KEY and no credentials at {path}: {e}"))?;
+    let creds: Value = serde_json::from_slice(&bytes)?;
+    creds["claudeAiOauth"]["accessToken"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("{path} has no claudeAiOauth.accessToken"))
 }
 
 pub struct TurnDone {
@@ -134,7 +157,7 @@ pub async fn stream_turn(
         .post("https://api.anthropic.com/v1/messages")
         .header("anthropic-version", "2023-06-01")
         .json(&body);
-    let response = auth.apply(request).send().await?;
+    let response = auth.apply(request)?.send().await?;
     if !response.status().is_success() {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
