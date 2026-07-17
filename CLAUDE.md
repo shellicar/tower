@@ -4,7 +4,8 @@ Tower v1 MVP in `mvp/`: `towerd` (Rust) + `frontend/` (Svelte) rendering the
 fleet's conversations by staleness — open one, read it, say into it — plus
 `bridge`, the v0 agent host that serves conversations (spawn over stdio, the
 messages API over SSE, the Skill tool). Hand-built, no mission machinery. The
-rest of the repo is specs (live contract), planning archives, and the poc.
+rest of the repo is specs (live contract), the planning design corpus (see
+below — not archive), and the poc.
 
 ## The documents govern
 
@@ -18,8 +19,19 @@ deviations land in the doc first, then the code.
   conformance, scenarios). Normative schemas live in the specs as zod.
   Versions are per concern and coexist: conv is v2, agent and approval are
   v1 — disjoint subject trees, so old and new towers run side by side.
-- `docs/roadmap.md` — where this sits. `docs/planning/` is archive: read for
-  history, never maintain.
+- `docs/roadmap.md` — where this sits. `docs/glossary.md` — the vocabulary.
+- `docs/planning/` — the design corpus. NOT mere archive: it holds the answers
+  you'd otherwise guess. Reach here BEFORE answering any "gap to
+  claude-sdk-cli" or "what should the agent do" question. Key ones:
+  `feature-comparison.md` (claude-sdk-cli vs the MVP — the gap, with the
+  must/want/NO scope), `sdk-feature-inventory.md`, `sdk-shape.md`,
+  `tool-philosophy.md`, `sdk-tools.md`, `cli-features.md` (the SDK/agent
+  reference), `code-architecture.md`, `orchestration-layer.md`,
+  `multi-transport-architecture.md`, `tui-architecture.md`, `project-state.md`.
+  Don't maintain it; don't guess past it either.
+
+You don't have to read them all. You do have to know they exist and reach for
+the right one instead of guessing.
 
 ## Rules with teeth
 
