@@ -49,6 +49,11 @@ pub fn static_tool_schemas() -> Vec<Value> {
         crate::mutate::append_file_schema(),
         crate::editfile::edit_file_schema(),
         crate::delete::delete_schema(),
+        crate::memtools::write_memory_schema(),
+        crate::memtools::read_memory_schema(),
+        crate::memtools::search_memory_schema(),
+        crate::memtools::delete_memory_schema(),
+        crate::memtools::memory_types_schema(),
     ]
 }
 
@@ -74,6 +79,8 @@ pub struct AgentConfig {
     pub attach_bucket: String,
     /// The oversized-tool-output store (refs.rs) the `Ref` tool fetches from.
     pub refs: crate::refs::RefStore,
+    /// The shared memory engine (memory.rs) the five Memory tools read/write.
+    pub memory: crate::memory::MemoryStore,
     /// Extended thinking budget; None = thinking off.
     pub thinking_budget: Option<i64>,
 }
@@ -356,6 +363,7 @@ async fn accept_say(
         user,
         user_from: from,
         refs: crate::refs::RefStore::clone(&config.refs),
+        memory: crate::memory::MemoryStore::clone(&config.memory),
         thinking_budget: config.thinking_budget,
     };
     let done = done_tx.clone();
@@ -380,6 +388,7 @@ struct TurnContext {
     user: Message,
     user_from: Value,
     refs: crate::refs::RefStore,
+    memory: crate::memory::MemoryStore,
     thinking_budget: Option<i64>,
 }
 
@@ -426,6 +435,7 @@ async fn run_query(
         user,
         user_from,
         refs,
+        memory,
         thinking_budget,
     } = &ctx;
     let pubr = Publisher::new(client, conv);
@@ -617,6 +627,7 @@ async fn run_query(
             &pubr,
             skills,
             refs,
+            memory,
             &tools,
             query,
             &turn_id,
@@ -659,6 +670,7 @@ async fn run_tool_round(
     pubr: &Publisher,
     skills: &Skills,
     refs: &crate::refs::RefStore,
+    memory: &crate::memory::MemoryStore,
     offered: &[Value],
     query: &str,
     turn_id: &str,
@@ -900,6 +912,53 @@ async fn run_tool_round(
                     }
                 }
             }
+            // WriteMemory/DeleteMemory mutate: gated like every other mutation.
+            "WriteMemory" => {
+                let approval_id = uuid::Uuid::new_v4().to_string();
+                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                let correlation = json!({
+                    "conversationId": pubr.conv().0,
+                    "queryId": query,
+                    "turnId": turn_id,
+                    "toolUseId": id,
+                });
+                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                    .await
+                {
+                    crate::approval::Verdict::Approved => {
+                        crate::memtools::run_write_memory(memory, &block["input"]).await
+                    }
+                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
+                    crate::approval::Verdict::Cancelled => {
+                        ("cancelled by user before approval".to_string(), true)
+                    }
+                }
+            }
+            "DeleteMemory" => {
+                let approval_id = uuid::Uuid::new_v4().to_string();
+                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                let correlation = json!({
+                    "conversationId": pubr.conv().0,
+                    "queryId": query,
+                    "turnId": turn_id,
+                    "toolUseId": id,
+                });
+                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                    .await
+                {
+                    crate::approval::Verdict::Approved => {
+                        crate::memtools::run_delete_memory(memory, &block["input"])
+                    }
+                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
+                    crate::approval::Verdict::Cancelled => {
+                        ("cancelled by user before approval".to_string(), true)
+                    }
+                }
+            }
+            // ReadMemory/SearchMemory/MemoryTypes are read-only: no approval gate.
+            "ReadMemory" => crate::memtools::run_read_memory(memory, &block["input"]),
+            "SearchMemory" => crate::memtools::run_search_memory(memory, &block["input"]),
+            "MemoryTypes" => crate::memtools::run_memory_types(memory),
             other => (format!("unknown tool {other:?}"), true),
         };
         // Walk and replace: anything over the oversized threshold is stashed

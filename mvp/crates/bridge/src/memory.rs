@@ -57,7 +57,7 @@ pub fn open(path: &std::path::Path) -> Result<MemoryStore, String> {
 /// A store at a newer MAJOR than this build is refused \u2014 a newer build
 /// wrote it, never down-migrate. A newer MINOR within this build's major is
 /// tolerated and operated against, not migrated \u2014 mirrors migrate.ts.
-fn migrate(conn: &Connection) -> Result<(), String> {
+pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
     let db_version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .map_err(|e| format!("read user_version: {e}"))?;

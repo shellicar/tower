@@ -39,6 +39,7 @@ mod exec;
 mod find;
 mod matcher;
 mod memory;
+mod memtools;
 mod mutate;
 mod objects;
 mod pipe;
@@ -180,6 +181,7 @@ struct Host {
     attach_bucket: String,
     thinking_budget: Option<i64>,
     refs: refs::RefStore,
+    memory: memory::MemoryStore,
 }
 
 impl Host {
@@ -194,6 +196,7 @@ impl Host {
             skills_root: Arc::clone(&self.skills_root),
             attach_bucket: self.attach_bucket.clone(),
             refs: Arc::clone(&self.refs),
+            memory: Arc::clone(&self.memory),
             thinking_budget: self.thinking_budget,
         }
     }
@@ -376,6 +379,18 @@ async fn main() -> anyhow::Result<()> {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::env::temp_dir().join("bridge-refs.db"));
     let refs_store = refs::open(&refs_path).map_err(|e| anyhow::anyhow!(e))?;
+    // Shared with claude-sdk-cli's own SqliteMemoryEngine — same file, same
+    // schema, so a memory either process writes is visible to the other.
+    let memory_path = std::env::var("BRIDGE_MEMORY_DB")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::env::var("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .join(".claude")
+                .join("memory.db")
+        });
+    let memory_store = memory::open(&memory_path).map_err(|e| anyhow::anyhow!(e))?;
 
     let client = async_nats::connect(&nats_url).await?; // fail-fast
 
@@ -421,6 +436,7 @@ async fn main() -> anyhow::Result<()> {
         instance,
         default_model,
         refs: refs_store,
+        memory: memory_store,
         auth,
         skills_root,
         system: Arc::new(RwLock::new(None)),
