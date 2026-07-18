@@ -688,7 +688,7 @@ async fn run_tool_round(
             results.push(json!({
                 "type": "tool_result",
                 "tool_use_id": id,
-                "content": format!("{name:?} is not offered this turn — refused, not executed"),
+                "content": format!("unknown tool {name:?}"),
                 "is_error": true,
             }));
             continue;
