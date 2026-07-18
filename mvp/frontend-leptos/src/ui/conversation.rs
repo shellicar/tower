@@ -149,6 +149,21 @@ pub fn ConversationView(
 
     let editing_title = RwSignal::new(false);
     let title_draft = RwSignal::new(String::new());
+    let title_input_ref = NodeRef::<html::Input>::new();
+
+    // The input never receives focus just by appearing (unlike Svelte's
+    // `autofocus` attribute, there's no Leptos equivalent) — without this,
+    // "click out" has nothing to blur, so commit never fires and only a
+    // direct click into the input, then Enter, works. Runs after the DOM
+    // patch so the node exists.
+    Effect::new(move |_| {
+        if editing_title.get()
+            && let Some(el) = title_input_ref.get()
+        {
+            let _ = el.focus();
+            el.select();
+        }
+    });
 
     let send_current = Callback::new(move |()| {
         let text = draft.get_untracked();
@@ -231,6 +246,7 @@ pub fn ConversationView(
                         view! {
                             <input
                                 class="title-editor"
+                                node_ref=title_input_ref
                                 prop:value=move || title_draft.get()
                                 on:input=move |ev| title_draft.set(event_target_value(&ev))
                                 on:blur=move |_| commit_title.run(())
