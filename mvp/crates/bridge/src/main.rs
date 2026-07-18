@@ -34,8 +34,10 @@ mod anthropic;
 mod approval;
 mod decisions;
 mod exec;
+mod find;
 mod objects;
 mod skills;
+mod stream;
 
 use std::sync::{Arc, RwLock};
 

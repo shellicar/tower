@@ -162,6 +162,7 @@ dependencies = [
  "base64",
  "futures",
  "libc",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

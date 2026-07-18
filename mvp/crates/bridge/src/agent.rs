@@ -401,11 +401,12 @@ async fn run_query(
     } = &ctx;
     let pubr = Publisher::new(client, conv);
 
-    // Bash, Exec and Read always; Skill only when a catalogue exists.
+    // Bash, Exec, Read and Find always; Skill only when a catalogue exists.
     let mut tools: Vec<Value> = vec![
         crate::exec::bash_schema(),
         crate::exec::exec_schema(),
         crate::exec::read_schema(),
+        crate::find::find_schema(),
     ];
     if !skills.is_empty() {
         tools.push(skills.tool_schema());
@@ -711,6 +712,12 @@ async fn run_tool_round(
                 let path = block["input"]["path"].as_str().unwrap_or("");
                 crate::exec::run_read(path).await
             }
+            // Find is discovery, read-only: no approval gate (composition-model.md
+            // — nothing it finds is acted on, so there is nothing to bound).
+            "Find" => match crate::find::run_find(&block["input"]).await {
+                Ok(stream) => (crate::stream::format_stream(&stream), false),
+                Err(e) => (format!("invalid Find input: {e}"), true),
+            },
             other => (format!("unknown tool {other:?}"), true),
         };
         results.push(json!({

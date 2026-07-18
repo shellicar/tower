@@ -22,6 +22,7 @@ futures = "0.3"
 # system OpenSSL) with native-roots so it trusts the OS keychain — required
 # behind TLS-intercepting proxies (Zscaler). uuid: id minting.
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-native-roots"] }
+regex = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
