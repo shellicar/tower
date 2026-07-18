@@ -401,13 +401,17 @@ async fn run_query(
     } = &ctx;
     let pubr = Publisher::new(client, conv);
 
-    // Bash, Exec, Read, Find and Match always; Skill only when a catalogue exists.
+    // Bash, Exec, Read, Find, Match, Head, Tail and Range always; Skill only
+    // when a catalogue exists.
     let mut tools: Vec<Value> = vec![
         crate::exec::bash_schema(),
         crate::exec::exec_schema(),
         crate::read::read_schema(),
         crate::find::find_schema(),
         crate::matcher::match_schema(),
+        crate::slice::head_schema(),
+        crate::slice::tail_schema(),
+        crate::slice::range_schema(),
     ];
     if !skills.is_empty() {
         tools.push(skills.tool_schema());
@@ -723,6 +727,19 @@ async fn run_tool_round(
             "Match" => match crate::matcher::run_match(&block["input"]).await {
                 Ok((stream, any_error)) => (crate::stream::format_stream(&stream), any_error),
                 Err(e) => (format!("invalid Match input: {e}"), true),
+            },
+            // Head/Tail/Range are read-only: no approval gate.
+            "Head" => match crate::slice::run_head(&block["input"]).await {
+                Ok((stream, any_error)) => (crate::stream::format_stream(&stream), any_error),
+                Err(e) => (format!("invalid Head input: {e}"), true),
+            },
+            "Tail" => match crate::slice::run_tail(&block["input"]).await {
+                Ok((stream, any_error)) => (crate::stream::format_stream(&stream), any_error),
+                Err(e) => (format!("invalid Tail input: {e}"), true),
+            },
+            "Range" => match crate::slice::run_range(&block["input"]).await {
+                Ok((stream, any_error)) => (crate::stream::format_stream(&stream), any_error),
+                Err(e) => (format!("invalid Range input: {e}"), true),
             },
             other => (format!("unknown tool {other:?}"), true),
         };

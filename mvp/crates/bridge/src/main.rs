@@ -39,6 +39,7 @@ mod matcher;
 mod objects;
 mod read;
 mod skills;
+mod slice;
 mod stream;
 
 use std::sync::{Arc, RwLock};
