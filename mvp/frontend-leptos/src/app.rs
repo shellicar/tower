@@ -7,13 +7,27 @@
 //! callback offers each decoded frame to every concern's `apply` in turn,
 //! same as egui's per-frame drain loop, just triggered by the frame's
 //! arrival instead of a redraw tick.
+//!
+//! Reads vs writes split the same way Rust gives egui: `rail.with(...)`,
+//! `conversations.with(...)` etc. take a shared borrow inside the closure, so
+//! several concerns are read together while a view renders — no shared store
+//! needed for that (Decision 2's "annotations shared" hard case stays a
+//! non-issue). Actions call `.update(...)` on exactly one concern's signal;
+//! Leptos's runtime borrow check (not the compiler, since signals are
+//! `Copy`+interior-mutable) panics on a re-entrant borrow rather than
+//! failing to compile — the Leptos-vs-egui enforcement finding, written up in
+//! docs/mvp/frontend-comparison-leptos.md.
 
+use leptos::ev;
 use leptos::prelude::*;
-use ws_types::ServerMsg;
+use ws_types::ClientMsg;
 
+use crate::concerns::approvals::{Approvals, ask_input, ask_label};
+use crate::concerns::conversation::{Conversations, QueryState};
 use crate::concerns::rail::Rail;
-use crate::time::Millis;
-use crate::transport::Transport;
+use crate::time::{Liveness, Millis, age};
+use crate::transport::{IdCounter, Status, Transport};
+use crate::uploads::{self, Upload};
 
 fn now_ms() -> Millis {
     #[cfg(target_arch = "wasm32")]
@@ -26,45 +40,424 @@ fn now_ms() -> Millis {
     }
 }
 
+/// The staleness id, shortened for the rail. Titled rows never reach here.
+fn short(conv: &str) -> String {
+    conv.chars().take(8).collect()
+}
+
+/// Cap a long value for a compact display — the raw input is the interim
+/// reviewable primitive (approval-spec); the content vocabulary is later.
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_owned()
+    } else {
+        let head: String = s.chars().take(max).collect();
+        format!("{head}\u{2026}")
+    }
+}
+
+fn message_text(content: &[serde_json::Value]) -> String {
+    use serde_json::Value;
+    let mut parts: Vec<String> = Vec::new();
+    for block in content {
+        match block.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                if let Some(t) = block.get("text").and_then(Value::as_str) {
+                    parts.push(t.to_owned());
+                }
+            }
+            Some("tool_use") => {
+                let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
+                parts.push(format!("[tool_use: {name}]"));
+            }
+            Some(other) => parts.push(format!("[{other}]")),
+            None => parts.push("[block]".to_owned()),
+        }
+    }
+    parts.join("\n")
+}
+
 #[cfg(target_arch = "wasm32")]
 #[component]
 pub fn App(ws_url: String) -> impl IntoView {
     let rail = RwSignal::new(Rail::default());
+    let conversations = RwSignal::new(Conversations::default());
+    let approvals = RwSignal::new(Approvals::default());
+    let ids = StoredValue::new_local(IdCounter::default());
+    let now = RwSignal::new(now_ms());
 
-    // wasm32 is single-threaded; the socket types aren't Send/Sync, so this
-    // is thread-local storage (Leptos's escape hatch for that), not a real
-    // cross-thread share.
     let transport = StoredValue::new_local(
-        Transport::connect(&ws_url, move |frame: ServerMsg| {
+        Transport::connect(&ws_url, move |frame| {
+            // Fan-out: one decoded frame, offered to every concern's own
+            // `apply`. Each concern's own match decides what it folds.
             rail.update(|r| r.apply(&frame));
+            conversations.update(|c| c.apply(&frame));
+            approvals.update(|a| a.apply(&frame));
         })
         .expect("websocket connect"),
     );
-    let _ = transport; // kept alive for the session; send() lands with the say/answer/cancel concerns
 
-    let now = now_ms();
+    // The re-render ticker — a per-concern cadence detail (Decision 1). Both
+    // liveness and approval-void verdicts read `now`; 1s covers both without
+    // a bespoke ticker per verdict.
+    set_interval(
+        move || now.set(now_ms()),
+        std::time::Duration::from_secs(1),
+    );
+
+    let open_conv = RwSignal::new(None::<String>);
+    let draft = RwSignal::new(String::new());
+
+    let send = move |msg: ClientMsg| transport.with_value(|t| t.send(&msg));
+    let next_id = move || ids.try_update_value(|c| c.next()).expect("id counter");
+
+    let open_conversation = move |conv: String| {
+        if open_conv.get_untracked().as_deref() == Some(conv.as_str()) {
+            return;
+        }
+        if let Some(prev) = open_conv.get_untracked() {
+            let id = next_id();
+            if let Some(msg) = conversations.try_update(|c| c.close(&prev, id)).flatten() {
+                send(msg);
+            }
+        }
+        let id = next_id();
+        if let Some(msg) = conversations
+            .try_update(|c| c.open(&conv, id))
+            .flatten()
+        {
+            send(msg);
+        }
+        open_conv.set(Some(conv));
+        draft.set(String::new());
+    };
+
+    let send_current = move || {
+        let Some(conv) = open_conv.get_untracked() else {
+            return;
+        };
+        let text = draft.get_untracked();
+        if text.trim().is_empty() {
+            return;
+        }
+        draft.set(String::new());
+        let id = next_id();
+        if let Some(msg) = conversations
+            .try_update(|c| c.say(&conv, text, id))
+            .flatten()
+        {
+            send(msg);
+        }
+    };
+
+    let cancel_current = move || {
+        let Some(conv) = open_conv.get_untracked() else {
+            return;
+        };
+        let id = next_id();
+        if let Some(msg) = conversations
+            .try_update(|c| c.cancel(&conv, id))
+            .flatten()
+        {
+            send(msg);
+        }
+    };
+
+    let answer_approval = move |approval_id: String, approved: bool| {
+        let id = next_id();
+        let msg = approvals.try_update(|a| a.answer(&approval_id, approved, id));
+        if let Some(msg) = msg {
+            send(msg);
+        }
+    };
+
+    let dismiss_approval = move |approval_id: String| {
+        approvals.update(|a| a.dismiss(&approval_id));
+    };
+
+    let upload_current = move |file: web_sys::File| {
+        let Some(conv) = open_conv.get_untracked() else {
+            return;
+        };
+        uploads::pick_and_upload(conv, file, move |Upload { conv, attachment }| {
+            conversations.update(|c| c.attach(&conv, vec![attachment]));
+        });
+    };
+
+    // A rejected or revoked say comes home to the editor: pull its words back
+    // into the draft if the box is empty, then consume the restore.
+    Effect::new(move |_| {
+        let Some(conv) = open_conv.get() else {
+            return;
+        };
+        if !draft.get_untracked().is_empty() {
+            return;
+        }
+        let restore = conversations
+            .with(|c| c.get(&conv).and_then(|oc| oc.restore_say.clone()));
+        if let Some(restore) = restore {
+            draft.set(restore);
+            conversations.update(|c| c.consume_restore(&conv));
+        }
+    });
 
     view! {
-        <div class="rail">
-            <ul>
+        <div class="tower">
+            <aside class="rail">
+                <h1>"Tower"</h1>
+                <p class="status">
+                    {move || match transport.with_value(|t| t.status()) {
+                        Status::Connecting => "connecting…",
+                        Status::Connected => "connected",
+                        Status::Closed => "disconnected",
+                    }}
+                </p>
                 {move || {
-                    rail.with(|r| {
-                        r.ordered()
-                            .into_iter()
-                            .map(|row| {
-                                let conv = row.conv.clone();
-                                let title = row.title.clone().unwrap_or_else(|| conv.clone());
-                                let live = rail.with(|r| r.verdict(&conv, now));
-                                view! {
-                                    <li>
-                                        {title} " " {format!("{live:?}")}
-                                    </li>
-                                }
-                            })
-                            .collect_view()
-                    })
+                    let n = approvals.with(|a| a.live(now.get()).len());
+                    (n > 0)
+                        .then(|| view! { <p class="awaiting">{format!("⚠ {n} awaiting approval")}</p> })
                 }}
-            </ul>
+                <ul class="rows">
+                    {move || {
+                        let pending = rail.with(|r| r.pending_by_conv(now.get()));
+                        rail.with(|r| {
+                            r.ordered()
+                                .into_iter()
+                                .map(|row| {
+                                    let conv = row.conv.clone();
+                                    let conv_click = conv.clone();
+                                    let label = row.title.clone().unwrap_or_else(|| short(&conv));
+                                    let is_pending = pending.contains(&conv);
+                                    let live = rail.with(|r| r.verdict(&conv, now.get()));
+                                    let selected = open_conv.get() == Some(conv.clone());
+                                    view! {
+                                        <li
+                                            class:selected=selected
+                                            on:click=move |_| open_conversation(conv_click.clone())
+                                        >
+                                            <span class="heat"></span>
+                                            {live.map(|l| {
+                                                let cls = match l {
+                                                    Liveness::Alive => "alive",
+                                                    Liveness::Stranded => "stranded",
+                                                };
+                                                view! { <span class=format!("liveness {cls}")>"◆"</span> }
+                                            })}
+                                            {is_pending.then(|| view! { <span class="pending">"⚠"</span> })}
+                                            <span class="label">{label}</span>
+                                            <span class="age">{age(now.get(), row.last_event)}</span>
+                                        </li>
+                                    }
+                                })
+                                .collect_view()
+                        })
+                    }}
+                </ul>
+                <ul class="potential">
+                    {move || {
+                        rail.with(|r| {
+                            r.attached_only()
+                                .into_iter()
+                                .map(|conv| {
+                                    let conv = conv.to_owned();
+                                    let conv_click = conv.clone();
+                                    view! {
+                                        <li on:click=move |_| open_conversation(conv_click.clone())>
+                                            {short(&conv)}
+                                        </li>
+                                    }
+                                })
+                                .collect_view()
+                        })
+                    }}
+                </ul>
+                <ul class="voided">
+                    {move || {
+                        approvals
+                            .with(|a| {
+                                a.pending()
+                                    .into_iter()
+                                    .filter(|ask| a.is_void(ask, now.get()))
+                                    .map(|ask| {
+                                        let id = ask.id.clone();
+                                        let label = ask_label(ask).to_owned();
+                                        view! {
+                                            <li>
+                                                {format!("{label} · holder gone")}
+                                                <button on:click=move |_| dismiss_approval(id.clone())>"Dismiss"</button>
+                                            </li>
+                                        }
+                                    })
+                                    .collect_view()
+                            })
+                    }}
+                </ul>
+            </aside>
+
+            <main class="conversation">
+                {move || {
+                    let Some(conv) = open_conv.get() else {
+                        return view! { <p class="empty">"Open a conversation from the rail."</p> }
+                            .into_any();
+                    };
+                    let header = rail
+                        .with(|r| r.row(&conv).and_then(|row| row.title.clone()))
+                        .unwrap_or_else(|| short(&conv));
+                    let loaded = conversations.with(|c| c.get(&conv).map(|oc| oc.loaded));
+                    let Some(loaded) = loaded else {
+                        return view! { <p class="opening">"opening…"</p> }.into_any();
+                    };
+
+                    let conv_for_live = conv.clone();
+                    let conv_for_note = conv.clone();
+                    let conv_for_live_query = conv.clone();
+                    let conv_for_pending = conv.clone();
+                    let conv_for_upload = conv.clone();
+
+                    view! {
+                        <div>
+                            <h2>{header}</h2>
+                            {(!loaded).then(|| view! { <p class="opening">"loading…"</p> })}
+                            <div class="messages">
+                                {move || {
+                                    let messages = conversations
+                                        .with(|c| c.get(&conv).map(|oc| oc.messages.clone()));
+                                    messages.map(|messages| {
+                                        messages
+                                            .into_iter()
+                                            .map(|m| {
+                                                let (who, cls) = match m.role.as_str() {
+                                                    "user" => ("you".to_owned(), "user"),
+                                                    "assistant" => ("agent".to_owned(), "assistant"),
+                                                    other => (other.to_owned(), "other"),
+                                                };
+                                                let text = message_text(&m.content);
+                                                view! {
+                                                    <p class=format!("message {cls}")>
+                                                        <span class="who">{who}" › "</span>
+                                                        {text}
+                                                    </p>
+                                                }
+                                            })
+                                            .collect_view()
+                                    })
+                                }}
+                                {move || {
+                                    let segments = conversations
+                                        .with(|c| c.get(&conv_for_live).map(|oc| oc.streaming.clone()));
+                                    segments.map(|segments| {
+                                        let total = segments.len();
+                                        segments
+                                            .into_iter()
+                                            .enumerate()
+                                            .map(|(i, seg)| {
+                                                let last = i + 1 == total;
+                                                let body = if last {
+                                                    format!("{}▊", seg.text)
+                                                } else {
+                                                    seg.text
+                                                };
+                                                let marker = (seg.block_type != "text")
+                                                    .then(|| format!("[{}] ", seg.block_type))
+                                                    .unwrap_or_default();
+                                                view! {
+                                                    <p class="message assistant streaming">
+                                                        <span class="who">"agent › "</span>
+                                                        {marker}
+                                                        {body}
+                                                    </p>
+                                                }
+                                            })
+                                            .collect_view()
+                                    })
+                                }}
+                                {move || {
+                                    conversations.with(|c| {
+                                        c.get(&conv_for_pending)
+                                            .and_then(|oc| oc.pending_say.clone())
+                                            .map(|pending| {
+                                                view! {
+                                                    <p class="pending-say">
+                                                        {format!("you (sending…) › {pending}")}
+                                                    </p>
+                                                }
+                                            })
+                                    })
+                                }}
+                            </div>
+
+                            {move || {
+                                approvals
+                                    .with(|a| {
+                                        a.live_for_conv(&conv_for_live_query, now.get())
+                                            .into_iter()
+                                            .map(|ask| {
+                                                let id = ask.id.clone();
+                                                let id_approve = id.clone();
+                                                let id_deny = id.clone();
+                                                let label = ask_label(ask).to_owned();
+                                                let input = ask_input(ask);
+                                                let note = a.answer_note(&id).map(str::to_owned);
+                                                view! {
+                                                    <div class="approval">
+                                                        <span class="warn">"⚠"</span>
+                                                        <strong>{label}</strong>
+                                                        <button on:click=move |_| answer_approval(id_approve.clone(), true)>
+                                                            "Approve"
+                                                        </button>
+                                                        <button on:click=move |_| answer_approval(id_deny.clone(), false)>
+                                                            "Deny"
+                                                        </button>
+                                                        {note.map(|n| view! { <span class="note">{n}</span> })}
+                                                        {input.map(|i| view! { <pre>{truncate(&i, 600)}</pre> })}
+                                                    </div>
+                                                }
+                                            })
+                                            .collect_view()
+                                    })
+                            }}
+
+                            <p class="last-say">
+                                {move || conversations.with(|c| c.get(&conv_for_note).and_then(|oc| oc.last_say.clone()))}
+                            </p>
+
+                            <div class="composer">
+                                <input
+                                    type="text"
+                                    placeholder="say something…"
+                                    prop:value=move || draft.get()
+                                    on:input=move |ev| draft.set(event_target_value(&ev))
+                                    on:keydown=move |ev: ev::KeyboardEvent| {
+                                        if ev.key() == "Enter" {
+                                            send_current();
+                                        }
+                                    }
+                                />
+                                <button on:click=move |_| send_current()>"Send"</button>
+                                <input
+                                    type="file"
+                                    on:change=move |ev| {
+                                        let input: web_sys::HtmlInputElement = event_target(&ev);
+                                        if let Some(files) = input.files()
+                                            && let Some(file) = files.get(0)
+                                        {
+                                            upload_current(file);
+                                        }
+                                        input.set_value("");
+                                    }
+                                />
+                                {move || {
+                                    let live = conversations
+                                        .with(|c| c.get(&conv_for_upload).map(|oc| oc.query_state == QueryState::Live))
+                                        .unwrap_or(false);
+                                    live.then(|| view! { <button on:click=move |_| cancel_current()>"Cancel"</button> })
+                                }}
+                            </div>
+                        </div>
+                    }
+                    .into_any()
+                }}
+            </main>
         </div>
     }
 }

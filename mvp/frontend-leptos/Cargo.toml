@@ -27,7 +27,7 @@ js-sys = "0.3"
 # gloo-net's WebSocket: an async Stream/Sink split, not ewebsock's try_recv
 # channel — the natural fit for Leptos's push-based reactive graph rather than
 # egui's per-frame pull.
-gloo-net = { version = "0.6", features = ["websocket"] }
+gloo-net = { version = "0.6", features = ["websocket", "http"] }
 futures = "0.3"
-web-sys = { version = "0.3", features = ["Document", "Element", "Location", "Window", "console"] }
+web-sys = { version = "0.3", features = ["Document", "Element", "File", "FileList", "HtmlInputElement", "Location", "Window", "console"] }
 console_error_panic_hook = "0.1"
