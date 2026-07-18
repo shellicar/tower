@@ -36,6 +36,7 @@ mod decisions;
 mod exec;
 mod find;
 mod matcher;
+mod mutate;
 mod objects;
 mod pipe;
 mod read;

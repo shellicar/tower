@@ -45,6 +45,8 @@ pub fn static_tool_schemas() -> Vec<Value> {
         crate::pipe::pipe_schema(),
         crate::readfile::read_file_schema(),
         crate::refs::ref_schema(),
+        crate::mutate::create_file_schema(),
+        crate::mutate::append_file_schema(),
     ]
 }
 
@@ -810,6 +812,50 @@ async fn run_tool_round(
             },
             // Ref is read-only: no approval gate.
             "Ref" => crate::refs::run_ref(refs, &block["input"]),
+            // CreateFile/AppendFile gate behind the same human approval as
+            // Bash/Exec — a mutation, same discipline.
+            "CreateFile" => {
+                let approval_id = uuid::Uuid::new_v4().to_string();
+                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                let correlation = json!({
+                    "conversationId": pubr.conv().0,
+                    "queryId": query,
+                    "turnId": turn_id,
+                    "toolUseId": id,
+                });
+                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                    .await
+                {
+                    crate::approval::Verdict::Approved => {
+                        crate::mutate::run_create_file(&block["input"]).await
+                    }
+                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
+                    crate::approval::Verdict::Cancelled => {
+                        ("cancelled by user before approval".to_string(), true)
+                    }
+                }
+            }
+            "AppendFile" => {
+                let approval_id = uuid::Uuid::new_v4().to_string();
+                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                let correlation = json!({
+                    "conversationId": pubr.conv().0,
+                    "queryId": query,
+                    "turnId": turn_id,
+                    "toolUseId": id,
+                });
+                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                    .await
+                {
+                    crate::approval::Verdict::Approved => {
+                        crate::mutate::run_append_file(&block["input"]).await
+                    }
+                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
+                    crate::approval::Verdict::Cancelled => {
+                        ("cancelled by user before approval".to_string(), true)
+                    }
+                }
+            }
             other => (format!("unknown tool {other:?}"), true),
         };
         // Walk and replace: anything over the oversized threshold is stashed
