@@ -1,31 +1,111 @@
-html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, sans-serif; background: #111; color: #eee; }
-.tower { display: flex; height: 100vh; }
-.rail { width: 300px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid #333; padding: 12px; box-sizing: border-box; }
-.rail h1 { font-size: 16px; margin: 0 0 8px; }
-.rail .status { color: #888; font-size: 12px; }
-.rail .awaiting { color: #eab308; }
-.rail ul { list-style: none; margin: 0; padding: 0; }
-.rail .rows li { display: flex; align-items: center; gap: 4px; padding: 4px 2px; cursor: pointer; border-radius: 4px; }
-.rail .rows li:hover { background: #222; }
-.rail .rows li.selected { background: #2a2a3a; }
-.rail .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rail .age { color: #888; font-size: 11px; }
-.rail .liveness.alive { color: #4ade80; }
-.rail .liveness.stranded { color: #f87171; }
-.rail .pending { color: #eab308; }
-.rail .potential li, .rail .voided li { color: #888; padding: 4px 2px; cursor: pointer; }
+/* Matches mvp/frontend's palette and type scale (app.css + the Tailwind
+   neutral/green/red/amber/sky/indigo scales its components read from) so the
+   three frontends look like the same product, not three different demos. */
 
-.conversation { flex: 1; display: flex; flex-direction: column; padding: 16px; overflow-y: auto; }
-.conversation .messages { flex: 1; overflow-y: auto; }
-.message { margin: 4px 0; }
-.message .who { color: #888; margin-right: 4px; }
-.message.user .who { color: #7dd3fc; }
-.message.assistant .who { color: #c4b5fd; }
-.pending-say { color: #888; }
-.approval { border: 1px solid #eab308; border-radius: 4px; padding: 8px; margin: 8px 0; }
-.approval pre { white-space: pre-wrap; word-break: break-all; }
-.last-say { color: #888; }
-.composer { display: flex; gap: 8px; align-items: center; }
-.composer input[type="text"] { flex: 1; padding: 6px; background: #1a1a1a; border: 1px solid #333; color: #eee; }
-button { background: #333; color: #eee; border: 1px solid #555; padding: 4px 10px; cursor: pointer; }
-button:hover { background: #444; }
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 13px;
+  background: #111;
+  color: #ddd;
+}
+
+.tower { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+
+.rail { overflow-y: auto; border-right: 1px solid #404040; display: flex; flex-direction: column; }
+.rail-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid #404040;
+  padding: 8px 12px;
+}
+.rail-header h1 { font-size: 13px; font-weight: bold; margin: 0; }
+.rail-header .meta { display: flex; align-items: baseline; gap: 12px; }
+.status.connected { color: #4ade80; }
+.status.disconnected { color: #f87171; }
+.awaiting { color: #fcd34d; background: none; border: none; cursor: pointer; font: inherit; }
+
+.rail ul { list-style: none; margin: 0; padding: 0; }
+.rows li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 8px;
+  border-bottom: 1px solid #262626;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.rows li:hover { background: #171717; }
+.rows li.selected { background: #1e293b; }
+.row-main { display: flex; min-width: 0; flex: 1; align-items: center; gap: 6px; }
+.dot { height: 8px; width: 8px; flex-shrink: 0; border-radius: 50%; }
+.dot.alive { background: #4ade80; }
+.dot.stranded { background: #f87171; }
+.pending-mark { color: #fcd34d; flex-shrink: 0; }
+.label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-side { display: flex; flex-shrink: 0; gap: 8px; color: #a3a3a3; }
+.age.fresh { color: #4ade80; }
+.age.cooling { color: #eab308; }
+.age.cold { color: #737373; }
+
+.potential li, .voided li { color: #737373; padding: 8px 12px; border-bottom: 1px solid #262626; cursor: pointer; }
+.potential li:hover { background: #171717; }
+.voided li { display: flex; justify-content: space-between; align-items: center; cursor: default; }
+.voided button { cursor: pointer; }
+
+.conversation { display: flex; min-height: 0; min-width: 0; flex-direction: column; padding: 0 16px; overflow-y: auto; }
+.conversation .empty, .conversation .opening { color: #737373; margin: auto; }
+.conversation h2 { font-size: 13px; font-weight: bold; border-bottom: 1px solid #404040; padding: 8px 0; margin: 0; }
+
+.messages { flex: 1; overflow-y: auto; padding-top: 8px; }
+.message {
+  margin: 8px 0;
+  padding: 6px 0 6px 8px;
+  border-left: 2px solid #404040;
+}
+.message.user { border-color: #3730a3; }
+.message.assistant { border-color: #166534; }
+.message .who { color: #a3a3a3; margin-right: 6px; }
+.message.streaming { opacity: 0.9; }
+.pending-say { color: #737373; }
+
+.approval {
+  border: 1px solid #404040;
+  border-radius: 2px;
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+.approval .warn { color: #fcd34d; margin-right: 4px; }
+.approval .note { color: #fdba74; margin-left: 8px; }
+.approval pre { white-space: pre-wrap; word-break: break-all; color: #a3a3a3; margin: 6px 0 0; }
+.approval button { margin-left: 6px; }
+.approval button.approve { border: 1px solid #166534; color: #86efac; background: none; }
+.approval button.approve:hover { background: #052e16; }
+.approval button.deny { border: 1px solid #7f1d1d; color: #fca5a5; background: none; }
+.approval button.deny:hover { background: #450a0a; }
+
+.last-say { color: #737373; }
+
+.composer { display: flex; gap: 8px; align-items: center; padding: 8px 0 12px; border-top: 1px solid #262626; }
+.composer input[type='text'] {
+  flex: 1;
+  padding: 6px 8px;
+  background: #171717;
+  border: 1px solid #404040;
+  color: #ddd;
+  font: inherit;
+}
+.composer input[type='text']::placeholder { color: #737373; }
+
+button {
+  background: none;
+  color: #ddd;
+  border: 1px solid #404040;
+  padding: 4px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+button:hover { background: #262626; }

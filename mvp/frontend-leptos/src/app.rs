@@ -45,6 +45,19 @@ fn short(conv: &str) -> String {
     conv.chars().take(8).collect()
 }
 
+/// Staleness heat: fresh green, cooling yellow, cold grey — mvp/frontend's
+/// `heat()` thresholds (1h, 6h), read here so the rail matches it exactly.
+fn heat_class(now: Millis, ts: Millis) -> &'static str {
+    let d = now - ts;
+    if d < 3_600_000 {
+        "fresh"
+    } else if d < 21_600_000 {
+        "cooling"
+    } else {
+        "cold"
+    }
+}
+
 /// Cap a long value for a compact display — the raw input is the interim
 /// reviewable primitive (approval-spec); the content vocabulary is later.
 fn truncate(s: &str, max: usize) -> String {
@@ -204,19 +217,28 @@ pub fn App(ws_url: String) -> impl IntoView {
     view! {
         <div class="tower">
             <aside class="rail">
-                <h1>"Tower"</h1>
-                <p class="status">
-                    {move || match transport.with_value(|t| t.status()) {
-                        Status::Connecting => "connecting…",
-                        Status::Connected => "connected",
-                        Status::Closed => "disconnected",
-                    }}
-                </p>
-                {move || {
-                    let n = approvals.with(|a| a.live(now.get()).len());
-                    (n > 0)
-                        .then(|| view! { <p class="awaiting">{format!("⚠ {n} awaiting approval")}</p> })
-                }}
+                <header class="rail-header">
+                    <h1>"Tower"</h1>
+                    <span class="meta">
+                        {move || {
+                            let n = approvals.with(|a| a.live(now.get()).len());
+                            (n > 0).then(|| view! { <span class="awaiting">{format!("⚠ {n}")}</span> })
+                        }}
+                        <span class=move || {
+                            let cls = match transport.with_value(|t| t.status()) {
+                                Status::Connected => "connected",
+                                _ => "disconnected",
+                            };
+                            format!("status {cls}")
+                        }>
+                            {move || match transport.with_value(|t| t.status()) {
+                                Status::Connecting => "connecting…",
+                                Status::Connected => "live",
+                                Status::Closed => "reconnecting…",
+                            }}
+                        </span>
+                    </span>
+                </header>
                 <ul class="rows">
                     {move || {
                         let pending = rail.with(|r| r.pending_by_conv(now.get()));
@@ -230,22 +252,26 @@ pub fn App(ws_url: String) -> impl IntoView {
                                     let is_pending = pending.contains(&conv);
                                     let live = rail.with(|r| r.verdict(&conv, now.get()));
                                     let selected = open_conv.get() == Some(conv.clone());
+                                    let heat = heat_class(now.get(), row.last_event);
                                     view! {
                                         <li
                                             class:selected=selected
                                             on:click=move |_| open_conversation(conv_click.clone())
                                         >
-                                            <span class="heat"></span>
-                                            {live.map(|l| {
-                                                let cls = match l {
-                                                    Liveness::Alive => "alive",
-                                                    Liveness::Stranded => "stranded",
-                                                };
-                                                view! { <span class=format!("liveness {cls}")>"◆"</span> }
-                                            })}
-                                            {is_pending.then(|| view! { <span class="pending">"⚠"</span> })}
-                                            <span class="label">{label}</span>
-                                            <span class="age">{age(now.get(), row.last_event)}</span>
+                                            <span class="row-main">
+                                                {is_pending.then(|| view! { <span class="pending-mark">"⚠"</span> })}
+                                                {live.map(|l| {
+                                                    let cls = match l {
+                                                        Liveness::Alive => "alive",
+                                                        Liveness::Stranded => "stranded",
+                                                    };
+                                                    view! { <span class=format!("dot {cls}")></span> }
+                                                })}
+                                                <span class="label">{label}</span>
+                                            </span>
+                                            <span class="row-side">
+                                                <span class=format!("age {heat}")>{age(now.get(), row.last_event)}</span>
+                                            </span>
                                         </li>
                                     }
                                 })
@@ -402,10 +428,10 @@ pub fn App(ws_url: String) -> impl IntoView {
                                                     <div class="approval">
                                                         <span class="warn">"⚠"</span>
                                                         <strong>{label}</strong>
-                                                        <button on:click=move |_| answer_approval(id_approve.clone(), true)>
+                                                        <button class="approve" on:click=move |_| answer_approval(id_approve.clone(), true)>
                                                             "Approve"
                                                         </button>
-                                                        <button on:click=move |_| answer_approval(id_deny.clone(), false)>
+                                                        <button class="deny" on:click=move |_| answer_approval(id_deny.clone(), false)>
                                                             "Deny"
                                                         </button>
                                                         {note.map(|n| view! { <span class="note">{n}</span> })}
