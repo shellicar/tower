@@ -49,7 +49,8 @@ pub async fn run_read(input: &Value) -> Result<(Stream, bool), String> {
 }
 
 /// Read each path into `LineEntry`s, in order, plus whether any failed.
-async fn read_paths(paths: &[String]) -> (Vec<LineEntry>, bool) {
+/// `pub(crate)`: `Match` reuses this to build the content it filters.
+pub(crate) async fn read_paths(paths: &[String]) -> (Vec<LineEntry>, bool) {
     let mut out = Vec::new();
     let mut any_error = false;
     for path in paths {

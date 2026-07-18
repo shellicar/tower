@@ -35,6 +35,7 @@ mod approval;
 mod decisions;
 mod exec;
 mod find;
+mod matcher;
 mod objects;
 mod read;
 mod skills;
