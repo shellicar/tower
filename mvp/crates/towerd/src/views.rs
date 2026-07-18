@@ -1570,8 +1570,14 @@ mod tests {
         assert_eq!(u.output_tokens, 50);
         assert_eq!(u.turns, 2);
         // Context and model are the LATEST turn's, not sums: context is that
-        // turn's whole prompt (input + cacheCreation + cacheRead).
-        assert_eq!(u.context_tokens, 200 + 0 + 300);
+        // turn's whole prompt (input + cacheCreation + cacheRead) — named
+        // here, not left as literals, so each addend is traceable back to
+        // its field in the second event above.
+        let (latest_input, latest_cache_creation, latest_cache_read) = (200, 0, 300);
+        assert_eq!(
+            u.context_tokens,
+            latest_input + latest_cache_creation + latest_cache_read
+        );
         assert_eq!(u.model, "claude-opus-4-6");
 
         // Each usage event broadcasts one Usage snapshot (content) alongside
