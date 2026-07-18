@@ -175,6 +175,28 @@ impl Conversations {
         }
     }
 
+    /// Reconcile the wire-open set against a wanted list — the view
+    /// concern's tab switch, ported from mvp/frontend's `Conversations.setOpen`.
+    /// Opens what's missing, closes what's no longer wanted; `next_id` mints
+    /// one id per message, same as every other action here.
+    pub fn set_open(&mut self, wanted: &[String], next_id: &mut impl FnMut() -> String) -> Vec<ClientMsg> {
+        let mut out = Vec::new();
+        let currently: Vec<String> = self.open.keys().cloned().collect();
+        for conv in &currently {
+            if !wanted.contains(conv)
+                && let Some(msg) = self.close(conv, next_id())
+            {
+                out.push(msg);
+            }
+        }
+        for conv in wanted {
+            if let Some(msg) = self.open(conv, next_id()) {
+                out.push(msg);
+            }
+        }
+        out
+    }
+
     pub fn cancel(&mut self, conv: &str, id: String) -> Option<ClientMsg> {
         let oc = self.open.get(conv)?;
         let query = oc.live_query.clone()?;
@@ -514,6 +536,26 @@ mod tests {
             message: msg("m1", "q", "assistant", 1),
         });
         assert!(c.get("a").unwrap().streaming.is_empty());
+    }
+
+    #[test]
+    fn set_open_opens_the_missing_and_closes_the_unwanted() {
+        let mut c = Conversations::default();
+        let mut next = {
+            let mut n = 0;
+            move || {
+                n += 1;
+                format!("r{n}")
+            }
+        };
+        open(&mut c, "a");
+        open(&mut c, "b");
+        let wanted = vec!["b".to_owned(), "c".to_owned()];
+        let sent = c.set_open(&wanted, &mut next);
+        assert!(c.get("a").is_none()); // closed
+        assert!(c.get("b").is_some()); // stayed open
+        assert!(c.get("c").is_some()); // newly opened
+        assert_eq!(sent.len(), 2); // close a, open c
     }
 
     #[test]

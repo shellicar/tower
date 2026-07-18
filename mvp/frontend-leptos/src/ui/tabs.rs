@@ -1,0 +1,62 @@
+//! The tab bar: reads the `view` concern only. Renaming uses the browser's
+//! native `prompt()`, same as mvp/frontend's `RowList`/`App.svelte` — a tab
+//! name is a rare, deliberate edit, not worth an inline editor the way a
+//! conversation's title is (clicked far more often, from the rail).
+
+use leptos::prelude::*;
+
+use crate::concerns::view::View;
+
+#[component]
+pub fn TabBar(
+    view: RwSignal<View>,
+    on_switch: Callback<usize>,
+    on_add: Callback<()>,
+    on_close: Callback<usize>,
+    on_rename: Callback<(usize, String)>,
+) -> impl IntoView {
+    view! {
+        <div class="tab-bar">
+            {move || {
+                let active = view.with(|v| v.active);
+                let can_close = view.with(|v| v.tabs.len() > 1);
+                view.with(|v| {
+                    v.tabs
+                        .iter()
+                        .enumerate()
+                        .map(|(i, tab)| {
+                            let name = tab.name.clone();
+                            let is_active = i == active;
+                            view! {
+                                <span class="tab" class:active=is_active>
+                                    <button
+                                        class="tab-name"
+                                        on:click=move |_| {
+                                            if is_active {
+                                                if let Some(next) = web_sys::window()
+                                                    .and_then(|w| w.prompt_with_message_and_default("tab name", &name).ok().flatten())
+                                                {
+                                                    on_rename.run((i, next));
+                                                }
+                                            } else {
+                                                on_switch.run(i);
+                                            }
+                                        }
+                                    >
+                                        {tab.name.clone()}
+                                    </button>
+                                    {(can_close && is_active).then(|| {
+                                        view! {
+                                            <button class="tab-close" on:click=move |_| on_close.run(i)>"×"</button>
+                                        }
+                                    })}
+                                </span>
+                            }
+                        })
+                        .collect_view()
+                })
+            }}
+            <button class="tab-add" on:click=move |_| on_add.run(())>"+"</button>
+        </div>
+    }
+}

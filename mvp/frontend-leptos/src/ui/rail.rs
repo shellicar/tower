@@ -29,7 +29,10 @@ pub fn RailView(
     rail: RwSignal<Rail>,
     approvals: RwSignal<Approvals>,
     now: RwSignal<Millis>,
-    open_conv: RwSignal<Option<String>>,
+    /// The active tab's open set — a row is "selected" if it's in it. A
+    /// derived `Signal`, not the `View` concern itself: this component reads
+    /// one fact (which convs are open), not the whole tab machine.
+    open_convs: Signal<Vec<String>>,
     status: Signal<Status>,
     on_open: Callback<String>,
     on_dismiss: Callback<String>,
@@ -70,7 +73,7 @@ pub fn RailView(
                                 let label = row.title.clone().unwrap_or_else(|| short(&conv));
                                 let is_pending = pending.contains(&conv);
                                 let live = rail.with(|r| r.verdict(&conv, now.get()));
-                                let selected = open_conv.get() == Some(conv.clone());
+                                let selected = open_convs.with(|c| c.contains(&conv));
                                 let heat = heat_class(now.get(), row.last_event);
                                 view! {
                                     <li

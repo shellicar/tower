@@ -7,6 +7,7 @@
 pub mod block;
 pub mod conversation;
 pub mod rail;
+pub mod tabs;
 
 /// Cap a long value for a compact display — the raw input is the interim
 /// reviewable primitive (approval-spec); the content vocabulary is later.

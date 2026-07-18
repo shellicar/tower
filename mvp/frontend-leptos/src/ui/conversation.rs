@@ -23,6 +23,8 @@ use wasm_bindgen::JsCast;
 use crate::concerns::approvals::{Approvals, ask_input, ask_label};
 use crate::concerns::conversation::{Conversations, QueryState};
 use crate::concerns::rail::Rail;
+use crate::concerns::usage::Usage;
+use crate::pricing::{format_tokens, format_usd, price_usage};
 use crate::time::{Millis, age};
 use crate::ui::block::render_block;
 use crate::ui::{short, truncate};
@@ -80,12 +82,33 @@ fn media_label(v: &Value) -> String {
         .to_owned()
 }
 
+/// The conversation's cost surface: towerd ships the token facts, priced
+/// here ($ and context %) — the client owns that policy, same split as
+/// mvp/frontend's `ConversationPanel.svelte`.
+fn price_usage_line(u: &ws_types::WsUsage) -> impl IntoView + use<> {
+    let p = price_usage(u);
+    view! {
+        <p class="usage-line" title=u.model.clone()>
+            <span>{format!("in {}", format_tokens(u.input_tokens))}</span>
+            <span title="cache write">{format!("↑{}", format_tokens(u.cache_creation_tokens))}</span>
+            <span title="cache read">{format!("↓{}", format_tokens(u.cache_read_tokens))}</span>
+            <span>{format!("out {}", format_tokens(u.output_tokens))}</span>
+            <span class="cost">{format_usd(p.cost_usd)}</span>
+            <span title="context window used">
+                {format!("ctx {}/{} ({:.1}%)", format_tokens(p.context_used), format_tokens(p.context_max), p.context_pct)}
+            </span>
+            <span>{format!("turns {}", u.turns)}</span>
+        </p>
+    }
+}
+
 #[component]
 pub fn ConversationView(
     conv: String,
     rail: RwSignal<Rail>,
     conversations: RwSignal<Conversations>,
     approvals: RwSignal<Approvals>,
+    usage: RwSignal<Usage>,
     now: RwSignal<Millis>,
     on_send: Callback<String>,
     on_cancel: Callback<()>,
@@ -372,6 +395,11 @@ pub fn ConversationView(
                         }
                     }}
                 </p>
+
+                {move || {
+                    let snapshot = conv.with_value(|c| usage.with(|u| u.get(c).cloned()));
+                    snapshot.map(|s| price_usage_line(&s))
+                }}
 
                 {move || {
                     let note = conv.with_value(|c| conversations.with(|cs| cs.get(c).and_then(|oc| oc.last_say.clone())));
