@@ -613,6 +613,7 @@ async fn run_query(
             &pubr,
             skills,
             refs,
+            &tools,
             query,
             &turn_id,
             &done.content,
@@ -654,11 +655,21 @@ async fn run_tool_round(
     pubr: &Publisher,
     skills: &Skills,
     refs: &crate::refs::RefStore,
+    offered: &[Value],
     query: &str,
     turn_id: &str,
     content: &[Value],
     cancel: &mut watch::Receiver<bool>,
 ) -> Vec<Value> {
+    // The gate: a tool_use for anything not in THIS turn's offered set is
+    // refused before any dispatch touches it, never executed. A schema
+    // absent from `tools` is not a suggestion the model might ignore — it is
+    // the only enforcement disabling a tool has. A model calling a name it
+    // was never offered (stale context, a hallucinated retry, an adopted
+    // conversation's history) must never reach a match arm that still knows
+    // how to run it.
+    let offered_names: std::collections::HashSet<&str> =
+        offered.iter().filter_map(|t| t["name"].as_str()).collect();
     let mut results: Vec<Value> = Vec::new();
     for block in content.iter().filter(|b| b["type"] == "tool_use") {
         let id = block["id"].as_str().unwrap_or("");
@@ -673,6 +684,15 @@ async fn run_tool_round(
             }),
         )
         .await;
+        if !offered_names.contains(name) {
+            results.push(json!({
+                "type": "tool_result",
+                "tool_use_id": id,
+                "content": format!("{name:?} is not offered this turn — refused, not executed"),
+                "is_error": true,
+            }));
+            continue;
+        }
         // ReadFile is the one tool whose result isn't text (a binary attachment
         // is a content block array) — handled before the common match, which
         // assumes every other tool's result is a plain String.
