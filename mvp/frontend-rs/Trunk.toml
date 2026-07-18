@@ -3,7 +3,7 @@
 # Svelte app. So the page's ws://localhost:8080/ws reaches towerd unchanged.
 
 [[proxy]]
-backend = "http://127.0.0.1:8081/ws"
+backend = "ws://127.0.0.1:8081/ws"
 ws = true
 
 [[proxy]]
