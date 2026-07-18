@@ -1,7 +1,10 @@
 //! The tab bar: reads the `view` concern only. Renaming uses the browser's
 //! native `prompt()`, same as mvp/frontend's `RowList`/`App.svelte` — a tab
 //! name is a rare, deliberate edit, not worth an inline editor the way a
-//! conversation's title is (clicked far more often, from the rail).
+//! conversation's title is (clicked far more often, from the rail). Closing
+//! confirms first, same as `App.svelte`'s `confirm(\`Close tab "${t.name}"?\`)`
+//! — a tab is a mission control with however many conversations open in it,
+//! not a scratch view; losing that set to a stray click is real work lost.
 
 use leptos::prelude::*;
 
@@ -46,8 +49,19 @@ pub fn TabBar(
                                         {tab.name.clone()}
                                     </button>
                                     {(can_close && is_active).then(|| {
+                                        let confirm_name = tab.name.clone();
                                         view! {
-                                            <button class="tab-close" on:click=move |_| on_close.run(i)>"×"</button>
+                                            <button
+                                                class="tab-close"
+                                                on:click=move |_| {
+                                                    let confirmed = web_sys::window()
+                                                        .and_then(|w| w.confirm_with_message(&format!("Close tab \"{confirm_name}\"?")).ok())
+                                                        .unwrap_or(false);
+                                                    if confirmed {
+                                                        on_close.run(i);
+                                                    }
+                                                }
+                                            >"×"</button>
                                         }
                                     })}
                                 </span>
