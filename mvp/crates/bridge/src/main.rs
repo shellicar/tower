@@ -38,6 +38,7 @@ mod editfile;
 mod exec;
 mod find;
 mod matcher;
+mod memory;
 mod mutate;
 mod objects;
 mod pipe;
