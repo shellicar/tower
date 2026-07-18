@@ -16,6 +16,6 @@ export const conversations = new Conversations(transport);
 export const rail = new Rail(transport);
 export const approvals = new Approvals(transport);
 export const usage = new Usage(transport);
-export const view = new View(conversations);
+export const view = new View(conversations, transport);
 
 transport.connect();

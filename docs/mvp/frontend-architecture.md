@@ -38,7 +38,12 @@ boundary where it won't — so neither a human nor an LLM has to remember it.
     liveQuery, pendingSay.
   - **approvals** — the asks.
   - **agents** — instances + attachments; liveness inputs.
-  - **view** — tabs, filters, grouping; localStorage; never touches the wire.
+  - **view** — tabs (name + open set) and whether the approvals view is
+    showing. Tabs are shared, durable fleet state as of 19 Jul (`layout`/
+    `set_layout` on the wire, towerd's `layout` table) — the tmux-attach
+    model: every connected client sees the same tabs, live. Filters/grouping
+    (`ViewConfig`) and which tab is active stay localStorage, deliberately:
+    facts about the viewer, not the shared workspace.
 - **Components** — render a concern's view. A component reads one concern (or a
   few), holds only its *own* local UI state (draft, scroll anchor, edit/upload
   buffers), and never reaches into the transport or another concern.

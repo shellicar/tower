@@ -101,6 +101,13 @@ export interface UsageSnapshot {
   contextTokens: number;
 }
 
+/** One tab: a name and its open set. A `ViewConfig` (filters/grouping) isn't
+ *  on the wire yet — out of scope for this pass, same as the Leptos build. */
+export interface WireTab {
+  name: string;
+  convs: string[];
+}
+
 /** One agent wire fact, flat; `kind` is an open set — unknown kinds skipped. */
 export interface AgentEvent {
   kind: string;
@@ -139,6 +146,8 @@ export type ServerMsg =
   | { type: 'streaming'; conv: string; text: string }
   | { type: 'stream_block'; conv: string; blockType: string }
   | ({ type: 'usage' } & UsageSnapshot)
+  | { type: 'layout'; tabs: WireTab[] }
+  | { type: 'layout_set'; id: string }
   | { type: 'error'; id: string; reason: string };
 
 // client → towerd
@@ -156,7 +165,8 @@ export type ClientMsg =
   | { type: 'cancel'; id: string; conv: string; query: string }
   | { type: 'set_title'; id: string; conv: string; title: string }
   | { type: 'set_tag'; id: string; conv: string; key: string; value: string }
-  | { type: 'answer'; id: string; approval: string; approved: boolean };
+  | { type: 'answer'; id: string; approval: string; approved: boolean }
+  | { type: 'set_layout'; id: string; tabs: WireTab[] };
 
 export function isRef(value: unknown): value is Ref {
   return (
