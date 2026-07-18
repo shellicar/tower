@@ -266,8 +266,14 @@ mod tests {
         let dir = skills_dir(
             "delta",
             &[
-                ("alpha", "---\nname: alpha\ndescription: first\n---\nbody one\n"),
-                ("beta", "---\nname: beta\ndescription: second\n---\nbody two\n"),
+                (
+                    "alpha",
+                    "---\nname: alpha\ndescription: first\n---\nbody one\n",
+                ),
+                (
+                    "beta",
+                    "---\nname: beta\ndescription: second\n---\nbody two\n",
+                ),
             ],
         );
         let base = Skills::scan(dir.clone()).baseline();
