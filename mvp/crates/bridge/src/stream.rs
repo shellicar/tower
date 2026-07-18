@@ -24,18 +24,16 @@ pub struct LineEntry {
 }
 
 /// The one value that flows between engine steps, typed at every boundary.
-/// `Lines` and the two methods below are unused until the next commit
-/// (`Read`, the first stage to construct and consume them) — the shape
-/// lands with `Find` because nothing later can build without it existing.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum Stream {
     Files(Vec<FileEntry>),
     Lines(Vec<LineEntry>),
 }
 
-#[allow(dead_code)]
 impl Stream {
+    // Unused by production code until Head/Tail/Range (commit 6) size against
+    // a stream; kept here because it's part of the type's shape, not a stage.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         match self {
             Stream::Files(v) => v.len(),
@@ -43,16 +41,22 @@ impl Stream {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }
 
+/// Combined output cap, shared by every tool built on this engine — nothing
+/// near this belongs in a model request (mirrors `exec.rs`'s own cap).
+const MAX_OUTPUT_BYTES: usize = 100 * 1024;
+
 /// Render a stream as the tool_result text a model reads — the engine's one
 /// terminal formatter, shared by every tool that can end a run: a standalone
-/// `Find`/`Read`/etc. today, and `Pipe`'s own last step later.
+/// `Find`/`Read`/etc. today, and `Pipe`'s own last step later. Capped once,
+/// here, so no individual tool has to reimplement truncation.
 pub fn format_stream(stream: &Stream) -> String {
-    match stream {
+    let full = match stream {
         Stream::Files(files) => {
             if files.is_empty() {
                 return "(no files)".to_string();
@@ -73,7 +77,15 @@ pub fn format_stream(stream: &Stream) -> String {
                 .collect::<Vec<_>>()
                 .join("\n")
         }
+    };
+    if full.len() <= MAX_OUTPUT_BYTES {
+        return full;
     }
+    let mut cut = MAX_OUTPUT_BYTES;
+    while !full.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}\n[truncated at 100 KB]", &full[..cut])
 }
 
 #[cfg(test)]

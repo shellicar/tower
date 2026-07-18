@@ -36,6 +36,7 @@ mod decisions;
 mod exec;
 mod find;
 mod objects;
+mod read;
 mod skills;
 mod stream;
 

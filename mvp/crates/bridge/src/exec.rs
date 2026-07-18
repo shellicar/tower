@@ -107,43 +107,6 @@ pub fn exec_schema() -> Value {
     })
 }
 
-pub fn read_schema() -> Value {
-    json!({
-        "name": "Read",
-        "description": "Read a UTF-8 text file and return its contents (capped at \
-            100 KB). Read-only, so no approval is required — prefer this over \
-            `cat` via Bash.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Path to the file to read."
-                }
-            },
-            "required": ["path"],
-            "additionalProperties": false
-        }
-    })
-}
-
-/// Read a file for the Read tool. Returns (content, is_error). Read-only: the
-/// caller runs it without the approval gate. Content is capped like Bash output.
-pub async fn run_read(path: &str) -> (String, bool) {
-    match tokio::fs::read(path).await {
-        Ok(bytes) => {
-            let truncated = bytes.len() > MAX_OUTPUT_BYTES;
-            let take = bytes.len().min(MAX_OUTPUT_BYTES);
-            let mut content = String::from_utf8_lossy(&bytes[..take]).into_owned();
-            if truncated {
-                content.push_str("\n[truncated at 100 KB]");
-            }
-            (content, false)
-        }
-        Err(e) => (format!("failed to read {path}: {e}"), true),
-    }
-}
-
 /// Kill the child's whole process group: SIGTERM, a 500ms grace, SIGKILL.
 /// A program that ignores TERM is reaped by the KILL and reports it; honest.
 /// Unix-only; the Windows seam is a Job Object with KILL_ON_JOB_CLOSE, which
