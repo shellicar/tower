@@ -60,6 +60,22 @@ use wire::now_iso;
 
 const PULSE_INTERVAL_S: i64 = 30;
 
+/// Expand a leading `~` or `~/...` to `$HOME`. A control line is JSON over
+/// stdio, never a shell, so this is the only place a `~`-prefixed path is
+/// ever resolved — anywhere else, it stays a literal tilde character.
+fn expand_tilde(path: &str) -> std::path::PathBuf {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return std::path::PathBuf::from(home).join(rest);
+        }
+    } else if path == "~"
+        && let Ok(home) = std::env::var("HOME")
+    {
+        return std::path::PathBuf::from(home);
+    }
+    std::path::PathBuf::from(path)
+}
+
 /// Replay a conversation's committed messages from the capture stream, in
 /// stream order (= commit order). Messages only: telemetry and deltas are
 /// observation, and this bridge publishes no revisions or tip movements to
@@ -274,13 +290,33 @@ impl Host {
                 println!("{}", serde_json::json!({ "error": "skills needs dir" }));
                 return;
             };
-            let path: std::path::PathBuf = dir.into();
+            // A control line is JSON over stdio, never a shell — nothing else
+            // will ever expand a leading `~`, so this is the one place it can
+            // happen; without it, a `~/...` path silently sets an unreadable
+            // directory with no clue why.
+            let path = expand_tilde(dir);
             *self.skills_root.write().unwrap() = path.clone();
             eprintln!("bridge: skills dir → {}", path.display());
-            println!(
-                "{}",
-                serde_json::json!({ "skillsDir": path.to_string_lossy() })
-            );
+            // Setting the config is never rejected — the directory might not
+            // exist yet, or might arrive before it does — but a missing or
+            // non-directory path is silent otherwise, so it's surfaced as a
+            // warning alongside the (always successful) set.
+            let mut response = serde_json::json!({ "skillsDir": path.to_string_lossy() });
+            match std::fs::metadata(&path) {
+                Ok(m) if m.is_dir() => {}
+                Ok(_) => {
+                    let warning = format!("{} exists but is not a directory", path.display());
+                    eprintln!("bridge: skills dir warning: {warning}");
+                    response["warning"] = serde_json::json!(warning);
+                }
+                Err(e) => {
+                    let warning =
+                        format!("{} does not exist or is unreadable: {e}", path.display());
+                    eprintln!("bridge: skills dir warning: {warning}");
+                    response["warning"] = serde_json::json!(warning);
+                }
+            }
+            println!("{response}");
         } else if let Some(system) = value.get("system") {
             // The API system prompt, read fresh each turn; never persisted.
             let Some(text) = system.as_str() else {
@@ -494,4 +530,51 @@ async fn main() -> anyhow::Result<()> {
     // stdin closed: keep serving what was spawned until killed.
     std::future::pending::<()>().await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expand_tilde;
+
+    #[test]
+    fn expands_a_leading_tilde_slash_to_home() {
+        let home = std::env::var("HOME").expect("HOME set in test environment");
+        let expanded = expand_tilde("~/repos/skills");
+        assert_eq!(
+            expanded,
+            std::path::PathBuf::from(home).join("repos/skills")
+        );
+    }
+
+    #[test]
+    fn expands_a_bare_tilde_to_home() {
+        let home = std::env::var("HOME").expect("HOME set in test environment");
+        assert_eq!(expand_tilde("~"), std::path::PathBuf::from(home));
+    }
+
+    #[test]
+    fn leaves_an_absolute_path_unchanged() {
+        assert_eq!(
+            expand_tilde("/abs/path"),
+            std::path::PathBuf::from("/abs/path")
+        );
+    }
+
+    #[test]
+    fn leaves_a_relative_path_unchanged() {
+        assert_eq!(
+            expand_tilde("rel/path"),
+            std::path::PathBuf::from("rel/path")
+        );
+    }
+
+    #[test]
+    fn does_not_expand_a_tilde_that_is_not_a_path_prefix() {
+        // "~foo" (another user's home) is deliberately not handled — only
+        // the bare current-user forms (`~`, `~/...`) are.
+        assert_eq!(
+            expand_tilde("~foo/bar"),
+            std::path::PathBuf::from("~foo/bar")
+        );
+    }
 }
