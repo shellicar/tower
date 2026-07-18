@@ -60,6 +60,11 @@ pub enum ViewEvent {
     /// (towerd accumulates), gated by `open` like `Message`. Absolute
     /// snapshot: the client replaces what it holds, never sums.
     Usage(UsageState),
+    /// The fleet's layout changed — tabs, JSON text verbatim (the shape a
+    /// client already sent). Awareness is unconditional, like `Row`: every
+    /// connected session sees the same shared workspace change live, the
+    /// tmux-attach model settled 12 Jul.
+    Layout(String),
 }
 
 /// The agent concern's facts, verdict-free: alive/released/stranded is the
@@ -238,6 +243,18 @@ pub enum ViewQuery {
         last_seq: u64,
         reply: oneshot::Sender<u64>,
     },
+    /// The current layout's tabs, JSON text verbatim; `None` before any
+    /// client has ever set one.
+    Layout {
+        reply: oneshot::Sender<Option<String>>,
+    },
+    /// Replaces the whole layout — coarse, not per-action: tabs are few and
+    /// small, so a full replace on every change is simpler than a dozen
+    /// fine-grained ops (add_tab/rename_tab/...) and costs nothing extra.
+    SetLayout {
+        tabs: String,
+        reply: oneshot::Sender<()>,
+    },
 }
 
 /// What sessions hold: the read channel plus the event fan-out.
@@ -366,6 +383,19 @@ const MIGRATIONS: &[&str] = &[
     // default 0 covers rows and producers that never carried the split.
     "ALTER TABLE usage ADD COLUMN cache_creation_5m_tokens INTEGER NOT NULL DEFAULT 0;
      ALTER TABLE usage ADD COLUMN cache_creation_1h_tokens INTEGER NOT NULL DEFAULT 0;",
+    // 9 — layout: the durable shape of attention across the fleet (which
+    // tabs exist, which conversations are open in each, what each is
+    // called). NOT a materialised view: never touched by rematerialisation,
+    // same footing as titles/tags. Keyed by `layout_id` though v1 has
+    // exactly one row ("default") — no auth yet, so no per-user dimension
+    // to key on, but the shape is known (a login, a profile) and the CLAUDE.md
+    // schema rule is explicit: key it now, don't singleton and migrate later.
+    // `tabs` is the whole blob as JSON text, not normalised — tabs are few
+    // and always read/written together, so there is nothing a join buys here.
+    "CREATE TABLE layout (
+         layout_id TEXT PRIMARY KEY,
+         tabs      TEXT NOT NULL
+     );",
 ];
 
 pub fn apply_schema(db: &Connection) -> anyhow::Result<()> {
@@ -910,6 +940,17 @@ impl Views {
                     }
                 }
             }
+            ViewQuery::Layout { reply } => {
+                let _ = reply.send(self.layout().ok().flatten());
+            }
+            ViewQuery::SetLayout { tabs, reply } => {
+                if let Err(e) = self.set_layout(&tabs) {
+                    eprintln!("views: set_layout failed: {e:#}");
+                } else {
+                    let _ = self.events.send(ViewEvent::Layout(tabs));
+                }
+                let _ = reply.send(());
+            }
         }
     }
 
@@ -1013,6 +1054,29 @@ impl Views {
     /// The conversation's usage snapshot; `None` when it has no usage yet.
     fn usage(&self, conv: &ConversationId) -> anyhow::Result<Option<UsageState>> {
         Ok(read_usage_row(&self.db, conv).optional()?)
+    }
+
+    /// The one shared layout row ("default" — no per-user dimension yet).
+    const LAYOUT_ID: &'static str = "default";
+
+    fn layout(&self) -> anyhow::Result<Option<String>> {
+        Ok(self
+            .db
+            .query_row(
+                "SELECT tabs FROM layout WHERE layout_id = ?1",
+                [Self::LAYOUT_ID],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
+    fn set_layout(&self, tabs: &str) -> anyhow::Result<()> {
+        self.db.execute(
+            "INSERT INTO layout (layout_id, tabs) VALUES (?1, ?2)
+             ON CONFLICT(layout_id) DO UPDATE SET tabs = excluded.tabs",
+            rusqlite::params![Self::LAYOUT_ID, tabs],
+        )?;
+        Ok(())
     }
 
     fn set_title(&self, conv: &ConversationId, title: &str) -> anyhow::Result<()> {
@@ -1486,6 +1550,27 @@ mod tests {
         // Empty title clears; the row falls back to untitled.
         views.set_title(&conv, "").unwrap();
         assert_eq!(rows_of(&views)[0].title, None);
+    }
+
+    #[test]
+    fn layout_round_trips_and_broadcasts_on_set() {
+        let (views, mut rx) = fresh();
+
+        // Nothing set yet: absent, not an error.
+        assert_eq!(views.layout().unwrap(), None);
+
+        let tabs = r#"[{"name":"main","convs":["c1","c2"]}]"#;
+        views.set_layout(tabs).unwrap();
+        assert_eq!(views.layout().unwrap().as_deref(), Some(tabs));
+
+        // A second write replaces, last-write-wins, same as titles/tags.
+        let renamed = r#"[{"name":"work","convs":["c1"]}]"#;
+        views.set_layout(renamed).unwrap();
+        assert_eq!(views.layout().unwrap().as_deref(), Some(renamed));
+
+        // set_layout itself doesn't broadcast (the `answer` dispatch does,
+        // once the write is known to have committed) — nothing to drain here.
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]

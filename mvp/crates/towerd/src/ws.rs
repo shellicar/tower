@@ -24,7 +24,7 @@ use crate::views::{
 // the mirror. The From impls below adapt towerd's internal view types into it.
 use ws_types::{
     ClientMsg, ServerMsg, WsAgent, WsAgentAttachment, WsAgentInstance, WsApproval, WsMessage,
-    WsRow, WsSettled, WsUsage,
+    WsRow, WsSettled, WsTab, WsUsage,
 };
 
 impl From<ApprovalState> for WsApproval {
@@ -230,6 +230,9 @@ impl Session {
             ViewEvent::Usage(state) if self.watching.contains(&state.conv) => {
                 Some(ServerMsg::Usage(state.into()))
             }
+            // Layout is awareness, like rows and approvals: every connected
+            // session sees the shared workspace change, not just its owner.
+            ViewEvent::Layout(tabs) => Some(ServerMsg::Layout { tabs: parse_tabs(&tabs) }),
             _ => None,
         }
     }
@@ -409,6 +412,25 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
             }
             vec![ServerMsg::TitleSet { id, conv }]
         }
+        ClientMsg::SetLayout { id, tabs } => {
+            let Ok(json) = serde_json::to_string(&tabs) else {
+                return vec![ServerMsg::Error {
+                    id,
+                    reason: "malformed".into(),
+                }];
+            };
+            let (tx, rx) = oneshot::channel();
+            let query = ViewQuery::SetLayout { tabs: json, reply: tx };
+            if views.queries.send(query).await.is_err() || rx.await.is_err() {
+                return vec![ServerMsg::Error {
+                    id,
+                    reason: "views unavailable".into(),
+                }];
+            }
+            // The broadcast (sent by Views itself once the write commits)
+            // reaches this same session too, so it doesn't need echoing here.
+            vec![ServerMsg::LayoutSet { id }]
+        }
         ClientMsg::Say {
             id,
             conv,
@@ -444,6 +466,13 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
             }]
         }
     }
+}
+
+/// Tolerant: an unparseable stored blob folds to no tabs rather than a
+/// broken connection (the wire's own leniency, applied to towerd's own
+/// storage — a hand-edited db row must not crash every session).
+fn parse_tabs(json: &str) -> Vec<WsTab> {
+    serde_json::from_str(json).unwrap_or_default()
 }
 
 /// Best effort at echoing an id out of unparseable text, so even a malformed
@@ -530,6 +559,23 @@ pub async fn run_session<B: Broker, C: Clock>(
         attachments: attachments.into_iter().map(Into::into).collect(),
     };
     if send(&mut sink, &snapshot).await.is_err() {
+        return;
+    }
+
+    // The layout snapshot, once, right after `agents` — absent (no tabs)
+    // until any client has ever set one.
+    let (tx, rx) = oneshot::channel();
+    if views
+        .queries
+        .send(ViewQuery::Layout { reply: tx })
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let Ok(layout) = rx.await else { return };
+    let tabs = layout.as_deref().map(parse_tabs).unwrap_or_default();
+    if send(&mut sink, &ServerMsg::Layout { tabs }).await.is_err() {
         return;
     }
 

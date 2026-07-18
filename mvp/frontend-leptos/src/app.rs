@@ -44,49 +44,24 @@ fn now_ms() -> Millis {
     }
 }
 
-fn tabs_key() -> &'static str {
-    "tower.tabs"
-}
 fn active_key() -> &'static str {
     "tower.activeTab"
 }
 
-fn load_view() -> View {
-    let storage = web_sys::window().and_then(|w| w.local_storage().ok().flatten());
-    let Some(storage) = storage else { return View::default() };
-    let tabs: Option<Vec<crate::concerns::view::Tab>> = storage
-        .get_item(tabs_key())
-        .ok()
-        .flatten()
-        .and_then(|raw| serde_json::from_str::<Vec<(String, Vec<String>)>>(&raw).ok())
-        .map(|parsed| {
-            parsed
-                .into_iter()
-                .map(|(name, convs)| crate::concerns::view::Tab { name, convs })
-                .collect()
-        });
-    let active = storage
-        .get_item(active_key())
-        .ok()
-        .flatten()
+/// `active` is the one piece of view state that stays local (module doc on
+/// `concerns::view`): a small per-browser convenience, not synced.
+fn load_active() -> usize {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item(active_key()).ok().flatten())
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(0);
-    match tabs {
-        Some(tabs) if !tabs.is_empty() => View { active: active.min(tabs.len() - 1), tabs },
-        _ => View::default(),
-    }
+        .unwrap_or(0)
 }
 
-fn save_view(view: &View) {
-    let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) else {
-        return;
-    };
-    let shape: Vec<(String, Vec<String>)> =
-        view.tabs.iter().map(|t| (t.name.clone(), t.convs.clone())).collect();
-    if let Ok(json) = serde_json::to_string(&shape) {
-        let _ = storage.set_item(tabs_key(), &json);
+fn save_active(i: usize) {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item(active_key(), &i.to_string());
     }
-    let _ = storage.set_item(active_key(), &view.active.to_string());
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -96,7 +71,11 @@ pub fn App(ws_url: String) -> impl IntoView {
     let conversations = RwSignal::new(Conversations::default());
     let approvals = RwSignal::new(Approvals::default());
     let usage = RwSignal::new(Usage::default());
-    let view = RwSignal::new(load_view());
+    let view = RwSignal::new({
+        let mut v = View::default();
+        v.switch_tab(load_active());
+        v
+    });
     let ids = StoredValue::new_local(IdCounter::default());
     let now = RwSignal::new(now_ms());
 
@@ -108,6 +87,7 @@ pub fn App(ws_url: String) -> impl IntoView {
             conversations.update(|c| c.apply(&frame));
             approvals.update(|a| a.apply(&frame));
             usage.update(|u| u.apply(&frame));
+            view.update(|v| v.apply(&frame));
         })
         .expect("websocket connect"),
     );
@@ -124,11 +104,10 @@ pub fn App(ws_url: String) -> impl IntoView {
     let send = move |msg: ClientMsg| transport.with_value(|t| t.send(&msg));
     let next_id = move || ids.try_update_value(|c| c.next()).expect("id counter");
 
-    // Reconcile the wire-open set to the active tab's convs, then persist —
-    // every view mutation funnels through this one place. `next_id` is Copy
-    // (it only closes over the Copy `ids` handle), so a fresh local mutable
-    // copy per call keeps `sync_open` itself a `Fn`, callable from every
-    // action below without needing a `mut` binding at each call site.
+    // Reconcile the wire-open set to the active tab's convs after a view
+    // mutation: the tab change itself already went out as `SetLayout`
+    // (returned by the `View` action and sent below); this is the sibling
+    // send that opens/closes the actual conversations named in it.
     let sync_open = move || {
         let wanted = view.with(|v| v.tab().convs.clone());
         let mut mint = next_id;
@@ -136,29 +115,42 @@ pub fn App(ws_url: String) -> impl IntoView {
         for msg in msgs.into_iter().flatten() {
             send(msg);
         }
-        view.with(save_view);
     };
 
     let open_conversation = Callback::new(move |conv: String| {
-        view.update(|v| v.open_conversation(&conv));
+        let msg = view.try_update(|v| v.open_conversation(&conv, next_id()));
+        if let Some(msg) = msg.flatten() {
+            send(msg);
+        }
         sync_open();
     });
 
     let switch_tab = Callback::new(move |i: usize| {
         view.update(|v| v.switch_tab(i));
+        save_active(i);
         sync_open();
     });
     let add_tab = Callback::new(move |()| {
-        view.update(|v| v.add_tab());
+        let msg = view.try_update(|v| v.add_tab(next_id()));
+        if let Some(msg) = msg {
+            send(msg);
+        }
+        save_active(view.with(|v| v.active));
         sync_open();
     });
     let close_tab = Callback::new(move |i: usize| {
-        view.update(|v| v.close_tab(i));
+        let msg = view.try_update(|v| v.close_tab(i, next_id()));
+        if let Some(msg) = msg.flatten() {
+            send(msg);
+        }
+        save_active(view.with(|v| v.active));
         sync_open();
     });
     let rename_tab = Callback::new(move |(i, name): (usize, String)| {
-        view.update(|v| v.rename_tab(i, &name));
-        view.with(save_view);
+        let msg = view.try_update(|v| v.rename_tab(i, &name, next_id()));
+        if let Some(msg) = msg.flatten() {
+            send(msg);
+        }
     });
 
     let answer_approval = move |approval_id: String, approved: bool| {
@@ -236,7 +228,10 @@ pub fn App(ws_url: String) -> impl IntoView {
                                 let on_close = Callback::new({
                                     let conv = conv.clone();
                                     move |()| {
-                                        view.update(|v| v.close_conversation(&conv));
+                                        let msg = view.try_update(|v| v.close_conversation(&conv, next_id()));
+                                        if let Some(msg) = msg {
+                                            send(msg);
+                                        }
                                         sync_open();
                                     }
                                 });

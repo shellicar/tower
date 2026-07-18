@@ -58,6 +58,12 @@ pub enum ClientMsg {
         approval: String,
         approved: bool,
     },
+    /// Replaces the whole layout — the fleet's shared tabs (docs/mvp/
+    /// frontend-architecture.md's `view` concern, since promoted off
+    /// localStorage onto the wire: settled 12 Jul, "tower owns the
+    /// management structure, clients only render it").
+    #[serde(rename = "set_layout")]
+    SetLayout { id: String, tabs: Vec<WsTab> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,8 +149,24 @@ pub enum ServerMsg {
     },
     #[serde(rename = "usage")]
     Usage(WsUsage),
+    /// The fleet's layout, once at connect (after `agents`) and again
+    /// whenever any client changes it — every connected session sees the
+    /// same shared workspace live, the tmux-attach model.
+    #[serde(rename = "layout")]
+    Layout { tabs: Vec<WsTab> },
+    #[serde(rename = "layout_set")]
+    LayoutSet { id: String },
     #[serde(rename = "error")]
     Error { id: String, reason: String },
+}
+
+/// One tab: a name and its open set. mvp/frontend's `Tab` also carries a
+/// `ViewConfig` (filters/grouping) — not on the wire yet, out of scope for
+/// this pass (docs/mvp/frontend-leptos-plan.md's scope note applies here too).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WsTab {
+    pub name: String,
+    pub convs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
