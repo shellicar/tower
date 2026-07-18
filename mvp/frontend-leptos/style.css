@@ -1,0 +1,31 @@
+html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+.tower { display: flex; height: 100vh; }
+.rail { width: 300px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid #333; padding: 12px; box-sizing: border-box; }
+.rail h1 { font-size: 16px; margin: 0 0 8px; }
+.rail .status { color: #888; font-size: 12px; }
+.rail .awaiting { color: #eab308; }
+.rail ul { list-style: none; margin: 0; padding: 0; }
+.rail .rows li { display: flex; align-items: center; gap: 4px; padding: 4px 2px; cursor: pointer; border-radius: 4px; }
+.rail .rows li:hover { background: #222; }
+.rail .rows li.selected { background: #2a2a3a; }
+.rail .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail .age { color: #888; font-size: 11px; }
+.rail .liveness.alive { color: #4ade80; }
+.rail .liveness.stranded { color: #f87171; }
+.rail .pending { color: #eab308; }
+.rail .potential li, .rail .voided li { color: #888; padding: 4px 2px; cursor: pointer; }
+
+.conversation { flex: 1; display: flex; flex-direction: column; padding: 16px; overflow-y: auto; }
+.conversation .messages { flex: 1; overflow-y: auto; }
+.message { margin: 4px 0; }
+.message .who { color: #888; margin-right: 4px; }
+.message.user .who { color: #7dd3fc; }
+.message.assistant .who { color: #c4b5fd; }
+.pending-say { color: #888; }
+.approval { border: 1px solid #eab308; border-radius: 4px; padding: 8px; margin: 8px 0; }
+.approval pre { white-space: pre-wrap; word-break: break-all; }
+.last-say { color: #888; }
+.composer { display: flex; gap: 8px; align-items: center; }
+.composer input[type="text"] { flex: 1; padding: 6px; background: #1a1a1a; border: 1px solid #333; color: #eee; }
+button { background: #333; color: #eee; border: 1px solid #555; padding: 4px 10px; cursor: pointer; }
+button:hover { background: #444; }
