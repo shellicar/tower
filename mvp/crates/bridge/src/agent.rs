@@ -28,6 +28,26 @@ use crate::skills::Skills;
 /// must not spin forever on someone's API bill.
 const MAX_TURNS_PER_QUERY: usize = 16;
 
+/// Every tool schema offered on every turn, except `Skill` (gated on a
+/// non-empty catalogue — conversation-specific, not static). The one source
+/// both `run_query`'s per-turn tool list and main.rs's startup log read
+/// from, so what's printed at boot and what's actually offered can never
+/// drift apart. Bash is deliberately absent (kept in exec.rs, not deleted).
+pub fn static_tool_schemas() -> Vec<Value> {
+    vec![
+        crate::exec::exec_schema(),
+        crate::read::read_schema(),
+        crate::find::find_schema(),
+        crate::matcher::match_schema(),
+        crate::slice::head_schema(),
+        crate::slice::tail_schema(),
+        crate::slice::range_schema(),
+        crate::pipe::pipe_schema(),
+        crate::readfile::read_file_schema(),
+        crate::refs::ref_schema(),
+    ]
+}
+
 pub struct AgentConfig {
     pub conv: ConversationId,
     pub model: String,
@@ -406,24 +426,11 @@ async fn run_query(
     } = &ctx;
     let pubr = Publisher::new(client, conv);
 
-    // Bash is disabled for now — Exec is the preferred structured tool and
-    // covers what Bash covered; kept in exec.rs (not deleted) rather than
-    // offered. Dynamic per-conversation enable/disable (like the `skills`
-    // stdio repoint) is a real future direction, not built yet — this list
-    // is the whole story until then. Exec, Read, Find, Match, Head, Tail and
-    // Range always; Skill only when a catalogue exists.
-    let mut tools: Vec<Value> = vec![
-        crate::exec::exec_schema(),
-        crate::read::read_schema(),
-        crate::find::find_schema(),
-        crate::matcher::match_schema(),
-        crate::slice::head_schema(),
-        crate::slice::tail_schema(),
-        crate::slice::range_schema(),
-        crate::pipe::pipe_schema(),
-        crate::readfile::read_file_schema(),
-        crate::refs::ref_schema(),
-    ];
+    // Skill only when a catalogue exists; every other tool is always this
+    // same list (static_tool_schemas) — the one source main.rs's startup log
+    // reads from too, so what's printed and what's actually offered can never
+    // drift apart.
+    let mut tools: Vec<Value> = static_tool_schemas();
     if !skills.is_empty() {
         tools.push(skills.tool_schema());
     }

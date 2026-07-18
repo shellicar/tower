@@ -437,6 +437,14 @@ async fn main() -> anyhow::Result<()> {
     // The live stdio control loop: one JSON object per line in, one per line
     // out. Unknown lines are answered; compliance is answering, on every
     // surface.
+    let tool_names: Vec<String> = agent::static_tool_schemas()
+        .iter()
+        .filter_map(|t| t["name"].as_str().map(str::to_owned))
+        .collect();
+    eprintln!(
+        "bridge: tools: {} (+ Skill once a catalogue is set)",
+        tool_names.join(", ")
+    );
     eprintln!(
         "bridge: ready (model {}); spawn with {{\"spawn\":{{}}}}",
         host.default_model
