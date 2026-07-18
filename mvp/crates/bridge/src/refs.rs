@@ -42,7 +42,6 @@ pub fn open(path: &std::path::Path) -> Result<RefStore, String> {
 
 /// A stashed value's id and size — what a tool's own oversized-output
 /// handling returns to the caller as the `{ref, size, hint}` token.
-#[allow(dead_code)]
 pub struct Stored {
     pub id: String,
     pub size: usize,
@@ -51,7 +50,6 @@ pub struct Stored {
 /// Stash content, content-addressed: the id is the content's own sha256, so
 /// storing the same bytes twice (a repeated large result) is a no-op, not a
 /// duplicate row — the same dedupe towerd's `refs.rs` already established.
-#[allow(dead_code)]
 pub fn store(refs: &RefStore, content: &str, hint: &str) -> Result<Stored, String> {
     let id = format!("{:x}", Sha256::digest(content.as_bytes()));
     let size = content.len();
@@ -66,6 +64,29 @@ pub fn store(refs: &RefStore, content: &str, hint: &str) -> Result<Stored, Strin
 
 const DEFAULT_LIMIT: usize = 10_000;
 const MAX_LIMIT: usize = 100_000;
+
+/// Anything a tool result carries past this is oversized for a model
+/// request — mirrors the `~16 KB+` threshold CLAUDE.md documents for
+/// towerd's own (wire-side) ref externalisation; reused here for the
+/// model-context side rather than inventing a second number.
+const OVERSIZED_THRESHOLD: usize = 16 * 1024;
+
+/// The "walk and replace what's too big" choke point every composable/Exec
+/// tool's string result passes through before it becomes a `tool_result`.
+/// Under the threshold, `content` rides verbatim; over it, the FULL content
+/// is stashed (nothing is discarded, unlike the old hard-truncate) and a
+/// small `{ref, size, hint}` pointer takes its place — the model pages the
+/// rest in with the `Ref` tool. A stash failure falls back to the raw
+/// (still internally capped) content rather than losing the result outright.
+pub fn finalize(refs: &RefStore, content: String, hint: &str) -> Value {
+    if content.len() <= OVERSIZED_THRESHOLD {
+        return Value::String(content);
+    }
+    match store(refs, &content, hint) {
+        Ok(stored) => json!({ "ref": stored.id, "size": stored.size, "hint": hint }),
+        Err(_) => Value::String(content),
+    }
+}
 
 pub fn ref_schema() -> Value {
     json!({
@@ -127,7 +148,7 @@ pub fn run_ref(refs: &RefStore, input: &Value) -> (String, bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{run_ref, store};
+    use super::{finalize, run_ref, store};
     use rusqlite::Connection;
     use serde_json::json;
 
@@ -178,5 +199,26 @@ mod tests {
         let refs = memory_store();
         let (_, is_error) = run_ref(&refs, &json!({}));
         assert!(is_error);
+    }
+
+    #[test]
+    fn content_under_the_threshold_rides_verbatim() {
+        let refs = memory_store();
+        let out = finalize(&refs, "short".to_string(), "Exec");
+        assert_eq!(out, json!("short"));
+    }
+
+    #[test]
+    fn content_over_the_threshold_is_stashed_and_pointed_to() {
+        let refs = memory_store();
+        let big = "x".repeat(17 * 1024);
+        let out = finalize(&refs, big.clone(), "Exec");
+        let id = out["ref"].as_str().expect("ref id present").to_string();
+        assert_eq!(out["hint"], "Exec");
+        assert_eq!(out["size"].as_u64().unwrap() as usize, big.len());
+        // Nothing was discarded: the full content is fetchable back out.
+        let (fetched, is_error) = run_ref(&refs, &json!({ "id": id, "limit": 100_000 }));
+        assert!(!is_error);
+        assert!(fetched.contains(&big[..100]));
     }
 }

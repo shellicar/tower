@@ -785,6 +785,10 @@ async fn run_tool_round(
             "Ref" => crate::refs::run_ref(refs, &block["input"]),
             other => (format!("unknown tool {other:?}"), true),
         };
+        // Walk and replace: anything over the oversized threshold is stashed
+        // whole (never discarded) and swapped for a small { ref, size, hint }
+        // pointer the model pages back in with the Ref tool.
+        let content = crate::refs::finalize(refs, content, name);
         results.push(json!({
             "type": "tool_result",
             "tool_use_id": id,
