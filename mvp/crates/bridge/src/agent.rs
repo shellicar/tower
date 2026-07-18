@@ -47,6 +47,7 @@ pub fn static_tool_schemas() -> Vec<Value> {
         crate::refs::ref_schema(),
         crate::mutate::create_file_schema(),
         crate::mutate::append_file_schema(),
+        crate::editfile::edit_file_schema(),
     ]
 }
 
@@ -849,6 +850,27 @@ async fn run_tool_round(
                 {
                     crate::approval::Verdict::Approved => {
                         crate::mutate::run_append_file(&block["input"]).await
+                    }
+                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
+                    crate::approval::Verdict::Cancelled => {
+                        ("cancelled by user before approval".to_string(), true)
+                    }
+                }
+            }
+            "EditFile" => {
+                let approval_id = uuid::Uuid::new_v4().to_string();
+                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                let correlation = json!({
+                    "conversationId": pubr.conv().0,
+                    "queryId": query,
+                    "turnId": turn_id,
+                    "toolUseId": id,
+                });
+                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                    .await
+                {
+                    crate::approval::Verdict::Approved => {
+                        crate::editfile::run_edit_file(&block["input"]).await
                     }
                     crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
                     crate::approval::Verdict::Cancelled => {

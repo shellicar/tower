@@ -33,6 +33,7 @@ mod agent;
 mod anthropic;
 mod approval;
 mod decisions;
+mod editfile;
 mod exec;
 mod find;
 mod matcher;
