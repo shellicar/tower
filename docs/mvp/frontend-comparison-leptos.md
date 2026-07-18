@@ -64,13 +64,26 @@ updates only the DOM nodes whose signal dependencies changed (fine-grained, like
 equivalent needed for redraw; the one polling loop in this build (`set_interval`, 1s) is
 there only because two verdicts (liveness, approval-void) are pure functions of wall
 clock against held facts, not wire events — the same reason `frontend-rs` re-evaluates
-every frame and Svelte used to (`heat`/`liveness` interval-boxes). Nothing else ticks. A
-proper idle-CPU/memory number needs a running browser tab under profiling, which this
-session didn't do; the structural claim (no per-frame repaint, real DOM, no tofu) is
-what the plan asked to confirm and is confirmed by inspection of what actually
-executes, not measured empirically here.
+every frame and Svelte used to (`heat`/`liveness` interval-boxes). Nothing else ticks.
 
-Verdict: Axis 3 moves as predicted. egui's cost was egui's, not Rust's.
+Measured, not just predicted: all three tabs open side by side against the same live
+towerd, idle (task manager sample, one connected conversation each, no active stream):
+
+| build  | memory  | CPU   |
+|--------|---------|-------|
+| egui   | 128 MB  | 28.8% |
+| Leptos | 62.3 MB | 0.1%  |
+| Svelte | 55.6 MB | 0.0%  |
+
+Leptos lands where the structural argument said it would: within striking distance of
+Svelte (62.3 MB vs 55.6 MB, both near-zero idle CPU), nowhere near egui's continuous
+repaint cost (128 MB and, more tellingly, 28.8% CPU at idle — the `request_repaint_after`
+loop actually painting every ~100ms whether anything changed or not). The CPU gap is the
+sharper number: egui pays a standing tax just to exist on screen; Leptos and Svelte pay
+nothing until a signal actually changes.
+
+Verdict: Axis 3 moves as predicted, and now confirmed, not just argued from structure.
+egui's cost was egui's, not Rust's.
 
 ## Axis 4: survival under careless extension — the same build-in-sequence method
 
@@ -130,8 +143,8 @@ What Leptos bought over egui, holding the architecture constant:
 
 - A real DOM (Axis 3): browser find/select/right-click, no tofu glyphs, an inspectable
   tree. This is the axis the plan set out to move, and it moved.
-- Idle-cost shape closer to Svelte's fine-grained update than egui's per-frame repaint,
-  by construction (not empirically profiled this session).
+- Idle cost within reach of Svelte's (62.3 MB / 0.1% CPU vs 55.6 MB / 0.0%) and far
+  below egui's (128 MB / 28.8% CPU) — measured, not just argued from construction.
 - The wire-type sharing win (Axis 2) carries over unchanged, as expected.
 
 What it cost, against egui:
@@ -144,10 +157,8 @@ What it cost, against egui:
 - The wasm-only native-check gap recurs unchanged — this is a lesson about any
   trunk/wasm Rust frontend, not this framework specifically.
 
-What stays open: a real idle-CPU/memory number against the ~175MB/several-%-CPU egui
-figure and the ~55MB/near-zero Svelte figure, which needs a running browser tab, not
-static inspection. And whether the `view!` ergonomics are a Leptos 0.8 rough edge or
-inherent to fine-grained-reactive Rust — worth revisiting against `leptos_dom`'s own
+What stays open: whether the `view!` ergonomics are a Leptos 0.8 rough edge or inherent
+to fine-grained-reactive Rust — worth revisiting against `leptos_dom`'s own
 `COMMON_BUGS.md` if this build continues.
 
 ## Running it
