@@ -81,9 +81,11 @@ impl From<AgentFact> for WsAgent {
                 ts,
                 conv,
                 cwd,
+                interval_s,
             } => WsAgent {
                 conv: Some(conv.0),
                 cwd,
+                interval_s,
                 ..base("attached", world, instance, ts)
             },
             AgentFact::Detached {

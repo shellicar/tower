@@ -49,6 +49,13 @@ pub struct Attached {
     /// cwd is causal (an input to how the conversation unfolds) — a named field.
     #[serde(default)]
     pub cwd: Option<String>,
+    /// The liveness promise, optionally carried here too (not just `pulse`) —
+    /// optional for backward compatibility with producers that don't send it
+    /// yet. Absent = no promise; the reader's fold applies its own default
+    /// silence threshold rather than reading absence as "definitely alive"
+    /// (docs/spec/agent-spec.md, Liveness is a fold, never declared).
+    #[serde(default, rename = "intervalS")]
+    pub interval_s: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -102,6 +109,17 @@ mod tests {
         let a: Attached = serde_json::from_value(v).unwrap();
         assert_eq!(a.conversation_id, ConversationId("conv-abc".into()));
         assert_eq!(a.cwd.as_deref(), Some("~/repos/tower"));
+        assert_eq!(a.interval_s, None); // an older producer omits it entirely
+    }
+
+    #[test]
+    fn attached_carries_its_own_interval_when_a_producer_sends_one() {
+        let v = json!({
+            "ts": "2026-07-07T21:00:00+10:00", "instanceId": "inst-1a2f",
+            "conversationId": "conv-abc", "intervalS": 15
+        });
+        let a: Attached = serde_json::from_value(v).unwrap();
+        assert_eq!(a.interval_s, Some(15));
     }
 
     #[test]

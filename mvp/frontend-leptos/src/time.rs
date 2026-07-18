@@ -15,14 +15,27 @@ pub enum Liveness {
     Stranded,
 }
 
+/// No declared interval read as "definitely alive" forever, previously — the
+/// gap found in the field 19 Jul 2026: an instance that attaches and dies
+/// before ever pulsing has no promise to break, so it never went stranded.
+/// `attached` now carries `intervalS` too (docs/spec/agent-spec.md), but
+/// optionally, for producers that haven't caught up; this is the fallback
+/// for exactly that gap, not a replacement for a real declared promise.
+pub const DEFAULT_STRANDED_AFTER_MS: Millis = 60_000;
+
 /// Liveness is a fold, never declared (agent-spec): the facts are the pulse and
 /// the instance's own declared interval; the verdict is the reader's, against
 /// its own clock. Stranded = silence past ~3 declared intervals; no declared
-/// interval yet = no verdict to pass (Alive).
+/// interval yet uses the flat default threshold above, not an automatic Alive.
 pub fn liveness_verdict(now: Millis, last_pulse: Millis, interval_s: Option<i64>) -> Liveness {
-    match interval_s {
-        Some(s) if now - last_pulse > 3 * s * 1000 => Liveness::Stranded,
-        _ => Liveness::Alive,
+    let stranded_after = match interval_s {
+        Some(s) => 3 * s * 1000,
+        None => DEFAULT_STRANDED_AFTER_MS,
+    };
+    if now - last_pulse > stranded_after {
+        Liveness::Stranded
+    } else {
+        Liveness::Alive
     }
 }
 
@@ -53,8 +66,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn no_declared_interval_is_never_stranded() {
-        assert_eq!(liveness_verdict(1_000_000, 0, None), Liveness::Alive);
+    fn no_declared_interval_uses_the_default_threshold() {
+        // Fresh (no promise yet, but recent): alive.
+        assert_eq!(liveness_verdict(1_000_000, 999_500, None), Liveness::Alive);
+        // Silent past the default 60s with no promise ever declared: stranded
+        // — not alive forever, the gap this default closes.
+        assert_eq!(liveness_verdict(1_000_000, 900_000, None), Liveness::Stranded);
     }
 
     #[test]

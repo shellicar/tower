@@ -59,13 +59,19 @@ map: who serves what, and whether they are alive.
 |---|---|---|
 | `ready` | `instanceId`, `host` | a process now serves this world; published once on boot, after its subscriptions are up |
 | `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement the master spec forbids |
-| `attached` | `instanceId`, `conversationId`, `cwd` | this instance is serving this conversation. What makes a conversation exist for observers before its first message |
+| `attached` | `instanceId`, `conversationId`, `cwd`, `intervalS`? | this instance is serving this conversation. What makes a conversation exist for observers before its first message. May carry `intervalS` (optional, backward compatible with producers that don't yet) so a fresh attachment can have a liveness basis immediately; when absent, the fold below has a default so the gap doesn't read as permanently alive |
 | `detached` | `instanceId`, `conversationId` | released, deliberately — Ctrl-C, drain, done. A decided fact; a crash publishes nothing |
 
 **Liveness is a fold, never declared.** An instance is presumed gone after
 about three of its own declared intervals of silence — judged against its own
-promise, nobody else's; the spec mandates no cadence. A conversation's state
-derives:
+promise, nobody else's; the spec mandates no cadence. **No declared interval
+yet is not the same as alive**: an attachment (or a pulse) that has never
+carried `intervalS` still needs a verdict, so a consumer applies a flat
+default silence threshold (60s is this spec's suggested default — deployments
+may choose their own) until a real promise arrives. Found in the field 19 Jul
+2026: without this, an instance that attaches and dies before ever pulsing
+reads as alive forever, because "no promise" and "definitely alive" collapsed
+into the same fold outcome. A conversation's state derives:
 
 - **alive** — attached by an instance whose pulse is fresh;
 - **released** — cleanly detached;
@@ -183,7 +189,7 @@ const sender = z.looseObject({
 export const agentTelemetry = {
   'ready': z.looseObject({ ts, instanceId: z.string(), host: z.string().optional() }),
   'pulse': z.looseObject({ ts, instanceId: z.string(), intervalS: z.number().int().positive() }),
-  'attached': z.looseObject({ ts, instanceId: z.string(), conversationId: z.string(), cwd: z.string().optional() }),
+  'attached': z.looseObject({ ts, instanceId: z.string(), conversationId: z.string(), cwd: z.string().optional(), intervalS: z.number().int().positive().optional() }),
   'detached': z.looseObject({ ts, instanceId: z.string(), conversationId: z.string() }),
 };
 

@@ -128,6 +128,16 @@ impl Rail {
                 self.instances.insert(ikey, instance);
             }
             "attached" => {
+                // Attaching is itself evidence of life, and may carry the
+                // liveness promise a `pulse` would otherwise be the only
+                // source of — the gap where an instance that dies before its
+                // first pulse read as alive forever (docs/spec/agent-spec.md).
+                let held = self.instances.get(&ikey);
+                let instance = Instance {
+                    last_pulse: fact.ts.max(held.map(|h| h.last_pulse).unwrap_or(0)),
+                    interval_s: fact.interval_s.or_else(|| held.and_then(|h| h.interval_s)),
+                };
+                self.instances.insert(ikey.clone(), instance);
                 if let Some(conv) = &fact.conv {
                     self.attachments.insert(
                         format!("{ikey}/{conv}"),
@@ -326,6 +336,45 @@ mod tests {
             Some(Liveness::Stranded)
         );
         assert_eq!(rail.verdict("unknown", 100_000), None);
+    }
+
+    #[test]
+    fn attaching_alone_gives_a_liveness_basis_without_a_pulse() {
+        let mut rail = Rail::default();
+        // No pulse ever — attach is the only fact, and it carries the
+        // interval itself (the closed gap).
+        rail.apply(&ServerMsg::Agent(WsAgent {
+            kind: "attached".into(),
+            world: "w".into(),
+            instance_id: "i".into(),
+            ts: 100_000,
+            conv: Some("a".into()),
+            cwd: None,
+            interval_s: Some(15),
+            host: None,
+        }));
+        assert_eq!(rail.verdict("a", 100_000), Some(Liveness::Alive));
+        assert_eq!(rail.verdict("a", 100_000 + 46_000), Some(Liveness::Stranded));
+    }
+
+    #[test]
+    fn attaching_with_no_interval_still_strands_after_the_default() {
+        let mut rail = Rail::default();
+        rail.apply(&ServerMsg::Agent(WsAgent {
+            kind: "attached".into(),
+            world: "w".into(),
+            instance_id: "i".into(),
+            ts: 100_000,
+            conv: Some("a".into()),
+            cwd: None,
+            interval_s: None,
+            host: None,
+        }));
+        assert_eq!(rail.verdict("a", 100_000), Some(Liveness::Alive));
+        assert_eq!(
+            rail.verdict("a", 100_000 + 61_000),
+            Some(Liveness::Stranded)
+        );
     }
 
     #[test]

@@ -91,6 +91,10 @@ pub enum AgentFact {
         ts: i64,
         conv: ConversationId,
         cwd: Option<String>,
+        /// The liveness promise, optionally carried on attach too (docs/spec/
+        /// agent-spec.md) — absent for a producer that hasn't been updated;
+        /// the reader's fold applies its own default threshold then.
+        interval_s: Option<i64>,
     },
     Detached {
         world: WorldId,
@@ -649,12 +653,27 @@ impl Views {
                      VALUES (?1, ?2, ?3, ?4, ?5)",
                     rusqlite::params![world.0, a.instance_id.0, a.conversation_id.0, a.cwd, ts_ms],
                 )?;
+                // Attaching is itself evidence of life, and may carry the
+                // liveness promise a `pulse` would otherwise be the only
+                // source of (docs/spec/agent-spec.md: the gap where an
+                // instance that dies before its first pulse read as alive
+                // forever). COALESCE keeps a held interval when this fact
+                // doesn't carry one, rather than clobbering it with NULL.
+                tx.execute(
+                    "INSERT INTO agent_instances (world, instance_id, last_pulse, interval_s)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(world, instance_id) DO UPDATE SET
+                         last_pulse = max(agent_instances.last_pulse, excluded.last_pulse),
+                         interval_s = COALESCE(excluded.interval_s, agent_instances.interval_s)",
+                    rusqlite::params![world.0, a.instance_id.0, ts_ms, a.interval_s],
+                )?;
                 Some(AgentFact::Attached {
                     world: world.clone(),
                     instance: a.instance_id.clone(),
                     ts: ts_ms,
                     conv: a.conversation_id.clone(),
                     cwd: a.cwd.clone(),
+                    interval_s: a.interval_s,
                 })
             }
             AgentKind::Telemetry(AgentTelemetry::Detached(d)) => {
