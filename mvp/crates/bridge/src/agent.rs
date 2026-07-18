@@ -48,6 +48,8 @@ pub struct AgentConfig {
     pub skills_root: Arc<std::sync::RwLock<std::path::PathBuf>>,
     /// The transit object store attachments resolve from (objects.rs).
     pub attach_bucket: String,
+    /// The oversized-tool-output store (refs.rs) the `Ref` tool fetches from.
+    pub refs: crate::refs::RefStore,
     /// Extended thinking budget; None = thinking off.
     pub thinking_budget: Option<i64>,
 }
@@ -329,6 +331,7 @@ async fn accept_say(
         turn,
         user,
         user_from: from,
+        refs: crate::refs::RefStore::clone(&config.refs),
         thinking_budget: config.thinking_budget,
     };
     let done = done_tx.clone();
@@ -352,6 +355,7 @@ struct TurnContext {
     /// The say: turn 1's user half, pending until that turn commits.
     user: Message,
     user_from: Value,
+    refs: crate::refs::RefStore,
     thinking_budget: Option<i64>,
 }
 
@@ -397,6 +401,7 @@ async fn run_query(
         turn,
         user,
         user_from,
+        refs,
         thinking_budget,
     } = &ctx;
     let pubr = Publisher::new(client, conv);
@@ -414,6 +419,7 @@ async fn run_query(
         crate::slice::range_schema(),
         crate::pipe::pipe_schema(),
         crate::readfile::read_file_schema(),
+        crate::refs::ref_schema(),
     ];
     if !skills.is_empty() {
         tools.push(skills.tool_schema());
@@ -593,8 +599,16 @@ async fn run_query(
         // results commit at execution, unlike the say: the committed
         // tool_use above is unanswerable without them - a record resting on
         // a bare tool_use is invalid for every future turn.
-        let results =
-            run_tool_round(&pubr, skills, query, &turn_id, &done.content, &mut cancel).await;
+        let results = run_tool_round(
+            &pubr,
+            skills,
+            refs,
+            query,
+            &turn_id,
+            &done.content,
+            &mut cancel,
+        )
+        .await;
 
         let message_id = uuid::Uuid::new_v4().to_string();
         pubr.message(
@@ -625,9 +639,11 @@ async fn run_query(
 /// is unreviewable without the payload). The slot is ALWAYS filled: a
 /// committed tool_use without its result is an invalid conversation the
 /// caller must still be able to close.
+#[allow(clippy::too_many_arguments)]
 async fn run_tool_round(
     pubr: &Publisher,
     skills: &Skills,
+    refs: &crate::refs::RefStore,
     query: &str,
     turn_id: &str,
     content: &[Value],
@@ -762,6 +778,8 @@ async fn run_tool_round(
                 Ok((stream, any_error)) => (crate::stream::format_stream(&stream), any_error),
                 Err(e) => (format!("invalid Pipe input: {e}"), true),
             },
+            // Ref is read-only: no approval gate.
+            "Ref" => crate::refs::run_ref(refs, &block["input"]),
             other => (format!("unknown tool {other:?}"), true),
         };
         results.push(json!({

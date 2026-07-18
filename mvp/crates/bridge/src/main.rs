@@ -40,6 +40,7 @@ mod objects;
 mod pipe;
 mod read;
 mod readfile;
+mod refs;
 mod skills;
 mod slice;
 mod stream;
@@ -174,6 +175,7 @@ struct Host {
     context: Arc<RwLock<Option<String>>>,
     attach_bucket: String,
     thinking_budget: Option<i64>,
+    refs: refs::RefStore,
 }
 
 impl Host {
@@ -187,6 +189,7 @@ impl Host {
             auth: self.auth.clone(),
             skills_root: Arc::clone(&self.skills_root),
             attach_bucket: self.attach_bucket.clone(),
+            refs: Arc::clone(&self.refs),
             thinking_budget: self.thinking_budget,
         }
     }
@@ -361,6 +364,14 @@ async fn main() -> anyhow::Result<()> {
         Some(n) => Some(n),
         None => Some(4096),
     };
+    // The oversized-tool-output store: content-addressed, ephemeral is fine
+    // (unlike conversation state, losing it across a restart is not data
+    // loss, only a stale ref id). Defaults under the OS temp dir so no new
+    // config is required to get it working.
+    let refs_path = std::env::var("BRIDGE_REFS_DB")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir().join("bridge-refs.db"));
+    let refs_store = refs::open(&refs_path).map_err(|e| anyhow::anyhow!(e))?;
 
     let client = async_nats::connect(&nats_url).await?; // fail-fast
 
@@ -405,6 +416,7 @@ async fn main() -> anyhow::Result<()> {
         world,
         instance,
         default_model,
+        refs: refs_store,
         auth,
         skills_root,
         system: Arc::new(RwLock::new(None)),
