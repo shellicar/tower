@@ -51,9 +51,20 @@ html, body {
 .age.cooling { color: #eab308; }
 .age.cold { color: #737373; }
 
-.potential li, .voided li { color: #737373; padding: 8px 12px; border-bottom: 1px solid #262626; cursor: pointer; }
+.potential li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 8px;
+  color: #737373;
+  padding: 8px 12px;
+  border-bottom: 1px solid #262626;
+  cursor: pointer;
+}
 .potential li:hover { background: #171717; }
-.voided li { display: flex; justify-content: space-between; align-items: center; cursor: default; }
+.potential .cwd { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #525252; }
+
+.voided li { color: #737373; padding: 8px 12px; border-bottom: 1px solid #262626; display: flex; justify-content: space-between; align-items: center; cursor: default; }
 .voided button { cursor: pointer; }
 
 .conversation { display: flex; min-height: 0; min-width: 0; flex-direction: column; }

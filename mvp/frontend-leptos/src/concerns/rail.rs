@@ -26,6 +26,7 @@ struct Attachment {
     conv: String,
     world: String,
     instance_id: String,
+    cwd: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +96,7 @@ impl Rail {
                                 conv: a.conv.clone(),
                                 world: a.world.clone(),
                                 instance_id: a.instance_id.clone(),
+                                cwd: a.cwd.clone(),
                             },
                         )
                     })
@@ -133,6 +135,7 @@ impl Rail {
                             conv: conv.clone(),
                             world: fact.world.clone(),
                             instance_id: fact.instance_id.clone(),
+                            cwd: fact.cwd.clone(),
                         },
                     );
                 }
@@ -178,12 +181,19 @@ impl Rail {
 
     /// Potential conversations: attached, no row yet — served, silent. They
     /// vanish with the attachment; the first committed message births a row.
-    pub fn attached_only(&self) -> Vec<&str> {
+    /// Carries the cwd (mvp/frontend's `RowList` shows it under the id) and
+    /// the liveness verdict, so the rail can render the same dot it uses for
+    /// ordinary rows.
+    pub fn attached_only(&self, now: Millis) -> Vec<PotentialConv<'_>> {
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for a in self.attachments.values() {
             if !self.rows.contains_key(&a.conv) && seen.insert(a.conv.as_str()) {
-                out.push(a.conv.as_str());
+                out.push(PotentialConv {
+                    conv: a.conv.as_str(),
+                    cwd: a.cwd.as_deref(),
+                    verdict: self.verdict(&a.conv, now),
+                });
             }
         }
         out
@@ -214,6 +224,13 @@ impl Rail {
             title,
         })
     }
+}
+
+/// One attached-but-message-less conversation, as the rail renders it.
+pub struct PotentialConv<'a> {
+    pub conv: &'a str,
+    pub cwd: Option<&'a str>,
+    pub verdict: Option<Liveness>,
 }
 
 /// The rail's slice of an approval: which conversation, how fresh the holder,
@@ -324,9 +341,11 @@ mod tests {
             interval_s: None,
             host: None,
         }));
-        assert_eq!(rail.attached_only(), ["ghost"]);
+        let potential = rail.attached_only(1);
+        assert_eq!(potential.len(), 1);
+        assert_eq!(potential[0].conv, "ghost");
         rail.apply(&row_event("ghost", 2));
-        assert!(rail.attached_only().is_empty());
+        assert!(rail.attached_only(1).is_empty());
     }
 
     #[test]

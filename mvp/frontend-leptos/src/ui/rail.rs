@@ -104,14 +104,24 @@ pub fn RailView(
             <ul class="potential">
                 {move || {
                     rail.with(|r| {
-                        r.attached_only()
+                        r.attached_only(now.get())
                             .into_iter()
-                            .map(|conv| {
-                                let conv = conv.to_owned();
+                            .map(|p| {
+                                let conv = p.conv.to_owned();
                                 let conv_click = conv.clone();
+                                let cwd = p.cwd.map(str::to_owned);
+                                let dot = p.verdict.map(|l| match l {
+                                    Liveness::Alive => "alive",
+                                    Liveness::Stranded => "stranded",
+                                });
                                 view! {
                                     <li on:click=move |_| on_open.run(conv_click.clone())>
-                                        {short(&conv)}
+                                        <span class="row-main">
+                                            {dot.map(|cls| view! { <span class=format!("dot {cls}")></span> })}
+                                            <span class="label">{short(&conv)}</span>
+                                        </span>
+                                        <span class="row-side">"served, silent"</span>
+                                        {cwd.map(|c| view! { <span class="cwd">{c}</span> })}
                                     </li>
                                 }
                             })
