@@ -74,6 +74,20 @@ export class Rail {
           });
           this.#instances = next;
         } else if (event.kind === 'attached' && event.conv) {
+          // Attaching is itself evidence of life, and may carry the liveness
+          // promise a `pulse` would otherwise be the only source of — the gap
+          // where an instance that dies before its first pulse read as alive
+          // forever (docs/spec/agent-spec.md).
+          const heldInstance = this.#instances.get(ikey);
+          const nextInstances = new Map(this.#instances);
+          nextInstances.set(ikey, {
+            world: event.world,
+            instanceId: event.instanceId,
+            host: heldInstance?.host,
+            lastPulse: Math.max(event.ts, heldInstance?.lastPulse ?? 0),
+            intervalS: event.intervalS ?? heldInstance?.intervalS,
+          });
+          this.#instances = nextInstances;
           const next = new Map(this.#attachments);
           next.set(`${ikey}/${event.conv}`, {
             world: event.world,

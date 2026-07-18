@@ -14,17 +14,26 @@ export interface Clock {
 
 export const systemClock: Clock = { now: () => Date.now() };
 
+/** No declared interval read as "definitely alive" forever, previously — the
+ *  gap found in the field 19 Jul 2026: an instance that attaches and dies
+ *  before ever pulsing has no promise to break, so it never went stranded.
+ *  `attached` now carries `intervalS` too (docs/spec/agent-spec.md), but
+ *  optionally, for producers that haven't caught up; this is the fallback
+ *  for exactly that gap, not a replacement for a real declared promise. */
+export const DEFAULT_STRANDED_AFTER_MS = 60_000;
+
 /** Liveness is a fold, never declared (agent-spec): the facts are the pulse
  *  and the instance's own declared interval; the verdict is the reader's,
  *  against its own clock. Stranded = silence past ~3 declared intervals; no
- *  declared interval yet = no verdict to pass. */
+ *  declared interval yet uses the flat default threshold above, not an
+ *  automatic 'alive'. */
 export function livenessVerdict(
   now: number,
   lastPulse: number,
   intervalS: number | undefined,
 ): 'alive' | 'stranded' {
-  if (intervalS && now - lastPulse > 3 * intervalS * 1000) return 'stranded';
-  return 'alive';
+  const strandedAfter = intervalS ? 3 * intervalS * 1000 : DEFAULT_STRANDED_AFTER_MS;
+  return now - lastPulse > strandedAfter ? 'stranded' : 'alive';
 }
 
 /** The pulse is ~15s while an approval pends, so ~3 missed (>45s) reads as a

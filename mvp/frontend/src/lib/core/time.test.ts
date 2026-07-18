@@ -12,8 +12,13 @@ describe('livenessVerdict', () => {
   it('is stranded past three declared intervals', () => {
     expect(livenessVerdict(now, now - 100_000, 30)).toBe('stranded'); // 100s > 90s
   });
-  it('never strands without a declared interval — there is no verdict input', () => {
-    expect(livenessVerdict(now, now - 10_000_000, undefined)).toBe('alive');
+  it('is alive within the default 60s threshold when no interval is declared', () => {
+    expect(livenessVerdict(now, now - 59_000, undefined)).toBe('alive');
+  });
+  it('strands past the default 60s threshold when no interval was ever declared', () => {
+    // The gap found in the field 19 Jul 2026: an instance that attaches and
+    // dies before its first pulse must not read as alive forever.
+    expect(livenessVerdict(now, now - 61_000, undefined)).toBe('stranded');
   });
 });
 
