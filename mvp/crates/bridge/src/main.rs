@@ -37,6 +37,7 @@ mod exec;
 mod find;
 mod matcher;
 mod objects;
+mod pipe;
 mod read;
 mod skills;
 mod slice;

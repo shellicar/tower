@@ -29,6 +29,18 @@ pub fn read_schema() -> Value {
     })
 }
 
+/// Read stage: `File[] -> Line[]`, reading each upstream file's path. Used
+/// by `Pipe` when a prior step (e.g. `Find`) produced a `Files` stream —
+/// the mid-pipeline counterpart to `run_read`'s standalone `paths` mode.
+pub async fn read_stream(stream: &Stream) -> Result<(Stream, bool), String> {
+    let Stream::Files(files) = stream else {
+        return Err("Read expects a Files stream upstream (File[] -> Line[])".to_string());
+    };
+    let paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+    let (lines, any_error) = read_paths(&paths).await;
+    Ok((Stream::Lines(lines), any_error))
+}
+
 /// Run `Read` from its raw tool input. Returns the produced `Stream::Lines`
 /// plus whether any path failed (item-level, per composition-model.md — a
 /// bad path is reported inline, never silently dropped; the whole call is

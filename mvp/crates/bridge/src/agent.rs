@@ -412,6 +412,7 @@ async fn run_query(
         crate::slice::head_schema(),
         crate::slice::tail_schema(),
         crate::slice::range_schema(),
+        crate::pipe::pipe_schema(),
     ];
     if !skills.is_empty() {
         tools.push(skills.tool_schema());
@@ -740,6 +741,12 @@ async fn run_tool_round(
             "Range" => match crate::slice::run_range(&block["input"]).await {
                 Ok((stream, any_error)) => (crate::stream::format_stream(&stream), any_error),
                 Err(e) => (format!("invalid Range input: {e}"), true),
+            },
+            // Pipe is read-only: no approval gate. Every step it dispatches
+            // to is itself read-only, so composing them adds no privilege.
+            "Pipe" => match crate::pipe::run_pipe(&block["input"]).await {
+                Ok((stream, any_error)) => (crate::stream::format_stream(&stream), any_error),
+                Err(e) => (format!("invalid Pipe input: {e}"), true),
             },
             other => (format!("unknown tool {other:?}"), true),
         };
