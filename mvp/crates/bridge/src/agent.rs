@@ -401,8 +401,12 @@ async fn run_query(
     } = &ctx;
     let pubr = Publisher::new(client, conv);
 
-    // Bash and Read always; Skill only when a catalogue exists.
-    let mut tools: Vec<Value> = vec![crate::exec::bash_schema(), crate::exec::read_schema()];
+    // Bash, Exec and Read always; Skill only when a catalogue exists.
+    let mut tools: Vec<Value> = vec![
+        crate::exec::bash_schema(),
+        crate::exec::exec_schema(),
+        crate::exec::read_schema(),
+    ];
     if !skills.is_empty() {
         tools.push(skills.tool_schema());
     }
@@ -668,6 +672,35 @@ async fn run_tool_round(
                     // without one is an invalid conversation. The cancel
                     // flag is set, so the caller's between-rounds check
                     // closes the query cancelled right after these commit.
+                    crate::approval::Verdict::Cancelled => {
+                        ("cancelled by user before approval".to_string(), true)
+                    }
+                }
+            }
+            // Exec gates behind the same human approval as Bash — same gate,
+            // structured input instead of a shell string.
+            "Exec" => {
+                let approval_id = uuid::Uuid::new_v4().to_string();
+                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                let correlation = json!({
+                    "conversationId": pubr.conv().0,
+                    "queryId": query,
+                    "turnId": turn_id,
+                    "toolUseId": id,
+                });
+                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                    .await
+                {
+                    crate::approval::Verdict::Approved => {
+                        match crate::exec::parse_commands(&block["input"]) {
+                            Ok(commands) => {
+                                let results = crate::exec::run_commands(&commands, cancel).await;
+                                crate::exec::format_results(&commands, &results)
+                            }
+                            Err(e) => (format!("invalid Exec input: {e}"), true),
+                        }
+                    }
+                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
                     crate::approval::Verdict::Cancelled => {
                         ("cancelled by user before approval".to_string(), true)
                     }
