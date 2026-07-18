@@ -11,18 +11,24 @@ use wire::ConversationId;
 
 pub const MAX_TOKENS: i64 = 8192;
 
+/// The OAuth token endpoint and client id claude-sdk-cli itself uses
+/// (packages/claude-sdk/src/private/Client/Auth/consts.ts) — refreshing a
+/// Claude Code credential means speaking the same grant to the same client.
+const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
+const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+
 /// Both ways of being allowed in: a platform API key, or the Claude Code
 /// subscription's OAuth token (bearer + the oauth beta header). The credential
 /// is held as its SOURCE, never the secret: it is read fresh on every request,
 /// so nothing sits at rest in memory and a token the file has since been
-/// refreshed with is picked up. v0 does not refresh the token itself — an
-/// expired one still fails the turn honestly (`turn_aborted`); the bridge only
-/// reads what the file holds now.
+/// refreshed with (by this bridge or the CLI) is picked up. An expired token
+/// is refreshed in place, matching claude-sdk-cli's own AnthropicAuth so the
+/// two can share one credentials file live.
 #[derive(Clone)]
 pub enum Auth {
     /// `ANTHROPIC_API_KEY`, read from the environment at each request.
     ApiKey,
-    /// The Claude Code credentials file, read at each request.
+    /// The Claude Code credentials file, read (and refreshed) at each request.
     OAuth { path: String },
 }
 
@@ -37,13 +43,16 @@ impl Auth {
         }
         let home = std::env::var("HOME").map_err(|_| anyhow::anyhow!("HOME not set"))?;
         let path = format!("{home}/.claude/.credentials.json");
-        read_oauth_token(&path)?; // validate now, discard the secret
+        read_credentials(&path)?; // validate now, discard the secret
         Ok(Auth::OAuth { path })
     }
 
     /// Read the current credential and set the auth header. Fresh per request:
     /// the secret exists only for the duration of this call.
-    fn apply(&self, request: reqwest::RequestBuilder) -> anyhow::Result<reqwest::RequestBuilder> {
+    async fn apply(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> anyhow::Result<reqwest::RequestBuilder> {
         Ok(match self {
             Auth::ApiKey => {
                 let key = std::env::var("ANTHROPIC_API_KEY")
@@ -53,23 +62,94 @@ impl Auth {
             Auth::OAuth { path } => request
                 .header(
                     "authorization",
-                    format!("Bearer {}", read_oauth_token(path)?),
+                    format!("Bearer {}", oauth_token(path).await?),
                 )
                 .header("anthropic-beta", "oauth-2025-04-20"),
         })
     }
 }
 
-/// Read the current OAuth access token out of the Claude Code credentials file.
-/// Called per request; the returned string is used and dropped, never held.
-fn read_oauth_token(path: &str) -> anyhow::Result<String> {
+/// Read the credentials file whole. Startup validation and every OAuth
+/// request both start here.
+fn read_credentials(path: &str) -> anyhow::Result<Value> {
     let bytes = std::fs::read(path)
         .map_err(|e| anyhow::anyhow!("no ANTHROPIC_API_KEY and no credentials at {path}: {e}"))?;
-    let creds: Value = serde_json::from_slice(&bytes)?;
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// The current OAuth access token. Refreshes and rewrites the credentials
+/// file first if `expiresAt` has passed — the same check claude-sdk-cli's
+/// `isExpired` makes — so an expired token degrades to one extra round trip
+/// instead of failing the turn. Called fresh per request; nothing cached.
+async fn oauth_token(path: &str) -> anyhow::Result<String> {
+    let mut creds = read_credentials(path)?;
+    let expires_at = creds["claudeAiOauth"]["expiresAt"].as_i64().unwrap_or(0);
+    if now_ms() >= expires_at {
+        let refresh_token = creds["claudeAiOauth"]["refreshToken"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("{path} has no claudeAiOauth.refreshToken"))?
+            .to_string();
+        creds = refresh_credentials(&refresh_token).await?;
+        // Write back so the next process — this bridge or a live claude-sdk-cli
+        // sharing the same file — picks up the refreshed token too.
+        std::fs::write(path, serde_json::to_vec_pretty(&creds)?)
+            .map_err(|e| anyhow::anyhow!("failed to write refreshed credentials to {path}: {e}"))?;
+    }
     creds["claudeAiOauth"]["accessToken"]
         .as_str()
         .map(str::to_string)
         .ok_or_else(|| anyhow::anyhow!("{path} has no claudeAiOauth.accessToken"))
+}
+
+/// POST the refresh_token grant (claude-sdk-cli's own
+/// Auth/refreshCredentials.ts) and shape the reply to match the credentials
+/// file's own schema (Auth/schema.ts's `authCredentials`), so the file stays
+/// readable by the CLI too. `subscriptionType`/`rateLimitTier` reset to empty
+/// on refresh — the token endpoint doesn't return them, and the reference
+/// implementation does the same.
+async fn refresh_credentials(refresh_token: &str) -> anyhow::Result<Value> {
+    let response = reqwest::Client::new()
+        .post(TOKEN_URL)
+        .json(&json!({
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": CLIENT_ID,
+        }))
+        .send()
+        .await?;
+    if !response.status().is_success() {
+        let status = response.status();
+        anyhow::bail!("token refresh failed: {status}");
+    }
+    let data: Value = response.json().await?;
+    let access_token = data["access_token"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("token refresh response has no access_token"))?;
+    let new_refresh_token = data["refresh_token"].as_str().unwrap_or(refresh_token);
+    let expires_in = data["expires_in"].as_i64().unwrap_or(0);
+    let scopes: Vec<&str> = data["scope"]
+        .as_str()
+        .unwrap_or("")
+        .split(' ')
+        .filter(|s| !s.is_empty())
+        .collect();
+    Ok(json!({
+        "claudeAiOauth": {
+            "accessToken": access_token,
+            "refreshToken": new_refresh_token,
+            "expiresAt": now_ms() + expires_in * 1000,
+            "scopes": scopes,
+            "subscriptionType": "",
+            "rateLimitTier": "",
+        }
+    }))
 }
 
 pub struct TurnDone {
@@ -160,7 +240,7 @@ pub async fn stream_turn(
         .post("https://api.anthropic.com/v1/messages")
         .header("anthropic-version", "2023-06-01")
         .json(&body);
-    let response = auth.apply(request)?.send().await?;
+    let response = auth.apply(request).await?.send().await?;
     if !response.status().is_success() {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
