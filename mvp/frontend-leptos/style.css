@@ -63,6 +63,7 @@ html, body {
 }
 .potential li:hover { background: #171717; }
 .potential .cwd { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #525252; }
+.potential .dismiss { padding: 0 6px; cursor: pointer; }
 
 .voided li { color: #737373; padding: 8px 12px; border-bottom: 1px solid #262626; display: flex; justify-content: space-between; align-items: center; cursor: default; }
 .voided button { cursor: pointer; }

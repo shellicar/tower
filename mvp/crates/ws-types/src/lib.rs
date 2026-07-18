@@ -64,6 +64,22 @@ pub enum ClientMsg {
     /// management structure, clients only render it").
     #[serde(rename = "set_layout")]
     SetLayout { id: String, tabs: Vec<WsTab> },
+    /// A human's own decision ("connection is authority") to stop tracking
+    /// an ask — never a claim it was answered. The settlement stays whatever
+    /// it was (usually none); `dismissed` rides on the next `approval` fact.
+    #[serde(rename = "dismiss_approval")]
+    DismissApproval { id: String, approval: String },
+    /// Same standing, for an attached-but-message-less conversation whose
+    /// holder has gone silent. Not a claim the agent detached — that fact
+    /// stays the agent's alone to publish.
+    #[serde(rename = "dismiss_attachment")]
+    DismissAttachment {
+        id: String,
+        world: String,
+        #[serde(rename = "instanceId")]
+        instance_id: String,
+        conv: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,6 +172,16 @@ pub enum ServerMsg {
     Layout { tabs: Vec<WsTab> },
     #[serde(rename = "layout_set")]
     LayoutSet { id: String },
+    /// An attachment a human dismissed — broadcast to every connected
+    /// session, like `row`/`approval`. Not an agent fact: a real `detached`
+    /// still arrives separately, from the agent, if it ever does.
+    #[serde(rename = "attachment_dismissed")]
+    AttachmentDismissed {
+        world: String,
+        #[serde(rename = "instanceId")]
+        instance_id: String,
+        conv: String,
+    },
     #[serde(rename = "error")]
     Error { id: String, reason: String },
 }
@@ -197,6 +223,11 @@ pub struct WsApproval {
     pub last_pulse: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settled: Option<WsSettled>,
+    /// A human's own decision to stop tracking this ask (tower's annotation,
+    /// never a claim it was answered). Excluded from the outstanding
+    /// snapshot once true, same as `settled`.
+    #[serde(default)]
+    pub dismissed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

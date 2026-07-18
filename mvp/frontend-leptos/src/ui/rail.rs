@@ -36,6 +36,7 @@ pub fn RailView(
     status: Signal<Status>,
     on_open: Callback<String>,
     on_dismiss: Callback<String>,
+    on_dismiss_attachment: Callback<String>,
 ) -> impl IntoView {
     view! {
         <aside class="rail">
@@ -109,7 +110,9 @@ pub fn RailView(
                             .map(|p| {
                                 let conv = p.conv.to_owned();
                                 let conv_click = conv.clone();
+                                let conv_dismiss = conv.clone();
                                 let cwd = p.cwd.map(str::to_owned);
+                                let stranded = p.verdict == Some(Liveness::Stranded);
                                 let dot = p.verdict.map(|l| match l {
                                     Liveness::Alive => "alive",
                                     Liveness::Stranded => "stranded",
@@ -120,7 +123,22 @@ pub fn RailView(
                                             {dot.map(|cls| view! { <span class=format!("dot {cls}")></span> })}
                                             <span class="label">{short(&conv)}</span>
                                         </span>
-                                        <span class="row-side">"served, silent"</span>
+                                        <span class="row-side">
+                                            "served, silent"
+                                            {stranded.then(|| {
+                                                view! {
+                                                    <button
+                                                        class="dismiss"
+                                                        on:click=move |ev| {
+                                                            ev.stop_propagation();
+                                                            on_dismiss_attachment.run(conv_dismiss.clone());
+                                                        }
+                                                    >
+                                                        "Dismiss"
+                                                    </button>
+                                                }
+                                            })}
+                                        </span>
                                         {cwd.map(|c| view! { <span class="cwd">{c}</span> })}
                                     </li>
                                 }

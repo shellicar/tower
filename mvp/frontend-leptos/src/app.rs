@@ -165,7 +165,16 @@ pub fn App(ws_url: String) -> impl IntoView {
     });
 
     let dismiss_approval = Callback::new(move |approval_id: String| {
-        approvals.update(|a| a.dismiss(&approval_id));
+        let id = next_id();
+        let msg = approvals.with(|a| a.dismiss(&approval_id, id));
+        send(msg);
+    });
+    let dismiss_attachment = Callback::new(move |conv: String| {
+        let id = next_id();
+        let msg = rail.with(|r| r.dismiss_attachment(&conv, id));
+        if let Some(msg) = msg {
+            send(msg);
+        }
     });
 
     let open_convs = Signal::derive(move || view.with(|v| v.tab().convs.clone()));
@@ -180,6 +189,7 @@ pub fn App(ws_url: String) -> impl IntoView {
                 status=status
                 on_open=open_conversation
                 on_dismiss=dismiss_approval
+                on_dismiss_attachment=dismiss_attachment
             />
             <main class="conversation">
                 <TabBar view=view on_switch=switch_tab on_add=add_tab on_close=close_tab on_rename=rename_tab />

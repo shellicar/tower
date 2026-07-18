@@ -62,11 +62,14 @@ impl Approvals {
     }
 
     /// Pending asks oldest-first — a waiting Claude burns wall-clock.
+    /// Dismissed asks are excluded, same footing as settled: a human's own
+    /// decision, not a claim the ask was answered (docs/spec/agent-spec.md's
+    /// "connection is authority" — settled 19 Jul).
     pub fn pending(&self) -> Vec<&WsApproval> {
         let mut asks: Vec<&WsApproval> = self
             .approvals
             .values()
-            .filter(|a| a.settled.is_none())
+            .filter(|a| a.settled.is_none() && !a.dismissed)
             .collect();
         asks.sort_by_key(|a| a.raised_ts);
         asks
@@ -111,11 +114,17 @@ impl Approvals {
         }
     }
 
-    /// Drop an ask from this client's view — local, not an answer (nobody
-    /// settles an abandoned ask). Its holder pulsing again resurrects it.
-    pub fn dismiss(&mut self, id: &str) {
-        self.approvals.remove(id);
-        self.answer_notes.remove(id);
+    /// A human's own decision ("connection is authority") to stop tracking
+    /// this ask — not an answer (nobody settles an abandoned ask), and not a
+    /// merely-local hide: persisted server-side, so it survives a reconnect
+    /// and reaches every other connected client too. The updated state
+    /// (`dismissed: true`) arrives back through the ordinary `Approval`
+    /// broadcast, same as any other fold — this method only sends.
+    pub fn dismiss(&self, id: &str, req_id: String) -> ClientMsg {
+        ClientMsg::DismissApproval {
+            id: req_id,
+            approval: id.to_owned(),
+        }
     }
 }
 
@@ -167,6 +176,7 @@ mod tests {
                 by: json!({ "kind": "human" }),
                 ts: pulse,
             }),
+            dismissed: false,
         }
     }
 
@@ -233,10 +243,20 @@ mod tests {
     }
 
     #[test]
-    fn dismiss_drops_the_ask_locally() {
+    fn dismiss_sends_and_the_broadcast_drops_it_from_pending() {
         let mut a = Approvals::default();
         a.apply(&ServerMsg::Approval(ask("p1", "c", 1, 100_000, false)));
-        a.dismiss("p1");
+        let msg = a.dismiss("p1", "r1".into());
+        assert!(matches!(
+            msg,
+            ClientMsg::DismissApproval { approval, .. } if approval == "p1"
+        ));
+        // Not removed until the server's own broadcast confirms it — this
+        // fold is the same as any upsert, `dismissed` just another field.
+        assert_eq!(a.pending().len(), 1);
+        let mut dismissed = ask("p1", "c", 1, 100_000, false);
+        dismissed.dismissed = true;
+        a.apply(&ServerMsg::Approval(dismissed));
         assert!(a.pending().is_empty());
     }
 }

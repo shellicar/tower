@@ -8,7 +8,8 @@ use serde_json::Value;
 use tokio::sync::{broadcast, oneshot};
 
 use wire::{
-    AnswerOutcome, ApprovalId, CancelOutcome, ConversationId, QueryId, SayCommand, SayOutcome,
+    AnswerOutcome, ApprovalId, CancelOutcome, ConversationId, InstanceId, QueryId, SayCommand,
+    SayOutcome, WorldId,
 };
 
 use crate::broker::{Broker, Clock};
@@ -40,6 +41,7 @@ impl From<ApprovalState> for WsApproval {
                 by: s.by,
                 ts: s.ts,
             }),
+            dismissed: a.dismissed,
         }
     }
 }
@@ -235,6 +237,16 @@ impl Session {
             // Layout is awareness, like rows and approvals: every connected
             // session sees the shared workspace change, not just its owner.
             ViewEvent::Layout(tabs) => Some(ServerMsg::Layout { tabs: parse_tabs(&tabs) }),
+            // A dismissed attachment is awareness too, like an approval
+            // dismiss riding the `approval` fact — every connected session
+            // drops it, not just the one that clicked.
+            ViewEvent::AttachmentDismissed { world, instance, conv } => {
+                Some(ServerMsg::AttachmentDismissed {
+                    world: world.0,
+                    instance_id: instance.0,
+                    conv: conv.0,
+                })
+            }
             _ => None,
         }
     }
@@ -433,6 +445,42 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
             // reaches this same session too, so it doesn't need echoing here.
             vec![ServerMsg::LayoutSet { id }]
         }
+        ClientMsg::DismissApproval { id, approval } => {
+            let (tx, rx) = oneshot::channel();
+            let query = ViewQuery::DismissApproval {
+                id: ApprovalId(approval),
+                now: now_ms(clock),
+                reply: tx,
+            };
+            if views.queries.send(query).await.is_err() || rx.await.is_err() {
+                return vec![ServerMsg::Error {
+                    id,
+                    reason: "views unavailable".into(),
+                }];
+            }
+            // The broadcast (an updated `approval` fact, `dismissed: true`)
+            // reaches this same session too — no separate ack needed.
+            vec![]
+        }
+        ClientMsg::DismissAttachment {
+            id: _,
+            world,
+            instance_id,
+            conv,
+        } => {
+            let (tx, rx) = oneshot::channel();
+            let query = ViewQuery::DismissAttachment {
+                world: WorldId(world),
+                instance: InstanceId(instance_id),
+                conv: ConversationId(conv),
+                now: now_ms(clock),
+                reply: tx,
+            };
+            let _ = views.queries.send(query).await;
+            let _ = rx.await;
+            // Same shape: the broadcast is the acknowledgement.
+            vec![]
+        }
         ClientMsg::Say {
             id,
             conv,
@@ -475,6 +523,14 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
 /// storage — a hand-edited db row must not crash every session).
 fn parse_tabs(json: &str) -> Vec<WsTab> {
     serde_json::from_str(json).unwrap_or_default()
+}
+
+/// `Views` holds no `Clock` (its timestamps all come from the wire events it
+/// folds); a dismiss is a direct client action with none to read a ts from,
+/// so the caller's own clock supplies "now", same unit (epoch millis) as
+/// every stored timestamp.
+fn now_ms<C: Clock>(clock: &C) -> i64 {
+    wire::parse_ts(&clock.now_iso()).unwrap_or(0)
 }
 
 /// Best effort at echoing an id out of unparseable text, so even a malformed

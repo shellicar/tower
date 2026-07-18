@@ -112,6 +112,12 @@ impl Rail {
             ServerMsg::Approval(a) => {
                 self.asks.insert(a.id.clone(), ask_of(a));
             }
+            // A human dismissed it (tower's own annotation, never a claim
+            // the agent detached) — drop it from the potential-conversation
+            // list, same as a real `detached` would.
+            ServerMsg::AttachmentDismissed { world, instance_id, conv } => {
+                self.attachments.remove(&format!("{world}/{instance_id}/{conv}"));
+            }
             _ => {} // not the rail's concern
         }
     }
@@ -232,6 +238,22 @@ impl Rail {
             id,
             conv: conv.to_owned(),
             title,
+        })
+    }
+
+    /// A human's own decision ("connection is authority") to stop tracking a
+    /// stranded potential conversation — not a claim the agent detached
+    /// (that fact stays the agent's alone to publish). Persisted server-side
+    /// via the request; the removal itself happens when the
+    /// `AttachmentDismissed` broadcast arrives back, same as any other fold.
+    /// `None` if nothing is attached under that key (nothing to dismiss).
+    pub fn dismiss_attachment(&self, conv: &str, id: String) -> Option<ClientMsg> {
+        let a = self.attachments.values().find(|a| a.conv == conv)?;
+        Some(ClientMsg::DismissAttachment {
+            id,
+            world: a.world.clone(),
+            instance_id: a.instance_id.clone(),
+            conv: conv.to_owned(),
         })
     }
 }
@@ -412,6 +434,7 @@ mod tests {
                     by: json!({ "kind": "human" }),
                     ts: pulse,
                 }),
+                dismissed: false,
             })
         };
         rail.apply(&approval("p1", 100_000, false));
@@ -436,5 +459,36 @@ mod tests {
     fn set_title_on_an_unknown_conversation_is_a_no_op() {
         let mut rail = Rail::default();
         assert!(rail.set_title("ghost", "x".into(), "r1".into()).is_none());
+    }
+
+    #[test]
+    fn dismiss_attachment_sends_then_the_broadcast_removes_it() {
+        let mut rail = Rail::default();
+        rail.apply(&ServerMsg::Agent(WsAgent {
+            kind: "attached".into(),
+            world: "w".into(),
+            instance_id: "i".into(),
+            ts: 1,
+            conv: Some("ghost".into()),
+            cwd: None,
+            interval_s: None,
+            host: None,
+        }));
+        let msg = rail.dismiss_attachment("ghost", "r1".into()).unwrap();
+        assert!(matches!(msg, ClientMsg::DismissAttachment { .. }));
+        // Not removed until the broadcast confirms it.
+        assert_eq!(rail.attached_only(1).len(), 1);
+        rail.apply(&ServerMsg::AttachmentDismissed {
+            world: "w".into(),
+            instance_id: "i".into(),
+            conv: "ghost".into(),
+        });
+        assert!(rail.attached_only(1).is_empty());
+    }
+
+    #[test]
+    fn dismiss_attachment_on_an_unknown_conversation_is_a_no_op() {
+        let rail = Rail::default();
+        assert!(rail.dismiss_attachment("ghost", "r1".into()).is_none());
     }
 }

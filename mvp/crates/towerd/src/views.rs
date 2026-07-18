@@ -65,6 +65,14 @@ pub enum ViewEvent {
     /// connected session sees the same shared workspace change live, the
     /// tmux-attach model settled 12 Jul.
     Layout(String),
+    /// A human dismissed an attached-but-message-less conversation — tower's
+    /// own annotation, not an agent fact (a real `Detached` still comes
+    /// through `Agent`). Awareness is unconditional, like `Row`.
+    AttachmentDismissed {
+        world: WorldId,
+        instance: InstanceId,
+        conv: ConversationId,
+    },
 }
 
 /// The agent concern's facts, verdict-free: alive/released/stranded is the
@@ -135,6 +143,10 @@ pub struct ApprovalState {
     pub raised_ts: i64,
     pub last_pulse: i64,
     pub settled: Option<SettledState>,
+    /// A human's own decision to stop tracking this ask — tower's annotation
+    /// (`dismissed_approvals`), never a claim the ask was answered. Excluded
+    /// from the outstanding snapshot once true.
+    pub dismissed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -257,6 +269,24 @@ pub enum ViewQuery {
     /// fine-grained ops (add_tab/rename_tab/...) and costs nothing extra.
     SetLayout {
         tabs: String,
+        reply: oneshot::Sender<()>,
+    },
+    /// A human's own decision ("connection is authority") to stop tracking
+    /// this ask — never a claim it was answered. Idempotent. `now` is the
+    /// caller's clock (Views holds no `Clock`; ws.rs supplies it, same as
+    /// every other timestamp here comes from the event that carried it).
+    DismissApproval {
+        id: ApprovalId,
+        now: i64,
+        reply: oneshot::Sender<()>,
+    },
+    /// Same standing, for an attached-but-message-less conversation whose
+    /// holder has gone silent. Idempotent; a later re-attach un-hides it.
+    DismissAttachment {
+        world: WorldId,
+        instance: InstanceId,
+        conv: ConversationId,
+        now: i64,
         reply: oneshot::Sender<()>,
     },
 }
@@ -399,6 +429,28 @@ const MIGRATIONS: &[&str] = &[
     "CREATE TABLE layout (
          layout_id TEXT PRIMARY KEY,
          tabs      TEXT NOT NULL
+     );",
+    // 10 — dismissed approvals/attachments: a human's own decision to stop
+    // tracking a dead thing ("connection is authority" — a connected client
+    // choosing to dismiss is the same standing that answers an approval or
+    // sets a title). Kept as SEPARATE tables, not columns on the derived
+    // `approvals`/`agent_attachments` tables, for the same reason titles/tags
+    // are separate: rematerialisation truncates derived tables on a stream
+    // incarnation change, and a human's dismissal must survive that —
+    // otherwise a rare recovery path silently resurrects everything anyone
+    // ever dismissed. NOT a claim the approval was answered or the agent
+    // detached (both of those are facts tower has no authority to assert);
+    // purely tower's own record of "stop showing me this."
+    "CREATE TABLE dismissed_approvals (
+         id            TEXT PRIMARY KEY,
+         dismissed_ts  INTEGER NOT NULL
+     );
+     CREATE TABLE dismissed_attachments (
+         world         TEXT NOT NULL,
+         instance_id   TEXT NOT NULL,
+         conv          TEXT NOT NULL,
+         dismissed_ts  INTEGER NOT NULL,
+         PRIMARY KEY (world, instance_id, conv)
      );",
 ];
 
@@ -970,6 +1022,26 @@ impl Views {
                 }
                 let _ = reply.send(());
             }
+            ViewQuery::DismissApproval { id, now, reply } => {
+                if let Err(e) = self.dismiss_approval(&id, now) {
+                    eprintln!("views: dismiss_approval failed for {id}: {e:#}");
+                }
+                let _ = reply.send(());
+            }
+            ViewQuery::DismissAttachment {
+                world,
+                instance,
+                conv,
+                now,
+                reply,
+            } => {
+                if let Err(e) = self.dismiss_attachment(&world, &instance, &conv, now) {
+                    eprintln!("views: dismiss_attachment failed for {world}/{instance}/{conv}: {e:#}");
+                } else {
+                    let _ = self.events.send(ViewEvent::AttachmentDismissed { world, instance, conv });
+                }
+                let _ = reply.send(());
+            }
         }
     }
 
@@ -1201,11 +1273,14 @@ impl Views {
             .collect()
     }
 
-    /// The outstanding snapshot: unsettled only, oldest first.
+    /// The outstanding snapshot: unsettled and not dismissed, oldest first.
     fn approvals(&self) -> anyhow::Result<Vec<ApprovalState>> {
         let mut stmt = self.db.prepare_cached(
-            "SELECT id, ask, correlation, raised_ts, last_pulse
-             FROM approvals WHERE settled_approved IS NULL ORDER BY raised_ts",
+            "SELECT a.id, a.ask, a.correlation, a.raised_ts, a.last_pulse
+             FROM approvals a
+             LEFT JOIN dismissed_approvals d ON d.id = a.id
+             WHERE a.settled_approved IS NULL AND d.id IS NULL
+             ORDER BY a.raised_ts",
         )?;
         let rows = stmt
             .query_map([], |r| {
@@ -1230,6 +1305,7 @@ impl Views {
                     raised_ts,
                     last_pulse,
                     settled: None,
+                    dismissed: false,
                 })
             })
             .collect()
@@ -1256,6 +1332,11 @@ impl Views {
             }),
             None => None,
         };
+        let dismissed: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM dismissed_approvals WHERE id = ?1)",
+            [&id.0],
+            |r| r.get(0),
+        )?;
         Ok(Some(ApprovalState {
             id: id.clone(),
             ask: serde_json::from_str(&ask)?,
@@ -1266,7 +1347,26 @@ impl Views {
             raised_ts: row.get(2)?,
             last_pulse: row.get(3)?,
             settled,
+            dismissed,
         }))
+    }
+
+    /// A human's own decision ("connection is authority") — not a claim the
+    /// ask was answered. Idempotent: dismissing twice is a no-op the second
+    /// time. Broadcasting the updated state (with `dismissed: true`) reuses
+    /// the existing `Approval` fact rather than inventing a new frame —
+    /// every session, including the dismisser's own, folds it the same way
+    /// `settled` already is.
+    fn dismiss_approval(&self, id: &ApprovalId, now: i64) -> anyhow::Result<()> {
+        self.db.execute(
+            "INSERT OR IGNORE INTO dismissed_approvals (id, dismissed_ts) VALUES (?1, ?2)",
+            rusqlite::params![id.0, now],
+        )?;
+        if let Some(mut state) = self.get_approval(id)? {
+            state.dismissed = true;
+            let _ = self.events.send(ViewEvent::Approval(state));
+        }
+        Ok(())
     }
 
     fn agents(&self) -> anyhow::Result<AgentsSnapshot> {
@@ -1284,8 +1384,16 @@ impl Views {
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
+        // A dismissal only hides an attachment while it's the SAME attach it
+        // was raised against (attached_ts <= dismissed_ts): a fresh re-attach
+        // after dismissal is new evidence and un-hides it, the same way a
+        // stranded instance pulsing again resurrects it.
         let mut stmt = self.db.prepare_cached(
-            "SELECT world, instance_id, conv, cwd, attached_ts FROM agent_attachments",
+            "SELECT a.world, a.instance_id, a.conv, a.cwd, a.attached_ts
+             FROM agent_attachments a
+             LEFT JOIN dismissed_attachments d
+                 ON d.world = a.world AND d.instance_id = a.instance_id AND d.conv = a.conv
+             WHERE d.dismissed_ts IS NULL OR a.attached_ts > d.dismissed_ts",
         )?;
         let attachments = stmt
             .query_map([], |r| {
@@ -1299,6 +1407,26 @@ impl Views {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok((instances, attachments))
+    }
+
+    /// A human's own decision, same footing as `dismiss_approval`. Keyed by
+    /// (world, instance, conv) with the CURRENT `attached_ts` — last write
+    /// wins if dismissed more than once, and a later re-attach naturally
+    /// un-hides it because `agents()`'s join compares against this stamp.
+    fn dismiss_attachment(
+        &self,
+        world: &WorldId,
+        instance: &InstanceId,
+        conv: &ConversationId,
+        now: i64,
+    ) -> anyhow::Result<()> {
+        self.db.execute(
+            "INSERT INTO dismissed_attachments (world, instance_id, conv, dismissed_ts)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(world, instance_id, conv) DO UPDATE SET dismissed_ts = excluded.dismissed_ts",
+            rusqlite::params![world.0, instance.0, conv.0, now],
+        )?;
+        Ok(())
     }
 
     fn get_ref(&self, id: &str) -> anyhow::Result<Option<(String, Vec<u8>)>> {
@@ -1336,7 +1464,7 @@ fn store_refs(tx: &rusqlite::Transaction<'_>, content: &mut [Value]) -> anyhow::
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wire::parse_wire;
+    use wire::{parse_ts, parse_wire};
 
     fn fresh() -> (Views, broadcast::Receiver<ViewEvent>) {
         let db = Connection::open_in_memory().unwrap();
@@ -1590,6 +1718,55 @@ mod tests {
         // set_layout itself doesn't broadcast (the `answer` dispatch does,
         // once the write is known to have committed) — nothing to drain here.
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn dismissed_approval_drops_from_the_outstanding_snapshot_and_survives_reread() {
+        let (mut views, mut rx) = fresh();
+        views.apply(1, &event("approval.v1.apr-1.lifecycle",
+            r#"{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"bash"},"correlation":{"conversationId":"conv-abc"}}"#));
+        assert_eq!(views.approvals().unwrap().len(), 1);
+
+        views.dismiss_approval(&ApprovalId("apr-1".into()), 999).unwrap();
+        assert!(views.approvals().unwrap().is_empty());
+
+        // Not deleted, not settled — dismissed, an honest third state.
+        let state = views.get_approval(&ApprovalId("apr-1".into())).unwrap().unwrap();
+        assert!(state.dismissed);
+        assert!(state.settled.is_none());
+
+        // Idempotent: dismissing twice doesn't error or double-insert.
+        views.dismiss_approval(&ApprovalId("apr-1".into()), 1000).unwrap();
+
+        // Drain the raised broadcast before checking the dismiss one.
+        let _ = rx.try_recv();
+        let ViewEvent::Approval(broadcast) = rx.try_recv().unwrap() else {
+            panic!("expected an approval broadcast");
+        };
+        assert!(broadcast.dismissed);
+    }
+
+    #[test]
+    fn dismissed_attachment_drops_until_a_fresh_reattach() {
+        let (mut views, _rx) = fresh();
+        views.apply(1, &event("agent.v1.w1.telemetry.attached",
+            r#"{"ts":"2026-07-07T21:00:00+10:00","instanceId":"i1","conversationId":"conv-ghost"}"#));
+        let (_, attachments) = views.agents().unwrap();
+        assert_eq!(attachments.len(), 1);
+
+        // Dismissed shortly after the first attach, well before the second.
+        let dismissed_ts = parse_ts("2026-07-07T21:30:00+10:00").unwrap();
+        views
+            .dismiss_attachment(&WorldId("w1".into()), &InstanceId("i1".into()), &ConversationId("conv-ghost".into()), dismissed_ts)
+            .unwrap();
+        let (_, attachments) = views.agents().unwrap();
+        assert!(attachments.is_empty());
+
+        // A fresh attach (later ts) is new evidence — un-hides it.
+        views.apply(2, &event("agent.v1.w1.telemetry.attached",
+            r#"{"ts":"2026-07-08T21:00:00+10:00","instanceId":"i1","conversationId":"conv-ghost"}"#));
+        let (_, attachments) = views.agents().unwrap();
+        assert_eq!(attachments.len(), 1);
     }
 
     #[test]
