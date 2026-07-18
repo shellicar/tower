@@ -8,3 +8,6 @@ ws = true
 
 [[proxy]]
 backend = "http://127.0.0.1:8081/ref"
+
+[[proxy]]
+backend = "http://127.0.0.1:8081/attachment"
