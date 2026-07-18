@@ -54,6 +54,8 @@ pub fn static_tool_schemas() -> Vec<Value> {
         crate::memtools::search_memory_schema(),
         crate::memtools::delete_memory_schema(),
         crate::memtools::memory_types_schema(),
+        crate::historytools::search_history_schema(),
+        crate::historytools::read_history_schema(),
     ]
 }
 
@@ -81,6 +83,9 @@ pub struct AgentConfig {
     pub refs: crate::refs::RefStore,
     /// The shared memory engine (memory.rs) the five Memory tools read/write.
     pub memory: crate::memory::MemoryStore,
+    /// The shared history index (history.rs), best-effort-written on every
+    /// committed message and read by SearchHistory/ReadHistory.
+    pub history: crate::history::HistoryStore,
     /// Extended thinking budget; None = thinking off.
     pub thinking_budget: Option<i64>,
 }
@@ -104,13 +109,19 @@ pub async fn subscribe(
 struct Publisher {
     client: async_nats::Client,
     conv: ConversationId,
+    history: crate::history::HistoryStore,
 }
 
 impl Publisher {
-    fn new(client: &async_nats::Client, conv: &ConversationId) -> Self {
+    fn new(
+        client: &async_nats::Client,
+        conv: &ConversationId,
+        history: &crate::history::HistoryStore,
+    ) -> Self {
         Self {
             client: client.clone(),
             conv: conv.clone(),
+            history: crate::history::HistoryStore::clone(history),
         }
     }
 
@@ -159,6 +170,32 @@ impl Publisher {
             }),
         )
         .await;
+
+        // Best-effort projection into the shared history index (AuditWriter.ts's
+        // own discipline): the record on the wire is the source of truth, so a
+        // history-write failure is logged and swallowed here, never propagated —
+        // the history record must never break the conversation it records. A
+        // gap left by a failure here is a rebuildable projection, healed later
+        // by a JetStream-replay import, not by retrying inline.
+        let history_message = crate::history::HistoryMessage {
+            id: id.to_string(),
+            conversation_id: self.conv.0.clone(),
+            turn_id: turn.to_string(),
+            query_id: query.to_string(),
+            timestamp: now_iso(),
+            role: if role == "user" {
+                crate::history::Role::User
+            } else {
+                crate::history::Role::Assistant
+            },
+            blocks: crate::history::to_history_blocks(content),
+        };
+        if let Err(e) = crate::history::insert(&self.history, &history_message) {
+            eprintln!(
+                "bridge[{}]: history index projection failed (swallowed): {e}",
+                self.conv.0
+            );
+        }
     }
 }
 
@@ -364,6 +401,7 @@ async fn accept_say(
         user_from: from,
         refs: crate::refs::RefStore::clone(&config.refs),
         memory: crate::memory::MemoryStore::clone(&config.memory),
+        history_store: crate::history::HistoryStore::clone(&config.history),
         thinking_budget: config.thinking_budget,
     };
     let done = done_tx.clone();
@@ -389,6 +427,7 @@ struct TurnContext {
     user_from: Value,
     refs: crate::refs::RefStore,
     memory: crate::memory::MemoryStore,
+    history_store: crate::history::HistoryStore,
     thinking_budget: Option<i64>,
 }
 
@@ -436,9 +475,10 @@ async fn run_query(
         user_from,
         refs,
         memory,
+        history_store,
         thinking_budget,
     } = &ctx;
-    let pubr = Publisher::new(client, conv);
+    let pubr = Publisher::new(client, conv, history_store);
 
     // Skill only when a catalogue exists; every other tool is always this
     // same list (static_tool_schemas) — the one source main.rs's startup log
@@ -628,6 +668,7 @@ async fn run_query(
             skills,
             refs,
             memory,
+            history_store,
             &tools,
             query,
             &turn_id,
@@ -671,6 +712,7 @@ async fn run_tool_round(
     skills: &Skills,
     refs: &crate::refs::RefStore,
     memory: &crate::memory::MemoryStore,
+    history_store: &crate::history::HistoryStore,
     offered: &[Value],
     query: &str,
     turn_id: &str,
@@ -959,6 +1001,11 @@ async fn run_tool_round(
             "ReadMemory" => crate::memtools::run_read_memory(memory, &block["input"]),
             "SearchMemory" => crate::memtools::run_search_memory(memory, &block["input"]),
             "MemoryTypes" => crate::memtools::run_memory_types(memory),
+            // SearchHistory/ReadHistory are read-only: no approval gate.
+            "SearchHistory" => {
+                crate::historytools::run_search_history(history_store, &block["input"])
+            }
+            "ReadHistory" => crate::historytools::run_read_history(history_store, &block["input"]),
             other => (format!("unknown tool {other:?}"), true),
         };
         // Walk and replace: anything over the oversized threshold is stashed

@@ -37,6 +37,8 @@ mod delete;
 mod editfile;
 mod exec;
 mod find;
+mod history;
+mod historytools;
 mod matcher;
 mod memory;
 mod memtools;
@@ -182,6 +184,7 @@ struct Host {
     thinking_budget: Option<i64>,
     refs: refs::RefStore,
     memory: memory::MemoryStore,
+    history: history::HistoryStore,
 }
 
 impl Host {
@@ -197,6 +200,7 @@ impl Host {
             attach_bucket: self.attach_bucket.clone(),
             refs: Arc::clone(&self.refs),
             memory: Arc::clone(&self.memory),
+            history: Arc::clone(&self.history),
             thinking_budget: self.thinking_budget,
         }
     }
@@ -391,6 +395,19 @@ async fn main() -> anyhow::Result<()> {
                 .join("memory.db")
         });
     let memory_store = memory::open(&memory_path).map_err(|e| anyhow::anyhow!(e))?;
+    // Shared with claude-sdk-cli's own SqliteHistoryEngine — same file, same
+    // schema. Written best-effort on every committed message (agent.rs's
+    // Publisher::message), read by SearchHistory/ReadHistory.
+    let history_path = std::env::var("BRIDGE_HISTORY_DB")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::env::var("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .join(".claude")
+                .join("history.db")
+        });
+    let history_store = history::open(&history_path).map_err(|e| anyhow::anyhow!(e))?;
 
     let client = async_nats::connect(&nats_url).await?; // fail-fast
 
@@ -437,6 +454,7 @@ async fn main() -> anyhow::Result<()> {
         default_model,
         refs: refs_store,
         memory: memory_store,
+        history: history_store,
         auth,
         skills_root,
         system: Arc::new(RwLock::new(None)),
