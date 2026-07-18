@@ -1,7 +1,10 @@
-# `trunk serve` hosts the wasm app on :8080 and proxies the socket + ref fetches
+# `trunk serve` hosts the wasm app and proxies the socket + ref fetches
 # through to towerd (127.0.0.1:8081, its dev bind), the same seam vite and
-# frontend-rs give their apps. So the page's ws://localhost:8080/ws reaches
-# towerd unchanged.
+# frontend-rs give their apps. Port 8082, not trunk's 8080 default: frontend-rs
+# already claims 8080, so the two Rust builds can run side by side (Svelte's
+# vite sits on 5173/5174 — none of the three webapps share a port).
+[serve]
+port = 8082
 
 [[proxy]]
 backend = "http://127.0.0.1:8081/ws"
