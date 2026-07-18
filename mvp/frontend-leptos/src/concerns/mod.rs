@@ -7,4 +7,6 @@
 //! same shape across all three frontends. Revisit only if a component needs
 //! to subscribe to one field of a concern without re-rendering on the rest.
 
+pub mod approvals;
+pub mod conversation;
 pub mod rail;
