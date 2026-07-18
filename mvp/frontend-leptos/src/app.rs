@@ -19,6 +19,7 @@
 //! docs/mvp/frontend-comparison-leptos.md.
 
 use leptos::ev;
+use leptos::html;
 use leptos::prelude::*;
 use ws_types::ClientMsg;
 
@@ -69,25 +70,90 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-fn message_text(content: &[serde_json::Value]) -> String {
+/// One content block, rendered per type — mirrors mvp/frontend's BlockView.svelte:
+/// text stands open, everything else (thinking, tool traffic, unknown blocks)
+/// collapses to a summary line via `<details>`, the primary render lever for
+/// per-message collapsing (docs/mvp/tower-v1-design.md, weight-as-refs note).
+fn render_block(block: &serde_json::Value) -> AnyView {
     use serde_json::Value;
-    let mut parts: Vec<String> = Vec::new();
-    for block in content {
-        match block.get("type").and_then(Value::as_str) {
-            Some("text") => {
-                if let Some(t) = block.get("text").and_then(Value::as_str) {
-                    parts.push(t.to_owned());
-                }
-            }
-            Some("tool_use") => {
-                let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
-                parts.push(format!("[tool_use: {name}]"));
-            }
-            Some(other) => parts.push(format!("[{other}]")),
-            None => parts.push("[block]".to_owned()),
-        }
+
+    fn short(v: &Value, max: usize) -> String {
+        let s = v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string());
+        truncate(&s, max)
     }
-    parts.join("\n")
+
+    match block.get("type").and_then(Value::as_str) {
+        Some("text") => {
+            let text = block
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            view! { <div class="block text">{text}</div> }.into_any()
+        }
+        Some("thinking") => {
+            let thinking = block
+                .get("thinking")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            view! {
+                <details class="block thinking">
+                    <summary>"thinking"</summary>
+                    <div class="block-body">{thinking}</div>
+                </details>
+            }
+            .into_any()
+        }
+        Some("tool_use") => {
+            let name = block
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("tool")
+                .to_owned();
+            let input = block.get("input").cloned().unwrap_or(Value::Null);
+            let preview = short(&input, 120);
+            let full = serde_json::to_string_pretty(&input).unwrap_or_default();
+            view! {
+                <details class="block tool">
+                    <summary>{format!("⚒ {name}")}" "<span class="dim">{preview}</span></summary>
+                    <pre class="block-body">{full}</pre>
+                </details>
+            }
+            .into_any()
+        }
+        Some("tool_result") => {
+            let is_error = block.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+            let content = block.get("content").cloned().unwrap_or(Value::Null);
+            let preview = short(&content, 120);
+            let full = content
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| serde_json::to_string_pretty(&content).unwrap_or_default());
+            let label = if is_error { "↩ result (error)" } else { "↩ result" };
+            view! {
+                <details class="block tool">
+                    <summary>{label}" "<span class="dim">{preview}</span></summary>
+                    <pre class="block-body">{full}</pre>
+                </details>
+            }
+            .into_any()
+        }
+        Some("image") => view! { <span class="dim">"🖼 image"</span> }.into_any(),
+        Some("document") => view! { <span class="dim">"📄 document"</span> }.into_any(),
+        Some(other) => {
+            let full = serde_json::to_string_pretty(block).unwrap_or_default();
+            let other = other.to_owned();
+            view! {
+                <details class="block">
+                    <summary>{other}</summary>
+                    <pre class="block-body">{full}</pre>
+                </details>
+            }
+            .into_any()
+        }
+        None => view! { <span class="dim">"[block]"</span> }.into_any(),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -120,6 +186,18 @@ pub fn App(ws_url: String) -> impl IntoView {
 
     let open_conv = RwSignal::new(None::<String>);
     let draft = RwSignal::new(String::new());
+    let messages_ref = NodeRef::<html::Div>::new();
+    // Stick-to-bottom while reading live; a manual scroll up drops it, and
+    // the "latest" button (mvp/frontend has none — this is a real gap it
+    // named) offers the way back down.
+    let at_bottom = RwSignal::new(true);
+
+    let scroll_to_bottom = move || {
+        if let Some(el) = messages_ref.get() {
+            el.set_scroll_top(el.scroll_height());
+        }
+        at_bottom.set(true);
+    };
 
     let send = move |msg: ClientMsg| transport.with_value(|t| t.send(&msg));
     let next_id = move || ids.try_update_value(|c| c.next()).expect("id counter");
@@ -196,6 +274,22 @@ pub fn App(ws_url: String) -> impl IntoView {
             conversations.update(|c| c.attach(&conv, vec![attachment]));
         });
     };
+
+    // Stick to the bottom while new content arrives and the reader hasn't
+    // scrolled away; runs after the DOM patch, so scrollHeight already
+    // reflects the new message/streaming chunk.
+    Effect::new(move |_| {
+        let conv = open_conv.get();
+        let count = conv.as_ref().and_then(|c| {
+            conversations.with(|cs| cs.get(c).map(|oc| oc.messages.len() + oc.streaming.len()))
+        });
+        let _ = count; // the dependency that re-triggers this effect
+        if at_bottom.get_untracked()
+            && let Some(el) = messages_ref.get()
+        {
+            el.set_scroll_top(el.scroll_height());
+        }
+    });
 
     // A rejected or revoked say comes home to the editor: pull its words back
     // into the draft if the box is empty, then consume the restore.
@@ -341,10 +435,19 @@ pub fn App(ws_url: String) -> impl IntoView {
                     let conv_for_upload = conv.clone();
 
                     view! {
-                        <div>
+                        <div class="conversation-inner">
                             <h2>{header}</h2>
                             {(!loaded).then(|| view! { <p class="opening">"loading…"</p> })}
-                            <div class="messages">
+                            <div
+                                class="messages"
+                                node_ref=messages_ref
+                                on:scroll=move |_| {
+                                    if let Some(el) = messages_ref.get() {
+                                        let gap = el.scroll_height() - el.scroll_top() - el.client_height();
+                                        at_bottom.set(gap < 32);
+                                    }
+                                }
+                            >
                                 {move || {
                                     let messages = conversations
                                         .with(|c| c.get(&conv).map(|oc| oc.messages.clone()));
@@ -357,12 +460,13 @@ pub fn App(ws_url: String) -> impl IntoView {
                                                     "assistant" => ("agent".to_owned(), "assistant"),
                                                     other => (other.to_owned(), "other"),
                                                 };
-                                                let text = message_text(&m.content);
+                                                let blocks: Vec<AnyView> =
+                                                    m.content.iter().map(render_block).collect();
                                                 view! {
-                                                    <p class=format!("message {cls}")>
-                                                        <span class="who">{who}" › "</span>
-                                                        {text}
-                                                    </p>
+                                                    <div class=format!("message {cls}")>
+                                                        <div class="who">{who}</div>
+                                                        {blocks}
+                                                    </div>
                                                 }
                                             })
                                             .collect_view()
@@ -411,6 +515,16 @@ pub fn App(ws_url: String) -> impl IntoView {
                                     })
                                 }}
                             </div>
+
+                            {move || {
+                                (!at_bottom.get()).then(|| {
+                                    view! {
+                                        <button class="latest" on:click=move |_| scroll_to_bottom()>
+                                            "↓ latest"
+                                        </button>
+                                    }
+                                })
+                            }}
 
                             {move || {
                                 approvals

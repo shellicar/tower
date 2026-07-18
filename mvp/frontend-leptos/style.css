@@ -56,11 +56,23 @@ html, body {
 .voided li { display: flex; justify-content: space-between; align-items: center; cursor: default; }
 .voided button { cursor: pointer; }
 
-.conversation { display: flex; min-height: 0; min-width: 0; flex-direction: column; padding: 0 16px; overflow-y: auto; }
+.conversation { display: flex; min-height: 0; min-width: 0; flex-direction: column; padding: 0 16px; }
 .conversation .empty, .conversation .opening { color: #737373; margin: auto; }
-.conversation h2 { font-size: 13px; font-weight: bold; border-bottom: 1px solid #404040; padding: 8px 0; margin: 0; }
+.conversation-inner { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.conversation h2 {
+  font-size: 13px;
+  font-weight: bold;
+  border-bottom: 1px solid #404040;
+  padding: 8px 0;
+  margin: 0;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  background: #111;
+  z-index: 1;
+}
 
-.messages { flex: 1; overflow-y: auto; padding-top: 8px; }
+.messages { flex: 1; min-height: 0; overflow-y: auto; padding-top: 8px; position: relative; }
 .message {
   margin: 8px 0;
   padding: 6px 0 6px 8px;
@@ -68,9 +80,32 @@ html, body {
 }
 .message.user { border-color: #3730a3; }
 .message.assistant { border-color: #166534; }
-.message .who { color: #a3a3a3; margin-right: 6px; }
+.message .who { color: #a3a3a3; margin-bottom: 2px; }
 .message.streaming { opacity: 0.9; }
 .pending-say { color: #737373; }
+
+.block { white-space: pre-wrap; word-break: break-word; margin: 2px 0; }
+.block summary { cursor: pointer; color: #a3a3a3; }
+.block summary:hover { color: #ddd; }
+.block-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #171717;
+  padding: 6px 8px;
+  margin: 4px 0;
+  overflow-x: auto;
+  color: #a3a3a3;
+}
+.block.thinking summary { color: #737373; }
+.dim { color: #737373; }
+
+.latest {
+  position: sticky;
+  bottom: 8px;
+  align-self: center;
+  background: #1e293b;
+  border-color: #334155;
+}
 
 .approval {
   border: 1px solid #404040;
@@ -89,7 +124,7 @@ html, body {
 
 .last-say { color: #737373; }
 
-.composer { display: flex; gap: 8px; align-items: center; padding: 8px 0 12px; border-top: 1px solid #262626; }
+.composer { display: flex; flex-shrink: 0; gap: 8px; align-items: center; padding: 8px 0 12px; border-top: 1px solid #262626; background: #111; }
 .composer input[type='text'] {
   flex: 1;
   padding: 6px 8px;
