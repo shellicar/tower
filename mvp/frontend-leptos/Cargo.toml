@@ -1,0 +1,33 @@
+# The Leptos frontend: the third build in the side-by-side (docs/mvp/
+# frontend-leptos-plan.md). Same architecture as mvp/frontend (Svelte) and
+# mvp/frontend-rs (egui), so the comparison isolates what a DOM-based Rust
+# renderer buys over both. A detached workspace of its own, trunk-built, kept
+# out of the mvp workspace so `just build` stays native and fast; the shared
+# WS contract arrives as a path dependency on ws-types, the one definition
+# every side uses (drift impossible).
+[workspace]
+
+[package]
+name = "tower-frontend-leptos"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# leptos 0.8 (stable) over the 0.9 alpha in the vetted clone — deliberate:
+# this build is testing the DOM-render axis, not tracking bleeding-edge
+# leptos.
+leptos = { version = "0.8", features = ["csr"] }
+serde_json = "1"
+ws-types = { path = "../crates/ws-types" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+# gloo-net's WebSocket: an async Stream/Sink split, not ewebsock's try_recv
+# channel — the natural fit for Leptos's push-based reactive graph rather than
+# egui's per-frame pull.
+gloo-net = { version = "0.6", features = ["websocket"] }
+futures = "0.3"
+web-sys = { version = "0.3", features = ["Document", "Element", "Location", "Window", "console"] }
+console_error_panic_hook = "0.1"
