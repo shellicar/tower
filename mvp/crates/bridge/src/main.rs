@@ -39,6 +39,7 @@ mod matcher;
 mod objects;
 mod pipe;
 mod read;
+mod readfile;
 mod skills;
 mod slice;
 mod stream;

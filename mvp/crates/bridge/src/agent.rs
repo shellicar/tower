@@ -413,6 +413,7 @@ async fn run_query(
         crate::slice::tail_schema(),
         crate::slice::range_schema(),
         crate::pipe::pipe_schema(),
+        crate::readfile::read_file_schema(),
     ];
     if !skills.is_empty() {
         tools.push(skills.tool_schema());
@@ -646,6 +647,19 @@ async fn run_tool_round(
             }),
         )
         .await;
+        // ReadFile is the one tool whose result isn't text (a binary attachment
+        // is a content block array) — handled before the common match, which
+        // assumes every other tool's result is a plain String.
+        if name == "ReadFile" {
+            let (result_content, is_error) = crate::readfile::run_read_file(&block["input"]).await;
+            results.push(json!({
+                "type": "tool_result",
+                "tool_use_id": id,
+                "content": result_content,
+                "is_error": is_error,
+            }));
+            continue;
+        }
         let (content, is_error) = match name {
             "Skill" => {
                 let skill = block["input"]["skill"].as_str().unwrap_or("");
