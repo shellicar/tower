@@ -19,7 +19,10 @@ const MAX_OUTPUT_BYTES: usize = 100 * 1024;
 pub fn bash_schema() -> Value {
     json!({
         "name": "Bash",
-        "description": "Run a bash command (bash -c) in the working directory. \
+        "description": "Run a bash command (bash -c) in the working directory. Prefer \
+            `Exec` — structured, reviewable, and it already covers chaining (`;`/`&&`/`||`/ \
+            `|`) and redirects. Reach for Bash only when you need actual shell features \
+            Exec doesn't have: globbing, variable expansion, subshells, here-docs. \
             Non-interactive: stdin is closed, so commands that prompt will fail \
             rather than hang. Output is capped at 100 KB. Every command requires \
             human approval before it runs.",
