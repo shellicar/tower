@@ -21,7 +21,6 @@ use crate::time::Millis;
 use crate::transport::{IdCounter, Transport};
 use crate::ui::conversation::ConversationView;
 use crate::ui::rail::RailView;
-use crate::uploads::{self, Upload};
 
 fn now_ms() -> Millis {
     #[cfg(target_arch = "wasm32")]
@@ -133,12 +132,29 @@ pub fn App(ws_url: String) -> impl IntoView {
                                 }
                             }
                         });
-                        let on_upload = Callback::new({
+                        let on_attach = Callback::new({
                             let conv = conv.clone();
-                            move |file: web_sys::File| {
-                                uploads::pick_and_upload(conv.clone(), file, move |Upload { conv, attachment }| {
-                                    conversations.update(|c| c.attach(&conv, vec![attachment]));
-                                });
+                            move |attachment| {
+                                conversations.update(|c| c.attach(&conv, vec![attachment]));
+                            }
+                        });
+                        let on_set_title = Callback::new({
+                            let conv = conv.clone();
+                            move |title: String| {
+                                let id = next_id();
+                                if let Some(msg) = rail.try_update(|r| r.set_title(&conv, title, id)).flatten() {
+                                    send(msg);
+                                }
+                            }
+                        });
+                        let on_close = Callback::new({
+                            let conv = conv.clone();
+                            move |()| {
+                                let id = next_id();
+                                if let Some(msg) = conversations.try_update(|c| c.close(&conv, id)).flatten() {
+                                    send(msg);
+                                }
+                                open_conv.set(None);
                             }
                         });
                         view! {
@@ -150,8 +166,10 @@ pub fn App(ws_url: String) -> impl IntoView {
                                 now=now
                                 on_send=on_send
                                 on_cancel=on_cancel
-                                on_upload=on_upload
+                                on_attach=on_attach
                                 on_answer=on_answer
+                                on_set_title=on_set_title
+                                on_close=on_close
                             />
                         }
                         .into_any()

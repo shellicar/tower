@@ -164,6 +164,17 @@ impl Conversations {
         }
     }
 
+    /// Drop one queued attachment before it rides a say — the chip's ×
+    /// (mvp/frontend's `removeAttachment`). Silently a no-op past the end;
+    /// the chip that fired this is already gone from a re-render by then.
+    pub fn remove_pending_attachment(&mut self, conv: &str, index: usize) {
+        if let Some(oc) = self.open.get_mut(conv)
+            && index < oc.pending_attachments.len()
+        {
+            oc.pending_attachments.remove(index);
+        }
+    }
+
     pub fn cancel(&mut self, conv: &str, id: String) -> Option<ClientMsg> {
         let oc = self.open.get(conv)?;
         let query = oc.live_query.clone()?;
@@ -468,6 +479,20 @@ mod tests {
             message: msg("m1", "q9", "user", 5),
         });
         assert!(c.get("a").unwrap().pending_attachments.is_empty()); // committed clears
+    }
+
+    #[test]
+    fn a_pending_attachment_can_be_dropped_before_it_ships() {
+        let mut c = Conversations::default();
+        open(&mut c, "a");
+        c.attach(
+            "a",
+            vec![json!({ "type": "image" }), json!({ "type": "document" })],
+        );
+        c.remove_pending_attachment("a", 0);
+        let remaining = &c.get("a").unwrap().pending_attachments;
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0]["type"], "document");
     }
 
     #[test]

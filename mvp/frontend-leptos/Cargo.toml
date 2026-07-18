@@ -29,5 +29,21 @@ js-sys = "0.3"
 # egui's per-frame pull.
 gloo-net = { version = "0.6", features = ["websocket", "http"] }
 futures = "0.3"
-web-sys = { version = "0.3", features = ["Document", "Element", "File", "FileList", "HtmlInputElement", "Location", "Window", "console"] }
+web-sys = { version = "0.3", features = [
+  "ClipboardEvent",
+  "CssStyleDeclaration",
+  "DataTransfer",
+  "DataTransferItem",
+  "DataTransferItemList",
+  "Document",
+  "Element",
+  "File",
+  "FileList",
+  "HtmlInputElement",
+  "HtmlTextAreaElement",
+  "Location",
+  "Storage",
+  "Window",
+  "console",
+] }
 console_error_panic_hook = "0.1"

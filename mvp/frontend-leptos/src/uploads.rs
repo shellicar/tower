@@ -18,50 +18,55 @@
 
 use serde_json::{Value, json};
 
-/// One completed upload, delivered to the app via callback.
-pub struct Upload {
-    pub conv: String,
-    pub attachment: Value,
+/// Uploads one file. `on_done` fires with the won ref on success (it rides
+/// the next say — the caller already knows which conversation, so only the
+/// ref comes back); `on_error` carries a human-readable reason for the
+/// composer's upload-note line (mvp/frontend's `uploadNote`); `on_settled`
+/// always fires last, success or failure, so the caller can drop its
+/// "uploading…" count without duplicating the outcome match.
+#[cfg(target_arch = "wasm32")]
+pub fn pick_and_upload(
+    file: web_sys::File,
+    on_done: impl Fn(Value) + 'static,
+    on_error: impl Fn(String) + 'static,
+    on_settled: impl Fn() + 'static,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        let mime = mime_from_name(&file.name());
+        match upload(&file, mime).await {
+            Ok(attachment) => on_done(attachment),
+            Err(reason) => {
+                log(&format!("upload: {reason}"));
+                on_error(reason);
+            }
+        }
+        on_settled();
+    });
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn pick_and_upload(conv: String, file: web_sys::File, on_done: impl Fn(Upload) + 'static) {
+async fn upload(file: &web_sys::File, mime: &str) -> Result<Value, String> {
     use gloo_net::http::Request;
     use wasm_bindgen_futures::JsFuture;
 
-    wasm_bindgen_futures::spawn_local(async move {
-        let mime = mime_from_name(&file.name());
-        let buf = match JsFuture::from(file.array_buffer()).await {
-            Ok(buf) => buf,
-            Err(err) => {
-                log(&format!("upload: failed to read file: {err:?}"));
-                return;
-            }
-        };
-        let bytes = js_sys::Uint8Array::new(&buf).to_vec();
+    let buf = JsFuture::from(file.array_buffer())
+        .await
+        .map_err(|err| format!("failed to read file: {err:?}"))?;
+    let bytes = js_sys::Uint8Array::new(&buf).to_vec();
 
-        let request = match Request::post("/attachment")
-            .header("Content-Type", mime)
-            .body(bytes)
-        {
-            Ok(r) => r,
-            Err(err) => {
-                log(&format!("upload: failed to build request: {err}"));
-                return;
-            }
-        };
-        match request.send().await {
-            Ok(res) if res.ok() => match res.binary().await {
-                Ok(body) => match attachment_ref(&body) {
-                    Some(attachment) => on_done(Upload { conv, attachment }),
-                    None => log("upload: unparseable /attachment response"),
-                },
-                Err(err) => log(&format!("upload: failed to read response: {err}")),
-            },
-            Ok(res) => log(&format!("upload failed: {}", res.status())),
-            Err(err) => log(&format!("upload error: {err}")),
-        }
-    });
+    let request = Request::post("/attachment")
+        .header("Content-Type", mime)
+        .body(bytes)
+        .map_err(|err| format!("failed to build request: {err}"))?;
+    let res = request.send().await.map_err(|err| format!("{err}"))?;
+    if !res.ok() {
+        return Err(format!("upload failed: {}", res.status()));
+    }
+    let body = res
+        .binary()
+        .await
+        .map_err(|err| format!("failed to read response: {err}"))?;
+    attachment_ref(&body).ok_or_else(|| "unparseable /attachment response".to_owned())
 }
 
 /// Build the say's AttachmentRef from the transit store's reply

@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
-use ws_types::{ServerMsg, WsAgent, WsApproval, WsRow};
+use ws_types::{ClientMsg, ServerMsg, WsAgent, WsApproval, WsRow};
 
 use crate::time::{Liveness, Millis, approval_void, liveness_verdict};
 
@@ -200,6 +200,20 @@ impl Rail {
             .filter_map(|a| a.conv.clone())
             .collect()
     }
+
+    /// Rename a conversation — owned-fact optimism (mirrors the Svelte
+    /// control's `setTitle`): the write leads, a reconnect's `list` is the
+    /// authority if it ever disagrees. Empty title clears back to the id.
+    /// None if the conversation has no row yet (nothing to rename).
+    pub fn set_title(&mut self, conv: &str, title: String, id: String) -> Option<ClientMsg> {
+        let row = self.rows.get_mut(conv)?;
+        row.title = if title.is_empty() { None } else { Some(title.clone()) };
+        Some(ClientMsg::SetTitle {
+            id,
+            conv: conv.to_owned(),
+            title,
+        })
+    }
 }
 
 /// The rail's slice of an approval: which conversation, how fresh the holder,
@@ -337,5 +351,22 @@ mod tests {
         assert!(!rail.pending_by_conv(100_000 + 46_000).contains("a"));
         rail.apply(&approval("p1", 100_000, true));
         assert!(!rail.pending_by_conv(100_000).contains("a"));
+    }
+
+    #[test]
+    fn set_title_writes_optimistically_and_sends() {
+        let mut rail = Rail::default();
+        rail.apply(&row_event("a", 1));
+        let msg = rail.set_title("a", "named".into(), "r1".into()).unwrap();
+        assert!(matches!(msg, ClientMsg::SetTitle { .. }));
+        assert_eq!(conv_of(&rail, "a").title.as_deref(), Some("named"));
+        rail.set_title("a", "".into(), "r2".into());
+        assert_eq!(conv_of(&rail, "a").title, None);
+    }
+
+    #[test]
+    fn set_title_on_an_unknown_conversation_is_a_no_op() {
+        let mut rail = Rail::default();
+        assert!(rail.set_title("ghost", "x".into(), "r1".into()).is_none());
     }
 }
