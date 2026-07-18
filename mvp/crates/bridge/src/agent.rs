@@ -406,10 +406,13 @@ async fn run_query(
     } = &ctx;
     let pubr = Publisher::new(client, conv);
 
-    // Bash, Exec, Read, Find, Match, Head, Tail and Range always; Skill only
-    // when a catalogue exists.
+    // Bash is disabled for now — Exec is the preferred structured tool and
+    // covers what Bash covered; kept in exec.rs (not deleted) rather than
+    // offered. Dynamic per-conversation enable/disable (like the `skills`
+    // stdio repoint) is a real future direction, not built yet — this list
+    // is the whole story until then. Exec, Read, Find, Match, Head, Tail and
+    // Range always; Skill only when a catalogue exists.
     let mut tools: Vec<Value> = vec![
-        crate::exec::bash_schema(),
         crate::exec::exec_schema(),
         crate::read::read_schema(),
         crate::find::find_schema(),

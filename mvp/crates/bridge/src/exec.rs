@@ -16,6 +16,11 @@ use tokio::sync::watch;
 /// carries its own limit.
 const MAX_OUTPUT_BYTES: usize = 100 * 1024;
 
+/// Disabled for now (agent.rs no longer registers this schema) — Exec is
+/// preferred and covers the same ground. Kept, not deleted: dynamic
+/// per-conversation tool enable/disable is real future work, and re-offering
+/// Bash is then a one-line change, not a rewrite.
+#[allow(dead_code)]
 pub fn bash_schema() -> Value {
     json!({
         "name": "Bash",
