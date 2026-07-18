@@ -46,10 +46,12 @@ export class Approvals {
     }
   }
 
-  /** Pending asks oldest-first — a waiting Claude burns wall-clock. */
+  /** Pending asks oldest-first — a waiting Claude burns wall-clock. Dismissed
+   *  asks are excluded, same footing as settled: a human's own decision, not
+   *  a claim the ask was answered ("connection is authority" — 19 Jul). */
   get pendingApprovals(): ApprovalState[] {
     return [...this.#approvals.values()]
-      .filter((a) => !a.settled)
+      .filter((a) => !a.settled && !a.dismissed)
       .sort((a, b) => a.raisedTs - b.raisedTs);
   }
 
@@ -95,11 +97,17 @@ export class Approvals {
     }
   }
 
-  /** Drop an ask from this client's view — local, not an answer (nobody settles
-   *  an abandoned ask). Its holder pulsing again resurrects it, which is right. */
+  /** A human's own decision ("connection is authority") to stop tracking this
+   *  ask — not an answer (nobody settles an abandoned ask), and not a merely-
+   *  local hide: persisted server-side, so it survives a reconnect and
+   *  reaches every other connected client too. The updated state
+   *  (`dismissed: true`) arrives back through the ordinary `approval`
+   *  broadcast, same as any other fold — this method only sends. */
   dismiss(id: string): void {
-    const next = new Map(this.#approvals);
-    next.delete(id);
-    this.#approvals = next;
+    this.#transport.send({
+      type: 'dismiss_approval',
+      id: this.#transport.id(),
+      approval: id,
+    });
   }
 }

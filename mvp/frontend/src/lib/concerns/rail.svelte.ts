@@ -126,6 +126,14 @@ export class Rail {
         this.#asks = next;
         break;
       }
+      case 'attachment_dismissed': {
+        // A human dismissed it (tower's own annotation, never a claim the
+        // agent detached) — drop it, same as a real `detached` would.
+        const next = new Map(this.#attachments);
+        next.delete(`${event.world}/${event.instanceId}/${event.conv}`);
+        this.#attachments = next;
+        break;
+      }
       default:
         break; // not the rail's concern
     }
@@ -170,13 +178,14 @@ export class Rail {
 
   /** Potential conversations: attached, no row yet — served, silent. Transient
    *  by design; they vanish with the attachment, and the first committed
-   *  message births an ordinary row. */
-  get attachedOnly(): AgentAttachment[] {
+   *  message births an ordinary row. Carries the liveness verdict, so a
+   *  stranded one can offer Dismiss (the RailView pattern). */
+  get attachedOnly(): (AgentAttachment & { verdict: 'alive' | 'stranded' | null })[] {
     const byConv = new Map<string, AgentAttachment>();
     for (const a of this.#attachments.values()) {
       if (!this.#rows.has(a.conv) && !byConv.has(a.conv)) byConv.set(a.conv, a);
     }
-    return [...byConv.values()];
+    return [...byConv.values()].map((a) => ({ ...a, verdict: this.verdict(a.conv) }));
   }
 
   /** Conversations with a LIVE pending ask (unsettled and not void), for the
@@ -203,6 +212,24 @@ export class Rail {
     const next = new Map(this.#rows);
     next.set(conv, { ...row, title: title === '' ? undefined : title });
     this.#rows = next;
+  }
+
+  /** A human's own decision ("connection is authority") to stop tracking a
+   *  stranded potential conversation — not a claim the agent detached (that
+   *  fact stays the agent's alone to publish). Persisted server-side; the
+   *  removal itself happens when the `attachment_dismissed` broadcast
+   *  arrives back, same as any other fold. A no-op if nothing is attached
+   *  under that conversation. */
+  dismissAttachment(conv: string): void {
+    const a = [...this.#attachments.values()].find((a) => a.conv === conv);
+    if (!a) return;
+    this.#transport.send({
+      type: 'dismiss_attachment',
+      id: this.#transport.id(),
+      world: a.world,
+      instanceId: a.instanceId,
+      conv,
+    });
   }
 
   setTag(conv: string, key: string, value: string): void {

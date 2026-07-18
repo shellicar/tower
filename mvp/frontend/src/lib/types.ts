@@ -56,6 +56,10 @@ export interface ApprovalState {
   raisedTs: Millis;
   lastPulse: Millis;
   settled?: { approved: boolean; by: Sender; ts: Millis };
+  /** A human's own decision to stop tracking this ask (tower's annotation,
+   *  never a claim it was answered). Excluded from the outstanding snapshot
+   *  once true, same as `settled`. */
+  dismissed?: boolean;
 }
 
 export interface AgentInstance {
@@ -148,6 +152,10 @@ export type ServerMsg =
   | ({ type: 'usage' } & UsageSnapshot)
   | { type: 'layout'; tabs: WireTab[] }
   | { type: 'layout_set'; id: string }
+  /** An attachment a human dismissed — broadcast to every connected session,
+   *  like `row`/`approval`. Not an agent fact: a real `detached` still
+   *  arrives separately, from the agent, if it ever does. */
+  | { type: 'attachment_dismissed'; world: string; instanceId: string; conv: string }
   | { type: 'error'; id: string; reason: string };
 
 // client → towerd
@@ -166,7 +174,13 @@ export type ClientMsg =
   | { type: 'set_title'; id: string; conv: string; title: string }
   | { type: 'set_tag'; id: string; conv: string; key: string; value: string }
   | { type: 'answer'; id: string; approval: string; approved: boolean }
-  | { type: 'set_layout'; id: string; tabs: WireTab[] };
+  | { type: 'set_layout'; id: string; tabs: WireTab[] }
+  /** A human's own decision ("connection is authority") — never a claim the
+   *  ask was answered. */
+  | { type: 'dismiss_approval'; id: string; approval: string }
+  /** Same standing, for an attached-but-message-less conversation whose
+   *  holder has gone silent. Not a claim the agent detached. */
+  | { type: 'dismiss_attachment'; id: string; world: string; instanceId: string; conv: string };
 
 export function isRef(value: unknown): value is Ref {
   return (

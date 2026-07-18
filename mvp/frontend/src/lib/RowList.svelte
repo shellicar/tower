@@ -156,7 +156,12 @@
        committed message births an ordinary row below. -->
   {#each rail.attachedOnly as a (a.conv)}
     <li>
-      <button
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+      <!-- A `role="button"` div, not a `<button>`: it wraps a real Dismiss
+           button for a stranded attachment, and buttons can't nest. -->
+      <div
+        role="button"
+        tabindex="0"
         class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900 {view.tab.convs.includes(
           a.conv,
         )
@@ -169,17 +174,28 @@
       >
         <span class="flex min-w-0 flex-1 items-center gap-1.5">
           <span
-            class="h-2 w-2 shrink-0 rounded-full {rail.verdict(a.conv) === 'stranded'
+            class="h-2 w-2 shrink-0 rounded-full {a.verdict === 'stranded'
               ? 'bg-red-400'
               : 'bg-green-400'}"
           ></span>
           <span class="truncate">{a.conv}</span>
         </span>
-        <span class="shrink-0 text-neutral-500">served, silent</span>
+        <span class="shrink-0 text-neutral-500">
+          served, silent
+          {#if a.verdict === 'stranded'}
+            <button
+              class="cursor-pointer rounded border border-neutral-700 px-1.5 text-neutral-300 hover:bg-neutral-800"
+              onclick={(e) => {
+                e.stopPropagation();
+                rail.dismissAttachment(a.conv);
+              }}>Dismiss</button
+            >
+          {/if}
+        </span>
         {#if a.cwd}
           <span class="w-full truncate pt-0.5 text-xs text-neutral-500">{a.cwd}</span>
         {/if}
-      </button>
+      </div>
     </li>
   {/each}
   {#each sections as section (section.label ?? '')}
