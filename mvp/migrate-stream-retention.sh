@@ -12,11 +12,15 @@
 # actually run it. NATS_URL overrides the default local broker.
 #
 # Order matters and is deliberately conservative:
-#   1. Back up conv-approval in full before anything else touches it —
-#      `nats stream backup`, restorable with `nats stream restore`. Only
-#      runs under --apply: dry run touches nothing, including the backup
-#      target directory.
-#   2. Narrow conv-approval's own subjects to audit-only FIRST. JetStream
+#   1. Back up the whole nats-data docker volume first — a filesystem-level
+#      tar via a throwaway container, broader insurance than the stream
+#      backup below: it covers the broker's own JetStream metadata and any
+#      other stream on the same volume, not just conv-approval's messages.
+#   2. Back up conv-approval itself in full — `nats stream backup`,
+#      restorable with `nats stream restore`. Both backup steps only run
+#      under --apply: dry run touches nothing, including the backup target
+#      directories.
+#   3. Narrow conv-approval's own subjects to audit-only FIRST. JetStream
 #      refuses to create a stream whose subjects overlap an existing one —
 #      conv-approval still claims every subject until this runs, so the new
 #      streams cannot be created before it (this bit a live run: creating
@@ -80,27 +84,45 @@ if [ "$APPLY" = "0" ]; then
 fi
 echo
 
-BACKUP_DIR="./stream-backups/conv-approval-$(date +%Y%m%dT%H%M%S)"
-echo "## 1. Back up conv-approval to $BACKUP_DIR"
+TS="$(date +%Y%m%dT%H%M%S)"
+VOLUME_NAME="${NATS_VOLUME:-mvp_nats-data}"
+VOLUME_BACKUP="$(pwd)/stream-backups/nats-data-volume-$TS.tar.gz"
+echo "## 1. Back up the $VOLUME_NAME docker volume to $VOLUME_BACKUP"
 if [ "$APPLY" = "1" ]; then
-  echo "+ nats --server $NATS_URL stream backup conv-approval $BACKUP_DIR"
-  mkdir -p "$BACKUP_DIR"
-  nats --server "$NATS_URL" stream backup conv-approval "$BACKUP_DIR"
-  echo "backup written to $BACKUP_DIR — restore with:"
-  echo "  nats --server $NATS_URL stream restore conv-approval $BACKUP_DIR"
+  mkdir -p "$(dirname "$VOLUME_BACKUP")"
+  echo "+ docker run --rm -v $VOLUME_NAME:/data:ro -v $(dirname "$VOLUME_BACKUP"):/backup alpine tar czf /backup/$(basename "$VOLUME_BACKUP") -C /data ."
+  docker run --rm \
+    -v "$VOLUME_NAME:/data:ro" \
+    -v "$(dirname "$VOLUME_BACKUP"):/backup" \
+    alpine tar czf "/backup/$(basename "$VOLUME_BACKUP")" -C /data .
+  echo "volume backup written to $VOLUME_BACKUP — restore by stopping the"
+  echo "broker, then: docker run --rm -v $VOLUME_NAME:/data -v $(dirname "$VOLUME_BACKUP"):/backup alpine sh -c 'rm -rf /data/* && tar xzf /backup/$(basename "$VOLUME_BACKUP") -C /data'"
 else
-  echo "(dry run) nats --server $NATS_URL stream backup conv-approval $BACKUP_DIR"
+  echo "(dry run) docker run --rm -v $VOLUME_NAME:/data:ro -v .../backup alpine tar czf ... /data"
 fi
 echo
 
-echo "## 2. Narrow conv-approval's subjects to audit-only (must happen before"
+STREAM_BACKUP_DIR="./stream-backups/conv-approval-$TS"
+echo "## 2. Back up conv-approval to $STREAM_BACKUP_DIR"
+if [ "$APPLY" = "1" ]; then
+  echo "+ nats --server $NATS_URL stream backup conv-approval $STREAM_BACKUP_DIR"
+  mkdir -p "$STREAM_BACKUP_DIR"
+  nats --server "$NATS_URL" stream backup conv-approval "$STREAM_BACKUP_DIR"
+  echo "backup written to $STREAM_BACKUP_DIR — restore with:"
+  echo "  nats --server $NATS_URL stream restore conv-approval $STREAM_BACKUP_DIR"
+else
+  echo "(dry run) nats --server $NATS_URL stream backup conv-approval $STREAM_BACKUP_DIR"
+fi
+echo
+
+echo "## 3. Narrow conv-approval's subjects to audit-only (must happen before"
 echo "##    the new streams are created — JetStream refuses overlapping subjects)"
 run nats --server "$NATS_URL" stream edit conv-approval \
   --subjects "$AUDIT_SUBJECTS" \
   --retention limits --discard old -f
 echo
 
-echo "## 3. Create conv-diagnostic (max_age 90d) if it does not exist"
+echo "## 4. Create conv-diagnostic (max_age 90d) if it does not exist"
 if nats --server "$NATS_URL" stream info conv-diagnostic >/dev/null 2>&1; then
   echo "conv-diagnostic already exists, skipping create"
 else
@@ -110,7 +132,7 @@ else
 fi
 echo
 
-echo "## 4. Create conv-ephemeral (max_age 3d) if it does not exist"
+echo "## 5. Create conv-ephemeral (max_age 3d) if it does not exist"
 if nats --server "$NATS_URL" stream info conv-ephemeral >/dev/null 2>&1; then
   echo "conv-ephemeral already exists, skipping create"
 else
@@ -120,13 +142,13 @@ else
 fi
 echo
 
-echo "## 5. Purge conv-approval of the now-out-of-scope diagnostic/ephemeral subjects"
+echo "## 6. Purge conv-approval of the now-out-of-scope diagnostic/ephemeral subjects"
 for subject in $(echo "$DIAGNOSTIC_SUBJECTS,$EPHEMERAL_SUBJECTS" | tr ',' ' '); do
   run nats --server "$NATS_URL" stream purge conv-approval --subject "$subject" -f
 done
 echo
 
-echo "## 6. Set conv-approval's max_age to unlimited"
+echo "## 7. Set conv-approval's max_age to unlimited"
 run nats --server "$NATS_URL" stream edit conv-approval --max-age 0 -f
 echo
 
