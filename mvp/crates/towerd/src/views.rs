@@ -9,7 +9,7 @@
 //! - `ViewQuery` in over an mpsc, answered over oneshots — the read path.
 
 use rusqlite::{Connection, OptionalExtension};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use wire::{
@@ -227,6 +227,12 @@ pub enum ViewQuery {
         id: String,
         reply: oneshot::Sender<Option<(String, Vec<u8>)>>,
     },
+    /// Table row counts, per-stream cursor positions, schema version and db
+    /// size — the plain-JSON diagnostic surface so "what's actually in the
+    /// db" doesn't require a manual sqlite3 session. Nothing here is part of
+    /// any wire contract; it exists for a human looking, not a client
+    /// deriving state.
+    Stats { reply: oneshot::Sender<Value> },
     /// Empty title clears the name. Last write wins.
     SetTitle {
         conv: ConversationId,
@@ -1034,6 +1040,12 @@ impl Views {
             ViewQuery::Ref { id, reply } => {
                 let _ = reply.send(self.get_ref(&id).ok().flatten());
             }
+            ViewQuery::Stats { reply } => {
+                let _ = reply.send(
+                    self.stats()
+                        .unwrap_or_else(|e| json!({ "error": e.to_string() })),
+                );
+            }
             ViewQuery::Approvals { reply } => {
                 let _ = reply.send(self.approvals().unwrap_or_default());
             }
@@ -1189,6 +1201,62 @@ impl Views {
             return Ok(0);
         }
         Ok(cursor)
+    }
+
+    /// Everything a human would otherwise reach for a raw sqlite3 session to
+    /// see: how many rows in each table, where each stream's cursor sits,
+    /// the schema version, and the db file's size on disk (via page_count *
+    /// page_size — portable, no need to know the file's own path).
+    fn stats(&self) -> anyhow::Result<Value> {
+        let table_count = |t: &str| -> anyhow::Result<i64> {
+            Ok(self
+                .db
+                .query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| r.get(0))?)
+        };
+        let tables = [
+            "rows",
+            "messages",
+            "refs",
+            "titles",
+            "approvals",
+            "tags",
+            "tag_keys",
+            "agent_instances",
+            "agent_attachments",
+            "usage",
+            "layout",
+            "dismissed_approvals",
+            "dismissed_attachments",
+        ];
+        let mut counts = serde_json::Map::new();
+        for t in tables {
+            counts.insert(t.to_string(), json!(table_count(t)?));
+        }
+
+        let mut streams_stmt = self.db.prepare(
+            "SELECT c.stream_name, c.seq, s.created
+             FROM cursor c LEFT JOIN stream s ON s.stream_name = c.stream_name",
+        )?;
+        let streams: Vec<Value> = streams_stmt
+            .query_map([], |r| {
+                Ok(json!({
+                    "stream": r.get::<_, String>(0)?,
+                    "cursor": r.get::<_, i64>(1)?,
+                    "created": r.get::<_, Option<String>>(2)?,
+                }))
+            })?
+            .collect::<Result<_, _>>()?;
+
+        let user_version: i64 = self.db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        let page_count: i64 = self.db.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+        let page_size: i64 = self.db.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+
+        Ok(json!({
+            "tables": counts,
+            "streams": streams,
+            "schemaVersion": user_version,
+            "dbBytes": page_count * page_size,
+        }))
     }
 
     /// The palette keys draw from at first use — readable on the dark UI.

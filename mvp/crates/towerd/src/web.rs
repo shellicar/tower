@@ -29,6 +29,7 @@ pub fn router<B: Broker, C: Clock>(state: AppState<B, C>) -> Router {
     Router::new()
         .route("/ws", get(ws_upgrade::<B, C>))
         .route("/ref/{id}", get(get_ref::<B, C>))
+        .route("/stats", get(get_stats::<B, C>))
         .route(
             "/attachment",
             axum::routing::post(post_attachment::<B, C>)
@@ -40,6 +41,26 @@ pub fn router<B: Broker, C: Clock>(state: AppState<B, C>) -> Router {
         .route("/", get(serve_index::<B, C>))
         .route("/{*path}", get(serve_asset::<B, C>))
         .with_state(state)
+}
+
+/// Table row counts, per-stream cursor positions, schema version and db
+/// size, as plain JSON — the diagnostic route so "what's actually in the
+/// db" doesn't need a manual sqlite3 session.
+async fn get_stats<B: Broker, C: Clock>(State(state): State<AppState<B, C>>) -> Response {
+    let (tx, rx) = oneshot::channel();
+    if state
+        .views
+        .queries
+        .send(ViewQuery::Stats { reply: tx })
+        .await
+        .is_err()
+    {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    let Ok(stats) = rx.await else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    axum::Json(stats).into_response()
 }
 
 /// Upload one attachment's bytes into the transit store. The id is minted
