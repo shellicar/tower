@@ -29,32 +29,61 @@ ground against). This build tests whether a DOM-based Rust renderer keeps
 Axes 1 and 2 (compiler-enforced isolation, shared wire types) while fixing
 Axis 3.
 
-## Scope: the same slice, again
+## Scope: two questions, one build
 
-Match what `frontend-rs` built, nothing more — the comparison is only valid if
-the slice is held constant a third time:
+This build answers two things, not one — decided explicitly (2026-07-19),
+reversing the earlier "match frontend-rs's slice, nothing more" scoping:
+
+1. **The narrow axis comparison** — does a DOM-based Rust renderer keep the
+   compile-time isolation and shared-wire-types wins while fixing egui's
+   render costs (Axis 3)? This is what the original scope (below, the
+   frontend-rs slice) answers on its own, and the four axes in "What to
+   measure" still apply unchanged.
+2. **Is Leptos a real candidate to actually replace Svelte** — which needs
+   the *current* Svelte feature set covered, not the older frontend-rs slice.
+   Svelte has grown a fifth concern and real features since this plan was
+   first scoped (tabs/multi-open now shared fleet state on the wire, tags,
+   usage/cost tracking, attachments, server-persisted dismiss) — none of
+   which the original scope touched.
+
+So the actual build target is Svelte's current full concern set, not the
+frontend-rs slice:
 
 - the staleness rail
-- one conversation panel: read messages, say, cancel, attach
+- conversation panels: read messages, say, cancel, attach — **multiple, in
+  tabs**, matching Svelte's current shared/durable layout (moved onto the
+  wire, not local UI state)
 - the approvals view: answer, dismiss
+- **usage** — the fifth concern (`usage.svelte.ts` + `pricing.ts` in Svelte):
+  per-conversation cost tracking, not in the original four-concern list
+- **tags** — flat key:value annotations, group-by, filtering, coloured keys
+- **attachments** — paste-to-attach, multi-file chips, upload
+- **dismiss** — persisted server-side, a real annotation not local state
 
-Do not add tabs/multi-open (Svelte has it, egui doesn't) unless comparing that
-specifically becomes the point — decide and note it, don't drift into it.
+The four-axis measurement still runs against this fuller build unchanged —
+more concerns is more material for Axis 4 (survival under careless
+extension), not a different framework.
 
 ## Concern shape to carry over
 
-Same four concerns, same contract, ported to Leptos signals instead of
-`$state` runes or plain structs:
+Five concerns now, same contract, ported to Leptos signals instead of
+`$state` runes or plain structs (Svelte's own shape — `concerns/rail.svelte.ts`,
+`conversation.svelte.ts`, `approvals.svelte.ts`, `usage.svelte.ts`,
+`view.svelte.ts` — is the reference for what each one owns):
 
 - `Transport` — owns the socket only. `web-sys`/`gloo-net` WebSocket (or
   Leptos's own wrapper if one exists — check, don't assume) instead of
   `ewebsock`. Still no domain state.
-- `Rail`, `Conversations`, `Approvals` — each a struct of signals, each folding
-  its own slice of `ServerMsg` via the same `apply(&mut self, &ServerMsg)`
-  shape the other two builds use. Whether Leptos's ownership model
-  (`RwSignal`/`ReadSignal`+`WriteSignal`, scopes) forces a different shape than
-  egui's plain `&mut self` is itself a finding worth writing down — don't
-  fight the framework to force a literal match.
+- `Rail`, `Conversations`, `Approvals`, `Usage`, `View` — each a struct of
+  signals, each folding its own slice of `ServerMsg` via the same
+  `apply(&mut self, &ServerMsg)` shape the other two builds use. `View` owns
+  tabs/layout (shared, durable, on the wire now, not local storage) — the one
+  concern with no egui-side precedent to check against, since frontend-rs
+  never built it; Svelte's `view.svelte.ts` is the only prior reference.
+  Whether Leptos's ownership model (`RwSignal`/`ReadSignal`+`WriteSignal`,
+  scopes) forces a different shape than egui's plain `&mut self` is itself a
+  finding worth writing down — don't fight the framework to force a literal
+  match.
 - Composition root — Leptos's top-level component, wiring transport +
   concerns, same fan-out-not-subscribe question the egui build already
   answered (worth re-checking whether Leptos's reactive graph changes that
@@ -91,7 +120,13 @@ Same four concerns, same contract, ported to Leptos signals instead of
    existing fixtures the wire crate already has.
 4. Port `Rail` second — it's the smallest concern and the one both other
    builds used to prove the fold pattern first.
-5. Only then conversation, approvals, upload.
+5. Then `Conversations` (read, say, cancel, attach) and `Approvals` (answer,
+   dismiss) — the frontend-rs slice; Axis-1-through-3 findings can be written
+   up as soon as these land, without waiting for the rest.
+6. Then `View` (tabs/layout), `Usage`, tags, attachments — the part that
+   answers question 2 (a real Svelte replacement, not just the axis
+   comparison). `View` first among these: `Conversations`/`Approvals` render
+   inside tabs, so it's the natural next dependency, not an independent add-on.
 
 ## Write the finding, not just the code
 
