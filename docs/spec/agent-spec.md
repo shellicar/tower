@@ -59,7 +59,7 @@ map: who serves what, and whether they are alive.
 |---|---|---|
 | `ready` | `instanceId`, `host` | a process now serves this world; published once on boot, after its subscriptions are up |
 | `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement the master spec forbids |
-| `attached` | `instanceId`, `conversationId`, `cwd`, `intervalS`? | this instance is serving this conversation. What makes a conversation exist for observers before its first message. May carry `intervalS` (optional, backward compatible with producers that don't yet) so a fresh attachment can have a liveness basis immediately; when absent, the fold below has a default so the gap doesn't read as permanently alive |
+| `attached` | `instanceId`, `conversationId`, `cwd`, `tip`?, `intervalS`? | this instance is serving this conversation. What makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's current tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for a conversation with nothing in it yet) — so an observer knows where the conversation stands without replaying its own change stream first; this is what lets a party other than the servicer address a `say` at a conversation it never spawned, migrated or otherwise, without asking it to publish its history first. Optional, like `intervalS`: backward compatible with producers that don't yet carry it — its absence is not a claim the conversation is empty, only that this attach didn't state it. May carry `intervalS` (optional, backward compatible with producers that don't yet) so a fresh attachment can have a liveness basis immediately; when absent, the fold below has a default so the gap doesn't read as permanently alive |
 | `detached` | `instanceId`, `conversationId` | released, deliberately — Ctrl-C, drain, done. A decided fact; a crash publishes nothing |
 
 **Liveness is a fold, never declared.** An instance is presumed gone after
@@ -189,7 +189,7 @@ const sender = z.looseObject({
 export const agentTelemetry = {
   'ready': z.looseObject({ ts, instanceId: z.string(), host: z.string().optional() }),
   'pulse': z.looseObject({ ts, instanceId: z.string(), intervalS: z.number().int().positive() }),
-  'attached': z.looseObject({ ts, instanceId: z.string(), conversationId: z.string(), cwd: z.string().optional(), intervalS: z.number().int().positive().optional() }),
+  'attached': z.looseObject({ ts, instanceId: z.string(), conversationId: z.string(), cwd: z.string().optional(), tip: z.string().nullable().optional(), intervalS: z.number().int().positive().optional() }),
   'detached': z.looseObject({ ts, instanceId: z.string(), conversationId: z.string() }),
 };
 

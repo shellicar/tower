@@ -169,6 +169,12 @@ async fn serve_conversation(
             return None;
         }
     };
+    // tip: where the conversation stands right now, so an observer other
+    // than this servicer (towerd, a client, another agent) can learn it
+    // without replaying the change stream first — the gap that made a
+    // migrated-in conversation unaddressable except by its own servicer.
+    // Read before the move: `conversation` is owned by the spawned task.
+    let tip = conversation.tip().map(str::to_owned);
     tokio::spawn(agent::run(client.clone(), requests, config, conversation));
     // The attachment is what makes the conversation exist for observers
     // before its first message. cwd is causal (an input to how the
@@ -177,6 +183,7 @@ async fn serve_conversation(
         "ts": now_iso(),
         "instanceId": instance,
         "conversationId": conv,
+        "tip": tip,
     });
     if let Ok(cwd) = std::env::current_dir() {
         attached["cwd"] = serde_json::json!(cwd.to_string_lossy());

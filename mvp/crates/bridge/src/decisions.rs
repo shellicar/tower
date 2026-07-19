@@ -67,11 +67,20 @@ impl Conversation {
         }
     }
 
+    /// The tree's current tip — `None` for an empty conversation, matching
+    /// the wire's own `{ tip: null }` for "nothing exists yet". Same read
+    /// `on_say` uses to check a premise; exposed for `attached`'s own
+    /// (optional) `tip` field, so an observer other than this servicer can
+    /// learn where the conversation stands without replaying its history.
+    pub fn tip(&self) -> Option<&str> {
+        self.tree.last().map(|m| m.id.as_str())
+    }
+
     /// The premise check: the sender's tip must be the tree's, and no query
     /// may be live against it. A live acceptance makes the same premise
     /// stale (scenario 5).
     pub fn on_say(&self, tip: Option<&str>) -> SayDecision {
-        let current = self.tree.last().map(|m| m.id.as_str());
+        let current = self.tip();
         if tip != current || self.live.is_some() {
             SayDecision::Stale
         } else {
