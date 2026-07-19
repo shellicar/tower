@@ -12,13 +12,20 @@
 # actually run it. NATS_URL overrides the default local broker.
 #
 # Order matters and is deliberately conservative:
-#   1. Create conv-diagnostic and conv-ephemeral fresh (additive, reversible
+#   1. Narrow conv-approval's own subjects to audit-only FIRST. JetStream
+#      refuses to create a stream whose subjects overlap an existing one —
+#      conv-approval still claims every subject until this runs, so the new
+#      streams cannot be created before it (this bit a live run: creating
+#      conv-diagnostic first failed outright with "subjects overlap with an
+#      existing stream", nothing was created or changed). This does open a
+#      brief window — the moment between this step and step 2/3 — where
+#      diagnostic/ephemeral traffic is published but no stream captures it;
+#      accepted as a few possibly-lost low-value events, not a correctness
+#      problem.
+#   2. Create conv-diagnostic and conv-ephemeral fresh (additive, reversible
 #      — new empty streams, no existing data touched). No backfill: nothing
 #      in either category was going to outlive 30 days under the old
 #      single-stream rule anyway, so there is nothing meaningful to migrate.
-#   2. Narrow conv-approval's own subjects to audit-only, so it stops
-#      capturing new diagnostic/ephemeral traffic (that now flows to the new
-#      streams instead).
 #   3. Purge conv-approval of the diagnostic/ephemeral messages it already
 #      holds from before the narrowing — narrowing a stream's subjects does
 #      not retroactively delete what is already stored under them, so this
@@ -69,7 +76,14 @@ if [ "$APPLY" = "0" ]; then
 fi
 echo
 
-echo "## 1. Create conv-diagnostic (max_age 90d) if it does not exist"
+echo "## 1. Narrow conv-approval's subjects to audit-only (must happen before"
+echo "##    the new streams are created — JetStream refuses overlapping subjects)"
+run nats --server "$NATS_URL" stream edit conv-approval \
+  --subjects "$AUDIT_SUBJECTS" \
+  --retention limits --discard old -f
+echo
+
+echo "## 2. Create conv-diagnostic (max_age 90d) if it does not exist"
 if nats --server "$NATS_URL" stream info conv-diagnostic >/dev/null 2>&1; then
   echo "conv-diagnostic already exists, skipping create"
 else
@@ -79,7 +93,7 @@ else
 fi
 echo
 
-echo "## 2. Create conv-ephemeral (max_age 3d) if it does not exist"
+echo "## 3. Create conv-ephemeral (max_age 3d) if it does not exist"
 if nats --server "$NATS_URL" stream info conv-ephemeral >/dev/null 2>&1; then
   echo "conv-ephemeral already exists, skipping create"
 else
@@ -87,12 +101,6 @@ else
     --subjects "$EPHEMERAL_SUBJECTS" \
     --storage file --retention limits --max-age 3d --discard old --defaults
 fi
-echo
-
-echo "## 3. Narrow conv-approval's subjects to audit-only"
-run nats --server "$NATS_URL" stream edit conv-approval \
-  --subjects "$AUDIT_SUBJECTS" \
-  --retention limits --discard old -f
 echo
 
 echo "## 4. Purge conv-approval of the now-out-of-scope diagnostic/ephemeral subjects"
