@@ -201,6 +201,12 @@ struct Host {
     refs: refs::RefStore,
     memory: memory::MemoryStore,
     history: history::HistoryStore,
+    // Resolved once at startup, informational only — what `settings` reports
+    // for each store's file, since the stores themselves don't carry their
+    // own path.
+    refs_path: std::path::PathBuf,
+    memory_path: std::path::PathBuf,
+    history_path: std::path::PathBuf,
 }
 
 impl Host {
@@ -341,6 +347,33 @@ impl Host {
             *self.context.write().unwrap() = Some(text.to_string());
             eprintln!("bridge: context set ({} chars)", text.len());
             println!("{}", serde_json::json!({ "context": "set" }));
+        } else if value.get("settings").is_some() {
+            // A live snapshot of every control-line-settable cell plus the
+            // static config — the read half of skills/system/context, which
+            // until now could be set but never queried back.
+            let skills_dir = self.skills_root.read().unwrap().clone();
+            let skills_dir_exists = std::fs::metadata(&skills_dir).is_ok_and(|m| m.is_dir());
+            let system = self.system.read().unwrap().clone();
+            let context = self.context.read().unwrap().clone();
+            println!(
+                "{}",
+                serde_json::json!({
+                    "settings": {
+                        "world": self.world,
+                        "instance": self.instance,
+                        "model": self.default_model,
+                        "thinkingBudget": self.thinking_budget,
+                        "attachBucket": self.attach_bucket,
+                        "skillsDir": skills_dir.to_string_lossy(),
+                        "skillsDirExists": skills_dir_exists,
+                        "system": system,
+                        "context": context,
+                        "refsDb": self.refs_path.to_string_lossy(),
+                        "memoryDb": self.memory_path.to_string_lossy(),
+                        "historyDb": self.history_path.to_string_lossy(),
+                    }
+                })
+            );
         } else {
             println!("{}", serde_json::json!({ "error": "unsupported" }));
         }
@@ -419,6 +452,7 @@ async fn main() -> anyhow::Result<()> {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::env::temp_dir().join("bridge-refs.db"));
     let refs_store = refs::open(&refs_path).map_err(|e| anyhow::anyhow!(e))?;
+    let refs_path_for_settings = refs_path.clone();
     // Shared with claude-sdk-cli's own SqliteMemoryEngine — same file, same
     // schema, so a memory either process writes is visible to the other.
     let memory_path = std::env::var("BRIDGE_MEMORY_DB")
@@ -431,6 +465,7 @@ async fn main() -> anyhow::Result<()> {
                 .join("memory.db")
         });
     let memory_store = memory::open(&memory_path).map_err(|e| anyhow::anyhow!(e))?;
+    let memory_path_for_settings = memory_path.clone();
     // Shared with claude-sdk-cli's own SqliteHistoryEngine — same file, same
     // schema. Written best-effort on every committed message (agent.rs's
     // Publisher::message), read by SearchHistory/ReadHistory.
@@ -444,6 +479,7 @@ async fn main() -> anyhow::Result<()> {
                 .join("history.db")
         });
     let history_store = history::open(&history_path).map_err(|e| anyhow::anyhow!(e))?;
+    let history_path_for_settings = history_path.clone();
 
     let client = async_nats::connect(&nats_url).await?; // fail-fast
 
@@ -491,6 +527,9 @@ async fn main() -> anyhow::Result<()> {
         refs: refs_store,
         memory: memory_store,
         history: history_store,
+        refs_path: refs_path_for_settings,
+        memory_path: memory_path_for_settings,
+        history_path: history_path_for_settings,
         auth,
         skills_root,
         system: Arc::new(RwLock::new(None)),
