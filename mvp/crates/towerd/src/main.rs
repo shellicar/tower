@@ -15,14 +15,23 @@ async fn main() -> anyhow::Result<()> {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
     let bind = std::env::var("TOWER_BIND").unwrap_or_else(|_| "127.0.0.1:8080".into());
     let db_path = std::env::var("TOWER_DB").unwrap_or_else(|_| "tower.db".into());
-    // Which stream captures the event subjects is deployment configuration;
-    // the default matches the deployed capture stream's name.
-    let stream = std::env::var("TOWER_STREAM").unwrap_or_else(|_| "conv-approval".into());
+    // Which stream captures which subjects is deployment configuration; the
+    // defaults match the three-way retention split (migrate-stream-retention.sh):
+    // audit (unlimited), diagnostic (90d), ephemeral (3d) — one ingest loop
+    // and one cursor row per stream, all folding into the same views.
+    let stream_audit =
+        std::env::var("TOWER_STREAM_AUDIT").unwrap_or_else(|_| "conv-approval".into());
+    let stream_diagnostic =
+        std::env::var("TOWER_STREAM_DIAGNOSTIC").unwrap_or_else(|_| "conv-diagnostic".into());
+    let stream_ephemeral =
+        std::env::var("TOWER_STREAM_EPHEMERAL").unwrap_or_else(|_| "conv-ephemeral".into());
 
-    // Which db, stream, broker and port this instance is: the first thing to
+    // Which db, streams, broker and port this instance is: the first thing to
     // know when more than one towerd runs on a machine (v1 beside v2, a stray
     // from a dead run). Without it a mismatched backend is invisible.
-    eprintln!("towerd: db {db_path} · stream {stream} · nats {nats_url} · bind {bind}");
+    eprintln!(
+        "towerd: db {db_path} · streams {stream_audit}/{stream_diagnostic}/{stream_ephemeral} · nats {nats_url} · bind {bind}"
+    );
 
     // Storage first: the schema must exist before the views thread starts.
     let db = rusqlite::Connection::open(&db_path)?;
@@ -30,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
 
     let client = async_nats::connect(&nats_url).await?; // fail-fast
 
-    let (events_tx, events_rx) = mpsc::channel::<(u64, wire::WireEvent)>(1024);
+    let (events_tx, events_rx) = mpsc::channel::<(String, u64, wire::WireEvent)>(1024);
     let (queries_tx, queries_rx) = mpsc::channel::<views::ViewQuery>(64);
     let (view_events_tx, _) = broadcast::channel::<views::ViewEvent>(1024);
 
@@ -38,12 +47,29 @@ async fn main() -> anyhow::Result<()> {
     let views = Views::new(db, view_events_tx.clone());
     std::thread::spawn(move || views.run_blocking(events_rx, queries_rx));
 
-    // Ingest: plain async fn, worker pool. Where to resume is the views'
-    // call — ingest reconciles the stream incarnation against the cursor on
-    // every consumer build (see ingest.rs).
+    // Ingest: plain async fn, worker pool, one task per stream. Where to
+    // resume is the views' call — ingest reconciles the stream incarnation
+    // against the cursor on every consumer build (see ingest.rs). A hiccup
+    // on one stream never stalls the other two: three independent loops,
+    // sharing only the channels into the one views thread.
     tokio::spawn(ingest::run_ingest(
         client.clone(),
-        stream,
+        stream_audit,
+        &ingest::AUDIT_SUBJECTS,
+        queries_tx.clone(),
+        events_tx.clone(),
+    ));
+    tokio::spawn(ingest::run_ingest(
+        client.clone(),
+        stream_diagnostic,
+        &ingest::DIAGNOSTIC_SUBJECTS,
+        queries_tx.clone(),
+        events_tx.clone(),
+    ));
+    tokio::spawn(ingest::run_ingest(
+        client.clone(),
+        stream_ephemeral,
+        &ingest::EPHEMERAL_SUBJECTS,
         queries_tx.clone(),
         events_tx,
     ));

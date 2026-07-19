@@ -255,6 +255,7 @@ pub enum ViewQuery {
     /// resume?" The reply is the cursor to resume after (0 = replay from the
     /// start).
     SyncStream {
+        stream: String,
         created: String,
         last_seq: u64,
         reply: oneshot::Sender<u64>,
@@ -452,6 +453,21 @@ const MIGRATIONS: &[&str] = &[
          dismissed_ts  INTEGER NOT NULL,
          PRIMARY KEY (world, instance_id, conv)
      );",
+    // 11 — cursor/stream go from singleton (one capture stream) to keyed by
+    // stream name: the capture subjects split across audit/diagnostic/
+    // ephemeral streams (each with its own retention), so each needs its own
+    // independent, non-comparable sequence position. The existing singleton
+    // row carries over to 'conv-approval' — an upgrade resumes exactly where
+    // it was, not a rematerialisation; the other two streams get no seed row,
+    // same as a fresh single-stream install starting from nothing.
+    "CREATE TABLE cursor_v2 (stream_name TEXT PRIMARY KEY, seq INTEGER NOT NULL);
+     CREATE TABLE stream_v2 (stream_name TEXT PRIMARY KEY, created TEXT NOT NULL);
+     INSERT INTO cursor_v2 (stream_name, seq) SELECT 'conv-approval', seq FROM cursor WHERE id = 1;
+     INSERT INTO stream_v2 (stream_name, created) SELECT 'conv-approval', created FROM stream WHERE id = 1;
+     DROP TABLE cursor;
+     DROP TABLE stream;
+     ALTER TABLE cursor_v2 RENAME TO cursor;
+     ALTER TABLE stream_v2 RENAME TO stream;",
 ];
 
 pub fn apply_schema(db: &Connection) -> anyhow::Result<()> {
@@ -466,12 +482,15 @@ pub fn apply_schema(db: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn read_cursor(db: &Connection) -> anyhow::Result<u64> {
-    Ok(
-        db.query_row("SELECT seq FROM cursor WHERE id = 1", [], |r| {
-            r.get::<_, i64>(0)
-        })? as u64,
-    )
+pub fn read_cursor(db: &Connection, stream_name: &str) -> anyhow::Result<u64> {
+    Ok(db
+        .query_row(
+            "SELECT seq FROM cursor WHERE stream_name = ?1",
+            [stream_name],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()?
+        .unwrap_or(0) as u64)
 }
 
 /// The conversation's usage row as a snapshot. Errors with `QueryReturnedNoRows`
@@ -521,7 +540,7 @@ impl Views {
     /// the loop (shutdown = crash: transactions make them the same path).
     pub fn run_blocking(
         mut self,
-        mut events_rx: mpsc::Receiver<(u64, WireEvent)>,
+        mut events_rx: mpsc::Receiver<(String, u64, WireEvent)>,
         mut queries_rx: mpsc::Receiver<ViewQuery>,
     ) {
         loop {
@@ -535,15 +554,15 @@ impl Views {
                 Err(mpsc::error::TryRecvError::Empty) => {}
                 Err(mpsc::error::TryRecvError::Disconnected) => {
                     // Reads gone; keep applying while ingest lives.
-                    while let Some((seq, event)) = events_rx.blocking_recv() {
-                        self.apply(seq, &event);
+                    while let Some((stream_name, seq, event)) = events_rx.blocking_recv() {
+                        self.apply(&stream_name, seq, &event);
                     }
                     return;
                 }
             }
             match events_rx.try_recv() {
-                Ok((seq, event)) => {
-                    self.apply(seq, &event);
+                Ok((stream_name, seq, event)) => {
+                    self.apply(&stream_name, seq, &event);
                     continue;
                 }
                 Err(mpsc::error::TryRecvError::Empty) => {}
@@ -561,19 +580,21 @@ impl Views {
 
     /// One event → one transaction (tables + cursor), then the broadcast.
     /// Publish after commit: subscribers read the db they can now see.
-    pub fn apply(&mut self, seq: u64, event: &WireEvent) {
+    pub fn apply(&mut self, stream_name: &str, seq: u64, event: &WireEvent) {
         let result = match event {
-            WireEvent::Conv(e) => self.apply_conv(seq, e),
-            WireEvent::Approval(e) => self.apply_approval(seq, e),
-            WireEvent::Agent(e) => self.apply_agent(seq, e),
+            WireEvent::Conv(e) => self.apply_conv(stream_name, seq, e),
+            WireEvent::Approval(e) => self.apply_approval(stream_name, seq, e),
+            WireEvent::Agent(e) => self.apply_agent(stream_name, seq, e),
         };
         if let Err(e) = result {
             // A poisoned frame must not kill the fold; it is logged and the
             // cursor still advances past it (skipping forever beats halting).
             eprintln!("views: apply failed at seq {seq}: {e:#}");
-            let _ = self
-                .db
-                .execute("UPDATE cursor SET seq = ?1 WHERE id = 1", [seq as i64]);
+            let _ = self.db.execute(
+                "INSERT INTO cursor (stream_name, seq) VALUES (?1, ?2)
+                 ON CONFLICT (stream_name) DO UPDATE SET seq = excluded.seq",
+                rusqlite::params![stream_name, seq as i64],
+            );
         }
     }
 
@@ -583,7 +604,12 @@ impl Views {
     /// never erases the settlement (the settled columns are not in the
     /// upsert). A pulse or settlement for an id never raised (pre-retention)
     /// is skipped — an ask is unreviewable without its raise.
-    fn apply_approval(&mut self, seq: u64, event: &ApprovalEvent) -> anyhow::Result<()> {
+    fn apply_approval(
+        &mut self,
+        stream_name: &str,
+        seq: u64,
+        event: &ApprovalEvent,
+    ) -> anyhow::Result<()> {
         let id = &event.id;
         let tx = self.db.transaction()?;
         match &event.kind {
@@ -640,7 +666,11 @@ impl Views {
             // fold; the cursor still advances.
             ApprovalKind::Unknown { .. } => {}
         }
-        tx.execute("UPDATE cursor SET seq = ?1 WHERE id = 1", [seq as i64])?;
+        tx.execute(
+            "INSERT INTO cursor (stream_name, seq) VALUES (?1, ?2)
+             ON CONFLICT (stream_name) DO UPDATE SET seq = excluded.seq",
+            rusqlite::params![stream_name, seq as i64],
+        )?;
         tx.commit()?;
 
         if let Some(state) = self.get_approval(id)? {
@@ -653,7 +683,12 @@ impl Views {
     /// instance's one liveness fact; `attached` upserts, `detached` deletes —
     /// a released attachment is absence. Never touches `rows`: staleness is
     /// conversation activity, and these are facts about the instance.
-    fn apply_agent(&mut self, seq: u64, event: &AgentEvent) -> anyhow::Result<()> {
+    fn apply_agent(
+        &mut self,
+        stream_name: &str,
+        seq: u64,
+        event: &AgentEvent,
+    ) -> anyhow::Result<()> {
         let world = &event.world;
         let tx = self.db.transaction()?;
         let fact = match &event.kind {
@@ -747,7 +782,11 @@ impl Views {
             // the cursor still advances.
             AgentKind::Unknown { .. } => None,
         };
-        tx.execute("UPDATE cursor SET seq = ?1 WHERE id = 1", [seq as i64])?;
+        tx.execute(
+            "INSERT INTO cursor (stream_name, seq) VALUES (?1, ?2)
+             ON CONFLICT (stream_name) DO UPDATE SET seq = excluded.seq",
+            rusqlite::params![stream_name, seq as i64],
+        )?;
         tx.commit()?;
 
         if let Some(fact) = fact {
@@ -756,14 +795,18 @@ impl Views {
         Ok(())
     }
 
-    fn apply_conv(&mut self, seq: u64, event: &Event) -> anyhow::Result<()> {
+    fn apply_conv(&mut self, stream_name: &str, seq: u64, event: &Event) -> anyhow::Result<()> {
         let conv = &event.conv;
 
         // Deltas are ephemeral: never stored, no row touch (the wire's own
         // rule — the committed message is the record), just fanned out.
         if let EventKind::Delta(d) = &event.kind {
             let tx = self.db.transaction()?;
-            tx.execute("UPDATE cursor SET seq = ?1 WHERE id = 1", [seq as i64])?;
+            tx.execute(
+                "INSERT INTO cursor (stream_name, seq) VALUES (?1, ?2)
+             ON CONFLICT (stream_name) DO UPDATE SET seq = excluded.seq",
+                rusqlite::params![stream_name, seq as i64],
+            )?;
             tx.commit()?;
             let _ = self.events.send(ViewEvent::Streaming {
                 conv: conv.clone(),
@@ -780,7 +823,11 @@ impl Views {
         // conversations' streaming displays.
         if let EventKind::Block(b) = &event.kind {
             let tx = self.db.transaction()?;
-            tx.execute("UPDATE cursor SET seq = ?1 WHERE id = 1", [seq as i64])?;
+            tx.execute(
+                "INSERT INTO cursor (stream_name, seq) VALUES (?1, ?2)
+             ON CONFLICT (stream_name) DO UPDATE SET seq = excluded.seq",
+                rusqlite::params![stream_name, seq as i64],
+            )?;
             tx.commit()?;
             let _ = self.events.send(ViewEvent::StreamBlock {
                 conv: conv.clone(),
@@ -926,7 +973,11 @@ impl Views {
             usage_snapshot = Some(read_usage_row(&tx, conv)?);
         }
 
-        tx.execute("UPDATE cursor SET seq = ?1 WHERE id = 1", [seq as i64])?;
+        tx.execute(
+            "INSERT INTO cursor (stream_name, seq) VALUES (?1, ?2)
+             ON CONFLICT (stream_name) DO UPDATE SET seq = excluded.seq",
+            rusqlite::params![stream_name, seq as i64],
+        )?;
         tx.commit()?;
 
         // Broadcast the row only if the db actually moved (touched_ts): an
@@ -996,11 +1047,12 @@ impl Views {
                 let _ = reply.send(());
             }
             ViewQuery::SyncStream {
+                stream,
                 created,
                 last_seq,
                 reply,
             } => {
-                match self.sync_stream(&created, last_seq) {
+                match self.sync_stream(&stream, &created, last_seq) {
                     Ok(cursor) => {
                         let _ = reply.send(cursor);
                     }
@@ -1075,42 +1127,65 @@ impl Views {
     /// adopt arm's blind spot closed: adoption trusts that the stream it
     /// meets is the one that advanced the cursor, and the guard is the check
     /// that the trust is arithmetically possible.
-    fn sync_stream(&mut self, created: &str, last_seq: u64) -> anyhow::Result<u64> {
+    fn sync_stream(
+        &mut self,
+        stream_name: &str,
+        created: &str,
+        last_seq: u64,
+    ) -> anyhow::Result<u64> {
         let stored: Option<String> = self
             .db
-            .query_row("SELECT created FROM stream WHERE id = 1", [], |r| r.get(0))
+            .query_row(
+                "SELECT created FROM stream WHERE stream_name = ?1",
+                [stream_name],
+                |r| r.get(0),
+            )
             .optional()?;
         let cursor = match stored {
-            Some(s) if s == created => read_cursor(&self.db)?,
+            Some(s) if s == created => read_cursor(&self.db, stream_name)?,
             Some(s) => {
                 eprintln!(
-                    "views: stream incarnation changed ({s} -> {created}); \
+                    "views: stream {stream_name} incarnation changed ({s} -> {created}); \
                      rematerialising the derived views (annotations untouched)"
                 );
                 let tx = self.db.transaction()?;
                 tx.execute_batch(
                     "DELETE FROM rows; DELETE FROM messages; DELETE FROM refs;
                      DELETE FROM approvals; DELETE FROM usage;
-                     DELETE FROM agent_instances; DELETE FROM agent_attachments;
-                     UPDATE cursor SET seq = 0 WHERE id = 1;",
+                     DELETE FROM agent_instances; DELETE FROM agent_attachments;",
                 )?;
-                tx.execute("UPDATE stream SET created = ?1 WHERE id = 1", [created])?;
+                // Every stream's cursor resets, not just this one: the
+                // derived tables just wiped are the union of all three
+                // streams' events, so all three must replay from scratch to
+                // refill them — only THIS stream's own incarnation record
+                // actually changed.
+                tx.execute("UPDATE cursor SET seq = 0", [])?;
+                tx.execute(
+                    "INSERT INTO stream (stream_name, created) VALUES (?1, ?2)
+                     ON CONFLICT (stream_name) DO UPDATE SET created = excluded.created",
+                    rusqlite::params![stream_name, created],
+                )?;
                 tx.commit()?;
                 0
             }
             None => {
-                self.db
-                    .execute("INSERT INTO stream (id, created) VALUES (1, ?1)", [created])?;
-                read_cursor(&self.db)?
+                self.db.execute(
+                    "INSERT INTO stream (stream_name, created) VALUES (?1, ?2)",
+                    rusqlite::params![stream_name, created],
+                )?;
+                read_cursor(&self.db, stream_name)?
             }
         };
         if cursor > last_seq {
             eprintln!(
-                "views: cursor {cursor} is beyond the stream's last sequence {last_seq} \
+                "views: stream {stream_name} cursor {cursor} is beyond its last sequence {last_seq} \
                  — an unreachable position; replaying from the start (no truncation)"
             );
-            self.db
-                .execute("UPDATE cursor SET seq = 0 WHERE id = 1", [])?;
+            self.db.execute(
+                "INSERT INTO cursor (stream_name, seq) VALUES (?1, 0)
+                 ON CONFLICT (stream_name) DO UPDATE SET seq = 0",
+                [stream_name],
+            )?;
             return Ok(0);
         }
         Ok(cursor)
@@ -1493,7 +1568,11 @@ mod tests {
     #[test]
     fn message_lands_in_views_and_row() {
         let (mut views, mut rx) = fresh();
-        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_M1),
+        );
 
         let rows = rows_of(&views);
         assert_eq!(rows.len(), 1);
@@ -1509,14 +1588,22 @@ mod tests {
 
         assert!(matches!(rx.try_recv().unwrap(), ViewEvent::Row(_)));
         assert!(matches!(rx.try_recv().unwrap(), ViewEvent::Message { .. }));
-        assert_eq!(read_cursor(&views.db).unwrap(), 1);
+        assert_eq!(read_cursor(&views.db, "conv-approval").unwrap(), 1);
     }
 
     #[test]
     fn replay_is_idempotent() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
-        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1)); // at-least-once
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_M1),
+        );
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_M1),
+        ); // at-least-once
         let msgs = views
             .conversation(&ConversationId("conv-abc".into()), None)
             .unwrap();
@@ -1526,8 +1613,12 @@ mod tests {
     #[test]
     fn revision_rewrites_content_in_place() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
-        views.apply(2, &event("conv.v2.conv-abc.changes.revision",
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_M1),
+        );
+        views.apply("conv-approval", 2, &event("conv.v2.conv-abc.changes.revision",
             r#"{"ts":"2026-07-07T21:01:00+10:00","messageId":"m1","content":[{"type":"text","text":"…trimmed…"}]}"#));
         let msgs = views
             .conversation(&ConversationId("conv-abc".into()), None)
@@ -1539,7 +1630,7 @@ mod tests {
     #[test]
     fn telemetry_touches_row_without_storing() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v2.conv-abc.telemetry.turn.started",
+        views.apply("conv-approval", 1, &event("conv.v2.conv-abc.telemetry.turn.started",
             r#"{"ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}"#));
         let rows = rows_of(&views);
         assert_eq!(rows[0].last_kind, "turn_started");
@@ -1558,11 +1649,11 @@ mod tests {
         // No usage yet: the snapshot is absent, and absent means zero.
         assert!(views.usage(&conv).unwrap().is_none());
 
-        views.apply(1, &event("conv.v2.conv-abc.telemetry.usage",
+        views.apply("conv-approval", 1, &event("conv.v2.conv-abc.telemetry.usage",
             r#"{"ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","inputTokens":100,"cacheCreationTokens":20,"cacheCreation5mTokens":3,"cacheCreation1hTokens":17,"cacheReadTokens":5,"outputTokens":40}"#));
         // The second frame omits the split (an older producer) — it must not
         // regress the running totals: absent reads as 0, so they hold.
-        views.apply(2, &event("conv.v2.conv-abc.telemetry.usage",
+        views.apply("conv-approval", 2, &event("conv.v2.conv-abc.telemetry.usage",
             r#"{"ts":"2026-07-07T21:01:00+10:00","queryId":"q2","turnId":"t2","service":"anthropic.messages","model":"claude-opus-4-6","inputTokens":200,"cacheCreationTokens":0,"cacheReadTokens":300,"outputTokens":10}"#));
 
         let u = views.usage(&conv).unwrap().unwrap();
@@ -1601,6 +1692,7 @@ mod tests {
     fn delta_streams_but_never_stores() {
         let (mut views, mut rx) = fresh();
         views.apply(
+            "conv-approval",
             1,
             &event(
                 "conv.v2.conv-abc.deltas",
@@ -1612,14 +1704,18 @@ mod tests {
             rx.try_recv().unwrap(),
             ViewEvent::Streaming { .. }
         ));
-        assert_eq!(read_cursor(&views.db).unwrap(), 1);
+        assert_eq!(read_cursor(&views.db, "conv-approval").unwrap(), 1);
     }
 
     #[test]
     fn after_filters_catch_up() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
-        views.apply(2, &event("conv.v2.conv-abc.changes.message",
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_M1),
+        );
+        views.apply("conv-approval", 2, &event("conv.v2.conv-abc.changes.message",
             r#"{"ts":"2026-07-07T21:05:00+10:00","id":"m2","queryId":"q1","turnId":"t1","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"done"}]}"#));
         // The boundary is inclusive: a message tied with the client's
         // high-water mark is re-sent (client dedupes by id), so the catch-up
@@ -1647,7 +1743,11 @@ mod tests {
             r#"{{"ts":"2026-07-07T21:00:00+10:00","id":"m9","queryId":"q1","turnId":"t2","role":"user","from":{{"kind":"agent"}},"content":[{{"type":"tool_result","tool_use_id":"toolu_01","content":"{}"}}]}}"#,
             "y".repeat(1000)
         );
-        views.apply(1, &event("conv.v2.conv-abc.changes.message", &heavy));
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", &heavy),
+        );
         let msgs = views
             .conversation(&ConversationId("conv-abc".into()), None)
             .unwrap();
@@ -1666,6 +1766,7 @@ mod tests {
     fn unknown_event_with_ts_still_touches_staleness() {
         let (mut views, _rx) = fresh();
         views.apply(
+            "conv-approval",
             1,
             &event(
                 "conv.v2.conv-abc.telemetry.vibe.shift",
@@ -1680,7 +1781,11 @@ mod tests {
     #[test]
     fn titles_set_overwrite_clear_and_survive_rematerialisation() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_M1),
+        );
         let conv = ConversationId("conv-abc".into());
 
         // Set, then overwrite (last write wins).
@@ -1700,10 +1805,14 @@ mod tests {
             .db
             .execute_batch(
                 "DELETE FROM rows; DELETE FROM messages; DELETE FROM refs;
-             UPDATE cursor SET seq = 0 WHERE id = 1;",
+             UPDATE cursor SET seq = 0 WHERE stream_name = 'conv-approval';",
             )
             .unwrap();
-        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_M1),
+        );
         assert_eq!(rows_of(&views)[0].title.as_deref(), Some("tower v1"));
 
         // Empty title clears; the row falls back to untitled.
@@ -1735,7 +1844,7 @@ mod tests {
     #[test]
     fn dismissed_approval_drops_from_the_outstanding_snapshot_and_survives_reread() {
         let (mut views, mut rx) = fresh();
-        views.apply(1, &event("approval.v1.apr-1.lifecycle",
+        views.apply("conv-approval", 1, &event("approval.v1.apr-1.lifecycle",
             r#"{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"bash"},"correlation":{"conversationId":"conv-abc"}}"#));
         assert_eq!(views.approvals().unwrap().len(), 1);
 
@@ -1768,7 +1877,7 @@ mod tests {
     #[test]
     fn dismissed_attachment_drops_until_a_fresh_reattach() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("agent.v1.w1.telemetry.attached",
+        views.apply("conv-approval", 1, &event("agent.v1.w1.telemetry.attached",
             r#"{"ts":"2026-07-07T21:00:00+10:00","instanceId":"i1","conversationId":"conv-ghost"}"#));
         let (_, attachments) = views.agents().unwrap();
         assert_eq!(attachments.len(), 1);
@@ -1787,7 +1896,7 @@ mod tests {
         assert!(attachments.is_empty());
 
         // A fresh attach (later ts) is new evidence — un-hides it.
-        views.apply(2, &event("agent.v1.w1.telemetry.attached",
+        views.apply("conv-approval", 2, &event("agent.v1.w1.telemetry.attached",
             r#"{"ts":"2026-07-08T21:00:00+10:00","instanceId":"i1","conversationId":"conv-ghost"}"#));
         let (_, attachments) = views.agents().unwrap();
         assert_eq!(attachments.len(), 1);
@@ -1796,25 +1905,44 @@ mod tests {
     #[test]
     fn sync_stream_adopts_resumes_and_rematerialises() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_M1),
+        );
         views
             .set_title(&ConversationId("conv-abc".into()), "tower v1")
             .unwrap();
 
         // First contact (nothing stored): ADOPT — keep data, keep cursor.
         // This is also the upgrade path for a db from before migration 3.
-        assert_eq!(views.sync_stream("incarnation-A", 100).unwrap(), 1);
+        assert_eq!(
+            views
+                .sync_stream("conv-approval", "incarnation-A", 100)
+                .unwrap(),
+            1
+        );
         assert_eq!(rows_of(&views).len(), 1);
 
         // Same incarnation again (every consumer rebuild): resume, touch nothing.
-        views.apply(2, &event("conv.v2.conv-abc.telemetry.turn.started",
+        views.apply("conv-approval", 2, &event("conv.v2.conv-abc.telemetry.turn.started",
             r#"{"ts":"2026-07-07T21:01:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}"#));
-        assert_eq!(views.sync_stream("incarnation-A", 100).unwrap(), 2);
+        assert_eq!(
+            views
+                .sync_stream("conv-approval", "incarnation-A", 100)
+                .unwrap(),
+            2
+        );
         assert_eq!(rows_of(&views).len(), 1);
 
         // A DIFFERENT incarnation: the stream was recreated — rematerialise.
         // Derived tables empty, cursor 0; the title (annotation) survives.
-        assert_eq!(views.sync_stream("incarnation-B", 100).unwrap(), 0);
+        assert_eq!(
+            views
+                .sync_stream("conv-approval", "incarnation-B", 100)
+                .unwrap(),
+            0
+        );
         assert!(rows_of(&views).is_empty());
         assert!(
             views
@@ -1822,14 +1950,23 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert_eq!(read_cursor(&views.db).unwrap(), 0);
+        assert_eq!(read_cursor(&views.db, "conv-approval").unwrap(), 0);
 
         // Replay refills the views; the row comes back already titled.
-        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_M1),
+        );
         assert_eq!(rows_of(&views)[0].title.as_deref(), Some("tower v1"));
 
         // And incarnation-B is now home: same again resumes normally.
-        assert_eq!(views.sync_stream("incarnation-B", 100).unwrap(), 1);
+        assert_eq!(
+            views
+                .sync_stream("conv-approval", "incarnation-B", 100)
+                .unwrap(),
+            1
+        );
     }
 
     #[test]
@@ -1839,21 +1976,39 @@ mod tests {
         // and, unlike rematerialisation, truncates nothing: the views keep
         // what they hold and the idempotent fold refills on top.
         let (mut views, _rx) = fresh();
-        views.apply(23386, &event("conv.v2.conv-abc.changes.message", MSG_M1));
+        views.apply(
+            "conv-approval",
+            23386,
+            &event("conv.v2.conv-abc.changes.message", MSG_M1),
+        );
         views
             .set_title(&ConversationId("conv-abc".into()), "tower v1")
             .unwrap();
 
         // Adopt arm meets a 628-message stream holding cursor 23386.
-        assert_eq!(views.sync_stream("incarnation-A", 628).unwrap(), 0);
+        assert_eq!(
+            views
+                .sync_stream("conv-approval", "incarnation-A", 628)
+                .unwrap(),
+            0
+        );
         // Views intact — no truncation on the guard path; cursor reset.
         assert_eq!(rows_of(&views).len(), 1);
         assert_eq!(rows_of(&views)[0].title.as_deref(), Some("tower v1"));
-        assert_eq!(read_cursor(&views.db).unwrap(), 0);
+        assert_eq!(read_cursor(&views.db, "conv-approval").unwrap(), 0);
 
         // Same-incarnation arm gets the same protection.
-        views.apply(23386, &event("conv.v2.conv-abc.changes.message", MSG_M1));
-        assert_eq!(views.sync_stream("incarnation-A", 628).unwrap(), 0);
+        views.apply(
+            "conv-approval",
+            23386,
+            &event("conv.v2.conv-abc.changes.message", MSG_M1),
+        );
+        assert_eq!(
+            views
+                .sync_stream("conv-approval", "incarnation-A", 628)
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -1861,7 +2016,7 @@ mod tests {
         let (mut views, mut rx) = fresh();
 
         // Scenario 6a: raised → pending in the snapshot, with its ask verbatim.
-        views.apply(1, &event("approval.v1.apr-1.lifecycle",
+        views.apply("conv-approval", 1, &event("approval.v1.apr-1.lifecycle",
             r#"{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"tool_use","name":"DeleteFile","input":{"content":{"type":"files","values":["./old.ts"]}}},"correlation":{"conversationId":"conv-abc","queryId":"q2","turnId":"t3","toolUseId":"toolu_02DEF"}}"#));
         let pending = views.approvals().unwrap();
         assert_eq!(pending.len(), 1);
@@ -1875,6 +2030,7 @@ mod tests {
 
         // The pulse refreshes last_pulse, monotonically.
         views.apply(
+            "conv-approval",
             2,
             &event(
                 "approval.v1.apr-1.telemetry",
@@ -1886,7 +2042,7 @@ mod tests {
 
         // Settled: out of the pending snapshot; the broadcast carries whose
         // decision it was.
-        views.apply(3, &event("approval.v1.apr-1.lifecycle",
+        views.apply("conv-approval", 3, &event("approval.v1.apr-1.lifecycle",
             r#"{"type":"settled","ts":"2026-07-07T21:00:30+10:00","approved":true,"by":{"kind":"human","userId":"stephen"}}"#));
         assert!(views.approvals().unwrap().is_empty());
         let _ = rx.try_recv(); // the pulse's event
@@ -1898,12 +2054,13 @@ mod tests {
         assert_eq!(settled.by["userId"], "stephen");
 
         // Replay of the raised after settlement never erases the settlement.
-        views.apply(1, &event("approval.v1.apr-1.lifecycle",
+        views.apply("conv-approval", 1, &event("approval.v1.apr-1.lifecycle",
             r#"{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"tool_use","name":"DeleteFile","input":{"content":{"type":"files","values":["./old.ts"]}}},"correlation":{"conversationId":"conv-abc"}}"#));
         assert!(views.approvals().unwrap().is_empty());
 
         // A pulse for an id never raised is skipped, not invented.
         views.apply(
+            "conv-approval",
             4,
             &event(
                 "approval.v1.apr-unknown.telemetry",
@@ -1911,13 +2068,17 @@ mod tests {
             ),
         );
         assert!(views.approvals().unwrap().is_empty());
-        assert_eq!(read_cursor(&views.db).unwrap(), 4);
+        assert_eq!(read_cursor(&views.db, "conv-approval").unwrap(), 4);
     }
 
     #[test]
     fn tags_set_overwrite_clear_and_colour_keys() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_M1),
+        );
         let conv = ConversationId("conv-abc".into());
 
         // Set two keys; first use mints each key's colour.
@@ -1960,10 +2121,14 @@ mod tests {
             .db
             .execute_batch(
                 "DELETE FROM rows; DELETE FROM messages; DELETE FROM refs;
-                 UPDATE cursor SET seq = 0 WHERE id = 1;",
+                 UPDATE cursor SET seq = 0 WHERE stream_name = 'conv-approval';",
             )
             .unwrap();
-        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1));
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_M1),
+        );
         assert_eq!(rows_of(&views)[0].tags.len(), 1);
     }
 
@@ -1974,6 +2139,7 @@ mod tests {
         // Scenario a1: ready seeds the instance, the pulse declares the
         // promise, attached makes the conversation exist for observers.
         views.apply(
+            "conv-approval",
             1,
             &event(
                 "agent.v1.mac.telemetry.ready",
@@ -1981,13 +2147,14 @@ mod tests {
             ),
         );
         views.apply(
+            "conv-approval",
             2,
             &event(
                 "agent.v1.mac.telemetry.pulse",
                 r#"{"ts":"2026-07-07T21:00:30+10:00","instanceId":"inst-1a2f","intervalS":30}"#,
             ),
         );
-        views.apply(3, &event("agent.v1.mac.telemetry.attached",
+        views.apply("conv-approval", 3, &event("agent.v1.mac.telemetry.attached",
             r#"{"ts":"2026-07-07T21:00:30+10:00","instanceId":"inst-1a2f","conversationId":"conv-abc","cwd":"~/repos/tower"}"#));
 
         let (instances, attachments) = views.agents().unwrap();
@@ -2018,6 +2185,7 @@ mod tests {
         // An out-of-order pulse never regresses the liveness fact.
         let fresh_pulse = instances[0].last_pulse;
         views.apply(
+            "conv-approval",
             4,
             &event(
                 "agent.v1.mac.telemetry.pulse",
@@ -2028,24 +2196,34 @@ mod tests {
         assert_eq!(instances[0].last_pulse, fresh_pulse);
 
         // Scenario a2: detached deletes — a released attachment is absence.
-        views.apply(5, &event("agent.v1.mac.telemetry.detached",
+        views.apply("conv-approval", 5, &event("agent.v1.mac.telemetry.detached",
             r#"{"ts":"2026-07-07T21:01:00+10:00","instanceId":"inst-1a2f","conversationId":"conv-abc"}"#));
         let (instances, attachments) = views.agents().unwrap();
         assert_eq!(instances.len(), 1); // the instance fact survives
         assert!(attachments.is_empty());
-        assert_eq!(read_cursor(&views.db).unwrap(), 5);
+        assert_eq!(read_cursor(&views.db, "conv-approval").unwrap(), 5);
     }
 
     #[test]
     fn agent_tables_are_derived_and_rematerialise() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("agent.v1.mac.telemetry.attached",
+        views.apply("conv-approval", 1, &event("agent.v1.mac.telemetry.attached",
             r#"{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","conversationId":"conv-abc","cwd":"~/repos/tower"}"#));
-        assert_eq!(views.sync_stream("incarnation-A", 100).unwrap(), 1);
+        assert_eq!(
+            views
+                .sync_stream("conv-approval", "incarnation-A", 100)
+                .unwrap(),
+            1
+        );
 
         // A recreated stream truncates the agent tables with the other
         // derived views — fully rebuildable from replay.
-        assert_eq!(views.sync_stream("incarnation-B", 100).unwrap(), 0);
+        assert_eq!(
+            views
+                .sync_stream("conv-approval", "incarnation-B", 100)
+                .unwrap(),
+            0
+        );
         let (instances, attachments) = views.agents().unwrap();
         assert!(instances.is_empty());
         assert!(attachments.is_empty());
@@ -2054,8 +2232,13 @@ mod tests {
     #[test]
     fn out_of_order_row_touch_never_regresses() {
         let (mut views, _rx) = fresh();
-        views.apply(1, &event("conv.v2.conv-abc.changes.message", MSG_M1)); // 21:00
         views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_M1),
+        ); // 21:00
+        views.apply(
+            "conv-approval",
             2,
             &event(
                 "conv.v2.conv-abc.telemetry.turn.cancelled",

@@ -20,28 +20,54 @@ use wire::{WireEvent, parse_wire};
 
 use crate::views::ViewQuery;
 
-/// Subjects ingest folds — event subjects only, never `.requests`
-/// (nats-spec, Storage: a stream over requests becomes a second responder).
-const SUBJECTS: [&str; 6] = [
-    "conv.v2.*.telemetry.>",
+/// The audit stream's subjects: the committal record, kept unlimited
+/// (conv-approval by convention, though the name itself is deployment
+/// config — see `run_ingest`'s own doc).
+pub const AUDIT_SUBJECTS: [&str; 3] = [
+    "conv.v1.*.changes",
     "conv.v2.*.changes.>",
-    "conv.v2.*.deltas",
-    "agent.v1.*.telemetry.>",
     "approval.v1.*.lifecycle",
+];
+/// The diagnostic stream's subjects: telemetry with real debugging/cost
+/// value, capped meaningfully longer than a display buffer (90d by
+/// convention).
+pub const DIAGNOSTIC_SUBJECTS: [&str; 4] = [
+    "conv.v1.*.telemetry",
+    "conv.v2.*.telemetry.>",
+    "agent.v1.*.telemetry.attached",
+    "agent.v1.*.telemetry.detached",
+];
+/// The ephemeral stream's subjects: pure liveness noise and in-progress
+/// streaming, superseded the instant it lands — a short grace window for a
+/// lagging consumer, nothing more (3d by convention).
+pub const EPHEMERAL_SUBJECTS: [&str; 5] = [
+    "conv.v1.*.deltas",
+    "conv.v2.*.deltas",
     "approval.v1.*.telemetry",
+    "agent.v1.*.telemetry.ready",
+    "agent.v1.*.telemetry.pulse",
 ];
 
+/// One ingest loop over one stream. Subjects and which stream name captures
+/// them are both deployment configuration (nats-spec, Storage) — never
+/// hard-coded past the constant lists above, which exist to keep this file
+/// in sync with `migrate-stream-retention.sh`'s declared split, not to
+/// re-hardcode a stream name. Every event this loop folds is tagged with its
+/// own stream name (its own, non-comparable sequence space) before crossing
+/// into the shared events channel — three independent loops feed one Views
+/// thread, one cursor row per stream.
 pub async fn run_ingest(
     client: async_nats::Client,
     stream: String,
+    subjects: &'static [&'static str],
     queries: mpsc::Sender<ViewQuery>,
-    events_tx: mpsc::Sender<(u64, WireEvent)>,
+    events_tx: mpsc::Sender<(String, u64, WireEvent)>,
 ) {
     let js = async_nats::jetstream::new(client);
 
     loop {
-        if let Err(e) = consume(&js, &stream, &queries, &events_tx).await {
-            eprintln!("ingest: consumer failed, rebuilding: {e:#}");
+        if let Err(e) = consume(&js, &stream, subjects, &queries, &events_tx).await {
+            eprintln!("ingest[{stream}]: consumer failed, rebuilding: {e:#}");
         }
         if events_tx.is_closed() {
             return; // views gone; nothing to feed
@@ -52,13 +78,12 @@ pub async fn run_ingest(
 
 async fn consume(
     js: &async_nats::jetstream::Context,
-    stream: &str,
+    stream_name: &str,
+    subjects: &'static [&'static str],
     queries: &mpsc::Sender<ViewQuery>,
-    events_tx: &mpsc::Sender<(u64, WireEvent)>,
+    events_tx: &mpsc::Sender<(String, u64, WireEvent)>,
 ) -> anyhow::Result<()> {
-    // Which stream captures the event subjects is deployment configuration
-    // (nats-spec, Storage) — the name arrives from config, never hard-coded.
-    let mut stream = js.get_stream(stream).await?;
+    let mut stream = js.get_stream(stream_name).await?;
     // `created` is fixed at the stream's birth: the incarnation identity.
     // `last_seq` bounds what any honest cursor can be — the views use it to
     // refuse an unreachable resume position (the silent-strand guard).
@@ -71,6 +96,7 @@ async fn consume(
     let (tx, rx) = oneshot::channel();
     queries
         .send(ViewQuery::SyncStream {
+            stream: stream_name.to_string(),
             created,
             last_seq,
             reply: tx,
@@ -86,7 +112,7 @@ async fn consume(
     // be folded before the views reflect the current stream.
     let behind = last_seq.saturating_sub(cursor);
     eprintln!(
-        "ingest: stream sync — head seq {last_seq}, resuming from {} ({behind} behind)",
+        "ingest[{stream_name}]: stream sync — head seq {last_seq}, resuming from {} ({behind} behind)",
         if cursor == 0 {
             "start".to_string()
         } else {
@@ -105,7 +131,7 @@ async fn consume(
                     start_sequence: cursor + 1,
                 }
             },
-            filter_subjects: SUBJECTS.iter().map(|s| s.to_string()).collect(),
+            filter_subjects: subjects.iter().map(|s| s.to_string()).collect(),
             // Ephemeral: the views' cursor is the durable position; a named
             // durable here would be a second cursor to drift.
             ..Default::default()
@@ -120,7 +146,7 @@ async fn consume(
     // "caught up" means folded past everything that existed when we started.
     let mut caught_up = cursor >= last_seq;
     if caught_up {
-        eprintln!("ingest: at head (seq {last_seq}), tailing live");
+        eprintln!("ingest[{stream_name}]: at head (seq {last_seq}), tailing live");
     }
     let mut folded: u64 = 0;
     let mut last_log = std::time::Instant::now();
@@ -136,10 +162,12 @@ async fn consume(
         if !caught_up {
             if seq >= last_seq {
                 caught_up = true;
-                eprintln!("ingest: caught up at seq {seq} ({folded} folded), tailing live");
+                eprintln!(
+                    "ingest[{stream_name}]: caught up at seq {seq} ({folded} folded), tailing live"
+                );
             } else if last_log.elapsed() >= std::time::Duration::from_secs(2) {
                 eprintln!(
-                    "ingest: folding — seq {seq}/{last_seq} ({} behind, {folded} folded)",
+                    "ingest[{stream_name}]: folding — seq {seq}/{last_seq} ({} behind, {folded} folded)",
                     last_seq - seq
                 );
                 last_log = std::time::Instant::now();
@@ -154,7 +182,10 @@ async fn consume(
             .map_err(|e| anyhow::anyhow!("ack failed: {e}"))?;
 
         if let Some(event) = parse_wire(&message.subject, &message.payload)
-            && events_tx.send((seq, event)).await.is_err()
+            && events_tx
+                .send((stream_name.to_string(), seq, event))
+                .await
+                .is_err()
         {
             return Ok(()); // views gone
         }
