@@ -25,6 +25,12 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 regex = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
+# ReadFile's image conditioning (readfile.rs): native decode/resize/encode,
+# no shelling out to a platform tool (sips was the Node-side workaround for
+# not having a real image library without a second native binary alongside
+# better-sqlite3 — that constraint doesn't exist in Rust). Default features
+# pull in every codec; only the four ReadFile actually accepts are enabled.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 # preserve_order: Map keeps insertion order (an IndexMap) instead of
 # alphabetizing keys (the default BTreeMap backing). Without it, every
 # round-trip through serde_json::Value silently reorders a tool call's

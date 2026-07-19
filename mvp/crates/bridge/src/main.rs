@@ -39,6 +39,7 @@ mod exec;
 mod find;
 mod history;
 mod historytools;
+mod imaging;
 mod matcher;
 mod memory;
 mod memtools;
