@@ -97,6 +97,15 @@ async fn read_binary(path: &str, media_type: &str) -> (Value, bool) {
             true,
         );
     }
+    // PDFs pass through untouched — sips conditions raster images, not pages.
+    // There is little point sending more than the server itself resizes down
+    // to, and a large image is exactly what pushes a conversation toward the
+    // API's per-request image-count ceiling faster than it needs to.
+    let (bytes, media_type) = if media_type == "application/pdf" {
+        (bytes, media_type.to_string())
+    } else {
+        condition_image(bytes, media_type).await
+    };
     let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
     let block_type = if media_type == "application/pdf" {
         "document"
@@ -112,9 +121,90 @@ async fn read_binary(path: &str, media_type: &str) -> (Value, bool) {
     )
 }
 
+/// Longest edge (px) an attached image may keep. Above this, downscale; at
+/// or below, leave as-is — a fixed safety number under the API's own
+/// per-image dimension handling (it resizes internally too, so nothing is
+/// gained by sending more), ported from claude-sdk-cli's own conditioner
+/// (packages/claude-core/src/image/conditionImage.ts).
+const MAX_LONG_EDGE: u32 = 2000;
+const SIPS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Downscale to a `MAX_LONG_EDGE` long edge (aspect kept), re-encoded as PNG,
+/// only when the source exceeds it — `sips` never invoked otherwise. `sips`
+/// is macOS-only, file-based (no stdin/stdout image mode), so bytes are
+/// staged to a throwaway temp dir either way. Any problem — `sips` missing,
+/// unreadable output, a failing call — degrades to the original bytes and
+/// media type unchanged: a conditioner must never block an attachment.
+async fn condition_image(bytes: Vec<u8>, media_type: &str) -> (Vec<u8>, String) {
+    match try_condition(&bytes).await {
+        Ok(Some(resized)) => (resized, "image/png".to_string()),
+        Ok(None) => (bytes, media_type.to_string()),
+        Err(_) => (bytes, media_type.to_string()),
+    }
+}
+
+/// `Ok(None)` when already within bounds (nothing to do); `Ok(Some(png))`
+/// when resized; `Err` on any sips problem, for the caller to degrade on.
+async fn try_condition(bytes: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
+    let dir = std::env::temp_dir().join(format!("bridge-sips-{}", uuid::Uuid::new_v4()));
+    tokio::fs::create_dir_all(&dir).await?;
+    let result = try_condition_in(&dir, bytes).await;
+    let _ = tokio::fs::remove_dir_all(&dir).await;
+    result
+}
+
+async fn try_condition_in(dir: &std::path::Path, bytes: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
+    let input_path = dir.join("input");
+    tokio::fs::write(&input_path, bytes).await?;
+
+    let dims = tokio::time::timeout(
+        SIPS_TIMEOUT,
+        tokio::process::Command::new("sips")
+            .args(["-g", "pixelWidth", "-g", "pixelHeight"])
+            .arg(&input_path)
+            .output(),
+    )
+    .await??;
+    if !dims.status.success() {
+        anyhow::bail!("sips dimensions failed: {}", dims.status);
+    }
+    let stdout = String::from_utf8_lossy(&dims.stdout);
+    let width: u32 = stdout
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("pixelWidth: "))
+        .and_then(|v| v.parse().ok())
+        .ok_or_else(|| anyhow::anyhow!("unparseable sips dimensions: {stdout}"))?;
+    let height: u32 = stdout
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("pixelHeight: "))
+        .and_then(|v| v.parse().ok())
+        .ok_or_else(|| anyhow::anyhow!("unparseable sips dimensions: {stdout}"))?;
+
+    if width.max(height) <= MAX_LONG_EDGE {
+        return Ok(None);
+    }
+
+    let output_path = dir.join("output.png");
+    let resize = tokio::time::timeout(
+        SIPS_TIMEOUT,
+        tokio::process::Command::new("sips")
+            .args(["-Z", &MAX_LONG_EDGE.to_string(), "-s", "format", "png"])
+            .arg(&input_path)
+            .arg("--out")
+            .arg(&output_path)
+            .output(),
+    )
+    .await??;
+    if !resize.status.success() {
+        anyhow::bail!("sips resize failed: {}", resize.status);
+    }
+    Ok(Some(tokio::fs::read(&output_path).await?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::run_read_file;
+    use base64::Engine;
     use serde_json::json;
 
     fn scratch_file(name: &str, bytes: &[u8]) -> std::path::PathBuf {
@@ -156,6 +246,32 @@ mod tests {
         let arr = content.as_array().expect("image block is an array");
         assert_eq!(arr[0]["type"], "image");
         assert_eq!(arr[0]["source"]["media_type"], "image/png");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn a_real_small_image_passes_through_unchanged() {
+        // A genuine, valid 1x1 PNG (not the fake magic-bytes-only fixture
+        // above) — well under MAX_LONG_EDGE, so sips must read its real
+        // dimensions, decide nothing needs resizing, and hand the exact
+        // original bytes back untouched.
+        #[rustfmt::skip]
+        let one_by_one_png: &[u8] = &[
+            137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
+            0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137,
+            0, 0, 0, 10, 73, 68, 65, 84, 120, 156, 99, 0, 1, 0, 0, 5,
+            0, 1, 13, 10, 45, 180, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+        ];
+        let path = scratch_file("one.png", one_by_one_png);
+        let (content, is_error) = run_read_file(&json!({ "path": path.to_str().unwrap() })).await;
+        assert!(!is_error);
+        let arr = content.as_array().expect("image block is an array");
+        assert_eq!(arr[0]["source"]["media_type"], "image/png");
+        let expected = base64::engine::general_purpose::STANDARD.encode(one_by_one_png);
+        assert_eq!(
+            arr[0]["source"]["data"], expected,
+            "a within-bounds image must round-trip byte-identical"
+        );
         std::fs::remove_file(&path).ok();
     }
 
