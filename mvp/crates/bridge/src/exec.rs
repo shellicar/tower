@@ -969,3 +969,19 @@ mod tests {
         assert_eq!(results.len(), 2, "one result per input command, always");
     }
 }
+
+#[cfg(test)]
+mod key_order_proof {
+    #[test]
+    fn round_tripping_a_tool_call_through_serde_json_value_preserves_key_order() {
+        // Regression guard for the `preserve_order` feature on serde_json
+        // (mvp/Cargo.toml): without it, this round-trip would alphabetize to
+        // {"args":...,"op":...,"program":...} regardless of the input order —
+        // which is exactly what a model actually wrote gets silently reordered
+        // to on the way into telemetry.tool.use's "input": block["input"].
+        let input = r#"{"program":"ps","args":["aux"],"op":"|"}"#;
+        let v: serde_json::Value = serde_json::from_str(input).unwrap();
+        let out = serde_json::to_string(&v).unwrap();
+        assert_eq!(out, input, "key order was not preserved: {out}");
+    }
+}

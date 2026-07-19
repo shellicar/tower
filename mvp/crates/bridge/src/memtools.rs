@@ -25,10 +25,6 @@ pub fn write_memory_schema() -> Value {
                     "description": "The one-line handle that ranks highest and is what a \
                         later search recalls. Make it a claim, not a topic."
                 },
-                "body": {
-                    "type": "string",
-                    "description": "The memory itself — what the next Claude needs to know."
-                },
                 "type": {
                     "type": "string",
                     "description": "The kind of memory (e.g. trap, decision, pattern). Reuse \
@@ -43,9 +39,15 @@ pub fn write_memory_schema() -> Value {
                     "type": "string",
                     "description": "Why you are making this call, in plain words. Never \
                         stored, never searched."
+                },
+                "body": {
+                    "type": "string",
+                    "description": "The memory itself — what the next Claude needs to know. \
+                        Put this last: a long value here can drop every field written after \
+                        it in a multi-parameter call, so nothing follows it."
                 }
             },
-            "required": ["title", "body", "type", "intent"],
+            "required": ["title", "type", "intent", "body"],
             "additionalProperties": false
         }
     })

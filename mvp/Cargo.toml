@@ -25,7 +25,13 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 regex = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order: Map keeps insertion order (an IndexMap) instead of
+# alphabetizing keys (the default BTreeMap backing). Without it, every
+# round-trip through serde_json::Value silently reorders a tool call's
+# fields — telemetry.tool.use's "input": block["input"] included — so a
+# schema's declared field order (and whatever order the model actually
+# wrote) never survives to what gets published or reviewed.
+serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 # EditFile's diff generation — the same job the CLI's own EditFile.ts hands
 # to the npm `diff` package; no reason to hand-roll Myers diff in Rust.
