@@ -181,6 +181,41 @@ item-level error bag (`stderr`/`exitCode` per command); `Delete`'s per-item resu
 (from the earlier design decision) needs the same shape — an explicit `errors`/status
 per path, not a single pass/fail for the whole batch.
 
+## The shape of "escalate" across external systems
+
+Not being built yet — the SC is separately working out az credentials in the
+CLI first. Laid out here so the shape isn't lost before that lands.
+
+claude-sdk-cli's `escalate` operation (`permissions.ts`) is one flat tag:
+always `Ask`, no zone, no config override. For the bridge's own dedicated
+tools per external system, the standard/escalate split isn't uniform — each
+system draws its own line, and for at least one of them a second, external
+approval layer sits underneath the bridge's own:
+
+| System | Standard | Escalate |
+|---|---|---|
+| `gh` (GitHub CLI) | read/write repo, PR read | PR write — create/merge/close |
+| `az` (Azure CLI) | (per-account scoped; likely read-heavy) | privileged operations |
+| Azure DevOps | — | PR + work item access |
+
+Two things that don't fold into the bridge's own approval gate cleanly:
+
+- **Credential scoping precedes escalation, for Azure.** A human's own `az`
+  session can span multiple accounts; a bridge-spawned instance would
+  probably be bound to a single account chosen at spawn/config time — so
+  part of "is this escalate" is already answered by which account/role the
+  credential is even capable of, before any bridge-side ask fires.
+- **PIM (Privileged Identity Management) + Entra ID P2, for the SC's actual
+  work accounts, is a second, external gate** — Microsoft's own just-in-time
+  role activation, with its own approval/justification step at the identity
+  provider, independent of anything the bridge decides. Bridge's own
+  `escalate`-tag-always-asks pattern and PIM's gate could both exist,
+  stacked, for the same action — not a replacement for one another.
+
+Credentials themselves: either keychain/secrets keyed by account, and/or PIM
+itself for the P2-governed accounts. Not decided which, or whether both
+apply depending on the account.
+
 ## Open, not decided
 
 - Ban vs translate for global-option flags (`-C`, `-L`, etc.) on the bridge's
