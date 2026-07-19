@@ -490,7 +490,17 @@ async fn main() -> anyhow::Result<()> {
         &client,
         &world,
         "ready",
-        serde_json::json!({ "ts": now_iso(), "instanceId": instance }),
+        // version/gitHash/buildTime ride the wire alongside instanceId — the
+        // same build banner main() prints locally, but durable and queryable
+        // now: "which build served this world" no longer dies with whoever's
+        // terminal happened to be open at boot.
+        serde_json::json!({
+            "ts": now_iso(),
+            "instanceId": instance,
+            "version": env!("CARGO_PKG_VERSION"),
+            "gitHash": env!("BRIDGE_GIT_HASH"),
+            "buildTime": env!("BRIDGE_BUILD_TIME"),
+        }),
     )
     .await;
     {
