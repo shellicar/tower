@@ -74,10 +74,16 @@ dictates when a change is visible.
 | system prompt | `system` | every conversation on its next turn |
 | user context | `context` | new spawns only; conversations already born keep theirs |
 
-- **skills** is re-scanned per say. A repoint surfaces to a running
-  conversation as a catalogue delta on its next say, and to a new spawn as the
-  full catalogue. With no skills directory set, there is no catalogue and the
-  Skill tool is not offered.
+- **skills** is re-scanned per say. Two layers, scoped differently: the
+  *directory* is per-process (`skills_root`, shared by every conversation this
+  instance serves — a repoint changes where all of them read from), but the
+  *delta baseline* (name→content-hash of what a conversation has already been
+  told) is per-conversation, held in `agent::run`'s own local state, one scan
+  history per conversation. That's why a repoint surfaces to a running
+  conversation as a catalogue delta on its next say — relative to *that
+  conversation's own* last-seen state, not a shared one — and to a new spawn
+  as the full catalogue. With no skills directory set, there is no catalogue
+  and the Skill tool is not offered.
 - **system** is the API system prompt, read fresh each turn and **never
   persisted** to the record. A change reaches even a running conversation on
   its next turn. Because it is not in the record, a revived conversation takes
@@ -128,14 +134,24 @@ turn's outcome says so. Replay reads the stream named by `BRIDGE_STREAM`.
 
 ### skills
 
-Repoint the skills directory.
+Repoint the skills directory. `~` and `~/...` are expanded against `$HOME`
+(the only place they ever are — a control line is JSON over stdio, never a
+shell, so nothing else expands a leading tilde).
 
 ```
 {"skills": {"dir": "/path/to/skills"}}
 {"skillsDir": "/path/to/skills"}
 ```
 
-Missing `dir` is an error:
+Setting it never fails — the directory might not exist yet, or might arrive
+before it does. A missing or non-directory path still sets the cell, but adds
+a `warning` alongside the (always successful) result:
+
+```
+{"skillsDir": "/path/to/skills", "warning": "/path/to/skills does not exist or is unreadable: …"}
+```
+
+Missing `dir` itself is still an error — there's no path to set at all:
 
 ```
 {"error": "skills needs dir"}
