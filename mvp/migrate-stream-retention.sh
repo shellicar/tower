@@ -44,6 +44,12 @@ for arg in "$@"; do
   fi
 done
 
+if [ "$APPLY" = "1" ] && pgrep -f 'towerd' >/dev/null 2>&1; then
+  echo "refusing to run: towerd appears to be running (pgrep -f towerd)" >&2
+  echo "stop it first — step 3 narrows conv-approval's subjects out from under its live ingest consumer" >&2
+  exit 1
+fi
+
 AUDIT_SUBJECTS='conv.v1.*.changes,conv.v2.*.changes.>,approval.v1.*.lifecycle'
 DIAGNOSTIC_SUBJECTS='conv.v1.*.telemetry,conv.v2.*.telemetry.>,agent.v1.*.telemetry.attached,agent.v1.*.telemetry.detached'
 EPHEMERAL_SUBJECTS='conv.v1.*.deltas,conv.v2.*.deltas,approval.v1.*.telemetry,agent.v1.*.telemetry.ready,agent.v1.*.telemetry.pulse'
