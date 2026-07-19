@@ -75,15 +75,25 @@ const OVERSIZED_THRESHOLD: usize = 16 * 1024;
 /// tool's string result passes through before it becomes a `tool_result`.
 /// Under the threshold, `content` rides verbatim; over it, the FULL content
 /// is stashed (nothing is discarded, unlike the old hard-truncate) and a
-/// small `{ref, size, hint}` pointer takes its place — the model pages the
-/// rest in with the `Ref` tool. A stash failure falls back to the raw
-/// (still internally capped) content rather than losing the result outright.
+/// pointer takes its place — the model pages the rest in with the `Ref`
+/// tool. A stash failure falls back to the raw (still internally capped)
+/// content rather than losing the result outright.
+///
+/// Always returns `Value::String`: the Messages API requires a
+/// `tool_result`'s `content` to be a string or a list of content blocks —
+/// never a bare object. An earlier version returned `json!({ref, size,
+/// hint})` directly, which the API rejects outright (400, on every replay
+/// of the history once committed) the first time a result crossed the
+/// threshold. Fixed 19 Jul 2026.
 pub fn finalize(refs: &RefStore, content: String, hint: &str) -> Value {
     if content.len() <= OVERSIZED_THRESHOLD {
         return Value::String(content);
     }
     match store(refs, &content, hint) {
-        Ok(stored) => json!({ "ref": stored.id, "size": stored.size, "hint": hint }),
+        Ok(stored) => Value::String(format!(
+            "[ref {}: {hint}, {} bytes — use Ref to fetch it]",
+            stored.id, stored.size
+        )),
         Err(_) => Value::String(content),
     }
 }
@@ -213,9 +223,17 @@ mod tests {
         let refs = memory_store();
         let big = "x".repeat(17 * 1024);
         let out = finalize(&refs, big.clone(), "Exec");
-        let id = out["ref"].as_str().expect("ref id present").to_string();
-        assert_eq!(out["hint"], "Exec");
-        assert_eq!(out["size"].as_u64().unwrap() as usize, big.len());
+        // A string, never a bare object — tool_result content must be a
+        // string or a list of content blocks (the 19 Jul bug this guards).
+        let out_str = out.as_str().expect("finalize always returns a string");
+        assert!(out_str.contains("Exec"));
+        assert!(out_str.contains(&big.len().to_string()));
+        let id = out_str
+            .split("[ref ")
+            .nth(1)
+            .and_then(|s| s.split(':').next())
+            .expect("ref id present")
+            .to_string();
         // Nothing was discarded: the full content is fetchable back out.
         let (fetched, is_error) = run_ref(&refs, &json!({ "id": id, "limit": 100_000 }));
         assert!(!is_error);

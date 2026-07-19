@@ -4,9 +4,11 @@
 //! composition root: it owns the concerns and the transport and wires these
 //! together; it renders none of the detail itself.
 
+pub mod approvals;
 pub mod block;
 pub mod conversation;
 pub mod rail;
+pub mod refview;
 pub mod tabs;
 
 /// Cap a long value for a compact display — the raw input is the interim

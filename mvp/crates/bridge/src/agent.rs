@@ -152,24 +152,28 @@ impl Publisher {
     /// Commit a message to the record (`changes.message`): the change stream
     /// constitutes the conversation, so this is the only publish that moves
     /// the tip.
+    /// `from` is the sender's provenance — present for an utterance (a say,
+    /// an assistant turn), absent for a tool_result: it is a mechanical
+    /// delivery of a tool's output, not something anyone sent, so it carries
+    /// no sender at all rather than a fabricated one.
     async fn message(
         &self,
         id: &str,
         query: &str,
         turn: &str,
         role: &str,
-        from: &Value,
+        from: Option<&Value>,
         content: &[Value],
     ) {
-        self.event(
-            "changes.message",
-            json!({
-                "ts": now_iso(),
-                "id": id, "queryId": query, "turnId": turn,
-                "role": role, "from": from, "content": content,
-            }),
-        )
-        .await;
+        let mut payload = json!({
+            "ts": now_iso(),
+            "id": id, "queryId": query, "turnId": turn,
+            "role": role, "content": content,
+        });
+        if let Some(from) = from {
+            payload["from"] = from.clone();
+        }
+        self.event("changes.message", payload).await;
 
         // Best-effort projection into the shared history index (AuditWriter.ts's
         // own discipline): the record on the wire is the source of truth, so a
@@ -235,8 +239,14 @@ pub async fn run(
                 let leaf = msg.subject.strip_prefix(prefix.as_str()).unwrap_or("");
                 let response = match parse_request(leaf, &msg.payload) {
                     ConvRequest::Say { text, tip, from, attachments } => {
-                        match conversation.on_say(tip.as_ref().map(|t| t.0.as_str())) {
+                        let has_new_content = !text.trim().is_empty() || !attachments.is_empty();
+                        match conversation.on_say(tip.as_ref().map(|t| t.0.as_str()), has_new_content) {
                             SayDecision::Stale => encode_rejected("stale"),
+                            // The sender's tip was correct; there was just
+                            // nothing to send and nothing to resume (the tip
+                            // is an assistant message, or the conversation
+                            // is empty) — honest and distinct from `stale`.
+                            SayDecision::Empty => encode_rejected("empty"),
                             SayDecision::Accept => {
                                 let (query, tx) = accept_say(
                                     &client,
@@ -371,7 +381,14 @@ async fn accept_say(
     // history - the tree and any adopted record hold reference blocks too,
     // and the API must never see one.
     content.extend(attachments);
-    content.push(json!({ "type": "text", "text": text }));
+    // The API rejects an empty text block outright ("text content blocks
+    // must be non-empty") — an empty say only reaches accept_say at all when
+    // the tip is a dangling user-role message that resumes with no new
+    // content (SayDecision::Accept, decisions.rs), so the block is simply
+    // omitted rather than sent empty.
+    if !text.is_empty() {
+        content.push(json!({ "type": "text", "text": text }));
+    }
 
     let user = Message {
         id: message_id,
@@ -593,7 +610,7 @@ async fn run_query(
         // assistant message: the record gains the pair together, and a query
         // that never got this far left the record untouched.
         if let Some(u) = pending_user.take() {
-            pubr.message(&u.id, query, &turn_id, "user", user_from, &u.content)
+            pubr.message(&u.id, query, &turn_id, "user", Some(user_from), &u.content)
                 .await;
             committed.push(u);
         }
@@ -606,7 +623,7 @@ async fn run_query(
             query,
             &turn_id,
             "assistant",
-            &json!({ "kind": "agent" }),
+            Some(&json!({ "kind": "agent" })),
             &done.content,
         )
         .await;
@@ -678,15 +695,11 @@ async fn run_query(
         .await;
 
         let message_id = uuid::Uuid::new_v4().to_string();
-        pubr.message(
-            &message_id,
-            query,
-            &turn_id,
-            "user",
-            &json!({ "kind": "agent" }),
-            &results,
-        )
-        .await;
+        // No `from`: a tool_result is the mechanical delivery of a tool's
+        // output, not an utterance — nobody sent it, so nobody is stamped as
+        // having sent it (conversation-spec, 19 Jul correction).
+        pubr.message(&message_id, query, &turn_id, "user", None, &results)
+            .await;
         history.push(json!({ "role": "user", "content": results.clone() }));
         committed.push(Message {
             id: message_id,

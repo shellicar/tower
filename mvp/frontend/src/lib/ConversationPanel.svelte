@@ -147,15 +147,11 @@
     }
   });
 
-  // The client's knowledge of query liveness — unknown is a real state,
-  // rendered as such, never dressed as idle. Only OUR OWN live query
-  // disables the input: it is the one we can cancel, and the one whose
-  // closure we are guaranteed to want. Foreign activity (streaming from
-  // another sender's query) badges but never locks — a submit against it
-  // is refused stale and the words come back, which is self-correcting;
-  // a hard lock with no cancel button would strand the panel if the
-  // servicer died mid-stream.
-  const busy = $derived(oc.liveQuery !== null);
+  // There is no "busy": a say is always accepted and queued, the same
+  // semantics as typing while Claude is still running locally
+  // (conversation-spec design: acceptance creates state, processed when
+  // the conversation gets to it). The input is never locked on query
+  // liveness — uploading is the only thing that legitimately blocks a send.
 
   // While anchored, re-pin on any geometry change — catch-up, new message,
   // streaming chunk. While unanchored, never move.
@@ -167,9 +163,24 @@
     if (anchored) pin();
   });
 
+  // The one source of truth for send-eligibility, read by both the submit
+  // guard and the textarea/button disabled state - never re-derived twice.
+  // Priority: uploading always blocks; OUR OWN live query always blocks (a
+  // say against it is a guaranteed `stale`, decisions.rs scenario 5 - this
+  // is why the original busy gate existed, and removing it was wrong);
+  // real content (text or an attachment) is always sendable; empty is
+  // sendable only to resume a conversation that already ends on an
+  // unanswered user-role message (a tool_result is one) - ported verbatim
+  // from claude-sdk-cli's EditorHandler#submit.
+  const canSend = $derived.by(() => {
+    if (uploading || oc.liveQuery !== null) return false;
+    if (draft.trim() || attachments.length > 0) return true;
+    return oc.messages.at(-1)?.role === 'user';
+  });
+
   function submit() {
+    if (!canSend) return;
     const text = draft.trim();
-    if (!text || busy || uploading) return;
     conversations.say(oc.conv, text, attachments);
     attachments = [];
     uploadNote = '';
@@ -391,8 +402,8 @@
       oninput={autosize}
       {onkeydown}
       {onpaste}
-      disabled={busy}
-      placeholder={busy ? 'query running… (cancel to speak)' : 'say… (⌘↩ to send)'}
+      disabled={oc.liveQuery !== null}
+      placeholder={oc.liveQuery !== null ? 'query running… (cancel to speak)' : 'say… (⌘↩ to send)'}
     ></textarea>
     <div class="mt-1">
       <button

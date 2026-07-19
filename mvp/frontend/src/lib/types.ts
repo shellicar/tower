@@ -28,7 +28,9 @@ export interface ConversationMessage {
   query: string;
   turn: string;
   role: string;
-  from: Sender;
+  /** Absent for a tool_result — it carries no sender (conversation-spec:
+   *  a mechanical delivery is not an utterance, so nobody "sent" it). */
+  from?: Sender;
   content: ContentBlock[];
   ts: Millis;
 }

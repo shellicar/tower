@@ -57,6 +57,33 @@ pub struct ConversationState {
 }
 
 impl ConversationState {
+    /// Whether the composer's Send should be enabled — pure and testable on
+    /// purpose, instead of buried in a Leptos view closure (the trap named in
+    /// the frontend-comparison doc: wasm-only UI code isn't native-checked).
+    ///
+    /// Priority, in order:
+    /// 1. Uploading always blocks — nothing to send until it resolves.
+    /// 2. OUR OWN live query always blocks: `decisions.rs`'s `on_say` makes
+    ///    a say sent while our query is live `stale` (scenario 5) — sending
+    ///    would just round-trip a guaranteed rejection, and disabling here
+    ///    gives the same affordance the original design had ("query
+    ///    running… cancel to speak"). Foreign activity (another sender's
+    ///    query) is NOT this — it never reaches here because it isn't
+    ///    `live_query`, only badges.
+    /// 3. Real content (non-empty text or an attachment) is always sendable.
+    /// 4. Empty otherwise: sendable only to resume — the tip is already a
+    ///    dangling user-role message (a tool_result), matching
+    ///    `decisions.rs`'s `SayDecision::Accept`-with-no-content case.
+    pub fn can_send(&self, draft_empty: bool, has_attachments: bool, uploading: bool) -> bool {
+        if uploading || self.live_query.is_some() {
+            return false;
+        }
+        if !draft_empty || has_attachments {
+            return true;
+        }
+        self.messages.last().is_some_and(|m| m.role == "user")
+    }
+
     fn fresh() -> Self {
         ConversationState {
             messages: Vec::new(),
@@ -373,7 +400,7 @@ mod tests {
             query: query.into(),
             turn: "t".into(),
             role: role.into(),
-            from: json!({ "kind": "human" }),
+            from: Some(json!({ "kind": "human" })),
             content: vec![json!({ "type": "text", "text": "hi" })],
             ts,
         }
@@ -381,6 +408,65 @@ mod tests {
 
     fn open(convs: &mut Conversations, conv: &str) {
         convs.open(conv, "r1".into());
+    }
+
+    #[test]
+    fn a_live_query_blocks_send_regardless_of_content() {
+        let mut c = Conversations::default();
+        open(&mut c, "a");
+        c.say("a", "hello".into(), "req1".into());
+        c.apply(&ServerMsg::SayResult {
+            id: "req1".into(),
+            outcome: "accepted".into(),
+            query: Some("q1".into()),
+            reason: None,
+        });
+        let oc = c.get("a").unwrap();
+        assert!(oc.live_query.is_some());
+        // Real content would normally be sendable, but our own live query
+        // always wins — a say against it is a guaranteed `stale` (scenario
+        // 5 in decisions.rs), so it must not look sendable here either.
+        assert!(!oc.can_send(false, false, false));
+        assert!(!oc.can_send(true, true, false));
+    }
+
+    #[test]
+    fn uploading_always_blocks_even_with_content() {
+        let mut c = Conversations::default();
+        open(&mut c, "a");
+        assert!(!c.get("a").unwrap().can_send(false, false, true));
+        assert!(!c.get("a").unwrap().can_send(true, true, true));
+    }
+
+    #[test]
+    fn real_content_is_always_sendable_when_not_busy_or_uploading() {
+        let mut c = Conversations::default();
+        open(&mut c, "a");
+        let oc = c.get("a").unwrap();
+        assert!(oc.can_send(false, false, false)); // text
+        assert!(oc.can_send(true, true, false)); // attachment alone
+    }
+
+    #[test]
+    fn empty_send_is_sendable_only_to_resume_a_dangling_user_message() {
+        let mut c = Conversations::default();
+        open(&mut c, "a");
+        // No messages yet: nothing to resume.
+        assert!(!c.get("a").unwrap().can_send(true, false, false));
+
+        c.apply(&ServerMsg::Message {
+            conv: "a".into(),
+            message: msg("m1", "q1", "assistant", 1),
+        });
+        // Tip is assistant: already answered, nothing to resume.
+        assert!(!c.get("a").unwrap().can_send(true, false, false));
+
+        c.apply(&ServerMsg::Message {
+            conv: "a".into(),
+            message: msg("m2", "q1", "user", 2), // stands in for a tool_result
+        });
+        // Tip is a dangling user-role message: an empty send resumes it.
+        assert!(c.get("a").unwrap().can_send(true, false, false));
     }
 
     #[test]

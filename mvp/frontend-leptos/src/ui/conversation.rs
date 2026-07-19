@@ -25,7 +25,7 @@ use crate::concerns::conversation::{Conversations, QueryState};
 use crate::concerns::rail::Rail;
 use crate::concerns::usage::Usage;
 use crate::pricing::{format_tokens, format_usd, price_usage};
-use crate::time::{Millis, age};
+use crate::time::{Millis, age, format_time};
 use crate::ui::block::render_block;
 use crate::ui::{short, truncate};
 use crate::uploads;
@@ -167,7 +167,13 @@ pub fn ConversationView(
 
     let send_current = Callback::new(move |()| {
         let text = draft.get_untracked();
-        if text.trim().is_empty() {
+        let allowed = conv.with_value(|c| {
+            conversations.with(|cs| {
+                cs.get(c)
+                    .map(|oc| oc.can_send(text.trim().is_empty(), !oc.pending_attachments.is_empty(), uploading.get_untracked() > 0))
+            })
+        }).unwrap_or(false);
+        if !allowed {
             return;
         }
         conv.with_value(|c| save_draft(c, ""));
@@ -291,16 +297,32 @@ pub fn ConversationView(
                         messages
                             .into_iter()
                             .map(|m| {
-                                let (who, cls) = match m.role.as_str() {
-                                    "user" => ("you".to_owned(), "user"),
-                                    "assistant" => ("agent".to_owned(), "assistant"),
-                                    other => (other.to_owned(), "other"),
+                                let cls = match m.role.as_str() {
+                                    "user" => "user",
+                                    "assistant" => "assistant",
+                                    _ => "other",
                                 };
+                                // Absent `from` is real: a tool_result carries no sender
+                                // (a mechanical delivery, not an utterance — nothing is
+                                // fabricated to fill the slot).
+                                let who = match &m.from {
+                                    Some(from) => from
+                                        .get("userId")
+                                        .and_then(Value::as_str)
+                                        .or_else(|| from.get("kind").and_then(Value::as_str))
+                                        .unwrap_or(&m.role)
+                                        .to_owned(),
+                                    None => "tool".to_owned(),
+                                };
+                                let time = format_time(m.ts);
                                 let blocks: Vec<AnyView> =
                                     m.content.iter().map(render_block).collect();
                                 view! {
                                     <div class=format!("message {cls}")>
-                                        <div class="who">{who}</div>
+                                        <div class="who">
+                                            <span class="who-name">{who}</span>
+                                            <span class="who-time">{time}</span>
+                                        </div>
                                         {blocks}
                                     </div>
                                 }
@@ -459,10 +481,6 @@ pub fn ConversationView(
                     class="composer-input"
                     node_ref=editor_ref
                     prop:value=move || draft.get()
-                    disabled=move || {
-                        conv.with_value(|c| conversations.with(|cs| cs.get(c).map(|oc| oc.live_query.is_some())))
-                            .unwrap_or(false)
-                    }
                     placeholder="say… (⌘⏎ to send)"
                     on:input=move |ev| {
                         let value = event_target_value(&ev);
@@ -501,7 +519,27 @@ pub fn ConversationView(
                     }
                 ></textarea>
                 <div class="composer-actions">
-                    <button on:click=move |_| send_current.run(())>"Send"</button>
+                    <button
+                        // The one source of truth for send-eligibility is
+                        // `ConversationState::can_send` (concerns/conversation.rs),
+                        // pure and unit-tested — this closure only supplies the
+                        // UI-local reads (draft, uploading), never re-derives the
+                        // rule itself.
+                        disabled=move || {
+                            !conv.with_value(|c| {
+                                conversations.with(|cs| {
+                                    cs.get(c).map(|oc| {
+                                        oc.can_send(
+                                            draft.with(|d| d.trim().is_empty()),
+                                            !oc.pending_attachments.is_empty(),
+                                            uploading.get() > 0,
+                                        )
+                                    })
+                                })
+                            }).unwrap_or(false)
+                        }
+                        on:click=move |_| send_current.run(())
+                    >"Send"</button>
                     <button
                         title="attach a file"
                         on:click=move |_| {

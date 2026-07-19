@@ -29,6 +29,7 @@ use crate::concerns::usage::Usage;
 use crate::concerns::view::View;
 use crate::time::Millis;
 use crate::transport::{IdCounter, Transport};
+use crate::ui::approvals::ApprovalsView;
 use crate::ui::conversation::ConversationView;
 use crate::ui::rail::RailView;
 use crate::ui::tabs::TabBar;
@@ -87,7 +88,7 @@ pub fn App(ws_url: String) -> impl IntoView {
             conversations.update(|c| c.apply(&frame));
             approvals.update(|a| a.apply(&frame));
             usage.update(|u| u.apply(&frame));
-            view.update(|v| v.apply(&frame));
+            view.update(|v| v.apply(&frame, crate::ui::rail::load_view));
         })
         .expect("websocket connect"),
     );
@@ -116,6 +117,22 @@ pub fn App(ws_url: String) -> impl IntoView {
             send(msg);
         }
     };
+
+    // The reconnect case Svelte covers with `transport.onConnect(() =>
+    // conversations.setOpen(tab.convs))`: the server's `Layout` snapshot
+    // updates `view` on its own (inside the transport callback above, which
+    // cannot call `sync_open` — `send`/`sync_open` are not yet defined at
+    // that point, and `transport` is still under construction). A reactive
+    // effect on the active tab's open set covers it instead: it fires once
+    // on mount (empty, harmless) and again the moment `Layout` updates the
+    // tab, actually requesting those conversations' content — the gap that
+    // left a freshly loaded/reconnected page showing open tabs with no
+    // messages, `set_open` already being idempotent makes this safe
+    // alongside every explicit `sync_open()` call above.
+    Effect::new(move |_| {
+        view.with(|v| v.tab().convs.clone());
+        sync_open();
+    });
 
     let open_conversation = Callback::new(move |conv: String| {
         let msg = view.try_update(|v| v.open_conversation(&conv, next_id()));
@@ -169,6 +186,12 @@ pub fn App(ws_url: String) -> impl IntoView {
         let msg = approvals.with(|a| a.dismiss(&approval_id, id));
         send(msg);
     });
+    let toggle_approvals = Callback::new(move |()| view.update(|v| v.toggle_approvals()));
+    let close_approvals = Callback::new(move |()| view.update(|v| v.close_approvals()));
+    let open_conversation_from_approval = Callback::new(move |conv: String| {
+        view.update(|v| v.close_approvals());
+        open_conversation.run(conv);
+    });
     let dismiss_attachment = Callback::new(move |conv: String| {
         let id = next_id();
         let msg = rail.with(|r| r.dismiss_attachment(&conv, id));
@@ -184,19 +207,33 @@ pub fn App(ws_url: String) -> impl IntoView {
             <RailView
                 rail=rail
                 approvals=approvals
+                view=view
                 now=now
                 open_convs=open_convs
                 status=status
                 on_open=open_conversation
-                on_dismiss=dismiss_approval
                 on_dismiss_attachment=dismiss_attachment
+                on_toggle_approvals=toggle_approvals
             />
             <main class="conversation">
                 <TabBar view=view on_switch=switch_tab on_add=add_tab on_close=close_tab on_rename=rename_tab />
                 <div class="panels">
                     {move || {
+                        view.with(|v| v.approvals_open).then(|| view! {
+                            <ApprovalsView
+                                approvals=approvals
+                                rail=rail
+                                now=now
+                                on_open_conversation=open_conversation_from_approval
+                                on_answer=on_answer
+                                on_dismiss=dismiss_approval
+                                on_close=close_approvals
+                            />
+                        })
+                    }}
+                    {move || {
                         let convs = view.with(|v| v.tab().convs.clone());
-                        if convs.is_empty() {
+                        if convs.is_empty() && !view.with(|v| v.approvals_open) {
                             return view! { <p class="empty">"Open a conversation from the rail."</p> }.into_any();
                         }
                         convs

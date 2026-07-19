@@ -177,6 +177,12 @@ impl Rail {
         self.rows.get(conv)
     }
 
+    /// Every known tag key's colour — the shared colour language, identical
+    /// on every client (ws-spec: `tagKeys` on `list`).
+    pub fn tag_keys(&self) -> &HashMap<String, String> {
+        &self.tag_keys
+    }
+
     /// The liveness verdict for a conversation — facts in, judgement out
     /// (agent-spec: a fold, never declared). None = no live attachment.
     pub fn verdict(&self, conv: &str, now: Millis) -> Option<Liveness> {

@@ -207,7 +207,9 @@ always, regardless of what is open. This event *is* the staleness product.
 The catch-up: every stored message with `ts` greater than the request's
 `after`, in `ts` order. Each message carries all three ids — `id` (message),
 `query`, `turn` — as every message does everywhere in this system; plus
-`role`, the `from` object verbatim from the wire, `content` blocks verbatim
+`role`, the `from` object verbatim from the wire (**absent for a
+`tool_result`** — a mechanical delivery carries no sender, never fabricated),
+`content` blocks verbatim
 (the client renders known block types, skips unknown ones), and `ts`. The
 boundary may overlap what the client already holds when `after` is a shared
 timestamp — dedupe by message `id`; rendering a known id again is a no-op.
@@ -571,7 +573,7 @@ const conversationMessage = z.looseObject({
   query: z.string(),
   turn: z.string(),
   role: openEnum(['user', 'assistant']),
-  from: sender,
+  from: sender.optional(),
   content: contentBlocks,
   ts: millis,
 });

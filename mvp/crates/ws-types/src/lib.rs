@@ -287,7 +287,10 @@ pub struct WsMessage {
     pub query: String,
     pub turn: String,
     pub role: String,
-    pub from: Value,
+    /// Absent for a tool_result — it carries no sender (conversation-spec:
+    /// a mechanical delivery is not an utterance).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub from: Option<Value>,
     pub content: Vec<Value>,
     pub ts: i64,
 }

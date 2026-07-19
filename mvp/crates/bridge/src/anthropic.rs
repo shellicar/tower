@@ -152,6 +152,33 @@ async fn refresh_credentials(refresh_token: &str) -> anyhow::Result<Value> {
     }))
 }
 
+/// Marks the last cacheable block of the last message with a 1h ephemeral
+/// breakpoint — the moving half of the two breakpoints (the other is the
+/// static system-block one in `stream_turn`), extending the cache
+/// incrementally each turn. Pulled out as its own pure function so this is a
+/// literal-value test, not something only a live API call can catch — an
+/// empty text block broke exactly this the first time a resume send (empty
+/// text, ws-spec's `text: ""`) reached it: the API rejects `cache_control`
+/// on an empty text block outright, so this walks back to the nearest block
+/// that isn't one, rather than assume the last block is always eligible.
+fn mark_message_cache_breakpoint(messages: &mut [Value]) {
+    let Some(blocks) = messages.last_mut().and_then(|m| m["content"].as_array_mut()) else {
+        return;
+    };
+    let Some(block) = blocks
+        .iter_mut()
+        .rev()
+        .find(|b| b["type"] != "text" || b["text"].as_str() != Some(""))
+    else {
+        // Every block in the last message is an empty text block (a resume
+        // send with nothing else attached): no eligible breakpoint this
+        // turn — the cache simply doesn't extend, never a reason to fail
+        // the send.
+        return;
+    };
+    block["cache_control"] = json!({ "type": "ephemeral", "ttl": "1h" });
+}
+
 pub struct TurnDone {
     pub content: Vec<Value>,
     pub stop_reason: String,
@@ -209,13 +236,7 @@ pub async fn stream_turn(
     }
     // Clone before marking: the caller's message tree is not ours to mutate.
     let mut messages = messages.to_vec();
-    if let Some(block) = messages
-        .last_mut()
-        .and_then(|m| m["content"].as_array_mut())
-        .and_then(|blocks| blocks.last_mut())
-    {
-        block["cache_control"] = json!({ "type": "ephemeral", "ttl": "1h" });
-    }
+    mark_message_cache_breakpoint(&mut messages);
     let mut body = json!({
         "model": model,
         "max_tokens": MAX_TOKENS,
@@ -399,5 +420,73 @@ fn append_str(block: &mut Value, field: &str, chunk: &str) {
         _ => {
             block[field] = Value::String(chunk.to_string());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn has_cache_control(block: &Value) -> bool {
+        block.get("cache_control").is_some()
+    }
+
+    #[test]
+    fn marks_the_last_block_when_it_is_a_real_text_block() {
+        let mut messages = vec![json!({
+            "role": "user",
+            "content": [{ "type": "text", "text": "hello" }],
+        })];
+        mark_message_cache_breakpoint(&mut messages);
+        assert!(has_cache_control(&messages[0]["content"][0]));
+    }
+
+    /// The exact bug this guards: a resume send (ws-spec `text: ""`) with no
+    /// attachments has exactly one block, an empty text block — the API
+    /// rejects a cache breakpoint on it outright ("cache_control cannot be
+    /// set for empty text blocks"). No breakpoint must be set anywhere.
+    #[test]
+    fn sets_no_breakpoint_when_the_only_block_is_an_empty_text_block() {
+        let mut messages = vec![json!({
+            "role": "user",
+            "content": [{ "type": "text", "text": "" }],
+        })];
+        mark_message_cache_breakpoint(&mut messages);
+        assert!(!has_cache_control(&messages[0]["content"][0]));
+    }
+
+    /// A resume send that also answers a dangling tool_use: the empty text
+    /// block trails a real one. The breakpoint must land on the tool_result,
+    /// never the trailing empty text block.
+    #[test]
+    fn walks_back_past_a_trailing_empty_text_block_to_a_real_one() {
+        let mut messages = vec![json!({
+            "role": "user",
+            "content": [
+                { "type": "tool_result", "tool_use_id": "toolu_1", "content": "ok" },
+                { "type": "text", "text": "" },
+            ],
+        })];
+        mark_message_cache_breakpoint(&mut messages);
+        assert!(has_cache_control(&messages[0]["content"][0]));
+        assert!(!has_cache_control(&messages[0]["content"][1]));
+    }
+
+    #[test]
+    fn only_the_last_message_is_touched() {
+        let mut messages = vec![
+            json!({ "role": "user", "content": [{ "type": "text", "text": "first" }] }),
+            json!({ "role": "assistant", "content": [{ "type": "text", "text": "second" }] }),
+        ];
+        mark_message_cache_breakpoint(&mut messages);
+        assert!(!has_cache_control(&messages[0]["content"][0]));
+        assert!(has_cache_control(&messages[1]["content"][0]));
+    }
+
+    #[test]
+    fn an_empty_message_list_is_a_no_op() {
+        let mut messages: Vec<Value> = vec![];
+        mark_message_cache_breakpoint(&mut messages); // must not panic
+        assert!(messages.is_empty());
     }
 }

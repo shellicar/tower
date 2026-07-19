@@ -13,20 +13,36 @@
 //! window you're looking at is a fact about the viewer, not the workspace —
 //! the same split the SC drew for browser profiles on 12 Jul.
 //!
-//! Scope note: this build ports tabs and rename; the filter/group/facet
-//! machine `view.svelte.ts` also owns stays out for now — a further,
-//! lower-priority ask, not free to include silently on the coattails of
-//! this one.
+//! `ViewConfig` (filters/grouping) is ported too, local-only like `active`
+//! (a fact about how this viewer sliced the rail, not the shared
+//! workspace), held per tab and re-attached by name across a `layout` fold
+//! — the same "held annotation survives the upsert" pattern the rail uses
+//! for titles.
+
+use std::collections::HashMap;
 
 use ws_types::{ClientMsg, ServerMsg, WsTab};
 
-/// A tab is a whole working view: its own open set. (Svelte's `Tab` also
-/// carries `view: ViewConfig` for filters/grouping — omitted here, see the
-/// module doc's scope note.)
+/// The rail's view configuration — per tab, local only. Mirrors
+/// mvp/frontend's `ViewConfig`.
+#[derive(Debug, Clone, Default)]
+pub struct ViewConfig {
+    /// key -> selected values; OR within a key, AND across keys.
+    pub filters: HashMap<String, Vec<String>>,
+    /// Section the rail by this key; empty = flat.
+    pub group_key: String,
+    /// Keys whose values decorate rows (value only; colour carries the key).
+    pub always_show: Vec<String>,
+    /// When grouping, drop rows that lack the group key entirely.
+    pub hide_untagged: bool,
+}
+
+/// A tab is a whole working view: its own config AND its own open set.
 #[derive(Debug, Clone)]
 pub struct Tab {
     pub name: String,
     pub convs: Vec<String>,
+    pub view: ViewConfig,
 }
 
 impl From<&Tab> for WsTab {
@@ -37,20 +53,26 @@ impl From<&Tab> for WsTab {
 
 impl From<WsTab> for Tab {
     fn from(t: WsTab) -> Self {
-        Tab { name: t.name, convs: t.convs }
+        Tab { name: t.name, convs: t.convs, view: ViewConfig::default() }
     }
 }
 
+#[derive(Clone)]
 pub struct View {
     pub tabs: Vec<Tab>,
     pub active: usize,
+    /// Whether the fleet-wide approvals panel is showing — local-only, same
+    /// footing as `active` (a fact about this viewer, not the shared
+    /// workspace). Mirrors mvp/frontend's `view.approvalsOpen`.
+    pub approvals_open: bool,
 }
 
 impl Default for View {
     fn default() -> Self {
         View {
-            tabs: vec![Tab { name: "main".to_owned(), convs: Vec::new() }],
+            tabs: vec![Tab { name: "main".to_owned(), convs: Vec::new(), view: ViewConfig::default() }],
             active: 0,
+            approvals_open: false,
         }
     }
 }
@@ -61,11 +83,28 @@ impl View {
     /// tabs) before any client has ever set one; keep the local default
     /// rather than replace it with an empty set, so a fresh fleet still
     /// shows one usable tab instead of none.
-    pub fn apply(&mut self, event: &ServerMsg) {
+    /// `load_config` supplies a `ViewConfig` for a tab name this browser has
+    /// never held (mvp/frontend's `readViewConfig(name)` — a previously
+    /// saved local config, or the default when there is none). Held config
+    /// from tabs already in memory always wins; the loader only fires for a
+    /// name genuinely new to this fold.
+    pub fn apply(&mut self, event: &ServerMsg, load_config: impl Fn(&str) -> ViewConfig) {
         if let ServerMsg::Layout { tabs } = event
             && !tabs.is_empty()
         {
-            self.tabs = tabs.iter().cloned().map(Tab::from).collect();
+            // Held view config (filters/grouping) survives the wholesale
+            // replace, re-attached by name — the same pattern the rail uses
+            // for titles across a row upsert.
+            let held: HashMap<String, ViewConfig> =
+                self.tabs.drain(..).map(|t| (t.name, t.view)).collect();
+            self.tabs = tabs
+                .iter()
+                .cloned()
+                .map(|t| Tab {
+                    view: held.get(&t.name).cloned().unwrap_or_else(|| load_config(&t.name)),
+                    ..Tab::from(t)
+                })
+                .collect();
             if self.active >= self.tabs.len() {
                 self.active = self.tabs.len() - 1;
             }
@@ -85,7 +124,11 @@ impl View {
     }
 
     pub fn add_tab(&mut self, id: String) -> ClientMsg {
-        self.tabs.push(Tab { name: format!("view {}", self.tabs.len() + 1), convs: Vec::new() });
+        self.tabs.push(Tab {
+            name: format!("view {}", self.tabs.len() + 1),
+            convs: Vec::new(),
+            view: ViewConfig::default(),
+        });
         self.active = self.tabs.len() - 1;
         self.set_layout_msg(id)
     }
@@ -139,6 +182,53 @@ impl View {
         let active = self.active.min(self.tabs.len() - 1);
         self.tabs[active].convs.retain(|c| c != conv);
         self.set_layout_msg(id)
+    }
+
+    pub fn toggle_approvals(&mut self) {
+        self.approvals_open = !self.approvals_open;
+    }
+
+    pub fn close_approvals(&mut self) {
+        self.approvals_open = false;
+    }
+
+    /// The active tab's config — what the rail reads and mutates.
+    pub fn view_config(&self) -> &ViewConfig {
+        &self.tab().view
+    }
+
+    fn active_view_mut(&mut self) -> &mut ViewConfig {
+        let active = self.active.min(self.tabs.len() - 1);
+        &mut self.tabs[active].view
+    }
+
+    pub fn set_group_key(&mut self, key: String) {
+        self.active_view_mut().group_key = key;
+    }
+
+    pub fn toggle_hide_untagged(&mut self) {
+        let v = self.active_view_mut();
+        v.hide_untagged = !v.hide_untagged;
+    }
+
+    pub fn toggle_always_show(&mut self, key: &str) {
+        let v = self.active_view_mut();
+        if let Some(i) = v.always_show.iter().position(|k| k == key) {
+            v.always_show.remove(i);
+        } else {
+            v.always_show.push(key.to_owned());
+        }
+    }
+
+    /// OR within a key: toggling a value adds/removes it from that key's set.
+    pub fn toggle_filter(&mut self, key: &str, value: &str) {
+        let v = self.active_view_mut();
+        let vs = v.filters.entry(key.to_owned()).or_default();
+        if let Some(i) = vs.iter().position(|x| x == value) {
+            vs.remove(i);
+        } else {
+            vs.push(value.to_owned());
+        }
     }
 }
 
@@ -211,16 +301,19 @@ mod tests {
     #[test]
     fn apply_replaces_tabs_wholesale_but_ignores_an_empty_snapshot() {
         let mut v = View::default();
-        v.apply(&ServerMsg::Layout {
-            tabs: vec![WsTab { name: "shared".into(), convs: vec!["x".into()] }],
-        });
+        v.apply(
+            &ServerMsg::Layout {
+                tabs: vec![WsTab { name: "shared".into(), convs: vec!["x".into()] }],
+            },
+            |_| ViewConfig::default(),
+        );
         assert_eq!(v.tabs.len(), 1);
         assert_eq!(v.tabs[0].name, "shared");
         assert_eq!(v.tab().convs, ["x"]);
 
         // An empty snapshot (nothing set yet, fresh fleet) doesn't wipe the
         // local default down to zero tabs.
-        v.apply(&ServerMsg::Layout { tabs: vec![] });
+        v.apply(&ServerMsg::Layout { tabs: vec![] }, |_| ViewConfig::default());
         assert_eq!(v.tabs.len(), 1);
     }
 }

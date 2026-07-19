@@ -706,7 +706,7 @@ mod tests {
                 query: QueryId("q1".into()),
                 turn: TurnId("t1".into()),
                 role: "user".into(),
-                from: serde_json::json!({ "kind": "human" }),
+                from: Some(serde_json::json!({ "kind": "human" })),
                 content: vec![serde_json::json!({ "type": "text", "text": "hi" })],
                 ts: 1,
             },

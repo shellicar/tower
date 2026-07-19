@@ -4,8 +4,10 @@
 
   let { message }: { message: ConversationMessage } = $props();
 
+  // Absent `from` is real: a tool_result carries no sender (it wasn't sent
+  // by anyone, so nothing is fabricated to fill the slot).
   const who = $derived(
-    message.from?.userId ?? message.from?.kind ?? message.role,
+    message.from ? (message.from.userId ?? message.from.kind) : 'tool',
   );
   const time = $derived(
     new Date(message.ts).toLocaleTimeString(undefined, { hour12: false }),

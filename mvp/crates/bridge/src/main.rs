@@ -9,6 +9,8 @@
 //!   {"conversationId":"…","adoptedMessages":12}
 //!   $ echo '{"skills": {"dir": "/path/to/skills"}}' | bridge
 //!   {"skillsDir":"/path/to/skills"}
+//!   $ echo '{"revise": {"conversationId": "…", "messageId": "…", "content": [...] }}' | bridge
+//!   {"conversationId":"…","revisedMessage":"…"}
 //!
 //! `adopt` revives a conversation whose holder died: the record outlives
 //! the servicer, so a fresh instance replays the committed messages from
@@ -78,10 +80,12 @@ fn expand_tilde(path: &str) -> std::path::PathBuf {
 }
 
 /// Replay a conversation's committed messages from the capture stream, in
-/// stream order (= commit order). Messages only: telemetry and deltas are
-/// observation, and this bridge publishes no revisions or tip movements to
-/// fold (a deliberate v0 cut, stated here so the gap is a sentence, not a
-/// surprise).
+/// stream order (= commit order), with every revision folded in —
+/// conversation-spec: "the state of a message is its latest revision"
+/// (last-write-wins per id; every prior revision, like every message,
+/// remains in the record, but replay only ever hands the servicer the
+/// current state). Telemetry, deltas and tip movements stay observation,
+/// not replayed.
 async fn replay_conversation(
     client: &async_nats::Client,
     stream_name: &str,
@@ -93,7 +97,7 @@ async fn replay_conversation(
     })?;
     let consumer = stream
         .create_consumer(async_nats::jetstream::consumer::pull::Config {
-            filter_subject: format!("conv.v2.{conv}.changes.message"),
+            filter_subject: format!("conv.v2.{conv}.changes.>"),
             deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
             ..Default::default()
         })
@@ -104,21 +108,41 @@ async fn replay_conversation(
     if pending == 0 {
         return Ok(messages);
     }
+    let mut revisions: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
     let mut batch = consumer.fetch().max_messages(pending).messages().await?;
     while let Some(msg) = batch.next().await {
         let msg = msg.map_err(|e| anyhow::anyhow!("replay read failed: {e}"))?;
-        // Tolerance: frames that don't parse as a message change are skipped
-        // (they can't be - the filter is exact - but never crash on a frame).
+        // Tolerance: frames that don't parse as a conv change are skipped
+        // (the filter admits query/tip_moved too now; only message and
+        // revision matter here).
         let Some(wire::WireEvent::Conv(event)) = wire::parse_wire(&msg.subject, &msg.payload)
         else {
             continue;
         };
-        if let wire::EventKind::Change(wire::ConvChange::Message(m)) = event.kind {
-            messages.push(decisions::Message {
-                id: m.id.0,
-                role: m.role,
-                content: m.content,
-            });
+        match event.kind {
+            wire::EventKind::Change(wire::ConvChange::Message(m)) => {
+                messages.push(decisions::Message {
+                    id: m.id.0,
+                    role: m.role,
+                    content: m.content,
+                });
+            }
+            // Revisions can arrive before or after the message they correct
+            // (a fix minted later in stream order) and the record keeps every
+            // one — only the last written per id is the current state, so a
+            // later revision in stream order always overwrites an earlier one
+            // here, and the fold below applies whichever is held once the
+            // whole backlog is read.
+            wire::EventKind::Change(wire::ConvChange::Revision(r)) => {
+                revisions.insert(r.message_id.0, r.content);
+            }
+            _ => {}
+        }
+    }
+    for message in &mut messages {
+        if let Some(content) = revisions.remove(&message.id) {
+            message.content = content;
         }
     }
     Ok(messages)
@@ -355,6 +379,43 @@ impl Host {
             *self.context.write().unwrap() = Some(text.to_string());
             eprintln!("bridge: context set ({} chars)", text.len());
             println!("{}", serde_json::json!({ "context": "set" }));
+        } else if let Some(revise) = value.get("revise") {
+            // Correct a committed message's content under its stable id
+            // (conversation-spec: revision) — a trim, a resize, or a bug fix
+            // in how the content was built the first time. Never mutates the
+            // original event: the record is append-only, and replay folds
+            // this as the message's new latest state (last-write-wins per
+            // id, main.rs's `replay_conversation`).
+            let (conv, message_id, content) = (
+                revise.get("conversationId").and_then(serde_json::Value::as_str),
+                revise.get("messageId").and_then(serde_json::Value::as_str),
+                revise.get("content").and_then(serde_json::Value::as_array),
+            );
+            let (Some(conv), Some(message_id), Some(content)) = (conv, message_id, content) else {
+                println!(
+                    "{}",
+                    serde_json::json!({ "error": "revise needs conversationId, messageId, content" })
+                );
+                return;
+            };
+            let subject = format!("conv.v2.{conv}.changes.revision");
+            let payload = serde_json::json!({
+                "ts": wire::now_iso(),
+                "messageId": message_id,
+                "content": content,
+            });
+            let bytes = serde_json::to_vec(&payload).expect("json of plain values cannot fail");
+            eprintln!("bridge: → {subject} ({} B)", bytes.len());
+            match self.client.publish(subject, bytes.into()).await {
+                Ok(()) => println!(
+                    "{}",
+                    serde_json::json!({ "conversationId": conv, "revisedMessage": message_id })
+                ),
+                Err(e) => {
+                    eprintln!("bridge: revise publish failed: {e}");
+                    println!("{}", serde_json::json!({ "error": "publish failed" }));
+                }
+            }
         } else if value.get("settings").is_some() {
             // A live snapshot of every control-line-settable cell plus the
             // static config — the read half of skills/system/context, which

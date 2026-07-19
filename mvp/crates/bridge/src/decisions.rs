@@ -27,10 +27,18 @@ pub enum QueryEnd {
 
 #[derive(Debug, PartialEq)]
 pub enum SayDecision {
-    /// The premise held: commit the user message and start the query.
+    /// The premise held and there is something to do: either real new
+    /// content (text or attachments), or the tip is already a dangling
+    /// user-role message (a tool_result) so an empty say resumes it — no
+    /// new message is committed for that case, the existing tip is enough.
     Accept,
     /// Tip mismatch, or a query is live against this premise (scenario 5).
     Stale,
+    /// No new content AND nothing to resume: the tip is an assistant
+    /// message (or the conversation is empty), so an empty say has no
+    /// premise problem but nothing to do either — distinct from `Stale`
+    /// because the sender's tip was correct, there was just nothing to send.
+    Empty,
 }
 
 #[derive(Debug, PartialEq)]
@@ -78,14 +86,26 @@ impl Conversation {
 
     /// The premise check: the sender's tip must be the tree's, and no query
     /// may be live against it. A live acceptance makes the same premise
-    /// stale (scenario 5).
-    pub fn on_say(&self, tip: Option<&str>) -> SayDecision {
+    /// stale (scenario 5). `has_new_content` is the sender's own text
+    /// (trimmed non-empty) or attachments — never the servicer's own
+    /// injected content (a skills reminder, a healed dangling tool_use),
+    /// which is not something the SENDER supplied.
+    pub fn on_say(&self, tip: Option<&str>, has_new_content: bool) -> SayDecision {
         let current = self.tip();
         if tip != current || self.live.is_some() {
-            SayDecision::Stale
-        } else {
-            SayDecision::Accept
+            return SayDecision::Stale;
         }
+        if !has_new_content && !self.resumable() {
+            return SayDecision::Empty;
+        }
+        SayDecision::Accept
+    }
+
+    /// The tip is a dangling user-role message (a tool_result) an empty say
+    /// can resume without adding anything new — there is nothing else this
+    /// wire has for it (an assistant tip, or no messages at all, is not).
+    fn resumable(&self) -> bool {
+        self.tree.last().is_some_and(|m| m.role == "user")
     }
 
     /// The query goes live. Nothing enters the tree here: the say's user
@@ -174,13 +194,13 @@ mod tests {
     fn premise_check_scenarios_one_and_five() {
         let mut conversation = Conversation::default();
         // Empty conversation: only the null tip holds.
-        assert_eq!(conversation.on_say(None), SayDecision::Accept);
-        assert_eq!(conversation.on_say(Some("m9")), SayDecision::Stale);
+        assert_eq!(conversation.on_say(None, true), SayDecision::Accept);
+        assert_eq!(conversation.on_say(Some("m9"), true), SayDecision::Stale);
 
         conversation.start_query("q1".into());
         // A live acceptance makes any premise stale (scenario 5) - even the
         // still-current null tip, whose premise now has a live acceptance.
-        assert_eq!(conversation.on_say(None), SayDecision::Stale);
+        assert_eq!(conversation.on_say(None, true), SayDecision::Stale);
 
         conversation.on_query_end(
             "q1".into(),
@@ -189,8 +209,8 @@ mod tests {
             },
         );
         // The tip moved to the committed reply.
-        assert_eq!(conversation.on_say(Some("m2")), SayDecision::Accept);
-        assert_eq!(conversation.on_say(Some("m1")), SayDecision::Stale);
+        assert_eq!(conversation.on_say(Some("m2"), true), SayDecision::Accept);
+        assert_eq!(conversation.on_say(Some("m1"), true), SayDecision::Stale);
     }
 
     /// A query cancelled before its first commit leaves nothing: no user
@@ -204,7 +224,7 @@ mod tests {
         conversation.on_query_end("q1".into(), QueryEnd::Cancelled { messages: vec![] });
 
         assert!(conversation.is_empty());
-        assert_eq!(conversation.on_say(None), SayDecision::Accept);
+        assert_eq!(conversation.on_say(None, true), SayDecision::Accept);
     }
 
     /// Scenario 2b, the race that shipped unproven: the query completes,
@@ -246,9 +266,9 @@ mod tests {
     fn adopted_record_continues_from_its_tip() {
         let mut conversation = Conversation::adopt(vec![msg("m1", "user"), msg("m2", "assistant")]);
         assert_eq!(conversation.history().len(), 2);
-        assert_eq!(conversation.on_say(Some("m2")), SayDecision::Accept);
-        assert_eq!(conversation.on_say(Some("m1")), SayDecision::Stale);
-        assert_eq!(conversation.on_say(None), SayDecision::Stale);
+        assert_eq!(conversation.on_say(Some("m2"), true), SayDecision::Accept);
+        assert_eq!(conversation.on_say(Some("m1"), true), SayDecision::Stale);
+        assert_eq!(conversation.on_say(None, true), SayDecision::Stale);
         assert_eq!(conversation.on_cancel("q9"), CancelDecision::NotFound);
         conversation.start_query("q1".into());
         assert_eq!(conversation.on_cancel("q1"), CancelDecision::Signal);
@@ -270,7 +290,7 @@ mod tests {
         );
         assert_eq!(conversation.history().len(), 3);
         // The tip is the last committed message, cancelled or not.
-        assert_eq!(conversation.on_say(Some("m3")), SayDecision::Accept);
+        assert_eq!(conversation.on_say(Some("m3"), true), SayDecision::Accept);
 
         conversation.start_query("q2".into());
         conversation.on_query_end(
@@ -284,6 +304,41 @@ mod tests {
             conversation.on_cancel("q2"),
             CancelDecision::AlreadyComplete
         );
+    }
+
+    /// An empty say (no text, no attachments) when the tip is already a
+    /// dangling user-role message (a tool_result) resumes it — accepted,
+    /// with nothing new to commit. This is the tool_result-in-the-composer
+    /// scenario: the record already ends on an unanswered user turn, so
+    /// there is something to send even with an empty box.
+    #[test]
+    fn an_empty_say_resumes_when_the_tip_is_a_dangling_user_message() {
+        let tool_result = Conversation::adopt(vec![
+            msg("m1", "user"),
+            msg("m2", "assistant"),
+            msg("m3", "user"), // stands in for a tool_result: role user
+        ]);
+        assert_eq!(tool_result.on_say(Some("m3"), false), SayDecision::Accept);
+        // A real premise problem still wins over the resume case.
+        assert_eq!(tool_result.on_say(Some("m1"), false), SayDecision::Stale);
+    }
+
+    /// An empty say when the tip is an assistant message (already answered)
+    /// or the conversation is empty has nothing to resume and nothing new to
+    /// add — `Empty`, not `Accept` and not `Stale`: the sender's tip was
+    /// exactly right, there was just nothing to send.
+    #[test]
+    fn an_empty_say_is_empty_not_accepted_when_there_is_nothing_to_resume() {
+        let answered = Conversation::adopt(vec![msg("m1", "user"), msg("m2", "assistant")]);
+        assert_eq!(answered.on_say(Some("m2"), false), SayDecision::Empty);
+
+        let empty = Conversation::default();
+        assert_eq!(empty.on_say(None, false), SayDecision::Empty);
+
+        // Real content always overrides both cases — empty-ness is about the
+        // SENDER'S content, not the tip.
+        assert_eq!(answered.on_say(Some("m2"), true), SayDecision::Accept);
+        assert_eq!(empty.on_say(None, true), SayDecision::Accept);
     }
 
     /// A hard death leaves the tip an assistant message carrying a tool_use

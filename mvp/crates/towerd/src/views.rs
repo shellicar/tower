@@ -180,7 +180,9 @@ pub struct ConversationMessage {
     pub query: QueryId,
     pub turn: TurnId,
     pub role: String,
-    pub from: Value,
+    /// Absent for a tool_result — it carries no sender (conversation-spec:
+    /// a mechanical delivery is not an utterance).
+    pub from: Option<Value>,
     pub content: Vec<Value>,
     pub ts: i64,
 }
@@ -474,6 +476,27 @@ const MIGRATIONS: &[&str] = &[
      DROP TABLE stream;
      ALTER TABLE cursor_v2 RENAME TO cursor;
      ALTER TABLE stream_v2 RENAME TO stream;",
+    // 12 — `sender` becomes nullable: a tool_result carries no `from` at all
+    // (conversation-spec, 19 Jul correction — it is a mechanical delivery,
+    // not an utterance, so stamping it with a sender was a category error).
+    // SQLite has no DROP NOT NULL, so recreate: existing rows carry over
+    // verbatim, including the stale sender JSON already committed on old
+    // tool_result rows — append-only history is not rewritten by a shape fix.
+    "CREATE TABLE messages_v2 (
+         conv       TEXT NOT NULL,
+         message_id TEXT NOT NULL,
+         query_id   TEXT NOT NULL,
+         turn_id    TEXT NOT NULL,
+         role       TEXT NOT NULL,
+         sender     TEXT,
+         content    TEXT NOT NULL,
+         ts         INTEGER NOT NULL,
+         PRIMARY KEY (conv, message_id)
+     );
+     INSERT INTO messages_v2 SELECT * FROM messages;
+     DROP TABLE messages;
+     ALTER TABLE messages_v2 RENAME TO messages;
+     CREATE INDEX messages_by_conv_ts ON messages (conv, ts);",
 ];
 
 pub fn apply_schema(db: &Connection) -> anyhow::Result<()> {
@@ -888,6 +911,7 @@ impl Views {
                         .ok_or_else(|| anyhow::anyhow!("message {id} has unparseable ts {ts}"))?;
                     let mut content = content.clone();
                     store_refs(&tx, &mut content)?;
+                    let sender = from.as_ref().map(serde_json::to_string).transpose()?;
                     tx.execute(
                         "INSERT OR REPLACE INTO messages
                              (conv, message_id, query_id, turn_id, role, sender, content, ts)
@@ -898,7 +922,7 @@ impl Views {
                             query_id.0,
                             turn_id.0,
                             role,
-                            serde_json::to_string(from)?,
+                            sender,
                             serde_json::to_string(&content)?,
                             ts_ms,
                         ],
@@ -1401,7 +1425,7 @@ impl Views {
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
-                    r.get::<_, String>(4)?,
+                    r.get::<_, Option<String>>(4)?,
                     r.get::<_, String>(5)?,
                     r.get::<_, i64>(6)?,
                 ))
@@ -1414,7 +1438,7 @@ impl Views {
                     query: QueryId(query),
                     turn: TurnId(turn),
                     role,
-                    from: serde_json::from_str(&sender)?,
+                    from: sender.map(|s| serde_json::from_str(&s)).transpose()?,
                     content: serde_json::from_str(&content)?,
                     ts,
                 })
@@ -1652,7 +1676,7 @@ mod tests {
             .unwrap();
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].id.0, "m1");
-        assert_eq!(msgs[0].from["userId"], "stephen");
+        assert_eq!(msgs[0].from.as_ref().unwrap()["userId"], "stephen");
 
         assert!(matches!(rx.try_recv().unwrap(), ViewEvent::Row(_)));
         assert!(matches!(rx.try_recv().unwrap(), ViewEvent::Message { .. }));

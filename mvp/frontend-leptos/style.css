@@ -65,8 +65,67 @@ html, body {
 .potential .cwd { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #525252; }
 .potential .dismiss { padding: 0 6px; cursor: pointer; }
 
-.voided li { color: #737373; padding: 8px 12px; border-bottom: 1px solid #262626; display: flex; justify-content: space-between; align-items: center; cursor: default; }
-.voided button { cursor: pointer; }
+/* .voided intentionally removed from the rail (18 Jul): void approvals
+   live in ApprovalsView, matching mvp/frontend — RowList never showed them. */
+
+.view-controls { border-bottom: 1px solid #404040; padding: 8px 12px; font-size: 11px; }
+.controls-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 4px; }
+.controls-row:last-child { margin-bottom: 0; }
+.view-controls select { background: #171717; border: 1px solid #404040; color: #ddd; font: inherit; padding: 1px 2px; }
+.facet-toggle { border: 1px solid #404040; color: #737373; padding: 1px 6px; border-radius: 2px; background: none; font: inherit; }
+.facet-toggle:hover { background: #262626; }
+.facet-toggle.on { border-color: #0284c7; color: #7dd3fc; }
+.facet-values { padding-left: 0; }
+.facet-value { border: 1px solid #404040; color: #a3a3a3; padding: 1px 8px; border-radius: 999px; background: none; font: inherit; }
+.facet-value:hover { background: #262626; }
+.facet-value.on { border-color: currentColor; }
+
+.section-header { display: flex; justify-content: space-between; gap: 8px; background: #171717; padding: 4px 12px; border-bottom: 1px solid #262626; font-size: 11px; cursor: default; }
+.tag-chips { display: flex; flex-wrap: wrap; gap: 4px; width: 100%; padding-top: 2px; }
+.tag-chip { border: 1px solid currentColor; border-radius: 999px; padding: 0 6px; opacity: 0.8; font-size: 11px; }
+
+.approvals-view {
+  display: flex;
+  min-width: 480px;
+  flex: 1;
+  flex-direction: column;
+  border-right: 1px solid #404040;
+}
+.approvals-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #404040;
+  padding: 8px 12px;
+  flex-shrink: 0;
+}
+.approvals-header .count { color: #fcd34d; }
+.approvals-header .close { border: none; background: none; color: #a3a3a3; font-size: 16px; padding: 0 4px; }
+.approvals-header .close:hover { color: #ddd; background: none; }
+.approvals-list { flex: 1; overflow-y: auto; }
+.approvals-list .empty { color: #737373; padding: 12px; }
+.ask {
+  border-bottom: 1px solid #262626;
+  padding: 8px 12px;
+}
+.ask.void { opacity: 0.4; }
+.ask-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ask-top .name { color: #d4d4d4; }
+.ask-top .payload { color: #a3a3a3; }
+.ask-top .age { flex-shrink: 0; color: #737373; }
+.ask-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.ask-bottom .conv-link { background: none; border: none; color: #7dd3fc; padding: 0; cursor: pointer; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-bottom .conv-link:hover { text-decoration: underline; background: none; }
+.ask-bottom .no-conv { color: #737373; }
+.ask-bottom .actions { display: flex; flex-shrink: 0; gap: 8px; align-items: center; }
+.ask-bottom .note { color: #fdba74; }
+.ask-bottom .void-label { color: #737373; }
+.ask-bottom button.approve { border: 1px solid #166534; color: #86efac; }
+.ask-bottom button.approve:hover { background: #052e16; }
+.ask-bottom button.deny { border: 1px solid #7f1d1d; color: #fca5a5; }
+.ask-bottom button.deny:hover { background: #450a0a; }
+.ask-bottom button.dismiss { border: 1px solid #404040; color: #a3a3a3; }
+.ask-bottom button.dismiss:hover { background: #262626; }
 
 .conversation { display: flex; min-height: 0; min-width: 0; flex-direction: column; }
 .conversation .empty, .conversation .opening { color: #737373; margin: auto; }
@@ -144,7 +203,9 @@ html, body {
 }
 .message.user { border-color: #3730a3; }
 .message.assistant { border-color: #166534; }
-.message .who { color: #a3a3a3; margin-bottom: 2px; }
+.message .who { color: #a3a3a3; margin-bottom: 2px; display: flex; gap: 8px; }
+.message .who-name { color: #d4d4d4; }
+.message .who-time { color: #737373; }
 .message.streaming { opacity: 0.9; }
 .pending-say { color: #737373; }
 
@@ -162,6 +223,26 @@ html, body {
 }
 .block.thinking summary { color: #737373; }
 .dim { color: #737373; }
+
+.ref-load {
+  display: block;
+  margin: 4px 0;
+  border: 1px dashed #525252;
+  color: #a3a3a3;
+  padding: 4px 8px;
+}
+.ref-load:hover { border-color: #737373; color: #ddd; }
+.ref-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #171717;
+  padding: 6px 8px;
+  margin: 4px 0;
+  max-height: 400px;
+  overflow: auto;
+  color: #ddd;
+}
+.ref-image, .attachment-preview { max-width: 100%; max-height: 24rem; margin: 4px 0; display: block; }
 
 .latest {
   position: sticky;
@@ -238,3 +319,5 @@ button {
   font: inherit;
 }
 button:hover { background: #262626; }
+button:disabled { opacity: 0.4; cursor: default; }
+button:disabled:hover { background: none; }

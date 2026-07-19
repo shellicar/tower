@@ -61,6 +61,19 @@ pub fn age(now: Millis, ts: Millis) -> String {
     }
 }
 
+/// A message's wall-clock time, 24h local — mvp/frontend's
+/// `toLocaleTimeString(undefined, { hour12: false })`.
+#[cfg(target_arch = "wasm32")]
+pub fn format_time(ts: Millis) -> String {
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ts as f64));
+    format!("{:02}:{:02}:{:02}", date.get_hours(), date.get_minutes(), date.get_seconds())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn format_time(_ts: Millis) -> String {
+    String::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
