@@ -236,17 +236,21 @@ impl Session {
             }
             // Layout is awareness, like rows and approvals: every connected
             // session sees the shared workspace change, not just its owner.
-            ViewEvent::Layout(tabs) => Some(ServerMsg::Layout { tabs: parse_tabs(&tabs) }),
+            ViewEvent::Layout(tabs) => Some(ServerMsg::Layout {
+                tabs: parse_tabs(&tabs),
+            }),
             // A dismissed attachment is awareness too, like an approval
             // dismiss riding the `approval` fact — every connected session
             // drops it, not just the one that clicked.
-            ViewEvent::AttachmentDismissed { world, instance, conv } => {
-                Some(ServerMsg::AttachmentDismissed {
-                    world: world.0,
-                    instance_id: instance.0,
-                    conv: conv.0,
-                })
-            }
+            ViewEvent::AttachmentDismissed {
+                world,
+                instance,
+                conv,
+            } => Some(ServerMsg::AttachmentDismissed {
+                world: world.0,
+                instance_id: instance.0,
+                conv: conv.0,
+            }),
             _ => None,
         }
     }
@@ -434,7 +438,10 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
                 }];
             };
             let (tx, rx) = oneshot::channel();
-            let query = ViewQuery::SetLayout { tabs: json, reply: tx };
+            let query = ViewQuery::SetLayout {
+                tabs: json,
+                reply: tx,
+            };
             if views.queries.send(query).await.is_err() || rx.await.is_err() {
                 return vec![ServerMsg::Error {
                     id,

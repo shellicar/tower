@@ -1036,9 +1036,15 @@ impl Views {
                 reply,
             } => {
                 if let Err(e) = self.dismiss_attachment(&world, &instance, &conv, now) {
-                    eprintln!("views: dismiss_attachment failed for {world}/{instance}/{conv}: {e:#}");
+                    eprintln!(
+                        "views: dismiss_attachment failed for {world}/{instance}/{conv}: {e:#}"
+                    );
                 } else {
-                    let _ = self.events.send(ViewEvent::AttachmentDismissed { world, instance, conv });
+                    let _ = self.events.send(ViewEvent::AttachmentDismissed {
+                        world,
+                        instance,
+                        conv,
+                    });
                 }
                 let _ = reply.send(());
             }
@@ -1733,16 +1739,23 @@ mod tests {
             r#"{"type":"raised","ts":"2026-07-07T21:00:00+10:00","ask":{"type":"bash"},"correlation":{"conversationId":"conv-abc"}}"#));
         assert_eq!(views.approvals().unwrap().len(), 1);
 
-        views.dismiss_approval(&ApprovalId("apr-1".into()), 999).unwrap();
+        views
+            .dismiss_approval(&ApprovalId("apr-1".into()), 999)
+            .unwrap();
         assert!(views.approvals().unwrap().is_empty());
 
         // Not deleted, not settled — dismissed, an honest third state.
-        let state = views.get_approval(&ApprovalId("apr-1".into())).unwrap().unwrap();
+        let state = views
+            .get_approval(&ApprovalId("apr-1".into()))
+            .unwrap()
+            .unwrap();
         assert!(state.dismissed);
         assert!(state.settled.is_none());
 
         // Idempotent: dismissing twice doesn't error or double-insert.
-        views.dismiss_approval(&ApprovalId("apr-1".into()), 1000).unwrap();
+        views
+            .dismiss_approval(&ApprovalId("apr-1".into()), 1000)
+            .unwrap();
 
         // Drain the raised broadcast before checking the dismiss one.
         let _ = rx.try_recv();
@@ -1763,7 +1776,12 @@ mod tests {
         // Dismissed shortly after the first attach, well before the second.
         let dismissed_ts = parse_ts("2026-07-07T21:30:00+10:00").unwrap();
         views
-            .dismiss_attachment(&WorldId("w1".into()), &InstanceId("i1".into()), &ConversationId("conv-ghost".into()), dismissed_ts)
+            .dismiss_attachment(
+                &WorldId("w1".into()),
+                &InstanceId("i1".into()),
+                &ConversationId("conv-ghost".into()),
+                dismissed_ts,
+            )
             .unwrap();
         let (_, attachments) = views.agents().unwrap();
         assert!(attachments.is_empty());
