@@ -16,6 +16,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::approvals::Approvals;
 use crate::conversation::{Conversation, QueryState};
+use crate::editor::Editor;
 use crate::usage::Usage;
 
 /// A block's stable identity for disclosure: the message that carries it and
@@ -182,19 +183,42 @@ fn lay(conv: &Conversation, approvals: &Approvals, view: &ViewState, width: usiz
     rows
 }
 
+/// Everything one frame reads: the concerns' state, borrowed together so the
+/// draw call stays one argument per axis (what to show / where / when).
+pub struct Screen<'a> {
+    pub conv_id: &'a str,
+    pub conv: &'a Conversation,
+    pub usage: &'a Usage,
+    pub approvals: &'a Approvals,
+    pub editor: &'a Editor,
+    pub note: Option<&'a str>,
+}
+
 /// Lay out and render one frame. Returns the geometry and hit map the mouse
 /// handler translates the next click/wheel against.
 pub fn draw(
     frame: &mut Frame,
-    conv_id: &str,
-    conv: &Conversation,
-    usage: &Usage,
-    approvals: &Approvals,
+    screen: &Screen<'_>,
     view: &mut ViewState,
     now_ms: i64,
 ) -> (Geometry, Vec<Option<BlockKey>>) {
-    let [main, status] =
-        Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(frame.area());
+    let Screen {
+        conv_id,
+        conv,
+        usage,
+        approvals,
+        editor,
+        note,
+    } = *screen;
+    // The input box grows with its content, up to 5 lines + borders.
+    let (editor_lines, (cursor_line, cursor_col)) = editor.lines_and_cursor();
+    let input_height = (editor_lines.len().min(5) + 2) as u16;
+    let [main, input, status] = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(input_height),
+        Constraint::Length(1),
+    ])
+    .areas(frame.area());
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(" {conv_id} "));
@@ -214,6 +238,23 @@ pub fn draw(
         hits.push(row.hit);
     }
     frame.render_widget(Paragraph::new(lines).block(block), main);
+
+    // Input: the visible tail of the editor's logical lines, hardware cursor
+    // placed at the buffer cursor. Enter says; alt+enter breaks the line.
+    let input_block = Block::default().borders(Borders::ALL);
+    let input_inner = input_block.inner(input);
+    let visible_from = editor_lines.len().saturating_sub(input_inner.height as usize);
+    let shown: Vec<Line> = editor_lines
+        .iter()
+        .skip(visible_from)
+        .map(|l| Line::raw(l.clone()))
+        .collect();
+    frame.render_widget(Paragraph::new(shown).block(input_block), input);
+    if cursor_line >= visible_from {
+        let cursor_x = input_inner.x + (cursor_col as u16).min(input_inner.width.saturating_sub(1));
+        let cursor_y = input_inner.y + (cursor_line - visible_from) as u16;
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
 
     let state = match conv.query_state {
         QueryState::Unknown => Span::styled("unknown", dim()),
@@ -238,7 +279,15 @@ pub fn draw(
             Style::default().fg(Color::Yellow),
         ));
     }
-    status_spans.push(Span::raw(" · click expands · q quits"));
+    if let Some(note) = note {
+        status_spans.push(Span::styled(
+            format!(" · {note}"),
+            Style::default().fg(Color::Red),
+        ));
+    }
+    status_spans.push(Span::raw(
+        " · enter says · esc cancels · ^y/^n approvals · ^c quits",
+    ));
     frame.render_widget(Paragraph::new(Line::from(status_spans)), status);
 
     (Geometry { inner }, hits)

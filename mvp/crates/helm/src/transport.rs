@@ -110,21 +110,38 @@ impl Session {
 
     /// Say into the conversation this session spawned: a real `conv.v2
     /// requests.say`, id-correlated, exactly what any client (tower
-    /// included) sends. `tip: None` claims "empty so far" — correct only
-    /// while helm has spawned a fresh conversation and never yet revised
-    /// its own premise; a real editor concern will need to track the true
-    /// tip once one exists.
-    pub async fn say(&self, conv: &wire::ConversationId, text: &str) -> anyhow::Result<wire::SayOutcome> {
+    /// included) sends. `tip` is the sender's premise — the latest message
+    /// id this client holds, `None` claiming "empty so far".
+    pub async fn say(
+        &self,
+        conv: &wire::ConversationId,
+        text: &str,
+        tip: Option<wire::MessageId>,
+    ) -> anyhow::Result<wire::SayOutcome> {
         let subject = format!("conv.v2.{}.requests.say", conv.0);
         let cmd = wire::SayCommand {
             conv: conv.clone(),
             text: text.to_string(),
-            tip: None,
+            tip,
             attachments: Vec::new(),
         };
         let payload = wire::encode_say(&cmd, &wire::now_iso());
         let reply = self.nats.request(subject, payload.into()).await?;
         Ok(wire::parse_say_reply(&reply.payload))
+    }
+
+    /// Cancel a live query by its id — the id is the cancel's premise.
+    /// Acceptance is all a reply means; the outcome lands on the record as
+    /// events like everything else.
+    pub async fn cancel(
+        &self,
+        conv: &wire::ConversationId,
+        query: &str,
+    ) -> anyhow::Result<wire::CancelOutcome> {
+        let subject = format!("conv.v2.{}.requests.cancel", conv.0);
+        let payload = wire::encode_cancel(&wire::QueryId(query.to_string()), &wire::now_iso());
+        let reply = self.nats.request(subject, payload.into()).await?;
+        Ok(wire::parse_cancel_reply(&reply.payload))
     }
 
     /// Answer a pending approval: a real `approval.v1.{id}.requests` answer,
