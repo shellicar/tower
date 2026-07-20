@@ -142,6 +142,24 @@ impl Conversations {
         self.open.get(conv).copied()
     }
 
+    /// The signal a panel binds to, creating a fresh one on demand if the
+    /// open-set hasn't caught up to the render yet. Rendering is driven by
+    /// `view.tab().convs` (reactive); `self.open`'s own insert (via `open()`,
+    /// called separately by the app's actions) is not — a `StoredValue` read
+    /// can't retrigger a render just because this map changed. So the render
+    /// path must tolerate finding nothing yet and supply a placeholder itself,
+    /// never filter the render list on this map's current contents (that was
+    /// tried and broke: the filter's dependency on a non-reactive read meant
+    /// a newly opened conversation could stay excluded even once its state
+    /// existed). Sends nothing — `open()` is still what puts `ClientMsg::Open`
+    /// on the wire; this only ever fills the same slot, a no-op the second time.
+    pub fn get_or_create(&mut self, conv: &str) -> RwSignal<ConversationState> {
+        *self
+            .open
+            .entry(conv.to_owned())
+            .or_insert_with(|| RwSignal::new(ConversationState::fresh()))
+    }
+
     // ---- open-set: the app (composition root) mints the id and sends ----
 
     pub fn open(&mut self, conv: &str, id: String) -> Option<ClientMsg> {

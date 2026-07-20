@@ -276,25 +276,21 @@ pub fn App(ws_url: String) -> impl IntoView {
                             .then(|| view! { <p class="empty">"Open a conversation from the rail."</p> })
                     }}
                     <For
-                        each=move || {
-                            // Filter to convs whose content already exists — a
-                            // freshly opened conv can name-appear in
-                            // `tab().convs` a tick before `sync_open` inserts
-                            // its `RwSignal`; skipping it for one render beats
-                            // handing `ConversationView` a signal that doesn't
-                            // exist yet.
-                            view.with(|v| v.tab().convs.clone())
-                                .into_iter()
-                                .filter(|c| conversations.with_value(|cs| cs.get(c).is_some()))
-                                .collect::<Vec<_>>()
-                        }
+                        each=move || view.with(|v| v.tab().convs.clone())
                         key=|conv| conv.clone()
                         let(conv)
                     >
                         {
+                            // Rendering is driven by `view.tab().convs`
+                            // (reactive); `conversations` (a `StoredValue`) is
+                            // not, so this must tolerate the open-set not
+                            // having caught up yet rather than filter the
+                            // list on it — `get_or_create` supplies a fresh
+                            // signal on demand, `sync_open`'s own insert
+                            // becomes a no-op once it lands.
                             let oc: RwSignal<ConversationState> = conversations
-                                .with_value(|c| c.get(&conv))
-                                .expect("filtered to convs with an open signal");
+                                .try_update_value(|c| c.get_or_create(&conv))
+                                .expect("conversations StoredValue is never disposed");
                             let on_send = Callback::new({
                                 let conv = conv.clone();
                                 move |text: String| {
