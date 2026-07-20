@@ -321,10 +321,11 @@ html, body {
   color: #ddd;
   font: inherit;
   /* CSS grows the box to fit typed content, clamped by min/max-height above
-     (overflow-y scrolls past max-height) — no JS measurement, so typing
-     never forces a synchronous layout read the way the old height=auto,
-     read scrollHeight, height=result dance did (profiled live 21 Jul as the
-     actual cause of laggy typing). */
+     (overflow-y scrolls past max-height) — no JS measurement needed. Ruled
+     out (21 Jul) as the source of the per-keystroke Layout cost: disabling
+     it entirely made no difference (still ~1 Layout per keydown) — that
+     cost is the browser's normal caret-position layout on any text input,
+     paid against the whole document's size, not this element's sizing. */
   field-sizing: content;
   overflow-y: auto;
 }
