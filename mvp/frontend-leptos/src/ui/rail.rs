@@ -98,7 +98,7 @@ pub fn RailView(
     /// one fact (which convs are open), not the whole tab machine.
     open_convs: Signal<Vec<String>>,
     status: Signal<Status>,
-    on_open: Callback<String>,
+    on_toggle: Callback<String>,
     on_dismiss_attachment: Callback<String>,
     on_toggle_approvals: Callback<()>,
 ) -> impl IntoView {
@@ -331,7 +331,7 @@ pub fn RailView(
                                     view! {
                                         <li
                                             class:selected=selected
-                                            on:click=move |_| on_open.run(conv_click.clone())
+                                            on:click=move |_| on_toggle.run(conv_click.clone())
                                         >
                                             <span class="row-main">
                                                 {is_pending.then(|| view! { <span class="pending-mark">"⚠"</span> })}
@@ -373,7 +373,7 @@ pub fn RailView(
                                     Liveness::Stranded => "stranded",
                                 });
                                 view! {
-                                    <li on:click=move |_| on_open.run(conv_click.clone())>
+                                    <li on:click=move |_| on_toggle.run(conv_click.clone())>
                                         <span class="row-main">
                                             {dot.map(|cls| view! { <span class=format!("dot {cls}")></span> })}
                                             <span class="label">{short(&conv)}</span>

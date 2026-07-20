@@ -88,7 +88,7 @@ pub fn App(ws_url: String) -> impl IntoView {
             conversations.update(|c| c.apply(&frame));
             approvals.update(|a| a.apply(&frame));
             usage.update(|u| u.apply(&frame));
-            view.update(|v| v.apply(&frame, crate::ui::rail::load_view));
+            view.maybe_update(|v| v.apply(&frame, crate::ui::rail::load_view));
         })
         .expect("websocket connect"),
     );
@@ -138,6 +138,21 @@ pub fn App(ws_url: String) -> impl IntoView {
         let msg = view.try_update(|v| v.open_conversation(&conv, next_id()));
         if let Some(msg) = msg.flatten() {
             send(msg);
+        }
+        sync_open();
+    });
+
+    let on_toggle = Callback::new(move |conv: String| {
+        if view.with(|v| v.tab().convs.contains(&conv)) {
+            let msg = view.try_update(|v| v.close_conversation(&conv, next_id()));
+            if let Some(msg) = msg {
+                send(msg);
+            }
+        } else {
+            let msg = view.try_update(|v| v.open_conversation(&conv, next_id()));
+            if let Some(msg) = msg.flatten() {
+                send(msg);
+            }
         }
         sync_open();
     });
@@ -211,7 +226,7 @@ pub fn App(ws_url: String) -> impl IntoView {
                 now=now
                 open_convs=open_convs
                 status=status
-                on_open=open_conversation
+                on_toggle=on_toggle
                 on_dismiss_attachment=dismiss_attachment
                 on_toggle_approvals=toggle_approvals
             />
@@ -233,75 +248,76 @@ pub fn App(ws_url: String) -> impl IntoView {
                     }}
                     {move || {
                         let convs = view.with(|v| v.tab().convs.clone());
-                        if convs.is_empty() && !view.with(|v| v.approvals_open) {
-                            return view! { <p class="empty">"Open a conversation from the rail."</p> }.into_any();
-                        }
-                        convs
-                            .into_iter()
-                            .map(|conv| {
-                                let on_send = Callback::new({
-                                    let conv = conv.clone();
-                                    move |text: String| {
-                                        let id = next_id();
-                                        if let Some(msg) = conversations.try_update(|c| c.say(&conv, text, id)).flatten() {
-                                            send(msg);
-                                        }
-                                    }
-                                });
-                                let on_cancel = Callback::new({
-                                    let conv = conv.clone();
-                                    move |()| {
-                                        let id = next_id();
-                                        if let Some(msg) = conversations.try_update(|c| c.cancel(&conv, id)).flatten() {
-                                            send(msg);
-                                        }
-                                    }
-                                });
-                                let on_attach = Callback::new({
-                                    let conv = conv.clone();
-                                    move |attachment| {
-                                        conversations.update(|c| c.attach(&conv, vec![attachment]));
-                                    }
-                                });
-                                let on_set_title = Callback::new({
-                                    let conv = conv.clone();
-                                    move |title: String| {
-                                        let id = next_id();
-                                        if let Some(msg) = rail.try_update(|r| r.set_title(&conv, title, id)).flatten() {
-                                            send(msg);
-                                        }
-                                    }
-                                });
-                                let on_close = Callback::new({
-                                    let conv = conv.clone();
-                                    move |()| {
-                                        let msg = view.try_update(|v| v.close_conversation(&conv, next_id()));
-                                        if let Some(msg) = msg {
-                                            send(msg);
-                                        }
-                                        sync_open();
-                                    }
-                                });
-                                view! {
-                                    <ConversationView
-                                        conv=conv
-                                        rail=rail
-                                        conversations=conversations
-                                        approvals=approvals
-                                        usage=usage
-                                        now=now
-                                        on_send=on_send
-                                        on_cancel=on_cancel
-                                        on_attach=on_attach
-                                        on_answer=on_answer
-                                        on_set_title=on_set_title
-                                        on_close=on_close
-                                    />
-                                }
-                            })
-                            .collect_view()
-                            .into_any()
+                        (convs.is_empty() && !view.with(|v| v.approvals_open))
+                            .then(|| view! { <p class="empty">"Open a conversation from the rail."</p> })
                     }}
+                    <For
+                        each=move || view.with(|v| v.tab().convs.clone())
+                        key=|conv| conv.clone()
+                        let(conv)
+                    >
+                        {
+                            let on_send = Callback::new({
+                                let conv = conv.clone();
+                                move |text: String| {
+                                    let id = next_id();
+                                    if let Some(msg) = conversations.try_update(|c| c.say(&conv, text, id)).flatten() {
+                                        send(msg);
+                                    }
+                                }
+                            });
+                            let on_cancel = Callback::new({
+                                let conv = conv.clone();
+                                move |()| {
+                                    let id = next_id();
+                                    if let Some(msg) = conversations.try_update(|c| c.cancel(&conv, id)).flatten() {
+                                        send(msg);
+                                    }
+                                }
+                            });
+                            let on_attach = Callback::new({
+                                let conv = conv.clone();
+                                move |attachment| {
+                                    conversations.update(|c| c.attach(&conv, vec![attachment]));
+                                }
+                            });
+                            let on_set_title = Callback::new({
+                                let conv = conv.clone();
+                                move |title: String| {
+                                    let id = next_id();
+                                    if let Some(msg) = rail.try_update(|r| r.set_title(&conv, title, id)).flatten() {
+                                        send(msg);
+                                    }
+                                }
+                            });
+                            let on_close = Callback::new({
+                                let conv = conv.clone();
+                                move |()| {
+                                    let msg = view.try_update(|v| v.close_conversation(&conv, next_id()));
+                                    if let Some(msg) = msg {
+                                        send(msg);
+                                    }
+                                    sync_open();
+                                }
+                            });
+                            view! {
+                                <ConversationView
+                                    conv=conv
+                                    rail=rail
+                                    conversations=conversations
+                                    approvals=approvals
+                                    usage=usage
+                                    now=now
+                                    on_send=on_send
+                                    on_cancel=on_cancel
+                                    on_attach=on_attach
+                                    on_answer=on_answer
+                                    on_set_title=on_set_title
+                                    on_close=on_close
+                                />
+                            }
+                        }
+                    </For>
                 </div>
             </main>
         </div>

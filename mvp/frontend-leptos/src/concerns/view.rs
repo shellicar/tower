@@ -88,7 +88,7 @@ impl View {
     /// saved local config, or the default when there is none). Held config
     /// from tabs already in memory always wins; the loader only fires for a
     /// name genuinely new to this fold.
-    pub fn apply(&mut self, event: &ServerMsg, load_config: impl Fn(&str) -> ViewConfig) {
+    pub fn apply(&mut self, event: &ServerMsg, load_config: impl Fn(&str) -> ViewConfig) -> bool {
         if let ServerMsg::Layout { tabs } = event
             && !tabs.is_empty()
         {
@@ -108,6 +108,9 @@ impl View {
             if self.active >= self.tabs.len() {
                 self.active = self.tabs.len() - 1;
             }
+            true
+        } else {
+            false
         }
     }
 
