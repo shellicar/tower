@@ -25,7 +25,7 @@
 
 use std::collections::HashMap;
 
-use leptos::prelude::{RwSignal, Update, With};
+use leptos::prelude::{Owner, RwSignal, Update, With};
 use serde_json::Value;
 use ws_types::{ClientMsg, ServerMsg, WsMessage};
 
@@ -129,7 +129,6 @@ enum Pending {
     Cancel { conv: String },
 }
 
-#[derive(Default)]
 pub struct Conversations {
     open: HashMap<String, RwSignal<ConversationState>>,
     /// Which convs we've actually asked the server to open — separate from
@@ -143,6 +142,34 @@ pub struct Conversations {
     /// because nothing ever told towerd this session was open on it.
     requested: std::collections::HashSet<String>,
     pending: HashMap<String, Pending>,
+    /// Every per-conversation signal is created under THIS owner — never
+    /// under whatever reactive scope happens to be calling `get_or_create`
+    /// (a `<For>` list item, when a panel first renders). A signal's Leptos
+    /// lifetime follows the scope active when `RwSignal::new` runs, not
+    /// whichever struct later holds its handle: parented to a `<For>` item,
+    /// it gets disposed the moment that item leaves the DOM — which happens
+    /// on a tab SWITCH, not just closing the conversation, since only the
+    /// active tab's convs are in the list. `Conversations` (and the
+    /// conversation's logical open-ness) outlives that; reading a signal
+    /// after its scope disposed it panics, and in wasm one panic can take
+    /// the whole reactive runtime down — observed live as clicking between
+    /// conversations eventually breaking the entire UI, not just one panel.
+    /// This owner is independent (a child of whatever scope `Conversations`
+    /// itself was constructed in — the app root, which only goes away on
+    /// page unload), so every signal it parents survives exactly as long as
+    /// `Conversations` does.
+    owner: Owner,
+}
+
+impl Default for Conversations {
+    fn default() -> Self {
+        Conversations {
+            open: HashMap::new(),
+            requested: std::collections::HashSet::new(),
+            pending: HashMap::new(),
+            owner: Owner::new(),
+        }
+    }
 }
 
 impl Conversations {
@@ -164,10 +191,11 @@ impl Conversations {
     /// existed). Sends nothing — `open()` is still what puts `ClientMsg::Open`
     /// on the wire; this only ever fills the same slot, a no-op the second time.
     pub fn get_or_create(&mut self, conv: &str) -> RwSignal<ConversationState> {
+        let owner = self.owner.clone();
         *self
             .open
             .entry(conv.to_owned())
-            .or_insert_with(|| RwSignal::new(ConversationState::fresh()))
+            .or_insert_with(|| owner.with(|| RwSignal::new(ConversationState::fresh())))
     }
 
     // ---- open-set: the app (composition root) mints the id and sends ----
