@@ -140,6 +140,10 @@ impl Publisher {
         &self.conv
     }
 
+    fn attach(&self) -> &Option<bridge::attach::AttachHandle> {
+        &self.attach
+    }
+
     /// `leaf` is the class-and-event path after the id (`changes.message`,
     /// `telemetry.turn.started`): v2's one-place discriminator.
     async fn event(&self, leaf: &str, payload: Value) {
@@ -809,7 +813,7 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
                     .await
                 {
                     crate::approval::Verdict::Approved => {
@@ -837,7 +841,7 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
                     .await
                 {
                     crate::approval::Verdict::Approved => {
@@ -903,7 +907,7 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
                     .await
                 {
                     crate::approval::Verdict::Approved => {
@@ -924,7 +928,7 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
                     .await
                 {
                     crate::approval::Verdict::Approved => {
@@ -945,7 +949,7 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
                     .await
                 {
                     crate::approval::Verdict::Approved => {
@@ -966,7 +970,7 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
                     .await
                 {
                     crate::approval::Verdict::Approved => {
@@ -988,7 +992,7 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
                     .await
                 {
                     crate::approval::Verdict::Approved => {
@@ -1009,7 +1013,7 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
+                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
                     .await
                 {
                     crate::approval::Verdict::Approved => {

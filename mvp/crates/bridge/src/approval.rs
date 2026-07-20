@@ -28,12 +28,23 @@ pub enum Verdict {
     Cancelled,
 }
 
-async fn publish(client: &async_nats::Client, approval_id: &str, leaf: &str, bytes: Vec<u8>) {
+async fn publish(
+    client: &async_nats::Client,
+    attach: &Option<bridge::attach::AttachHandle>,
+    approval_id: &str,
+    leaf: &str,
+    bytes: Vec<u8>,
+) {
     let subject = format!("approval.v1.{approval_id}.{leaf}");
     eprintln!("{} bridge: → {subject} ({} B)", now_iso(), bytes.len());
-    if let Err(e) = client.publish(subject, bytes.into()).await {
+    if let Err(e) = client.publish(subject.clone(), bytes.clone().into()).await {
         eprintln!("bridge: approval publish failed: {e}");
     }
+    // The attach fd is the local TUI's complete direct feed — approvals are
+    // the most interactive thing it exists to answer, so they mirror exactly
+    // like conv events do. Addressed replies (msg.reply) are not broadcast
+    // lifecycle and are never teed.
+    bridge::attach::tee(attach, &subject, &bytes).await;
 }
 
 /// Raise the ask and wait for the human. First valid answer wins and is
@@ -41,6 +52,7 @@ async fn publish(client: &async_nats::Client, approval_id: &str, leaf: &str, byt
 /// answer everything addressed to it); the cancel signal abandons the ask.
 pub async fn gate(
     client: &async_nats::Client,
+    attach: &Option<bridge::attach::AttachHandle>,
     approval_id: &str,
     ask: &Value,
     correlation: &Value,
@@ -63,6 +75,7 @@ pub async fn gate(
 
     publish(
         client,
+        attach,
         approval_id,
         "lifecycle",
         encode_raised(ask, correlation, &now_iso()),
@@ -75,7 +88,7 @@ pub async fn gate(
     loop {
         tokio::select! {
             _ = pulse.tick() => {
-                publish(client, approval_id, "telemetry", encode_heartbeat(&now_iso())).await;
+                publish(client, attach, approval_id, "telemetry", encode_heartbeat(&now_iso())).await;
             }
             _ = crate::agent::cancelled(cancel) => {
                 return Verdict::Cancelled;
@@ -102,6 +115,7 @@ pub async fn gate(
                 }
                 publish(
                     client,
+                    attach,
                     approval_id,
                     "lifecycle",
                     encode_settled(approved, &from, &now_iso()),
