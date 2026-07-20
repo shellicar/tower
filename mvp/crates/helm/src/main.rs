@@ -171,10 +171,18 @@ async fn main() -> anyhow::Result<()> {
                                 CommandMode::Root => match key.code {
                                     KeyCode::Esc => view_state.command.escape(),
                                     KeyCode::Char('t') => {
-                                        // Paste clipboard text into the say editor.
+                                        // Clipboard text becomes an ATTACHMENT chip
+                                        // (the reference's addText), not an editor
+                                        // insert: it rides the say as a verbatim
+                                        // text block, which bridge folds into the
+                                        // message content untouched.
                                         match clipboard::read_text().await {
                                             Some(text) => {
-                                                restore_to(&mut editor, &text);
+                                                let label = format!("text ({} chars)", text.chars().count());
+                                                attachments.push((
+                                                    label,
+                                                    serde_json::json!({ "type": "text", "text": text }),
+                                                ));
                                                 note = None;
                                             }
                                             None => note = Some("clipboard: no text".into()),
