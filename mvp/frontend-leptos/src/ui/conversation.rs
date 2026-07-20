@@ -201,16 +201,26 @@ pub fn ConversationView(
     });
 
     // Stick to the bottom while new content arrives and the reader hasn't
-    // scrolled away; runs after the DOM patch, so scrollHeight already
-    // reflects the new message/streaming chunk. Reads only THIS panel's `oc`
-    // — another open conversation's activity never fires this effect.
+    // scrolled away. Reads only THIS panel's `oc` — another open
+    // conversation's activity never fires this effect — which means it now
+    // fires exactly once per real update instead of also being nudged by
+    // unrelated traffic the way the old shared-signal version was. That
+    // exposed a real race: the effect itself runs before the browser has
+    // laid out the newly patched message DOM, so `scroll_height()` read
+    // synchronously here is still the OLD (smaller) height — observed live
+    // as a conversation opening at the top and the "latest" button never
+    // appearing (the scroll position and `at_bottom` both got set against
+    // stale geometry). Deferring to the next animation frame, same trick
+    // `autosize` already uses, reads geometry after layout instead.
     Effect::new(move |_| {
         let count = oc.with(|s| s.messages.len() + s.streaming.len());
         let _ = count; // the dependency that re-triggers this effect
-        if at_bottom.get_untracked()
-            && let Some(el) = messages_ref.get()
-        {
-            el.set_scroll_top(el.scroll_height());
+        if at_bottom.get_untracked() {
+            request_animation_frame(move || {
+                if let Some(el) = messages_ref.get() {
+                    el.set_scroll_top(el.scroll_height());
+                }
+            });
         }
     });
 
