@@ -205,26 +205,11 @@ impl Session {
         Ok(wire::parse_answer_reply(&reply.payload))
     }
 
-    /// Upload a file into the transit object store and mint its reference
+    /// Upload raw bytes into the transit object store and mint the reference
     /// block (conversation-spec `attachments`): bytes never ride a subject,
-    /// the say carries only this block, and bridge resolves it at its own
-    /// edge. Returns (chip label, block).
-    pub async fn upload_attachment(
-        &self,
-        path: &str,
-    ) -> anyhow::Result<(String, serde_json::Value)> {
-        let (block_type, media_type) = media_type_for(path)
-            .ok_or_else(|| anyhow::anyhow!("unsupported attachment type: {path}"))?;
-        let bytes = tokio::fs::read(path).await?;
-        let name = std::path::Path::new(path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.to_string());
-        self.upload_bytes(&name, block_type, media_type, bytes).await
-    }
-
-    /// Upload raw bytes (a clipboard image has no path) — the shared tail of
-    /// every attachment: store the bytes, mint the reference block.
+    /// the say carries only the block, bridge resolves at its own edge. Only
+    /// images come this way — files attach as path metadata in the submit
+    /// text (submit.rs, the reference's format), never as bytes.
     pub async fn upload_bytes(
         &self,
         name: &str,
@@ -262,23 +247,6 @@ impl Session {
             return Ok(None);
         }
         parse_attach_line(&line)
-    }
-}
-
-/// The reference block type and media type a path's extension implies; None
-/// for anything bridge can't inline (the model API takes images and PDFs).
-fn media_type_for(path: &str) -> Option<(&'static str, &'static str)> {
-    let ext = std::path::Path::new(path)
-        .extension()?
-        .to_str()?
-        .to_ascii_lowercase();
-    match ext.as_str() {
-        "png" => Some(("image", "image/png")),
-        "jpg" | "jpeg" => Some(("image", "image/jpeg")),
-        "gif" => Some(("image", "image/gif")),
-        "webp" => Some(("image", "image/webp")),
-        "pdf" => Some(("document", "application/pdf")),
-        _ => None,
     }
 }
 

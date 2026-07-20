@@ -11,6 +11,7 @@ mod clipboard;
 mod command;
 mod conversation;
 mod editor;
+mod submit;
 mod transport;
 mod usage;
 mod view;
@@ -24,6 +25,7 @@ use crossterm::event::{
     PushKeyboardEnhancementFlags,
 };
 use editor::Editor;
+use submit::{Chip, FileKind, build_submit};
 use transport::Session;
 use usage::Usage;
 use view::{BlockKey, Geometry, ViewState};
@@ -102,14 +104,14 @@ async fn main() -> anyhow::Result<()> {
     let mut view_state = ViewState::default();
     let mut editor = Editor::default();
     let mut note: Option<String> = None;
-    // Attachments pinned to the next say: (chip label, reference block).
-    let mut attachments: Vec<(String, serde_json::Value)> = Vec::new();
+    // Attachments pinned to the next say (submit.rs: the format contract).
+    let mut attachments: Vec<Chip> = Vec::new();
     let mut geometry = Geometry::default();
     let mut hits: Vec<Option<BlockKey>> = Vec::new();
 
     let result: anyhow::Result<()> = async {
         loop {
-            let chip_labels: Vec<String> = attachments.iter().map(|(l, _)| l.clone()).collect();
+            let chip_labels: Vec<String> = attachments.iter().map(Chip::label).collect();
             terminal.draw(|frame| {
                 let screen = view::Screen {
                     conv_id: &conv_id.0,
@@ -178,11 +180,7 @@ async fn main() -> anyhow::Result<()> {
                                         // message content untouched.
                                         match clipboard::read_text().await {
                                             Some(text) => {
-                                                let label = format!("text ({} chars)", text.chars().count());
-                                                attachments.push((
-                                                    label,
-                                                    serde_json::json!({ "type": "text", "text": text }),
-                                                ));
+                                                attachments.push(Chip::Text { text });
                                                 note = None;
                                             }
                                             None => note = Some("clipboard: no text".into()),
@@ -198,8 +196,8 @@ async fn main() -> anyhow::Result<()> {
                                                     .upload_bytes(&name, "image", media_type, bytes)
                                                     .await
                                                 {
-                                                    Ok(chip) => {
-                                                        attachments.push(chip);
+                                                    Ok((label, block)) => {
+                                                        attachments.push(Chip::Image { label, block });
                                                         note = None;
                                                     }
                                                     Err(e) => {
@@ -243,16 +241,23 @@ async fn main() -> anyhow::Result<()> {
                                 CommandMode::AttachEdit(overlay) => match (key.code, key.modifiers) {
                                     (KeyCode::Esc, _) => view_state.command.escape(),
                                     (KeyCode::Enter, _) => {
+                                        // The reference's pasteFile: metadata only,
+                                        // never bytes — the agent reads the path
+                                        // with its own tools.
                                         let path = overlay.take();
                                         let path = path.trim().to_string();
                                         if !path.is_empty() {
-                                            match session.upload_attachment(&path).await {
-                                                Ok(chip) => {
-                                                    attachments.push(chip);
-                                                    note = None;
-                                                }
-                                                Err(e) => note = Some(format!("attach failed: {e}")),
-                                            }
+                                            let expanded = expand_home(&path);
+                                            let kind = match tokio::fs::metadata(&expanded).await {
+                                                Ok(m) if m.is_dir() => FileKind::Dir,
+                                                Ok(m) => FileKind::File { size: m.len() },
+                                                Err(_) => FileKind::Missing,
+                                            };
+                                            attachments.push(Chip::File {
+                                                path: expanded,
+                                                kind,
+                                            });
+                                            note = None;
                                         }
                                         view_state.command = CommandMode::Closed;
                                     }
@@ -277,10 +282,9 @@ async fn main() -> anyhow::Result<()> {
                                     || m.contains(KeyModifiers::CONTROL) =>
                             {
                                 if !editor.is_empty() || !attachments.is_empty() {
-                                    let text = editor.take();
+                                    let typed = editor.take();
+                                    let (text, blocks) = build_submit(&typed, &attachments);
                                     let tip = conv.messages.last().map(|m| m.id.clone());
-                                    let blocks: Vec<serde_json::Value> =
-                                        attachments.iter().map(|(_, b)| b.clone()).collect();
                                     match session.say(&conv_id, &text, tip, blocks).await? {
                                         wire::SayOutcome::Accepted { .. } => {
                                             note = None;
@@ -374,5 +378,20 @@ async fn main() -> anyhow::Result<()> {
 fn restore_to(editor: &mut Editor, text: &str) {
     for c in text.chars() {
         editor.insert(c);
+    }
+}
+
+/// `~`/`~/...` → $HOME, the reference's own expansion; anything else passes
+/// through untouched.
+fn expand_home(path: &str) -> String {
+    let Ok(home) = std::env::var("HOME") else {
+        return path.to_string();
+    };
+    if path == "~" {
+        return home;
+    }
+    match path.strip_prefix("~/") {
+        Some(rest) => format!("{home}/{rest}"),
+        None => path.to_string(),
     }
 }
