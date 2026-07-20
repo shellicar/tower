@@ -7,6 +7,7 @@
 //! expands/collapses a thinking/tool block.
 
 mod approvals;
+mod command;
 mod conversation;
 mod editor;
 mod transport;
@@ -14,6 +15,7 @@ mod usage;
 mod view;
 
 use approvals::Approvals;
+use command::CommandMode;
 use conversation::Conversation;
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, Event as TermEvent, KeyCode, KeyModifiers,
@@ -146,54 +148,71 @@ async fn main() -> anyhow::Result<()> {
                 event = input.recv() => {
                     let Some(event) = event else { break };
                     match event {
-                        // The attach-path overlay owns the keyboard while open.
-                        TermEvent::Key(key) if view_state.attach_editor.is_some() => {
-                            let overlay = view_state.attach_editor.as_mut().expect("checked");
-                            match (key.code, key.modifiers) {
-                                (KeyCode::Esc, _) => view_state.attach_editor = None,
-                                (KeyCode::Enter, _) => {
-                                    let path = overlay.take();
-                                    let path = path.trim();
-                                    if !path.is_empty() {
-                                        match session.upload_attachment(path).await {
-                                            Ok(chip) => {
-                                                attachments.push(chip);
-                                                note = None;
-                                            }
-                                            Err(e) => note = Some(format!("attach failed: {e}")),
+                        // Ctrl+/ is command mode's one door, from any state.
+                        // Legacy terminals send 0x1F for it, which crossterm
+                        // may report as ctrl+'_' — both spellings accepted.
+                        TermEvent::Key(key)
+                            if matches!(key.code, KeyCode::Char('/') | KeyCode::Char('_'))
+                                && key.modifiers.contains(KeyModifiers::CONTROL) =>
+                        {
+                            view_state.command.toggle();
+                        }
+                        // While command mode is open it claims every key:
+                        // bound ones fire intents, the rest are swallowed.
+                        TermEvent::Key(key) if view_state.command.is_open() => {
+                            match &mut view_state.command {
+                                CommandMode::Root => match key.code {
+                                    KeyCode::Esc => view_state.command.escape(),
+                                    KeyCode::Char('f') => {
+                                        view_state.command = CommandMode::AttachEdit(Editor::default());
+                                    }
+                                    KeyCode::Char('d') => {
+                                        attachments.pop();
+                                    }
+                                    KeyCode::Char(answer @ ('y' | 'n')) => {
+                                        let target = approvals
+                                            .live(now_ms())
+                                            .first()
+                                            .map(|(id, _)| id.to_string());
+                                        if let Some(id) = target {
+                                            session.answer(&id, answer == 'y').await?;
+                                            view_state.command = CommandMode::Closed;
                                         }
                                     }
-                                    view_state.attach_editor = None;
-                                }
-                                (KeyCode::Backspace, _) => overlay.backspace(),
-                                (KeyCode::Delete, _) => overlay.delete(),
-                                (KeyCode::Left, _) => overlay.left(),
-                                (KeyCode::Right, _) => overlay.right(),
-                                (KeyCode::Home, _) => overlay.home(),
-                                (KeyCode::End, _) => overlay.end(),
-                                (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-                                    overlay.insert(c);
-                                }
-                                _ => {}
+                                    _ => {}
+                                },
+                                CommandMode::AttachEdit(overlay) => match (key.code, key.modifiers) {
+                                    (KeyCode::Esc, _) => view_state.command.escape(),
+                                    (KeyCode::Enter, _) => {
+                                        let path = overlay.take();
+                                        let path = path.trim().to_string();
+                                        if !path.is_empty() {
+                                            match session.upload_attachment(&path).await {
+                                                Ok(chip) => {
+                                                    attachments.push(chip);
+                                                    note = None;
+                                                }
+                                                Err(e) => note = Some(format!("attach failed: {e}")),
+                                            }
+                                        }
+                                        view_state.command = CommandMode::Closed;
+                                    }
+                                    (KeyCode::Backspace, _) => overlay.backspace(),
+                                    (KeyCode::Delete, _) => overlay.delete(),
+                                    (KeyCode::Left, _) => overlay.left(),
+                                    (KeyCode::Right, _) => overlay.right(),
+                                    (KeyCode::Home, _) => overlay.home(),
+                                    (KeyCode::End, _) => overlay.end(),
+                                    (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+                                        overlay.insert(c);
+                                    }
+                                    _ => {}
+                                },
+                                CommandMode::Closed => unreachable!("guarded by is_open"),
                             }
                         }
                         TermEvent::Key(key) => match (key.code, key.modifiers) {
                             (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
-                            (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
-                                view_state.attach_editor = Some(Editor::default());
-                            }
-                            (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
-                                attachments.pop();
-                            }
-                            (KeyCode::Char(answer @ ('y' | 'n')), KeyModifiers::CONTROL) => {
-                                let target = approvals
-                                    .live(now_ms())
-                                    .first()
-                                    .map(|(id, _)| id.to_string());
-                                if let Some(id) = target {
-                                    session.answer(&id, answer == 'y').await?;
-                                }
-                            }
                             (KeyCode::Enter, m)
                                 if m.contains(KeyModifiers::SUPER)
                                     || m.contains(KeyModifiers::CONTROL) =>

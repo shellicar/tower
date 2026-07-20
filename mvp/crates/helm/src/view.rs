@@ -15,6 +15,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::approvals::Approvals;
+use crate::command::CommandMode;
 use crate::conversation::{Conversation, QueryState};
 use crate::editor::Editor;
 use crate::usage::Usage;
@@ -30,9 +31,8 @@ pub type BlockKey = (String, usize);
 pub struct ViewState {
     pub scroll_from_bottom: usize,
     pub expanded: HashSet<BlockKey>,
-    /// The attach-file path editor, when open (Ctrl+F). The seed of command
-    /// mode: more overlays join as variants when they exist.
-    pub attach_editor: Option<Editor>,
+    /// Command mode — Ctrl+/ the one door in (command.rs).
+    pub command: CommandMode,
 }
 
 impl ViewState {
@@ -254,11 +254,11 @@ pub fn draw(
         note,
         attachments,
     } = *screen;
-    // The attach-path overlay owns the input box while open; otherwise the
-    // say editor does. The box grows with its content, up to 5 lines.
-    let (input_title, active_editor) = match &view.attach_editor {
-        Some(attach) => (" attach file path (enter adds · esc closes) ", attach),
-        None => ("", editor),
+    // Command mode's attach editor owns the input box while open; otherwise
+    // the say editor does. The box grows with its content, up to 5 lines.
+    let (input_title, active_editor) = match &view.command {
+        CommandMode::AttachEdit(attach) => (" attach file path (enter adds · esc backs out) ", attach),
+        _ => ("", editor),
     };
     let (editor_lines, (cursor_line, cursor_col)) = active_editor.lines_and_cursor();
     let input_height = (editor_lines.len().min(5) + 2) as u16;
@@ -346,9 +346,19 @@ pub fn draw(
             Style::default().fg(Color::Red),
         ));
     }
-    status_spans.push(Span::raw(
-        " · ⌘↵/^↵ says · ↵ breaks · esc cancels · ^y/^n approvals · ^c quits",
-    ));
+    status_spans.push(match view.command {
+        CommandMode::Root => Span::styled(
+            " · command: f attach · d drop attachment · y/n approval · esc/^/ exit",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ),
+        CommandMode::AttachEdit(_) => Span::styled(
+            " · attach: ↵ adds · esc backs out · ^/ closes",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ),
+        CommandMode::Closed => {
+            Span::raw(" · ^/ commands · ⌘↵/^↵ says · ↵ breaks · esc cancels · ^c quits")
+        }
+    });
     frame.render_widget(Paragraph::new(Line::from(status_spans)), status);
 
     (Geometry { inner }, hits)
