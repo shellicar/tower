@@ -18,9 +18,9 @@ check:
 run:
     cargo run -p towerd
 
-# Bring the whole mvp up (towerd + vite with hot reload). Multi-process
-# orchestration is the one job cargo doesn't do; dev.sh owns it. The broker
-# is expected up (docker compose up -d). Web: http://localhost:5173.
+# Bring the whole mvp up (towerd + the leptos frontend with hot reload).
+# Multi-process orchestration is the one job cargo doesn't do; dev.sh owns it.
+# The broker is expected up (docker compose up -d). Web: http://localhost:8082.
 dev:
     ./dev.sh
 

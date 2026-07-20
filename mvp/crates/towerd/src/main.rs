@@ -111,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
         broker: NatsBroker { client },
         clock: SystemClock,
         dist: std::env::var("TOWER_DIST")
-            .unwrap_or_else(|_| "frontend/dist".into())
+            .unwrap_or_else(|_| "frontend-leptos/dist".into())
             .into(),
         attach,
     };
