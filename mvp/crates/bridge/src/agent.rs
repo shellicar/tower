@@ -155,10 +155,14 @@ impl Publisher {
             self.conv.0,
             bytes.len()
         );
-        if let Err(e) = self.client.publish(subject.clone(), bytes.clone().into()).await {
+        // Tee first: it only borrows, so the NATS publish can take the bytes
+        // by move — no per-event clone on the hot path (tool results run to
+        // hundreds of KB; a tower-only instance must not pay for a mirror it
+        // doesn't have).
+        bridge::attach::tee(&self.attach, &subject, &bytes).await;
+        if let Err(e) = self.client.publish(subject, bytes.into()).await {
             eprintln!("bridge[{}]: publish failed: {e}", self.conv.0);
         }
-        bridge::attach::tee(&self.attach, &subject, &bytes).await;
     }
 
     /// Commit a message to the record (`changes.message`): the change stream

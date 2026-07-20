@@ -52,16 +52,23 @@ pub struct Conversation {
 impl Conversation {
     /// Insert in ts order; same id replaces (revisions keep the id, last
     /// write wins — conversation-spec). Boundary overlap on a reconnect is
-    /// expected and handled the same way.
+    /// expected and handled the same way. Ordering compares parsed instants,
+    /// never strings: wire timestamps carry mixed offsets and strings
+    /// misorder (tower-v1-design, the ts rule); unparseable stamps fall back
+    /// to string order rather than being dropped.
     fn insert_message(&mut self, m: WireMessage) {
         if let Some(existing) = self.messages.iter_mut().find(|x| x.id == m.id) {
             *existing = m;
             return;
         }
+        let after = |a: &str, b: &str| match (wire::parse_ts(a), wire::parse_ts(b)) {
+            (Some(a), Some(b)) => a > b,
+            _ => a > b,
+        };
         let pos = self
             .messages
             .iter()
-            .position(|x| x.ts > m.ts)
+            .position(|x| after(&x.ts, &m.ts))
             .unwrap_or(self.messages.len());
         self.messages.insert(pos, m);
     }
@@ -221,6 +228,18 @@ mod tests {
         conv.fold(&EventKind::Change(ConvChange::Query(closure)));
         assert_eq!(conv.pending_say, None);
         assert_eq!(conv.restore_say.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn mixed_offset_timestamps_order_by_instant_not_string() {
+        // 21:00+10:00 (11:00Z) precedes 12:00Z as an instant, but follows it
+        // as a string ("2026-07-07T21" > "2026-07-07T12") — the misorder the
+        // ts rule exists to prevent.
+        let mut conv = Conversation::default();
+        conv.insert_message(message("m2", "2026-07-07T12:00:00Z", "assistant", vec![]));
+        conv.insert_message(message("m1", "2026-07-07T21:00:00+10:00", "user", vec![]));
+        assert_eq!(conv.messages[0].id.0, "m1");
+        assert_eq!(conv.messages[1].id.0, "m2");
     }
 
     #[test]

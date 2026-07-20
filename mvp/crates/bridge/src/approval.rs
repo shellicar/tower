@@ -37,14 +37,14 @@ async fn publish(
 ) {
     let subject = format!("approval.v1.{approval_id}.{leaf}");
     eprintln!("{} bridge: → {subject} ({} B)", now_iso(), bytes.len());
-    if let Err(e) = client.publish(subject.clone(), bytes.clone().into()).await {
-        eprintln!("bridge: approval publish failed: {e}");
-    }
     // The attach fd is the local TUI's complete direct feed — approvals are
     // the most interactive thing it exists to answer, so they mirror exactly
     // like conv events do. Addressed replies (msg.reply) are not broadcast
-    // lifecycle and are never teed.
+    // lifecycle and are never teed. Tee first: it borrows, the publish moves.
     bridge::attach::tee(attach, &subject, &bytes).await;
+    if let Err(e) = client.publish(subject, bytes.into()).await {
+        eprintln!("bridge: approval publish failed: {e}");
+    }
 }
 
 /// Raise the ask and wait for the human. First valid answer wins and is
