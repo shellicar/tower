@@ -65,8 +65,15 @@ if [ "$APPLY" = "1" ] && pgrep -f 'towerd' >/dev/null 2>&1; then
   exit 1
 fi
 
-AUDIT_SUBJECTS='conv.v1.*.changes,conv.v2.*.changes.>,approval.v1.*.lifecycle'
-DIAGNOSTIC_SUBJECTS='conv.v1.*.telemetry,conv.v2.*.telemetry.>,agent.v1.*.telemetry.attached,agent.v1.*.telemetry.detached'
+# usage rides in AUDIT, not DIAGNOSTIC, despite being telemetry-plane
+# traffic (mvp/crates/towerd/src/ingest.rs's AUDIT_SUBJECTS doc comment) —
+# it is the only record of what a conversation cost, and DIAGNOSTIC's 90-day
+# cap silently deletes that forever. Corrected 19 Jul 2026 by
+# migrate-usage-retention.sh, after exactly that happened once; kept in sync
+# here so a FRESH install (this script, not the usage-specific follow-up)
+# lands in the right place the first time.
+AUDIT_SUBJECTS='conv.v1.*.changes,conv.v2.*.changes.>,approval.v1.*.lifecycle,conv.v2.*.telemetry.usage'
+DIAGNOSTIC_SUBJECTS='conv.v1.*.telemetry,conv.v2.*.telemetry.turn.started,conv.v2.*.telemetry.turn.ended,conv.v2.*.telemetry.turn.cancelled,conv.v2.*.telemetry.turn.aborted,conv.v2.*.telemetry.tool.use,agent.v1.*.telemetry.attached,agent.v1.*.telemetry.detached'
 EPHEMERAL_SUBJECTS='conv.v1.*.deltas,conv.v2.*.deltas,approval.v1.*.telemetry,agent.v1.*.telemetry.ready,agent.v1.*.telemetry.pulse'
 
 run() {

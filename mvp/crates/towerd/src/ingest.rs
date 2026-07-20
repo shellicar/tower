@@ -22,18 +22,32 @@ use crate::views::ViewQuery;
 
 /// The audit stream's subjects: the committal record, kept unlimited
 /// (conv-approval by convention, though the name itself is deployment
-/// config — see `run_ingest`'s own doc).
-pub const AUDIT_SUBJECTS: [&str; 3] = [
+/// config — see `run_ingest`'s own doc). `usage` rides here, not in
+/// `DIAGNOSTIC_SUBJECTS` below, despite being telemetry-plane traffic
+/// (nats-spec's own test still holds: the conversation functions fine
+/// without publishing it): it is the only record of what a conversation
+/// COST, and diagnostic's 90-day cap silently deletes that forever —
+/// correction, 19 Jul 2026, after exactly that happened once (see
+/// migrate-usage-retention.sh). Retention need, not plane, decided this.
+pub const AUDIT_SUBJECTS: [&str; 4] = [
     "conv.v1.*.changes",
     "conv.v2.*.changes.>",
     "approval.v1.*.lifecycle",
+    "conv.v2.*.telemetry.usage",
 ];
 /// The diagnostic stream's subjects: telemetry with real debugging/cost
 /// value, capped meaningfully longer than a display buffer (90d by
-/// convention).
-pub const DIAGNOSTIC_SUBJECTS: [&str; 4] = [
+/// convention). Spelled out leaf by leaf, not `conv.v2.*.telemetry.>` —
+/// `usage` is the one leaf under this prefix that does NOT belong here
+/// (see `AUDIT_SUBJECTS`), and NATS subject wildcards cannot express
+/// "everything except one leaf".
+pub const DIAGNOSTIC_SUBJECTS: [&str; 8] = [
     "conv.v1.*.telemetry",
-    "conv.v2.*.telemetry.>",
+    "conv.v2.*.telemetry.turn.started",
+    "conv.v2.*.telemetry.turn.ended",
+    "conv.v2.*.telemetry.turn.cancelled",
+    "conv.v2.*.telemetry.turn.aborted",
+    "conv.v2.*.telemetry.tool.use",
     "agent.v1.*.telemetry.attached",
     "agent.v1.*.telemetry.detached",
 ];
