@@ -676,8 +676,9 @@ async fn main() -> anyhow::Result<()> {
     while let Some(line) = lines.next_line().await? {
         handle_line(&host, &line).await;
     }
-    // stdin closed: keep serving what was spawned until killed.
-    std::future::pending::<()>().await;
+    // stdin closed: the control channel is the lifetime. Whoever spawned
+    // bridge holds its stdin; when they let go, bridge is done.
+    eprintln!("bridge: stdin closed, exiting");
     Ok(())
 }
 
