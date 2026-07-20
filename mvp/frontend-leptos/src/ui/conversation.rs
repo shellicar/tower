@@ -218,7 +218,13 @@ pub fn ConversationView(
         if at_bottom.get_untracked() {
             request_animation_frame(move || {
                 if let Some(el) = messages_ref.get() {
-                    el.set_scroll_top(el.scroll_height());
+                    // Never read scroll_height() to compute this: that read
+                    // forces a synchronous layout right then, and profiling
+                    // live (21 Jul) showed Layout as the dominant cost with
+                    // several panels streaming at once. Writing a constant
+                    // far past any real height needs no read at all — the
+                    // browser clamps scroll_top to the actual max for you.
+                    el.set_scroll_top(1_000_000_000);
                 }
             });
         }
