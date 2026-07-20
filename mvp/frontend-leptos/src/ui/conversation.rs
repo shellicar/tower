@@ -138,18 +138,6 @@ pub fn ConversationView(
         }
         at_bottom.set(true);
     };
-    let autosize = move || {
-        if let Some(el) = editor_ref.get() {
-            // `.style()` on the leptos-wrapped element resolves to tachys's
-            // reactive-attribute method, not web_sys's `CSSStyleDeclaration`
-            // getter, so borrow the underlying DOM element explicitly.
-            let html_el: &web_sys::HtmlElement = el.unchecked_ref();
-            html_el.style().set_property("height", "auto").ok();
-            let h = el.scroll_height();
-            html_el.style().set_property("height", &format!("{h}px")).ok();
-        }
-    };
-
     // Local upload state — a component's own, per the architecture doc; the
     // concern only ever holds the ref once it's won (`on_attach`).
     let uploading = RwSignal::new(0u32);
@@ -184,7 +172,6 @@ pub fn ConversationView(
         conv.with_value(|c| save_draft(c, ""));
         draft.set(String::new());
         on_send.run(text);
-        request_animation_frame(autosize);
     });
 
     let handle_files = Callback::new(move |files: web_sys::FileList| {
@@ -248,7 +235,6 @@ pub fn ConversationView(
                 s.restore_say = None;
                 s.restore_attachments.clear();
             });
-            request_animation_frame(autosize);
         }
     });
 
@@ -355,34 +341,46 @@ pub fn ConversationView(
                     let pending = oc.with(|s| s.pending_say.clone());
                     pending.map(|pending| view! { <p class="pending-say">{pending}</p> })
                 }}
-                {move || {
-                    let segments = oc.with(|s| s.streaming.clone());
-                    (!segments.is_empty()).then(|| {
-                        let total = segments.len();
-                        segments
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, seg)| {
-                                let last = i + 1 == total;
-                                let body = if last {
-                                    format!("{}▊", seg.text)
-                                } else {
-                                    seg.text
-                                };
-                                let marker = (seg.block_type != "text")
-                                    .then(|| format!("[{}] ", seg.block_type))
-                                    .unwrap_or_default();
-                                view! {
-                                    <p class="message assistant streaming">
-                                        <span class="who">"agent"</span>
-                                        {marker}
-                                        {body}
-                                    </p>
-                                }
-                            })
-                            .collect_view()
-                    })
-                }}
+                // Keyed by index, not a cloned-and-rebuilt Vec: `each` here
+                // only actually differs in SHAPE (add/remove) when a new
+                // block starts, so a delta appended to the growing segment's
+                // text never tears down and recreates every prior `<p>` —
+                // the old `.collect_view()` over a fresh clone did exactly
+                // that on EVERY chunk, which live profiling (21 Jul) showed
+                // as the actual driver of the periodic Layout-dominated CPU
+                // spikes during active streaming (not the scroll-to-bottom
+                // read fixed earlier the same night). Each item's own body
+                // is its own `move ||`, so only the segment whose text
+                // actually changed gets its content patched.
+                <For
+                    each=move || {
+                        let n = oc.with(|s| s.streaming.len());
+                        (0..n).collect::<Vec<usize>>()
+                    }
+                    key=|i| *i
+                    let(i)
+                >
+                    {move || {
+                        oc.with(|s| s.streaming.get(i).cloned()).map(|seg| {
+                            let last = i + 1 == oc.with(|s| s.streaming.len());
+                            let body = if last {
+                                format!("{}▊", seg.text)
+                            } else {
+                                seg.text
+                            };
+                            let marker = (seg.block_type != "text")
+                                .then(|| format!("[{}] ", seg.block_type))
+                                .unwrap_or_default();
+                            view! {
+                                <p class="message assistant streaming">
+                                    <span class="who">"agent"</span>
+                                    {marker}
+                                    {body}
+                                </p>
+                            }
+                        })
+                    }}
+                </For>
             </div>
 
             {move || {
@@ -509,7 +507,6 @@ pub fn ConversationView(
                         let value = event_target_value(&ev);
                         conv.with_value(|c| save_draft(c, &value));
                         draft.set(value);
-                        autosize();
                     }
                     on:keydown=move |ev: ev::KeyboardEvent| {
                         if ev.key() == "Enter" && (ev.meta_key() || ev.ctrl_key()) {
