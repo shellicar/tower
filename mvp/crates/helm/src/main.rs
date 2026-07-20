@@ -5,10 +5,12 @@
 //! this is transport + document model proven together, the seam the rest
 //! builds on.
 
+mod approvals;
 mod conversation;
 mod transport;
 mod usage;
 
+use approvals::Approvals;
 use conversation::Conversation;
 use transport::Session;
 use usage::Usage;
@@ -30,15 +32,42 @@ async fn main() -> anyhow::Result<()> {
         println!("helm: say outcome {outcome:?}");
     }
 
+    let auto_approve = std::env::var("HELM_AUTO_APPROVE").is_ok_and(|v| v == "1");
     let mut conv = Conversation::default();
     let mut usage = Usage::default();
+    let mut approvals = Approvals::default();
     while let Some(event) = session.next_event().await? {
-        let Some(wire::WireEvent::Conv(decoded)) = wire::parse_wire(&event.subject, &event.payload)
-        else {
-            continue; // not conv.v2 traffic, or a frame this build doesn't model
-        };
-        conv.fold(&decoded.kind);
-        usage.fold(&decoded.kind);
+        match wire::parse_wire(&event.subject, &event.payload) {
+            Some(wire::WireEvent::Conv(decoded)) => {
+                conv.fold(&decoded.kind);
+                usage.fold(&decoded.kind);
+            }
+            Some(wire::WireEvent::Approval(decoded)) => {
+                approvals.fold(&decoded.id.0, &decoded.kind);
+                // No editor yet, so nothing interactive can answer — surface
+                // the live asks loudly instead of leaving the agent silently
+                // blocked, and HELM_AUTO_APPROVE=1 answers them (the
+                // non-interactive proof of the whole answer loop).
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                let live: Vec<(String, serde_json::Value)> = approvals
+                    .live(now_ms)
+                    .into_iter()
+                    .map(|(id, ask)| (id.to_string(), ask.ask.clone()))
+                    .collect();
+                for (id, ask) in live {
+                    println!("helm: PENDING APPROVAL {id}: {ask}");
+                    if auto_approve {
+                        let outcome = session.answer(&id, true).await?;
+                        println!("helm: auto-approved {id}: {outcome:?}");
+                    }
+                }
+                continue;
+            }
+            _ => continue, // not traffic this build models
+        }
         println!(
             "helm: {} messages, query {:?}, streaming {:?}, {} in / {} out{}",
             conv.messages.len(),

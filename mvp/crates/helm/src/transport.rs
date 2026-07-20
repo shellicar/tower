@@ -122,6 +122,18 @@ impl Session {
         Ok(wire::parse_say_reply(&reply.payload))
     }
 
+    /// Answer a pending approval: a real `approval.v1.{id}.requests` answer,
+    /// first valid answer wins — losing the race comes back as
+    /// `rejected: already_settled` and is information, not an error. The
+    /// settlement arrives back over the attach fd as an ordinary lifecycle
+    /// event, same as tower sees it.
+    pub async fn answer(&self, approval_id: &str, approved: bool) -> anyhow::Result<wire::AnswerOutcome> {
+        let subject = format!("approval.v1.{approval_id}.requests");
+        let payload = wire::encode_answer(approved, &wire::now_iso());
+        let reply = self.nats.request(subject, payload.into()).await?;
+        Ok(wire::parse_answer_reply(&reply.payload))
+    }
+
     /// One event off the attach fd, or `None` once it closes (bridge exited).
     pub async fn next_event(&mut self) -> anyhow::Result<Option<AttachEvent>> {
         let mut line = String::new();
