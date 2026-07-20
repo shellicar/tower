@@ -3,8 +3,9 @@
 Tower v1 MVP in `mvp/`: `towerd` (Rust) + `frontend/` (Svelte) rendering the
 fleet's conversations by staleness — open one, read it, say into it — plus
 `bridge`, the v0 agent host that serves conversations (spawn over stdio, the
-messages API over SSE, the Skill tool). Hand-built, no mission machinery. The
-rest of the repo is specs (live contract), the planning design corpus (see
+messages API over SSE, the Skill tool), and `helm`, the single-conversation
+terminal client that spawns its own bridge. Hand-built, no mission machinery.
+The rest of the repo is specs (live contract), the planning design corpus (see
 below — not archive), and the poc.
 
 ## The documents govern
@@ -109,6 +110,39 @@ only for what cargo can't do. Config env vars: `NATS_URL`, `TOWER_BIND`,
 catalogue, later says a delta naming skills whose SKILL.md changed; the
 stdio `skills` control line repoints the directory live).
 
+## helm
+
+The terminal client (`mvp/crates/helm`): one bridge, spawned as a child,
+dialed over a second fd (`BRIDGE_ATTACH_FD`, a socketpair dup'd to fd 3 —
+stdio keeps the control protocol untouched; the fd carries events out only).
+Bridge tees every conv.v2 and approval.v1 publish onto it; requests (say,
+cancel, answer) go over NATS like any client's. Bridge's lifetime is its
+stdin: helm dies, bridge exits. Internal shape mirrors
+`frontend/src/lib/concerns/` — transport owns the wire, conversation /
+usage / approvals / editor are self-contained folds, fixture-tested; ratatui
+owns present/platform, `view.rs` wraps in-house so every visual row maps to
+its block (that's what makes click hit-testing exact).
+
+```sh
+HELM_BRIDGE_PATH=./target/debug/bridge cargo run -p helm
+```
+
+Env: `HELM_BRIDGE_PATH`, `HELM_BRIDGE_LOG` (bridge stderr, default
+`/tmp/helm-bridge.log`), `NATS_URL`.
+
+Known debt, deliberate, fix shapes agreed:
+
+- say/cancel/answer are awaited in the render loop — a slow broker freezes
+  keystrokes. Fix: spawn the request, fold its outcome back through a
+  channel arm (the frontend's async-say shape).
+- `wrap_into` counts chars, not grapheme widths — CJK/emoji mismeasure
+  (hit map stays correct). Fix: unicode-segmentation + unicode-width,
+  already in-tree via ratatui.
+- expanded blocks re-lay every frame. Fix: cache wrapped rows keyed by
+  (block, width, expanded); sealed messages make it sound by construction.
+- `Session::control` can hang forever if bridge dies mid-reply. Fix:
+  `tokio::time::timeout` + EOF = bridge gone.
+
 ## Testing
 
 - `wire` folds: pure tests, inputs from `docs/spec/scenarios.md` fixtures.
@@ -119,8 +153,9 @@ stdio `skills` control line repoints the directory live).
 ## Dependencies
 
 Blessed: tokio, axum, async-nats, rusqlite, serde/serde_json, anyhow,
-thiserror, reqwest, uuid, yaml_serde; Svelte 5, Vite. A new dependency is a
-decision — name it and why in the commit, don't reach.
+thiserror, reqwest, uuid, yaml_serde; ratatui + crossterm (helm only);
+Svelte 5, Vite. A new dependency is a decision — name it and why in the
+commit, don't reach.
 
 ## Conventions
 
