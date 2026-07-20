@@ -216,16 +216,28 @@ impl Session {
         let (block_type, media_type) = media_type_for(path)
             .ok_or_else(|| anyhow::anyhow!("unsupported attachment type: {path}"))?;
         let bytes = tokio::fs::read(path).await?;
+        let name = std::path::Path::new(path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string());
+        self.upload_bytes(&name, block_type, media_type, bytes).await
+    }
+
+    /// Upload raw bytes (a clipboard image has no path) — the shared tail of
+    /// every attachment: store the bytes, mint the reference block.
+    pub async fn upload_bytes(
+        &self,
+        name: &str,
+        block_type: &str,
+        media_type: &str,
+        bytes: Vec<u8>,
+    ) -> anyhow::Result<(String, serde_json::Value)> {
         let id = format!("att-{}", uuid::Uuid::new_v4());
         let js = async_nats::jetstream::new(self.nats.clone());
         let store = js.get_object_store(&self.attach_bucket).await.map_err(|e| {
             anyhow::anyhow!("object store {:?} unavailable: {e}", self.attach_bucket)
         })?;
         store.put(id.as_str(), &mut bytes.as_slice()).await?;
-        let name = std::path::Path::new(path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.to_string());
         let block = serde_json::json!({
             "type": block_type,
             "source": {

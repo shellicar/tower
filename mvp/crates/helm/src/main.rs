@@ -7,6 +7,7 @@
 //! expands/collapses a thinking/tool block.
 
 mod approvals;
+mod clipboard;
 mod command;
 mod conversation;
 mod editor;
@@ -169,8 +170,52 @@ async fn main() -> anyhow::Result<()> {
                             match &mut view_state.command {
                                 CommandMode::Root => match key.code {
                                     KeyCode::Esc => view_state.command.escape(),
+                                    KeyCode::Char('t') => {
+                                        // Paste clipboard text into the say editor.
+                                        match clipboard::read_text().await {
+                                            Some(text) => {
+                                                restore_to(&mut editor, &text);
+                                                note = None;
+                                            }
+                                            None => note = Some("clipboard: no text".into()),
+                                        }
+                                        view_state.command = CommandMode::Closed;
+                                    }
+                                    KeyCode::Char('i') => {
+                                        // Clipboard image → upload → chip.
+                                        match clipboard::read_image().await {
+                                            Some((bytes, media_type)) => {
+                                                let name = format!("clipboard.{}", &media_type[6..]);
+                                                match session
+                                                    .upload_bytes(&name, "image", media_type, bytes)
+                                                    .await
+                                                {
+                                                    Ok(chip) => {
+                                                        attachments.push(chip);
+                                                        note = None;
+                                                    }
+                                                    Err(e) => {
+                                                        note = Some(format!("attach failed: {e}"));
+                                                    }
+                                                }
+                                            }
+                                            None => {
+                                                note = Some(
+                                                    "clipboard: no image (pngpaste installed?)".into(),
+                                                );
+                                            }
+                                        }
+                                        view_state.command = CommandMode::Closed;
+                                    }
                                     KeyCode::Char('f') => {
-                                        view_state.command = CommandMode::AttachEdit(Editor::default());
+                                        // Prefill the path editor from the clipboard
+                                        // when it holds a path (terminal, VS Code,
+                                        // Finder — the reference's three stages).
+                                        let mut path_editor = Editor::default();
+                                        if let Some(path) = clipboard::read_path().await {
+                                            restore_to(&mut path_editor, &path);
+                                        }
+                                        view_state.command = CommandMode::AttachEdit(path_editor);
                                     }
                                     KeyCode::Char('d') => {
                                         attachments.pop();
@@ -316,8 +361,8 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-/// Put a say's text back into the editor — the one path for every failure
-/// shape (rejection, unreachable, revoked closure).
+/// Insert text into an editor at its cursor — the restore path for a failed
+/// or revoked say, and the paste path.
 fn restore_to(editor: &mut Editor, text: &str) {
     for c in text.chars() {
         editor.insert(c);

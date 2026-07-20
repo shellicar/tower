@@ -348,7 +348,7 @@ pub fn draw(
     }
     status_spans.push(match view.command {
         CommandMode::Root => Span::styled(
-            " · command: f attach · d drop attachment · y/n approval · esc/^/ exit",
+            " · command: t text · i image · f file · d drop · y/n approval · esc/^/ exit",
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         ),
         CommandMode::AttachEdit(_) => Span::styled(
