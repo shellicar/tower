@@ -372,10 +372,7 @@ impl Host {
             // new spawns only; a running conversation's model is fixed at
             // birth (docs/mvp/bridge-stdio-spec.md).
             let Some(text) = model.as_str() else {
-                println!(
-                    "{}",
-                    serde_json::json!({ "error": "model needs a string" })
-                );
+                println!("{}", serde_json::json!({ "error": "model needs a string" }));
                 return;
             };
             *self.default_model.write().unwrap() = text.to_string();
@@ -401,7 +398,9 @@ impl Host {
             // this as the message's new latest state (last-write-wins per
             // id, main.rs's `replay_conversation`).
             let (conv, message_id, content) = (
-                revise.get("conversationId").and_then(serde_json::Value::as_str),
+                revise
+                    .get("conversationId")
+                    .and_then(serde_json::Value::as_str),
                 revise.get("messageId").and_then(serde_json::Value::as_str),
                 revise.get("content").and_then(serde_json::Value::as_array),
             );

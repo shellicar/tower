@@ -162,7 +162,10 @@ async fn refresh_credentials(refresh_token: &str) -> anyhow::Result<Value> {
 /// on an empty text block outright, so this walks back to the nearest block
 /// that isn't one, rather than assume the last block is always eligible.
 fn mark_message_cache_breakpoint(messages: &mut [Value]) {
-    let Some(blocks) = messages.last_mut().and_then(|m| m["content"].as_array_mut()) else {
+    let Some(blocks) = messages
+        .last_mut()
+        .and_then(|m| m["content"].as_array_mut())
+    else {
         return;
     };
     let Some(block) = blocks
