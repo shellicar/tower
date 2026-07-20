@@ -242,6 +242,13 @@ impl Rail {
         &self.stale
     }
 
+    /// Just the count — the rail badge and tab indicators only ever need
+    /// how many, not the rows themselves; avoids building/sorting the full
+    /// `stale_rows()` list just to read its length on every render.
+    pub fn stale_count(&self) -> usize {
+        self.stale.len()
+    }
+
     /// The stale conversations as rows, oldest-touched first — the unread
     /// pane's list. A conv can be stale before its row ever arrives (a fresh
     /// connection ordering quirk); those are skipped rather than shown

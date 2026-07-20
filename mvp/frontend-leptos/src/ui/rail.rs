@@ -124,7 +124,7 @@ pub fn RailView(
                         })
                     }}
                     {move || {
-                        let n = rail.with(|r| r.stale_rows().len());
+                        let n = rail.with(|r| r.stale_count());
                         (n > 0).then(|| view! {
                             <button class="unread-toggle" on:click=move |_| on_toggle_unread.run(())>
                                 {format!("● {n}")}
@@ -270,6 +270,12 @@ pub fn RailView(
             <ul class="rows">
                 {move || {
                     let pending = rail.with(|r| r.pending_by_conv(now.get()));
+                    // Computed once per render, then a plain lookup per row
+                    // below — not a fresh `rail.with()` closure per row, which
+                    // would re-subscribe every row to the WHOLE rail signal
+                    // and recompute on any unrelated mutation (an agent pulse
+                    // anywhere), the same discipline `pending` already uses.
+                    let stale = rail.with(|r| r.stale_convs().clone());
                     let filters = view.with(|v| v.view_config().filters.clone());
                     let group_key = view.with(|v| v.view_config().group_key.clone());
                     let hide_untagged = view.with(|v| v.view_config().hide_untagged);
@@ -344,7 +350,7 @@ pub fn RailView(
                                         >
                                             <span class="row-main">
                                                 {is_pending.then(|| view! { <span class="pending-mark">"⚠"</span> })}
-                                                {rail.with(|r| r.stale_convs().contains(&conv)).then(|| view! {
+                                                {stale.contains(&conv).then(|| view! {
                                                     <span class="stale-mark" title="nobody's looked at this since it last got new content">"●"</span>
                                                 })}
                                                 {live.map(|l| {
