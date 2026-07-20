@@ -184,7 +184,8 @@ async fn main() -> anyhow::Result<()> {
                                             }
                                             None => note = Some("clipboard: no text".into()),
                                         }
-                                        view_state.command = CommandMode::Closed;
+                                        // Command mode stays open: only the user
+                                        // exits it (Ctrl+/ or Esc), never an intent.
                                     }
                                     KeyCode::Char('i') => {
                                         // Clipboard image → upload → chip.
@@ -210,7 +211,6 @@ async fn main() -> anyhow::Result<()> {
                                                 );
                                             }
                                         }
-                                        view_state.command = CommandMode::Closed;
                                     }
                                     KeyCode::Char('f') => {
                                         // Prefill the path editor from the clipboard
@@ -232,7 +232,6 @@ async fn main() -> anyhow::Result<()> {
                                             .map(|(id, _)| id.to_string());
                                         if let Some(id) = target {
                                             session.answer(&id, answer == 'y').await?;
-                                            view_state.command = CommandMode::Closed;
                                         }
                                     }
                                     _ => {}
@@ -258,7 +257,8 @@ async fn main() -> anyhow::Result<()> {
                                             });
                                             note = None;
                                         }
-                                        view_state.command = CommandMode::Closed;
+                                        // Back to root, still in command mode.
+                                        view_state.command.escape();
                                     }
                                     (KeyCode::Backspace, _) => overlay.backspace(),
                                     (KeyCode::Delete, _) => overlay.delete(),
