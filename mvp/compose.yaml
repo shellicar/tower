@@ -18,43 +18,25 @@ services:
     volumes:
       - nats-data:/data
 
-  # One-shot: converge the capture stream to this file's declared config —
-  # create it if missing, edit it to match if it already exists. Event
-  # subjects only — never a `.requests` subject: a JetStream stream over a
-  # request subject answers the request with its own PubAck, beating the
-  # servicer's reply (nats-spec, Storage). Retention is deployment config,
-  # not contract.
-  # The broker image is distroless (no shell for a healthcheck), so this
-  # container — which has a shell — owns the wait: probe until the broker
-  # answers. Converging (not "exists -> exit 0") is the point: a plain
-  # `docker compose down && up` now actually reapplies a changed subjects
-  # list or retention policy, instead of silently doing nothing because the
-  # stream was already there. `storage` is the one field left off `edit` —
-  # JetStream cannot change a stream's backing storage after creation.
+  # One-shot: converge every capture stream (conv-approval / conv-diagnostic /
+  # conv-ephemeral) to mvp/crates/towerd/src/ingest.rs's declared subject
+  # split — create what's missing, migrate any subject sitting on the wrong
+  # stream (verified, no-loss), edit retention to match. Runs on every `up`;
+  # `down` never removes the data volume, so this script is the ONLY thing
+  # that ever needs to bring an existing broker's streams up to date — there
+  # is no separate migrate-*.sh to run by hand (mvp/stream-init.sh has the
+  # full reasoning). Event subjects only — never a `.requests` subject: a
+  # JetStream stream over a request subject answers the request with its own
+  # PubAck, beating the servicer's reply (nats-spec, Storage).
   stream-init:
     image: natsio/nats-box:latest
     depends_on:
       - nats
+    volumes:
+      - ./stream-init.sh:/stream-init.sh:ro
     entrypoint:
       - sh
-      - -c
-      - |
-        SUBJECTS='conv.v1.*.changes,conv.v1.*.deltas,conv.v1.*.telemetry,conv.v2.*.changes.>,conv.v2.*.deltas,conv.v2.*.telemetry.>,agent.v1.*.telemetry.>,approval.v1.*.lifecycle,approval.v1.*.telemetry'
-        for i in $$(seq 1 30); do
-          if nats --server nats://nats:4222 stream info conv-approval >/dev/null 2>&1; then
-            nats --server nats://nats:4222 stream edit conv-approval \
-              --subjects "$$SUBJECTS" \
-              --retention limits --max-age 30d --discard old -f \
-              && exit 0
-            exit 1
-          fi
-          nats --server nats://nats:4222 stream add conv-approval \
-            --subjects "$$SUBJECTS" \
-            --storage file --retention limits --max-age 30d --discard old --defaults \
-            && exit 0
-          echo "nats not ready, retrying ($$i)..."; sleep 1
-        done
-        echo 'gave up waiting for nats'; exit 1
+      - /stream-init.sh
 
 volumes:
   nats-data:
