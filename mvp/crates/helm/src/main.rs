@@ -58,10 +58,27 @@ fn spawn_input_thread() -> tokio::sync::mpsc::UnboundedReceiver<TermEvent> {
 async fn main() -> anyhow::Result<()> {
     let bridge_path = std::env::var("HELM_BRIDGE_PATH").unwrap_or_else(|_| "bridge".into());
     let nats_url = std::env::var("NATS_URL").ok();
-    let mut session = Session::spawn(&bridge_path, nats_url.as_deref()).await?;
-    let conv_id = session.spawn_conversation().await?;
 
-    if let Some(text) = std::env::args().nth(1) {
+    // Args: `--adopt <conv-id>` resumes an existing conversation (history
+    // replayed over the attach fd); a free argument is a one-shot say.
+    let mut adopt: Option<String> = None;
+    let mut one_shot: Option<String> = None;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--adopt" {
+            adopt = args.next();
+        } else {
+            one_shot = Some(arg);
+        }
+    }
+
+    let mut session = Session::spawn(&bridge_path, nats_url.as_deref()).await?;
+    let conv_id = match &adopt {
+        Some(conv) => session.adopt_conversation(conv).await?,
+        None => session.spawn_conversation().await?,
+    };
+
+    if let Some(text) = one_shot {
         session.say(&conv_id, &text, None).await?;
     }
 

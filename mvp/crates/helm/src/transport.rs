@@ -26,6 +26,11 @@ pub struct Session {
     control_out: tokio::process::ChildStdin,
     control_in: BufReader<tokio::process::ChildStdout>,
     attach: BufReader<tokio::net::UnixStream>,
+    /// Events drained while a control reply was awaited — an adopt replays
+    /// history onto the fd BEFORE its reply, and the pipe's buffer is finite,
+    /// so whoever awaits a reply must keep draining or deadlock bridge.
+    /// `next_event` serves these first.
+    buffered: std::collections::VecDeque<AttachEvent>,
     /// Every real request (say, cancel) still goes over NATS — the attach fd
     /// only ever carries events out, never requests in (conv.v2's own
     /// `.requests` subject is what a servicer subscribes to). helm dials NATS
@@ -84,19 +89,42 @@ impl Session {
             control_out,
             control_in,
             attach,
+            buffered: std::collections::VecDeque::new(),
             nats,
         })
     }
 
     /// Send one control line, read its one reply line — bridge's existing
-    /// stdio contract, untouched by helm's presence.
+    /// stdio contract, untouched by helm's presence. The attach fd keeps
+    /// draining while the reply is awaited: bridge may tee (an adopt's whole
+    /// replayed history) before it answers, and a full pipe with no reader
+    /// deadlocks both processes.
     pub async fn control(&mut self, line: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
         let mut bytes = serde_json::to_vec(line)?;
         bytes.push(b'\n');
         self.control_out.write_all(&bytes).await?;
         let mut reply = String::new();
-        self.control_in.read_line(&mut reply).await?;
-        Ok(serde_json::from_str(reply.trim_end())?)
+        // Both accumulators persist across select iterations: read_line is
+        // not cancellation-safe, but its partial progress lives in the String
+        // it appends to — keeping the Strings keeps the bytes.
+        let mut attach_line = String::new();
+        loop {
+            tokio::select! {
+                n = self.control_in.read_line(&mut reply) => {
+                    n?;
+                    return Ok(serde_json::from_str(reply.trim_end())?);
+                }
+                n = self.attach.read_line(&mut attach_line) => {
+                    if n? == 0 {
+                        anyhow::bail!("attach fd closed while awaiting a control reply");
+                    }
+                    if let Some(event) = parse_attach_line(&attach_line)? {
+                        self.buffered.push_back(event);
+                    }
+                    attach_line.clear();
+                }
+            }
+        }
     }
 
     /// The conversation this session's spawn control line minted.
@@ -105,6 +133,20 @@ impl Session {
         let id = reply["conversationId"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("spawn reply carried no conversationId: {reply}"))?;
+        Ok(wire::ConversationId(id.to_string()))
+    }
+
+    /// Adopt an existing conversation: bridge replays the record from the
+    /// capture stream, serves on from its tip, and — with this session's
+    /// attach fd present — tees the replayed frames to us, so the history
+    /// arrives through the same fold as live traffic. No client-side store.
+    pub async fn adopt_conversation(&mut self, conv: &str) -> anyhow::Result<wire::ConversationId> {
+        let reply = self
+            .control(&serde_json::json!({ "adopt": { "conversationId": conv } }))
+            .await?;
+        let id = reply["conversationId"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("adopt reply carried no conversationId: {reply}"))?;
         Ok(wire::ConversationId(id.to_string()))
     }
 
@@ -156,16 +198,26 @@ impl Session {
         Ok(wire::parse_answer_reply(&reply.payload))
     }
 
-    /// One event off the attach fd, or `None` once it closes (bridge exited).
+    /// One event off the attach fd — anything drained during a control
+    /// exchange first — or `None` once it closes (bridge exited).
     pub async fn next_event(&mut self) -> anyhow::Result<Option<AttachEvent>> {
+        if let Some(event) = self.buffered.pop_front() {
+            return Ok(Some(event));
+        }
         let mut line = String::new();
         let n = self.attach.read_line(&mut line).await?;
         if n == 0 {
             return Ok(None);
         }
-        let envelope: serde_json::Value = serde_json::from_str(line.trim_end())?;
-        let subject = envelope["subject"].as_str().unwrap_or_default().to_string();
-        let payload = serde_json::to_vec(&envelope["payload"])?;
-        Ok(Some(AttachEvent { subject, payload }))
+        parse_attach_line(&line)
     }
+}
+
+/// One framed envelope line → event; `Ok(None)` for a line that isn't one
+/// (tolerance: skipped, never fatal).
+fn parse_attach_line(line: &str) -> anyhow::Result<Option<AttachEvent>> {
+    let envelope: serde_json::Value = serde_json::from_str(line.trim_end())?;
+    let subject = envelope["subject"].as_str().unwrap_or_default().to_string();
+    let payload = serde_json::to_vec(&envelope["payload"])?;
+    Ok(Some(AttachEvent { subject, payload }))
 }

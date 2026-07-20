@@ -90,6 +90,7 @@ async fn replay_conversation(
     client: &async_nats::Client,
     stream_name: &str,
     conv: &str,
+    attach: &Option<bridge::attach::AttachHandle>,
 ) -> anyhow::Result<Vec<decisions::Message>> {
     let js = async_nats::jetstream::new(client.clone());
     let stream = js.get_stream(stream_name).await.map_err(|e| {
@@ -113,6 +114,11 @@ async fn replay_conversation(
     let mut batch = consumer.fetch().max_messages(pending).messages().await?;
     while let Some(msg) = batch.next().await {
         let msg = msg.map_err(|e| anyhow::anyhow!("replay read failed: {e}"))?;
+        // History reaches an attached client as the same envelopes the live
+        // tee sends — the record replayed, not a second history protocol.
+        // The client's fold rebuilds the conversation exactly as the
+        // servicer's own replay below does (last-write-wins per id).
+        bridge::attach::tee(attach, &msg.subject, &msg.payload).await;
         // Tolerance: frames that don't parse as a conv change are skipped
         // (the filter admits query/tip_moved too now; only message and
         // revision matter here).
@@ -300,7 +306,7 @@ impl Host {
             };
             let stream_name =
                 std::env::var("BRIDGE_STREAM").unwrap_or_else(|_| "conv-approval".into());
-            let messages = match replay_conversation(&self.client, &stream_name, &conv).await {
+            let messages = match replay_conversation(&self.client, &stream_name, &conv, &self.attach).await {
                 Ok(m) => m,
                 Err(e) => {
                     eprintln!("bridge: adopt failed for {conv}: {e:#}");

@@ -49,22 +49,12 @@ async fn main() -> anyhow::Result<()> {
     let stdout = child.stdout.take().expect("piped stdout");
     let mut stdout = BufReader::new(stdout);
 
-    stdin.write_all(b"{\"spawn\":{}}\n")?;
-    let mut reply = String::new();
-    stdout.read_line(&mut reply)?;
-    println!("attach_probe: spawn reply: {}", reply.trim_end());
-    let reply_value: serde_json::Value = serde_json::from_str(reply.trim_end())?;
-    let conv = reply_value["conversationId"]
-        .as_str()
-        .expect("conversationId in spawn reply")
-        .to_string();
-
+    // The attach reader starts BEFORE any control line: an adopt tees its
+    // whole replayed history before it replies, and a full pipe with no
+    // reader deadlocks both processes.
     parent_end.set_nonblocking(true)?;
     let attach = tokio::net::UnixStream::from_std(parent_end)?;
     let mut attach_reader = TokioBufReader::new(attach);
-
-    // Live before we publish, so the say's own early events can't race a
-    // reader that isn't listening yet.
     let read_task = tokio::spawn(async move {
         loop {
             let mut line = String::new();
@@ -82,22 +72,42 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
-    let client = async_nats::connect(&nats_url).await?;
-    let subject = format!("conv.v2.{conv}.requests.say");
-    let say = wire::SayCommand {
-        conv: wire::ConversationId(conv.clone()),
-        text: "hello from attach_probe".into(),
-        tip: None,
-        attachments: Vec::new(),
+    // With an argv conversation id: adopt it and watch the replayed history
+    // arrive over the attach fd (no say is sent). Without: spawn fresh.
+    let adopt_target = std::env::args().nth(1);
+    let control = match &adopt_target {
+        Some(conv) => format!("{{\"adopt\":{{\"conversationId\":\"{conv}\"}}}}\n"),
+        None => "{\"spawn\":{}}\n".to_string(),
     };
-    let payload = wire::encode_say(&say, &wire::now_iso());
-    println!("attach_probe: publishing say to {subject}");
-    let reply = client.request(subject, payload.into()).await?;
-    println!(
-        "attach_probe: say reply: {}",
-        String::from_utf8_lossy(&reply.payload)
-    );
+    stdin.write_all(control.as_bytes())?;
+    let mut reply = String::new();
+    stdout.read_line(&mut reply)?;
+    println!("attach_probe: control reply: {}", reply.trim_end());
+    let reply_value: serde_json::Value = serde_json::from_str(reply.trim_end())?;
+    let conv = reply_value["conversationId"]
+        .as_str()
+        .expect("conversationId in reply")
+        .to_string();
+
+    if adopt_target.is_none() {
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
+        let client = async_nats::connect(&nats_url).await?;
+        let subject = format!("conv.v2.{conv}.requests.say");
+        let say = wire::SayCommand {
+            conv: wire::ConversationId(conv.clone()),
+            text: "hello from attach_probe".into(),
+            tip: None,
+            attachments: Vec::new(),
+        };
+        let payload = wire::encode_say(&say, &wire::now_iso());
+        println!("attach_probe: publishing say to {subject}");
+        let reply = client.request(subject, payload.into()).await?;
+        println!(
+            "attach_probe: say reply: {}",
+            String::from_utf8_lossy(&reply.payload)
+        );
+    }
 
     tokio::time::sleep(Duration::from_secs(5)).await;
     read_task.abort();
