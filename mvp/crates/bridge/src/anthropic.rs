@@ -208,6 +208,7 @@ pub async fn stream_turn(
     messages: &[Value],
     tools: &[Value],
     thinking_budget: Option<i64>,
+    attach: &Option<bridge::attach::AttachHandle>,
 ) -> anyhow::Result<TurnDone> {
     // The system array always leads with the Agent SDK identity prefix;
     // subscription (OAuth) access requires it. The spawn's own system prompt
@@ -269,13 +270,16 @@ pub async fn stream_turn(
     }
 
     // v2's one deliberately flat subject: delta and block keep their body
-    // `type`; the leaf does not spell it here.
+    // `type`; the leaf does not spell it here. Deltas mirror onto the attach
+    // fd like every other publish — they're the whole point of a live TUI.
     let deltas_subject = format!("conv.v2.{}.deltas", conv.0);
     let publish = |payload: Value| {
         let client = client.clone();
         let subject = deltas_subject.clone();
+        let attach = attach.clone();
         async move {
             let bytes = serde_json::to_vec(&payload).expect("json! cannot fail");
+            bridge::attach::tee(&attach, &subject, &bytes).await;
             let _ = client.publish(subject, bytes.into()).await;
         }
     };

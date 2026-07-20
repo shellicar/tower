@@ -564,6 +564,7 @@ async fn run_query(
                 &history,
                 &tools,
                 *thinking_budget,
+                attach,
             ) => outcome,
             _ = cancelled(&mut cancel) => {
                 pubr.event(
