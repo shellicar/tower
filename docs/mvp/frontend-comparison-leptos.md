@@ -168,3 +168,46 @@ docker compose up -d                    # broker, if not already up (mvp/)
 cargo run -p towerd                     # from mvp/, TOWER_BIND defaults to 127.0.0.1:8081
 cd frontend-leptos && trunk serve       # http://127.0.0.1:8080, proxies /ws and /ref to towerd
 ```
+
+
+## Postscript: the fuller build (tabs, usage, tags, attachments, dismiss)
+
+Everything above was written against the narrow slice (rail, one conversation
+panel, approvals) that answers the plan's question 1 — does a DOM-based Rust
+renderer keep Axes 1 and 2 while fixing Axis 3. The plan's question 2 (is
+Leptos a real candidate to replace Svelte) needed the current Svelte feature
+set, and that has since landed here too: `concerns/usage.rs` and
+`src/pricing.rs` (per-conversation cost line), `concerns/view.rs` and
+`ui/tabs.rs` (multi-tab, server-owned layout), tag filtering/grouping in
+`concerns/rail.rs`/`ui/rail.rs`, and attachment dismiss. `trunk build` is
+clean and all 58 tests pass.
+
+No new axis-relevant finding came out of it — each addition is the same
+`apply(&mut self, &ServerMsg)` fold plus a render block, so it confirms the
+four verdicts above rather than changing any of them:
+
+- **Enforcement (Axis 1):** unchanged. `Usage`, `View`'s tab list, and the
+  rail's tag/filter state are more `RwSignal`s a closure could in principle
+  reach across concerns — module-boundary convention still does the actual
+  isolating, same as before.
+- **Shared wire types (Axis 2):** unchanged. `WsUsage` and `WsTab` came from
+  `ws-types` like everything else — still a non-finding.
+- **Render surface (Axis 3):** unchanged, and if anything reinforced. Tags
+  render as real coloured `<span>` chips and the facet-filter UI as ordinary
+  buttons/selects — nothing here would have been materially harder in egui,
+  but the DOM gives browser find/select/inspect over all of it for free,
+  same as the original finding.
+- **Survival under careless extension (Axis 4):** unchanged. The `view!`
+  clone-before-list trap recurred (`ui/rail.rs`'s grouped-sections rendering
+  clones `WsRow`s out of the signal before building views, same pattern as
+  the original build); the wasm-only native-check gap is unchanged — `usage.rs`,
+  `view.rs`, and the tag-filter logic in `rail.rs` are all plain structs that
+  test natively, but their render blocks in `ui/` are wasm-only, same split
+  as before.
+
+One thing worth naming precisely because it's easy to miss: `View`'s tabs are
+*more* complete here than Svelte's, not less — this build never had a
+localStorage-tabs predecessor to migrate off, so `concerns/view.rs` is
+simpler than `view.svelte.ts` (no `readLegacyLocalTabs`/migration path),
+while still landing on the same server-owned-tabs, locally-owned-`active`
+split the SC settled on 19 Jul.

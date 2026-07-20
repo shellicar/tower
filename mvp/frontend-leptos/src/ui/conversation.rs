@@ -4,8 +4,10 @@
 //! local UI state (the composer draft, attachment chips, the scroll anchor,
 //! the title editor) — a component's state, per the architecture doc, never
 //! a concern's. Tracks mvp/frontend's ConversationPanel.svelte feature for
-//! feature within this build's slice (say/cancel/attach, not usage/pricing
-//! or tabs — out of scope per docs/mvp/frontend-leptos-plan.md).
+//! feature, including usage/pricing and attachments — the slice grew past
+//! docs/mvp/frontend-leptos-plan.md's original frontend-rs-only scope once
+//! the plan's question 2 (full Svelte parity) was answered. Tabs live in
+//! `ui/tabs.rs` and the `view` concern instead.
 //!
 //! `conv` is held as a `StoredValue<String>` (Copy), not a plain `String`:
 //! this view has a dozen reactive closures that each need the conversation
