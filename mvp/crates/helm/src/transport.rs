@@ -47,7 +47,12 @@ impl Session {
         cmd.env("BRIDGE_ATTACH_FD", "3");
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::inherit());
+        // bridge's stderr must never reach helm's terminal — the alternate
+        // screen is helm's alone. The log survives in a file instead.
+        let log_path = std::env::var("HELM_BRIDGE_LOG")
+            .unwrap_or_else(|_| "/tmp/helm-bridge.log".into());
+        let log = std::fs::File::create(&log_path)?;
+        cmd.stderr(Stdio::from(log));
 
         // SAFETY: dup2 only, between fork and exec — see bridge::attach's
         // own doc for the same discipline.

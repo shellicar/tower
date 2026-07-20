@@ -55,3 +55,10 @@ base64 = "0.22"
 # yaml-serde) — skills frontmatter is YAML, and hand-parsing YAML is an
 # approximation that already bit once (block-scalar descriptions).
 yaml_serde = "0.10"
+# helm's terminal engine: ratatui owns the present/platform layers of
+# docs/planning/tui-architecture.md (cell diffing, resize, alt screen) so
+# helm only writes layout — the whole reason a Rust TUI is cheap to build.
+# crossterm is ratatui's platform backend, depended on directly for the
+# input events (raw keys) ratatui doesn't wrap.
+ratatui = "0.29"
+crossterm = "0.28"

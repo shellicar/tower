@@ -1,86 +1,113 @@
-//! helm: the standalone terminal client. Spawns its own bridge (or dials one
-//! given by path), sends the one spawn control line, then folds whatever
-//! arrives on the attach fd into the conversation document model. No
-//! layout/compose/present/platform yet (tui-architecture.md's render side) —
-//! this is transport + document model proven together, the seam the rest
-//! builds on.
+//! helm: the standalone terminal client. Spawns its own bridge, dials its
+//! attach fd, folds the event stream into the concerns (conversation, usage,
+//! approvals), and renders them through ratatui. Input is minimal for now:
+//! q quits, y/n answers the oldest live approval. The editor concern (typing
+//! a say) is the next slice; a one-shot say still rides argv.
 
 mod approvals;
 mod conversation;
 mod transport;
 mod usage;
+mod view;
 
 use approvals::Approvals;
 use conversation::Conversation;
+use crossterm::event::{Event as TermEvent, KeyCode, KeyEvent, KeyModifiers};
 use transport::Session;
 use usage::Usage;
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Blocking crossterm reads on a plain thread, forwarded into the async
+/// select loop. Killed implicitly at exit: the thread is a daemon by drop.
+fn spawn_input_thread() -> tokio::sync::mpsc::UnboundedReceiver<KeyEvent> {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    std::thread::spawn(move || {
+        loop {
+            match crossterm::event::read() {
+                Ok(TermEvent::Key(key)) => {
+                    if tx.send(key).is_err() {
+                        return;
+                    }
+                }
+                Ok(_) => {} // resize is handled by ratatui's next draw
+                Err(_) => return,
+            }
+        }
+    });
+    rx
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let bridge_path = std::env::var("HELM_BRIDGE_PATH").unwrap_or_else(|_| "bridge".into());
     let nats_url = std::env::var("NATS_URL").ok();
-    eprintln!("helm: spawning {bridge_path}");
     let mut session = Session::spawn(&bridge_path, nats_url.as_deref()).await?;
-
     let conv_id = session.spawn_conversation().await?;
-    println!("helm: conversation {}", conv_id.0);
 
-    // Not interactivity yet (no editor concern, no stdin loop) — an optional
-    // one-shot say, proving Session::say from real use before either exists.
     if let Some(text) = std::env::args().nth(1) {
-        let outcome = session.say(&conv_id, &text).await?;
-        println!("helm: say outcome {outcome:?}");
+        session.say(&conv_id, &text).await?;
     }
 
-    let auto_approve = std::env::var("HELM_AUTO_APPROVE").is_ok_and(|v| v == "1");
+    let mut terminal = ratatui::init(); // alt screen + raw mode, restored by ratatui::restore
+    let mut keys = spawn_input_thread();
+
     let mut conv = Conversation::default();
     let mut usage = Usage::default();
     let mut approvals = Approvals::default();
-    while let Some(event) = session.next_event().await? {
-        match wire::parse_wire(&event.subject, &event.payload) {
-            Some(wire::WireEvent::Conv(decoded)) => {
-                conv.fold(&decoded.kind);
-                usage.fold(&decoded.kind);
-            }
-            Some(wire::WireEvent::Approval(decoded)) => {
-                approvals.fold(&decoded.id.0, &decoded.kind);
-                // No editor yet, so nothing interactive can answer — surface
-                // the live asks loudly instead of leaving the agent silently
-                // blocked, and HELM_AUTO_APPROVE=1 answers them (the
-                // non-interactive proof of the whole answer loop).
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
-                let live: Vec<(String, serde_json::Value)> = approvals
-                    .live(now_ms)
-                    .into_iter()
-                    .map(|(id, ask)| (id.to_string(), ask.ask.clone()))
-                    .collect();
-                for (id, ask) in live {
-                    println!("helm: PENDING APPROVAL {id}: {ask}");
-                    if auto_approve {
-                        let outcome = session.answer(&id, true).await?;
-                        println!("helm: auto-approved {id}: {outcome:?}");
+
+    let result: anyhow::Result<()> = async {
+        loop {
+            terminal.draw(|frame| {
+                view::draw(frame, &conv_id.0, &conv, &usage, &approvals, now_ms());
+            })?;
+
+            tokio::select! {
+                event = session.next_event() => {
+                    let Some(event) = event? else {
+                        break; // attach fd closed: bridge is gone
+                    };
+                    match wire::parse_wire(&event.subject, &event.payload) {
+                        Some(wire::WireEvent::Conv(decoded)) => {
+                            conv.fold(&decoded.kind);
+                            usage.fold(&decoded.kind);
+                        }
+                        Some(wire::WireEvent::Approval(decoded)) => {
+                            approvals.fold(&decoded.id.0, &decoded.kind);
+                        }
+                        _ => {}
                     }
                 }
-                continue;
+                key = keys.recv() => {
+                    let Some(key) = key else { break };
+                    match (key.code, key.modifiers) {
+                        (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
+                        (KeyCode::Char(answer @ ('y' | 'n')), _) => {
+                            // The oldest live ask is the one a human is being
+                            // asked about; the settlement folds back via the
+                            // attach fd like any other event.
+                            let target = approvals
+                                .live(now_ms())
+                                .first()
+                                .map(|(id, _)| id.to_string());
+                            if let Some(id) = target {
+                                session.answer(&id, answer == 'y').await?;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
-            _ => continue, // not traffic this build models
         }
-        println!(
-            "helm: {} messages, query {:?}, streaming {:?}, {} in / {} out{}",
-            conv.messages.len(),
-            conv.query_state,
-            conv.streaming,
-            usage.input_tokens + usage.cache_creation_tokens + usage.cache_read_tokens,
-            usage.output_tokens,
-            usage
-                .cost_usd
-                .map(|c| format!(", ${c:.4}"))
-                .unwrap_or_default(),
-        );
+        Ok(())
     }
-    println!("helm: attach fd closed, exiting");
-    Ok(())
+    .await;
+
+    ratatui::restore();
+    result
 }
