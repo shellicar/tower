@@ -42,6 +42,11 @@ pub struct Conversation {
     pub query_state: QueryState,
     /// The query this attach has seen start, while live.
     pub live_query: Option<String>,
+    /// The say in flight: accepted but not committed — rendered greyed,
+    /// superseded by its committed message (tower's pendingSay pattern).
+    pub pending_say: Option<String>,
+    /// A revoked say handed back for the editor; the input loop consumes it.
+    pub restore_say: Option<String>,
 }
 
 impl Conversation {
@@ -68,6 +73,14 @@ impl Conversation {
     pub fn fold(&mut self, kind: &EventKind) {
         match kind {
             EventKind::Change(ConvChange::Message(m)) => {
+                // A committed human say supersedes the pending one. Matching
+                // on provenance, not just role: tool_results also commit as
+                // role user, but nobody sent them.
+                if m.role == "user"
+                    && m.from.as_ref().and_then(|f| f["kind"].as_str()) == Some("human")
+                {
+                    self.pending_say = None;
+                }
                 self.insert_message(m.clone());
                 self.streaming.clear(); // a committed message supersedes the stream
             }
@@ -81,6 +94,11 @@ impl Conversation {
                 self.streaming.clear();
                 if self.live_query.as_deref() == Some(q.query_id.0.as_str()) {
                     self.live_query = None;
+                }
+                // The query closed with the say still pending: it never
+                // committed (a cancel revoked it) — words go home, not away.
+                if let Some(text) = self.pending_say.take() {
+                    self.restore_say = Some(text);
                 }
             }
             EventKind::Change(ConvChange::TipMoved(_)) => {}
@@ -172,6 +190,37 @@ mod tests {
             from: None,
             content,
         }
+    }
+
+    #[test]
+    fn a_committed_human_say_supersedes_the_pending_one_but_a_tool_result_does_not() {
+        let mut conv = Conversation::default();
+        conv.pending_say = Some("hello".into());
+        // A tool_result commits as role user with agent provenance — the
+        // pending say must survive it.
+        let mut tool_result = message("m1", "2026-07-07T21:00:00+10:00", "user", vec![]);
+        tool_result.from = Some(serde_json::json!({ "kind": "agent" }));
+        conv.fold(&EventKind::Change(ConvChange::Message(tool_result)));
+        assert_eq!(conv.pending_say.as_deref(), Some("hello"));
+        // The human say's own commit clears it.
+        let mut say = message("m2", "2026-07-07T21:00:01+10:00", "user", vec![]);
+        say.from = Some(serde_json::json!({ "kind": "human" }));
+        conv.fold(&EventKind::Change(ConvChange::Message(say)));
+        assert_eq!(conv.pending_say, None);
+    }
+
+    #[test]
+    fn a_query_closing_with_the_say_still_pending_sends_it_home() {
+        let mut conv = Conversation::default();
+        conv.pending_say = Some("hello".into());
+        let closure = wire::Query {
+            ts: "2026-07-07T21:00:02+10:00".into(),
+            query_id: wire::QueryId("q1".into()),
+            reason: "cancelled".into(),
+        };
+        conv.fold(&EventKind::Change(ConvChange::Query(closure)));
+        assert_eq!(conv.pending_say, None);
+        assert_eq!(conv.restore_say.as_deref(), Some("hello"));
     }
 
     #[test]

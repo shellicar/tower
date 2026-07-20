@@ -17,7 +17,8 @@ use approvals::Approvals;
 use conversation::Conversation;
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, Event as TermEvent, KeyCode, KeyModifiers,
-    MouseButton, MouseEventKind,
+    KeyboardEnhancementFlags, MouseButton, MouseEventKind, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use editor::Editor;
 use transport::Session;
@@ -66,6 +67,13 @@ async fn main() -> anyhow::Result<()> {
 
     let mut terminal = ratatui::init(); // alt screen + raw mode, restored by ratatui::restore
     let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
+    // Kitty keyboard protocol, where the terminal supports it: without it,
+    // Cmd+Enter never reaches the app at all. Ctrl+Enter is the fallback
+    // everywhere else. Best-effort push, popped on exit.
+    let _ = crossterm::execute!(
+        std::io::stdout(),
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+    );
     let mut input = spawn_input_thread();
 
     let mut conv = Conversation::default();
@@ -102,6 +110,11 @@ async fn main() -> anyhow::Result<()> {
                         Some(wire::WireEvent::Conv(decoded)) => {
                             conv.fold(&decoded.kind);
                             usage.fold(&decoded.kind);
+                            // A revoked say comes home: words to the editor.
+                            if let Some(text) = conv.restore_say.take() {
+                                restore_to(&mut editor, &text);
+                                note = Some("say revoked — returned to the editor".into());
+                            }
                         }
                         Some(wire::WireEvent::Approval(decoded)) => {
                             approvals.fold(&decoded.id.0, &decoded.kind);
@@ -123,23 +136,31 @@ async fn main() -> anyhow::Result<()> {
                                     session.answer(&id, answer == 'y').await?;
                                 }
                             }
-                            (KeyCode::Enter, KeyModifiers::ALT) => editor.newline(),
-                            (KeyCode::Enter, _) => {
+                            (KeyCode::Enter, m)
+                                if m.contains(KeyModifiers::SUPER)
+                                    || m.contains(KeyModifiers::CONTROL) =>
+                            {
                                 if !editor.is_empty() {
                                     let text = editor.take();
                                     let tip = conv.messages.last().map(|m| m.id.clone());
-                                    note = match session.say(&conv_id, &text, tip).await? {
-                                        wire::SayOutcome::Accepted { .. } => None,
+                                    match session.say(&conv_id, &text, tip).await? {
+                                        wire::SayOutcome::Accepted { .. } => {
+                                            note = None;
+                                            conv.pending_say = Some(text);
+                                        }
                                         wire::SayOutcome::Rejected { reason } => {
-                                            Some(format!("say rejected: {reason}"))
+                                            note = Some(format!("say rejected: {reason}"));
+                                            restore_to(&mut editor, &text);
                                         }
                                         wire::SayOutcome::Unreachable => {
-                                            Some("say unreachable".into())
+                                            note = Some("say unreachable".into());
+                                            restore_to(&mut editor, &text);
                                         }
-                                    };
+                                    }
                                     view_state.scroll_from_bottom = 0; // a say re-pins to the tail
                                 }
                             }
+                            (KeyCode::Enter, _) => editor.newline(),
                             (KeyCode::Esc, _) => {
                                 // Scrolled: re-pin. Pinned with a live query: cancel it.
                                 if view_state.scroll_from_bottom > 0 {
@@ -203,7 +224,16 @@ async fn main() -> anyhow::Result<()> {
     }
     .await;
 
+    let _ = crossterm::execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
     let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     result
+}
+
+/// Put a say's text back into the editor — the one path for every failure
+/// shape (rejection, unreachable, revoked closure).
+fn restore_to(editor: &mut Editor, text: &str) {
+    for c in text.chars() {
+        editor.insert(c);
+    }
 }

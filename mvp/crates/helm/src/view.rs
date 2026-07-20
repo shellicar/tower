@@ -158,6 +158,19 @@ fn lay(conv: &Conversation, approvals: &Approvals, view: &ViewState, width: usiz
             hit: None,
         });
     }
+    // The say in flight: accepted, not yet committed — greyed until its
+    // committed message supersedes it (or a revoke sends it home).
+    if let Some(pending) = &conv.pending_say {
+        rows.push(Row {
+            line: role_line("user"),
+            hit: None,
+        });
+        wrap_into(&mut rows, pending, width, Some(dim()), None);
+        rows.push(Row {
+            line: Line::raw(""),
+            hit: None,
+        });
+    }
     for segment in &conv.streaming {
         if segment.text.is_empty() {
             continue;
@@ -286,7 +299,7 @@ pub fn draw(
         ));
     }
     status_spans.push(Span::raw(
-        " · enter says · esc cancels · ^y/^n approvals · ^c quits",
+        " · ⌘↵/^↵ says · ↵ breaks · esc cancels · ^y/^n approvals · ^c quits",
     ));
     frame.render_widget(Paragraph::new(Line::from(status_spans)), status);
 
