@@ -1,9 +1,19 @@
 //! concerns/conversation — the open conversations' owned store (docs/mvp/
-//! frontend-architecture.md), ported verbatim from frontend-rs's
-//! conversation.rs: the fold logic is render-framework-agnostic. It owns a
-//! keyed map of open conversations and their content, folds its OWN slices of
-//! the wire (its convs' messages, streaming, query closures), and drives
-//! say/cancel.
+//! frontend-architecture.md). Owns a keyed map of open conversations and
+//! their content, folds its OWN slices of the wire (its convs' messages,
+//! streaming, query closures), and drives say/cancel.
+//!
+//! Each open conversation gets its OWN `RwSignal<ConversationState>` rather
+//! than one signal for the whole map: Leptos's reactivity is per-signal, so
+//! a delta arriving for conversation A must only invalidate renders that
+//! read A's state, never B's. With one shared signal, opening several
+//! panels while any one of them streams re-rendered every open panel on
+//! every chunk — measured live as CPU scaling with panel count, not message
+//! rate. `Conversations` itself is NOT behind a Leptos signal (app.rs holds
+//! it as a `StoredValue`, like `ids`/`transport`): which conversations exist
+//! is already reactive through `view.tab().convs`; this struct is just the
+//! lookup table plus the outstanding-request ledger, neither of which
+//! anything renders directly.
 //!
 //! Correlation is local, the fan-out way: an outbound say/cancel mints a
 //! request id, the concern records it, and the matching
@@ -11,11 +21,11 @@
 //! promise, no await; the result arrives through the same fan-out as every
 //! other frame. Action methods return the `ClientMsg` to send; the app (which
 //! owns the transport and the id mint) sends it. So this concern touches no
-//! socket and, like every concern, its `apply(&mut self, &ServerMsg)` borrows
-//! only itself.
+//! socket.
 
 use std::collections::HashMap;
 
+use leptos::prelude::{Dispose, RwSignal, Update, With};
 use serde_json::Value;
 use ws_types::{ClientMsg, ServerMsg, WsMessage};
 
@@ -121,14 +131,15 @@ enum Pending {
 
 #[derive(Default)]
 pub struct Conversations {
-    open: HashMap<String, ConversationState>,
+    open: HashMap<String, RwSignal<ConversationState>>,
     pending: HashMap<String, Pending>,
 }
 
 impl Conversations {
-    /// The state a panel renders, or None if not open.
-    pub fn get(&self, conv: &str) -> Option<&ConversationState> {
-        self.open.get(conv)
+    /// The signal a panel reads/renders from, or None if not open. A `Copy`
+    /// handle, not a borrow — cheap to fetch once per panel and hold.
+    pub fn get(&self, conv: &str) -> Option<RwSignal<ConversationState>> {
+        self.open.get(conv).copied()
     }
 
     // ---- open-set: the app (composition root) mints the id and sends ----
@@ -138,7 +149,7 @@ impl Conversations {
             return None;
         }
         self.open
-            .insert(conv.to_owned(), ConversationState::fresh());
+            .insert(conv.to_owned(), RwSignal::new(ConversationState::fresh()));
         Some(ClientMsg::Open {
             id,
             conv: conv.to_owned(),
@@ -147,7 +158,8 @@ impl Conversations {
     }
 
     pub fn close(&mut self, conv: &str, id: String) -> Option<ClientMsg> {
-        self.open.remove(conv)?;
+        let oc = self.open.remove(conv)?;
+        oc.dispose();
         Some(ClientMsg::Close {
             id,
             conv: conv.to_owned(),
@@ -157,15 +169,19 @@ impl Conversations {
     // ---- speaking: id-correlated, optimism reconciled by the wire ----
 
     pub fn say(&mut self, conv: &str, text: String, id: String) -> Option<ClientMsg> {
-        let oc = self.open.get_mut(conv)?;
-        // The premise is the sender's view of the tip; None claims empty.
-        let tip = oc.messages.last().map(|m| m.id.clone());
-        // Optimistic: greyed pending say.
-        oc.last_say = None;
-        oc.pending_say = Some(text.clone());
-        // The accumulated uploads ride this say and stay pending until the
-        // committed message supersedes them (or a failure hands them back).
-        let attachments = oc.pending_attachments.clone();
+        let oc = self.get(conv)?;
+        let mut tip = None;
+        let mut attachments = Vec::new();
+        oc.update(|s| {
+            // The premise is the sender's view of the tip; None claims empty.
+            tip = s.messages.last().map(|m| m.id.clone());
+            // Optimistic: greyed pending say.
+            s.last_say = None;
+            s.pending_say = Some(text.clone());
+            // The accumulated uploads ride this say and stay pending until the
+            // committed message supersedes them (or a failure hands them back).
+            attachments = s.pending_attachments.clone();
+        });
         self.pending.insert(
             id.clone(),
             Pending::Say {
@@ -186,19 +202,8 @@ impl Conversations {
     /// completes, arriving over a channel: the async boundary is handled by
     /// communicating, not by a shared mutable write across an await.
     pub fn attach(&mut self, conv: &str, refs: Vec<Value>) {
-        if let Some(oc) = self.open.get_mut(conv) {
-            oc.pending_attachments.extend(refs);
-        }
-    }
-
-    /// Drop one queued attachment before it rides a say — the chip's ×
-    /// (mvp/frontend's `removeAttachment`). Silently a no-op past the end;
-    /// the chip that fired this is already gone from a re-render by then.
-    pub fn remove_pending_attachment(&mut self, conv: &str, index: usize) {
-        if let Some(oc) = self.open.get_mut(conv)
-            && index < oc.pending_attachments.len()
-        {
-            oc.pending_attachments.remove(index);
+        if let Some(oc) = self.get(conv) {
+            oc.update(|s| s.pending_attachments.extend(refs));
         }
     }
 
@@ -206,7 +211,11 @@ impl Conversations {
     /// concern's tab switch, ported from mvp/frontend's `Conversations.setOpen`.
     /// Opens what's missing, closes what's no longer wanted; `next_id` mints
     /// one id per message, same as every other action here.
-    pub fn set_open(&mut self, wanted: &[String], next_id: &mut impl FnMut() -> String) -> Vec<ClientMsg> {
+    pub fn set_open(
+        &mut self,
+        wanted: &[String],
+        next_id: &mut impl FnMut() -> String,
+    ) -> Vec<ClientMsg> {
         let mut out = Vec::new();
         let currently: Vec<String> = self.open.keys().cloned().collect();
         for conv in &currently {
@@ -225,8 +234,8 @@ impl Conversations {
     }
 
     pub fn cancel(&mut self, conv: &str, id: String) -> Option<ClientMsg> {
-        let oc = self.open.get(conv)?;
-        let query = oc.live_query.clone()?;
+        let oc = self.get(conv)?;
+        let query = oc.with(|s| s.live_query.clone())?;
         self.pending.insert(
             id.clone(),
             Pending::Cancel {
@@ -243,45 +252,53 @@ impl Conversations {
     pub fn apply(&mut self, event: &ServerMsg) {
         match event {
             ServerMsg::Conversation { conv, messages, .. } => {
-                if let Some(oc) = self.open.get_mut(conv) {
-                    for m in messages {
-                        insert_message(&mut oc.messages, m.clone());
-                    }
-                    oc.loaded = true;
+                if let Some(oc) = self.get(conv) {
+                    oc.update(|s| {
+                        for m in messages {
+                            insert_message(&mut s.messages, m.clone());
+                        }
+                        s.loaded = true;
+                    });
                 }
             }
             ServerMsg::Message { conv, message } => {
-                if let Some(oc) = self.open.get_mut(conv) {
-                    let supersedes_pending = oc.pending_say.is_some()
-                        && message.role == "user"
-                        && oc.live_query.as_deref() == Some(message.query.as_str());
-                    insert_message(&mut oc.messages, message.clone());
-                    oc.streaming.clear(); // a committed message supersedes the stream
-                    if supersedes_pending {
-                        oc.pending_say = None;
-                        oc.pending_attachments.clear();
-                    }
+                if let Some(oc) = self.get(conv) {
+                    oc.update(|s| {
+                        let supersedes_pending = s.pending_say.is_some()
+                            && message.role == "user"
+                            && s.live_query.as_deref() == Some(message.query.as_str());
+                        insert_message(&mut s.messages, message.clone());
+                        s.streaming.clear(); // a committed message supersedes the stream
+                        if supersedes_pending {
+                            s.pending_say = None;
+                            s.pending_attachments.clear();
+                        }
+                    });
                 }
             }
             ServerMsg::Streaming { conv, text } => {
-                if let Some(oc) = self.open.get_mut(conv) {
-                    // Evidence a query is live (maybe not ours). Append to the
-                    // current segment, or start a text one.
-                    match oc.streaming.last_mut() {
-                        Some(seg) => seg.text.push_str(text),
-                        None => oc.streaming.push(StreamSegment {
-                            block_type: "text".to_owned(),
-                            text: text.clone(),
-                        }),
-                    }
-                    oc.query_state = QueryState::Live;
+                if let Some(oc) = self.get(conv) {
+                    oc.update(|s| {
+                        // Evidence a query is live (maybe not ours). Append to the
+                        // current segment, or start a text one.
+                        match s.streaming.last_mut() {
+                            Some(seg) => seg.text.push_str(text),
+                            None => s.streaming.push(StreamSegment {
+                                block_type: "text".to_owned(),
+                                text: text.clone(),
+                            }),
+                        }
+                        s.query_state = QueryState::Live;
+                    });
                 }
             }
             ServerMsg::StreamBlock { conv, block_type } => {
-                if let Some(oc) = self.open.get_mut(conv) {
-                    oc.streaming.push(StreamSegment {
-                        block_type: block_type.clone(),
-                        text: String::new(),
+                if let Some(oc) = self.get(conv) {
+                    oc.update(|s| {
+                        s.streaming.push(StreamSegment {
+                            block_type: block_type.clone(),
+                            text: String::new(),
+                        });
                     });
                 }
             }
@@ -290,16 +307,18 @@ impl Conversations {
                 query_id,
                 reason,
             } => {
-                if let Some(oc) = self.open.get_mut(conv) {
-                    oc.query_state = QueryState::Idle;
-                    oc.streaming.clear();
-                    if oc.live_query.as_deref() == Some(query_id.as_str()) {
-                        oc.live_query = None;
-                    }
-                    if reason != "completed" {
-                        oc.last_say = Some(format!("query {reason}"));
-                    }
-                    oc.restore_pending();
+                if let Some(oc) = self.get(conv) {
+                    oc.update(|s| {
+                        s.query_state = QueryState::Idle;
+                        s.streaming.clear();
+                        if s.live_query.as_deref() == Some(query_id.as_str()) {
+                            s.live_query = None;
+                        }
+                        if reason != "completed" {
+                            s.last_say = Some(format!("query {reason}"));
+                        }
+                        s.restore_pending();
+                    });
                 }
             }
             ServerMsg::SayResult {
@@ -309,26 +328,26 @@ impl Conversations {
                 reason,
             } => {
                 if let Some(Pending::Say { conv }) = self.pending.remove(id)
-                    && let Some(oc) = self.open.get_mut(&conv)
+                    && let Some(oc) = self.get(&conv)
                 {
-                    match outcome.as_str() {
+                    oc.update(|s| match outcome.as_str() {
                         "accepted" => {
-                            oc.last_say = None;
-                            oc.live_query = query.clone();
-                            oc.query_state = QueryState::Live;
+                            s.last_say = None;
+                            s.live_query = query.clone();
+                            s.query_state = QueryState::Live;
                         }
                         "rejected" => {
-                            oc.last_say =
+                            s.last_say =
                                 Some(format!("rejected: {}", reason.as_deref().unwrap_or("")));
-                            oc.restore_pending();
+                            s.restore_pending();
                         }
                         _ => {
-                            oc.last_say = Some(
+                            s.last_say = Some(
                                 "unreachable — nothing is serving this conversation".to_owned(),
                             );
-                            oc.restore_pending();
+                            s.restore_pending();
                         }
-                    }
+                    });
                 }
             }
             ServerMsg::CancelResult {
@@ -337,38 +356,30 @@ impl Conversations {
                 reason,
             } => {
                 if let Some(Pending::Cancel { conv }) = self.pending.remove(id)
-                    && let Some(oc) = self.open.get_mut(&conv)
+                    && let Some(oc) = self.get(&conv)
                 {
-                    match outcome.as_str() {
+                    oc.update(|s| match outcome.as_str() {
                         "rejected" => {
-                            oc.last_say = Some(format!(
+                            s.last_say = Some(format!(
                                 "cancel rejected: {}",
                                 reason.as_deref().unwrap_or("")
                             ));
                         }
                         "unreachable" => {
                             // No closure will arrive, so free the input.
-                            oc.last_say = Some(
+                            s.last_say = Some(
                                 "cancel unreachable — nothing is serving this conversation"
                                     .to_owned(),
                             );
-                            oc.live_query = None;
-                            oc.query_state = QueryState::Unknown;
-                            oc.restore_pending();
+                            s.live_query = None;
+                            s.query_state = QueryState::Unknown;
+                            s.restore_pending();
                         }
                         _ => {}
-                    }
+                    });
                 }
             }
             _ => {} // not this concern's
-        }
-    }
-
-    /// The panel consumed the revoked say and its attachments.
-    pub fn consume_restore(&mut self, conv: &str) {
-        if let Some(oc) = self.open.get_mut(conv) {
-            oc.restore_say = None;
-            oc.restore_attachments.clear();
         }
     }
 }
@@ -422,20 +433,21 @@ mod tests {
             reason: None,
         });
         let oc = c.get("a").unwrap();
-        assert!(oc.live_query.is_some());
+        assert!(oc.with(|s| s.live_query.is_some()));
         // Real content would normally be sendable, but our own live query
         // always wins — a say against it is a guaranteed `stale` (scenario
         // 5 in decisions.rs), so it must not look sendable here either.
-        assert!(!oc.can_send(false, false, false));
-        assert!(!oc.can_send(true, true, false));
+        assert!(!oc.with(|s| s.can_send(false, false, false)));
+        assert!(!oc.with(|s| s.can_send(true, true, false)));
     }
 
     #[test]
     fn uploading_always_blocks_even_with_content() {
         let mut c = Conversations::default();
         open(&mut c, "a");
-        assert!(!c.get("a").unwrap().can_send(false, false, true));
-        assert!(!c.get("a").unwrap().can_send(true, true, true));
+        let oc = c.get("a").unwrap();
+        assert!(!oc.with(|s| s.can_send(false, false, true)));
+        assert!(!oc.with(|s| s.can_send(true, true, true)));
     }
 
     #[test]
@@ -443,8 +455,8 @@ mod tests {
         let mut c = Conversations::default();
         open(&mut c, "a");
         let oc = c.get("a").unwrap();
-        assert!(oc.can_send(false, false, false)); // text
-        assert!(oc.can_send(true, true, false)); // attachment alone
+        assert!(oc.with(|s| s.can_send(false, false, false))); // text
+        assert!(oc.with(|s| s.can_send(true, true, false))); // attachment alone
     }
 
     #[test]
@@ -452,21 +464,21 @@ mod tests {
         let mut c = Conversations::default();
         open(&mut c, "a");
         // No messages yet: nothing to resume.
-        assert!(!c.get("a").unwrap().can_send(true, false, false));
+        assert!(!c.get("a").unwrap().with(|s| s.can_send(true, false, false)));
 
         c.apply(&ServerMsg::Message {
             conv: "a".into(),
             message: msg("m1", "q1", "assistant", 1),
         });
         // Tip is assistant: already answered, nothing to resume.
-        assert!(!c.get("a").unwrap().can_send(true, false, false));
+        assert!(!c.get("a").unwrap().with(|s| s.can_send(true, false, false)));
 
         c.apply(&ServerMsg::Message {
             conv: "a".into(),
             message: msg("m2", "q1", "user", 2), // stands in for a tool_result
         });
         // Tip is a dangling user-role message: an empty send resumes it.
-        assert!(c.get("a").unwrap().can_send(true, false, false));
+        assert!(c.get("a").unwrap().with(|s| s.can_send(true, false, false)));
     }
 
     #[test]
@@ -482,7 +494,7 @@ mod tests {
             conv: "a".into(),
             message: msg("m1", "q1", "assistant", 1),
         });
-        assert_eq!(c.get("a").unwrap().messages.len(), 1);
+        assert_eq!(c.get("a").unwrap().with(|s| s.messages.len()), 1);
     }
 
     #[test]
@@ -499,13 +511,10 @@ mod tests {
                 message: m,
             });
         }
-        let ids: Vec<&str> = c
+        let ids: Vec<String> = c
             .get("a")
             .unwrap()
-            .messages
-            .iter()
-            .map(|m| m.id.as_str())
-            .collect();
+            .with(|s| s.messages.iter().map(|m| m.id.clone()).collect());
         assert_eq!(ids, ["m1", "m2"]);
     }
 
@@ -515,7 +524,10 @@ mod tests {
         open(&mut c, "a");
         let out = c.say("a", "hello".into(), "req1".into()).unwrap();
         assert!(matches!(out, ClientMsg::Say { .. }));
-        assert_eq!(c.get("a").unwrap().pending_say.as_deref(), Some("hello"));
+        assert_eq!(
+            c.get("a").unwrap().with(|s| s.pending_say.clone()),
+            Some("hello".to_owned())
+        );
         c.apply(&ServerMsg::SayResult {
             id: "req1".into(),
             outcome: "accepted".into(),
@@ -523,8 +535,10 @@ mod tests {
             reason: None,
         });
         let oc = c.get("a").unwrap();
-        assert_eq!(oc.query_state, QueryState::Live);
-        assert_eq!(oc.live_query.as_deref(), Some("q9"));
+        oc.with(|s| {
+            assert_eq!(s.query_state, QueryState::Live);
+            assert_eq!(s.live_query.as_deref(), Some("q9"));
+        });
     }
 
     #[test]
@@ -539,9 +553,11 @@ mod tests {
             reason: Some("stale".into()),
         });
         let oc = c.get("a").unwrap();
-        assert_eq!(oc.pending_say, None);
-        assert_eq!(oc.restore_say.as_deref(), Some("hello"));
-        assert_eq!(oc.last_say.as_deref(), Some("rejected: stale"));
+        oc.with(|s| {
+            assert_eq!(s.pending_say, None);
+            assert_eq!(s.restore_say.as_deref(), Some("hello"));
+            assert_eq!(s.last_say.as_deref(), Some("rejected: stale"));
+        });
     }
 
     #[test]
@@ -559,7 +575,7 @@ mod tests {
             conv: "a".into(),
             message: msg("m1", "q9", "user", 5),
         });
-        assert_eq!(c.get("a").unwrap().pending_say, None);
+        assert_eq!(c.get("a").unwrap().with(|s| s.pending_say.clone()), None);
     }
 
     #[test]
@@ -575,7 +591,10 @@ mod tests {
             ClientMsg::Say { attachments, .. } => assert_eq!(attachments.len(), 1),
             _ => panic!("expected a say"),
         }
-        assert_eq!(c.get("a").unwrap().pending_attachments.len(), 1); // still pending
+        assert_eq!(
+            c.get("a").unwrap().with(|s| s.pending_attachments.len()),
+            1
+        ); // still pending
         c.apply(&ServerMsg::SayResult {
             id: "req1".into(),
             outcome: "accepted".into(),
@@ -586,7 +605,11 @@ mod tests {
             conv: "a".into(),
             message: msg("m1", "q9", "user", 5),
         });
-        assert!(c.get("a").unwrap().pending_attachments.is_empty()); // committed clears
+        assert!(
+            c.get("a")
+                .unwrap()
+                .with(|s| s.pending_attachments.is_empty())
+        ); // committed clears
     }
 
     #[test]
@@ -597,10 +620,16 @@ mod tests {
             "a",
             vec![json!({ "type": "image" }), json!({ "type": "document" })],
         );
-        c.remove_pending_attachment("a", 0);
-        let remaining = &c.get("a").unwrap().pending_attachments;
-        assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0]["type"], "document");
+        let oc = c.get("a").unwrap();
+        oc.update(|s| {
+            if 0 < s.pending_attachments.len() {
+                s.pending_attachments.remove(0);
+            }
+        });
+        oc.with(|s| {
+            assert_eq!(s.pending_attachments.len(), 1);
+            assert_eq!(s.pending_attachments[0]["type"], "document");
+        });
     }
 
     #[test]
@@ -615,13 +644,16 @@ mod tests {
             conv: "a".into(),
             text: "lo".into(),
         });
-        assert_eq!(c.get("a").unwrap().streaming[0].text, "hello");
-        assert_eq!(c.get("a").unwrap().query_state, QueryState::Live);
+        let oc = c.get("a").unwrap();
+        oc.with(|s| {
+            assert_eq!(s.streaming[0].text, "hello");
+            assert_eq!(s.query_state, QueryState::Live);
+        });
         c.apply(&ServerMsg::Message {
             conv: "a".into(),
             message: msg("m1", "q", "assistant", 1),
         });
-        assert!(c.get("a").unwrap().streaming.is_empty());
+        assert!(c.get("a").unwrap().with(|s| s.streaming.is_empty()));
     }
 
     #[test]
@@ -661,8 +693,10 @@ mod tests {
             reason: "cancelled".into(),
         });
         let oc = c.get("a").unwrap();
-        assert_eq!(oc.query_state, QueryState::Idle);
-        assert_eq!(oc.live_query, None);
-        assert_eq!(oc.last_say.as_deref(), Some("query cancelled"));
+        oc.with(|s| {
+            assert_eq!(s.query_state, QueryState::Idle);
+            assert_eq!(s.live_query, None);
+            assert_eq!(s.last_say.as_deref(), Some("query cancelled"));
+        });
     }
 }
