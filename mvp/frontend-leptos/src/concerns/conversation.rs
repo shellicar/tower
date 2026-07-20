@@ -132,6 +132,16 @@ enum Pending {
 #[derive(Default)]
 pub struct Conversations {
     open: HashMap<String, RwSignal<ConversationState>>,
+    /// Which convs we've actually asked the server to open — separate from
+    /// `open`'s keys on purpose. `get_or_create` populates `open` purely so a
+    /// render has a signal to bind to, lazily and with no wire side effect;
+    /// if `open()` reused `open`'s own keys to decide whether to send
+    /// `ClientMsg::Open`, a render racing ahead of the click handler that
+    /// calls `open()` could find the slot already filled and skip sending it
+    /// — observed live as a panel that exists and folds gated broadcasts
+    /// (usage, message timestamps) fine, yet never gets the catch-up history
+    /// because nothing ever told towerd this session was open on it.
+    requested: std::collections::HashSet<String>,
     pending: HashMap<String, Pending>,
 }
 
@@ -163,11 +173,10 @@ impl Conversations {
     // ---- open-set: the app (composition root) mints the id and sends ----
 
     pub fn open(&mut self, conv: &str, id: String) -> Option<ClientMsg> {
-        if self.open.contains_key(conv) {
-            return None;
+        if !self.requested.insert(conv.to_owned()) {
+            return None; // already asked — idempotent
         }
-        self.open
-            .insert(conv.to_owned(), RwSignal::new(ConversationState::fresh()));
+        self.get_or_create(conv);
         Some(ClientMsg::Open {
             id,
             conv: conv.to_owned(),
@@ -183,7 +192,10 @@ impl Conversations {
     /// (page reload, or a future real disposal point once the ordering is
     /// provably safe) reclaim it is the safer default for now.
     pub fn close(&mut self, conv: &str, id: String) -> Option<ClientMsg> {
-        self.open.remove(conv)?;
+        if !self.requested.remove(conv) {
+            return None; // wasn't open
+        }
+        self.open.remove(conv);
         Some(ClientMsg::Close {
             id,
             conv: conv.to_owned(),
