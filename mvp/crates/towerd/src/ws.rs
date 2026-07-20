@@ -16,7 +16,7 @@ use crate::broker::{Broker, Clock};
 use crate::gateway;
 use crate::views::{
     AgentAttachmentState, AgentFact, AgentInstanceState, ApprovalState, ConversationMessage,
-    RowState, UsageState, ViewEvent, ViewQuery, ViewsHandle,
+    RowState, UnreadState, UsageState, ViewEvent, ViewQuery, ViewsHandle,
 };
 
 // ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@ use crate::views::{
 // the mirror. The From impls below adapt towerd's internal view types into it.
 use ws_types::{
     ClientMsg, ServerMsg, WsAgent, WsAgentAttachment, WsAgentInstance, WsApproval, WsMessage,
-    WsRow, WsSettled, WsTab, WsUsage,
+    WsRow, WsSettled, WsTab, WsUnread, WsUsage,
 };
 
 impl From<ApprovalState> for WsApproval {
@@ -144,6 +144,16 @@ impl From<UsageState> for WsUsage {
     }
 }
 
+impl From<UnreadState> for WsUnread {
+    fn from(u: UnreadState) -> Self {
+        WsUnread {
+            conv: u.conv.0,
+            read_id: u.read_id,
+            stale: u.stale,
+        }
+    }
+}
+
 impl From<RowState> for WsRow {
     fn from(r: RowState) -> Self {
         WsRow {
@@ -251,6 +261,9 @@ impl Session {
                 instance_id: instance.0,
                 conv: conv.0,
             }),
+            // Unread is awareness too, like row/approval: every connected
+            // session sees the badge appear or clear, not just whoever's open.
+            ViewEvent::Unread(state) => Some(ServerMsg::StaleConversation(state.into())),
             _ => None,
         }
     }
@@ -302,6 +315,14 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
     match msg {
         ClientMsg::Open { id, conv, after } => {
             session.open(&conv);
+            // "I have this open, therefore I saw it" — acks whatever unread
+            // episode is current for the conv, if any (a no-op otherwise).
+            let _ = views
+                .queries
+                .send(ViewQuery::AckUnread {
+                    conv: ConversationId(conv.clone()),
+                })
+                .await;
             let (tx, rx) = oneshot::channel();
             let query = ViewQuery::Conversation {
                 conv: ConversationId(conv.clone()),
@@ -644,11 +665,45 @@ pub async fn run_session<B: Broker, C: Clock>(
         return;
     }
 
+    // The stale-conversations snapshot, once, right after `layout` — so a
+    // client connecting after the fact sees the badge without waiting for a
+    // live transition.
+    let (tx, rx) = oneshot::channel();
+    if views
+        .queries
+        .send(ViewQuery::StaleConversations { reply: tx })
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let Ok(stale) = rx.await else { return };
+    let snapshot = ServerMsg::StaleConversations {
+        conversations: stale.into_iter().map(Into::into).collect(),
+    };
+    if send(&mut sink, &snapshot).await.is_err() {
+        return;
+    }
+
     loop {
         tokio::select! {
             event = events.recv() => {
                 match event {
                     Ok(event) => {
+                        // An assistant turn landing in a conversation this
+                        // session currently has open is itself a sighting —
+                        // "I have this open, therefore I saw it" — auto-ack
+                        // before forwarding, same trigger as opening into an
+                        // already-unread conversation above.
+                        if let ViewEvent::Message { conv, message } = &event
+                            && message.role == "assistant"
+                            && session.watching.contains(conv)
+                        {
+                            let _ = views
+                                .queries
+                                .send(ViewQuery::AckUnread { conv: conv.clone() })
+                                .await;
+                        }
                         if let Some(frame) = session.on_view_event(event)
                             && send(&mut sink, &frame).await.is_err()
                         {

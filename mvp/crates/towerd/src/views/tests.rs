@@ -1,3 +1,5 @@
+use rusqlite::OptionalExtension;
+
 use super::*;
 use wire::{ApprovalId, ConversationId, InstanceId, WorldId, parse_ts, parse_wire};
 
@@ -5,7 +7,18 @@ fn fresh() -> (Views, tokio::sync::broadcast::Receiver<ViewEvent>) {
     let db = rusqlite::Connection::open_in_memory().unwrap();
     apply_schema(&db).unwrap();
     let (tx, rx) = tokio::sync::broadcast::channel(64);
-    (Views::new(db, tx), rx)
+    let (queries_tx, _queries_rx) = tokio::sync::mpsc::channel(64);
+    let runtime =
+        tokio::runtime::Handle::try_current().unwrap_or_else(|_| RT.with(|rt| rt.handle().clone()));
+    (Views::new(db, tx, queries_tx, runtime), rx)
+}
+
+thread_local! {
+    /// Tests run under `#[test]` (no tokio runtime) rather than
+    /// `#[tokio::test]`, since almost none of them are async — `Views::new`
+    /// still needs a runtime handle to hand to the unread-timer plumbing, so
+    /// each thread lazily starts one just to have a handle, never entered.
+    static RT: tokio::runtime::Runtime = tokio::runtime::Runtime::new().unwrap();
 }
 
 fn event(subject: &str, payload: &str) -> WireEvent {
@@ -713,4 +726,147 @@ fn out_of_order_row_touch_never_regresses() {
     );
     let rows = rows_of(&views);
     assert_eq!(rows[0].last_kind, "message"); // the earlier ts did not win
+}
+
+#[test]
+fn turn_finishing_mints_a_silent_episode_then_the_timer_declares_it_stale() {
+    let (mut views, mut rx) = fresh();
+    let conv = ConversationId("conv-abc".into());
+    // An assistant message landing mints an episode — silently: no broadcast
+    // yet, only the row/message frames the fold always sends.
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.changes.message",
+        r#"{"ts":"2026-07-07T21:00:00+10:00","id":"m1","queryId":"q1","turnId":"t1","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"done"}]}"#));
+    while let Ok(ev) = rx.try_recv() {
+        assert!(!matches!(ev, ViewEvent::Unread(_)));
+    }
+    assert!(views.stale_conversations().unwrap().is_empty());
+
+    // The timer fires: NOW it broadcasts, and the snapshot carries it.
+    let read_id = views
+        .db
+        .query_row(
+            "SELECT read_id FROM unread WHERE conv = ?1",
+            [&conv.0],
+            |r| r.get::<_, String>(0),
+        )
+        .unwrap();
+    views.on_stale_timer(&conv, &read_id);
+    let ViewEvent::Unread(state) = rx.try_recv().unwrap() else {
+        panic!("expected an unread broadcast");
+    };
+    assert!(state.stale);
+    assert_eq!(state.read_id, read_id);
+    let snapshot = views.stale_conversations().unwrap();
+    assert_eq!(snapshot.len(), 1);
+    assert_eq!(snapshot[0].conv.0, "conv-abc");
+}
+
+#[test]
+fn a_second_turn_while_unread_does_not_reset_the_episode_or_its_timer() {
+    // The starvation guard: more qualifying events landing while an episode
+    // is already open must not mint a new read_id (which would restart the
+    // timer and could starve a busy conversation into never going stale).
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.changes.message",
+        r#"{"ts":"2026-07-07T21:00:00+10:00","id":"m1","queryId":"q1","turnId":"t1","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"one"}]}"#));
+    let first_read_id: String = views
+        .db
+        .query_row(
+            "SELECT read_id FROM unread WHERE conv = ?1",
+            ["conv-abc"],
+            |r| r.get(0),
+        )
+        .unwrap();
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.changes.message",
+        r#"{"ts":"2026-07-07T21:05:00+10:00","id":"m2","queryId":"q2","turnId":"t2","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"two"}]}"#));
+    let second_read_id: String = views
+        .db
+        .query_row(
+            "SELECT read_id FROM unread WHERE conv = ?1",
+            ["conv-abc"],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(first_read_id, second_read_id);
+}
+
+#[test]
+fn an_ack_before_the_timer_fires_stays_silent_forever() {
+    let (mut views, mut rx) = fresh();
+    let conv = ConversationId("conv-abc".into());
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.changes.message",
+        r#"{"ts":"2026-07-07T21:00:00+10:00","id":"m1","queryId":"q1","turnId":"t1","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"done"}]}"#));
+    let read_id: String = views
+        .db
+        .query_row(
+            "SELECT read_id FROM unread WHERE conv = ?1",
+            [&conv.0],
+            |r| r.get(0),
+        )
+        .unwrap();
+
+    views.ack_unread(&conv);
+    while let Ok(ev) = rx.try_recv() {
+        assert!(!matches!(ev, ViewEvent::Unread(_))); // acked before stale: silent
+    }
+
+    // The timer firing after the fact is a no-op — the episode is gone.
+    views.on_stale_timer(&conv, &read_id);
+    assert!(rx.try_recv().is_err());
+    assert!(views.stale_conversations().unwrap().is_empty());
+}
+
+#[test]
+fn an_ack_after_stale_resolves_it_everywhere() {
+    let (mut views, mut rx) = fresh();
+    let conv = ConversationId("conv-abc".into());
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.changes.message",
+        r#"{"ts":"2026-07-07T21:00:00+10:00","id":"m1","queryId":"q1","turnId":"t1","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"done"}]}"#));
+    let read_id: String = views
+        .db
+        .query_row(
+            "SELECT read_id FROM unread WHERE conv = ?1",
+            [&conv.0],
+            |r| r.get(0),
+        )
+        .unwrap();
+    views.on_stale_timer(&conv, &read_id);
+    // Drain the row/message broadcasts from apply() plus the stale one.
+    while let Ok(ev) = rx.try_recv() {
+        if matches!(ev, ViewEvent::Unread(_)) {
+            break;
+        }
+    }
+
+    views.ack_unread(&conv);
+    let ViewEvent::Unread(state) = rx.try_recv().unwrap() else {
+        panic!("expected a resolution broadcast");
+    };
+    assert!(!state.stale);
+    assert!(views.stale_conversations().unwrap().is_empty());
+
+    // Idempotent: acking again is a silent no-op.
+    views.ack_unread(&conv);
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn a_user_message_is_not_a_qualifying_event() {
+    // Only an assistant turn landing counts — new content nobody's seen. A
+    // human's own message is not "new content" in that sense.
+    let (mut views, _rx) = fresh();
+    views.apply(
+        "conv-approval",
+        1,
+        &event("conv.v2.conv-abc.changes.message", MSG_M1), // role: user
+    );
+    assert!(
+        views
+            .db
+            .query_row("SELECT 1 FROM unread WHERE conv = 'conv-abc'", [], |r| r
+                .get::<_, i64>(0))
+            .optional()
+            .unwrap()
+            .is_none()
+    );
 }

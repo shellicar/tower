@@ -40,7 +40,12 @@ async fn scripted_publisher_reaches_the_ws_client() {
     let (queries_tx, queries_rx) = mpsc::channel(64);
     let (view_events_tx, _) = broadcast::channel(1024);
 
-    let views = Views::new(db, view_events_tx.clone());
+    let views = Views::new(
+        db,
+        view_events_tx.clone(),
+        queries_tx.clone(),
+        tokio::runtime::Handle::current(),
+    );
     std::thread::spawn(move || views.run_blocking(events_rx, queries_rx));
     let stream = std::env::var("TOWER_STREAM_AUDIT").unwrap_or_else(|_| "conv-approval".into());
     tokio::spawn(ingest::run_ingest(

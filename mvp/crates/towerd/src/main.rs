@@ -43,8 +43,16 @@ async fn main() -> anyhow::Result<()> {
     let (queries_tx, queries_rx) = mpsc::channel::<views::ViewQuery>(64);
     let (view_events_tx, _) = broadcast::channel::<views::ViewEvent>(1024);
 
-    // Views: the one struct, on its own OS thread.
-    let views = Views::new(db, view_events_tx.clone());
+    // Views: the one struct, on its own OS thread. It gets a sender back into
+    // its own query queue (the unread-episode timer fires into it) and a
+    // runtime handle (to schedule that timer as a real task without itself
+    // being async).
+    let views = Views::new(
+        db,
+        view_events_tx.clone(),
+        queries_tx.clone(),
+        tokio::runtime::Handle::current(),
+    );
     std::thread::spawn(move || views.run_blocking(events_rx, queries_rx));
 
     // Ingest: plain async fn, worker pool, one task per stream. Where to

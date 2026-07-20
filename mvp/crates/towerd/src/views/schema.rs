@@ -198,6 +198,22 @@ const MIGRATIONS: &[&str] = &[
      DROP TABLE messages;
      ALTER TABLE messages_v2 RENAME TO messages;
      CREATE INDEX messages_by_conv_ts ON messages (conv, ts);",
+    // 13 — unread: the ticket-system stale-conversation signal ("has anyone
+    // on the fleet looked at this"), one row per conversation, upserted in
+    // place. `unread` starts true the moment a qualifying event (an
+    // assistant turn) lands on a resolved conversation, and stays true until
+    // acked; `stale` flips true only once the per-episode timer fires with
+    // nobody having acked it yet — the durable, broadcastable state.
+    // `read_id` is the episode's identity: a superseded or late ack is a
+    // harmless no-op, never an error. NOT a materialised view — tower's own
+    // annotation, never touched by rematerialisation (same footing as
+    // titles/tags/layout).
+    "CREATE TABLE unread (
+         conv    TEXT PRIMARY KEY,
+         read_id TEXT NOT NULL,
+         unread  INTEGER NOT NULL,
+         stale   INTEGER NOT NULL
+     );",
 ];
 
 pub fn apply_schema(db: &Connection) -> anyhow::Result<()> {

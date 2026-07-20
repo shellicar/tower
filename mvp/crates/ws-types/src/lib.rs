@@ -182,6 +182,16 @@ pub enum ServerMsg {
         instance_id: String,
         conv: String,
     },
+    /// Every conversation currently announced stale, once at connect (right
+    /// after `layout`), so a late-joining client sees the badge without
+    /// waiting for a live transition.
+    #[serde(rename = "stale_conversations")]
+    StaleConversations { conversations: Vec<WsUnread> },
+    /// One conversation's unread episode entering or leaving stale — fires
+    /// exactly twice per episode (never for the silent mint or a same-episode
+    /// ack that beats the timer). Awareness, unconditional like `row`.
+    #[serde(rename = "stale_conversation")]
+    StaleConversation(WsUnread),
     #[serde(rename = "error")]
     Error { id: String, reason: String },
 }
@@ -293,6 +303,18 @@ pub struct WsMessage {
     pub from: Option<Value>,
     pub content: Vec<Value>,
     pub ts: i64,
+}
+
+/// One conversation's unread-episode state — a ticket-system signal ("has
+/// anyone on the fleet looked at this"), not a personal read marker.
+/// `readId` identifies the episode so a late/superseded ack is a no-op, not
+/// an error.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WsUnread {
+    pub conv: String,
+    #[serde(rename = "readId")]
+    pub read_id: String,
+    pub stale: bool,
 }
 
 /// The conversation's usage snapshot — facts only; the client prices the

@@ -281,6 +281,7 @@ impl Views {
         };
 
         let mut stored_message: Option<ConversationMessage> = None;
+        let mut minted_unread: Option<String> = None;
         let tx = self.db.transaction()?;
 
         // Staleness: every event with a readable ts touches the row — but the
@@ -344,6 +345,11 @@ impl Views {
                         content,
                         ts: ts_ms,
                     });
+                    // The qualifying event for the unread signal: an
+                    // assistant turn landing is new content nobody's seen.
+                    if role == "assistant" {
+                        minted_unread = super::unread::note_turn_finished(&tx, conv)?;
+                    }
                 }
                 ConvChange::Revision(r) => {
                     let (message_id, content) = (&r.message_id, &r.content);
@@ -443,6 +449,11 @@ impl Views {
         }
         if let Some(snapshot) = usage_snapshot {
             let _ = self.events.send(ViewEvent::Usage(snapshot));
+        }
+        // The mint itself is silent (no broadcast) — only the timer schedules
+        // here, after the transaction that recorded it has committed.
+        if let Some(read_id) = minted_unread {
+            self.spawn_stale_timer(conv.clone(), read_id);
         }
         Ok(())
     }

@@ -26,6 +26,7 @@ mod schema;
 #[cfg(test)]
 mod tests;
 mod types;
+mod unread;
 
 pub use schema::{apply_schema, read_cursor};
 pub use types::*;
@@ -36,14 +37,29 @@ pub use types::*;
 pub struct Views {
     db: rusqlite::Connection,
     events: tokio::sync::broadcast::Sender<ViewEvent>,
+    /// A sender back into `Views`' own query queue — the unread-episode
+    /// timer (`unread.rs`) fires into it, so the transition is serialised
+    /// through the same thread that touches sqlite, same as everything else.
+    self_queries: mpsc::Sender<ViewQuery>,
+    /// A handle to the tokio runtime, so `Views` (on its own blocking OS
+    /// thread) can schedule the unread-episode timer as a real task — not a
+    /// polling sweep — without itself being async.
+    runtime: tokio::runtime::Handle,
 }
 
 impl Views {
     pub fn new(
         db: rusqlite::Connection,
         events: tokio::sync::broadcast::Sender<ViewEvent>,
+        self_queries: mpsc::Sender<ViewQuery>,
+        runtime: tokio::runtime::Handle,
     ) -> Self {
-        Views { db, events }
+        Views {
+            db,
+            events,
+            self_queries,
+            runtime,
+        }
     }
 
     /// The loop, on its own OS thread. Queries are checked first on purpose:
@@ -187,6 +203,15 @@ impl Views {
                     });
                 }
                 let _ = reply.send(());
+            }
+            ViewQuery::StaleConversations { reply } => {
+                let _ = reply.send(self.stale_conversations().unwrap_or_default());
+            }
+            ViewQuery::AckUnread { conv } => {
+                self.ack_unread(&conv);
+            }
+            ViewQuery::StaleTimerFired { conv, read_id } => {
+                self.on_stale_timer(&conv, &read_id);
             }
         }
     }

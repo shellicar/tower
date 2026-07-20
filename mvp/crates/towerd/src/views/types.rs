@@ -57,6 +57,21 @@ pub enum ViewEvent {
         instance: InstanceId,
         conv: ConversationId,
     },
+    /// A conversation's unread episode entered or left stale — fires exactly
+    /// twice per episode (never for the silent mint). Awareness is
+    /// unconditional, like `Row`.
+    Unread(UnreadState),
+}
+
+/// One conversation's unread-episode state, towerd's own annotation (a
+/// ticket-system signal: "has anyone on the fleet looked at this"), not wire
+/// state. `read_id` identifies the episode so a superseded or late ack is a
+/// harmless no-op rather than an error.
+#[derive(Debug, Clone)]
+pub struct UnreadState {
+    pub conv: ConversationId,
+    pub read_id: String,
+    pub stale: bool,
 }
 
 /// The agent concern's facts, verdict-free: alive/released/stranded is the
@@ -281,6 +296,22 @@ pub enum ViewQuery {
         conv: ConversationId,
         now: i64,
         reply: oneshot::Sender<()>,
+    },
+    /// The snapshot for a client connecting after the fact: every episode
+    /// currently announced stale.
+    StaleConversations {
+        reply: oneshot::Sender<Vec<UnreadState>>,
+    },
+    /// A session that currently has this conversation open reporting "I'm
+    /// looking at it" — acks whatever episode is CURRENT for the conv,
+    /// whichever one that is (no reply: fire-and-forget, idempotent, and a
+    /// no-op if there's nothing outstanding).
+    AckUnread { conv: ConversationId },
+    /// The per-episode timer fired: internal-only, never sent by a client.
+    /// Re-checked against the row before declaring stale (see `unread.rs`).
+    StaleTimerFired {
+        conv: ConversationId,
+        read_id: String,
     },
 }
 
