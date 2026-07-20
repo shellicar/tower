@@ -79,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     if let Some(text) = one_shot {
-        session.say(&conv_id, &text, None).await?;
+        session.say(&conv_id, &text, None, Vec::new()).await?;
     }
 
     let mut terminal = ratatui::init(); // alt screen + raw mode, restored by ratatui::restore
@@ -99,11 +99,14 @@ async fn main() -> anyhow::Result<()> {
     let mut view_state = ViewState::default();
     let mut editor = Editor::default();
     let mut note: Option<String> = None;
+    // Attachments pinned to the next say: (chip label, reference block).
+    let mut attachments: Vec<(String, serde_json::Value)> = Vec::new();
     let mut geometry = Geometry::default();
     let mut hits: Vec<Option<BlockKey>> = Vec::new();
 
     let result: anyhow::Result<()> = async {
         loop {
+            let chip_labels: Vec<String> = attachments.iter().map(|(l, _)| l.clone()).collect();
             terminal.draw(|frame| {
                 let screen = view::Screen {
                     conv_id: &conv_id.0,
@@ -112,6 +115,7 @@ async fn main() -> anyhow::Result<()> {
                     approvals: &approvals,
                     editor: &editor,
                     note: note.as_deref(),
+                    attachments: &chip_labels,
                 };
                 let (g, h) = view::draw(frame, &screen, &mut view_state, now_ms());
                 geometry = g;
@@ -142,8 +146,45 @@ async fn main() -> anyhow::Result<()> {
                 event = input.recv() => {
                     let Some(event) = event else { break };
                     match event {
+                        // The attach-path overlay owns the keyboard while open.
+                        TermEvent::Key(key) if view_state.attach_editor.is_some() => {
+                            let overlay = view_state.attach_editor.as_mut().expect("checked");
+                            match (key.code, key.modifiers) {
+                                (KeyCode::Esc, _) => view_state.attach_editor = None,
+                                (KeyCode::Enter, _) => {
+                                    let path = overlay.take();
+                                    let path = path.trim();
+                                    if !path.is_empty() {
+                                        match session.upload_attachment(path).await {
+                                            Ok(chip) => {
+                                                attachments.push(chip);
+                                                note = None;
+                                            }
+                                            Err(e) => note = Some(format!("attach failed: {e}")),
+                                        }
+                                    }
+                                    view_state.attach_editor = None;
+                                }
+                                (KeyCode::Backspace, _) => overlay.backspace(),
+                                (KeyCode::Delete, _) => overlay.delete(),
+                                (KeyCode::Left, _) => overlay.left(),
+                                (KeyCode::Right, _) => overlay.right(),
+                                (KeyCode::Home, _) => overlay.home(),
+                                (KeyCode::End, _) => overlay.end(),
+                                (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+                                    overlay.insert(c);
+                                }
+                                _ => {}
+                            }
+                        }
                         TermEvent::Key(key) => match (key.code, key.modifiers) {
                             (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
+                            (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
+                                view_state.attach_editor = Some(Editor::default());
+                            }
+                            (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                                attachments.pop();
+                            }
                             (KeyCode::Char(answer @ ('y' | 'n')), KeyModifiers::CONTROL) => {
                                 let target = approvals
                                     .live(now_ms())
@@ -157,13 +198,16 @@ async fn main() -> anyhow::Result<()> {
                                 if m.contains(KeyModifiers::SUPER)
                                     || m.contains(KeyModifiers::CONTROL) =>
                             {
-                                if !editor.is_empty() {
+                                if !editor.is_empty() || !attachments.is_empty() {
                                     let text = editor.take();
                                     let tip = conv.messages.last().map(|m| m.id.clone());
-                                    match session.say(&conv_id, &text, tip).await? {
+                                    let blocks: Vec<serde_json::Value> =
+                                        attachments.iter().map(|(_, b)| b.clone()).collect();
+                                    match session.say(&conv_id, &text, tip, blocks).await? {
                                         wire::SayOutcome::Accepted { .. } => {
                                             note = None;
                                             conv.pending_say = Some(text);
+                                            attachments.clear(); // committed with the say
                                         }
                                         wire::SayOutcome::Rejected { reason } => {
                                             note = Some(format!("say rejected: {reason}"));

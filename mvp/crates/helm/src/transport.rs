@@ -37,6 +37,9 @@ pub struct Session {
     /// itself for this, same as any other client; it is not routed through
     /// bridge's stdio or its attach fd.
     nats: async_nats::Client,
+    /// The transit object store attachments upload into — must name the same
+    /// bucket bridge resolves from (its BRIDGE_ATTACH_BUCKET).
+    attach_bucket: String,
 }
 
 impl Session {
@@ -83,6 +86,8 @@ impl Session {
             .map(str::to_string)
             .unwrap_or_else(|| "nats://127.0.0.1:4222".into());
         let nats = async_nats::connect(&nats_url).await?;
+        let attach_bucket =
+            std::env::var("HELM_ATTACH_BUCKET").unwrap_or_else(|_| "attach".into());
 
         Ok(Self {
             child,
@@ -91,6 +96,7 @@ impl Session {
             attach,
             buffered: std::collections::VecDeque::new(),
             nats,
+            attach_bucket,
         })
     }
 
@@ -159,13 +165,14 @@ impl Session {
         conv: &wire::ConversationId,
         text: &str,
         tip: Option<wire::MessageId>,
+        attachments: Vec<serde_json::Value>,
     ) -> anyhow::Result<wire::SayOutcome> {
         let subject = format!("conv.v2.{}.requests.say", conv.0);
         let cmd = wire::SayCommand {
             conv: conv.clone(),
             text: text.to_string(),
             tip,
-            attachments: Vec::new(),
+            attachments,
         };
         let payload = wire::encode_say(&cmd, &wire::now_iso());
         let reply = self.nats.request(subject, payload.into()).await?;
@@ -198,6 +205,39 @@ impl Session {
         Ok(wire::parse_answer_reply(&reply.payload))
     }
 
+    /// Upload a file into the transit object store and mint its reference
+    /// block (conversation-spec `attachments`): bytes never ride a subject,
+    /// the say carries only this block, and bridge resolves it at its own
+    /// edge. Returns (chip label, block).
+    pub async fn upload_attachment(
+        &self,
+        path: &str,
+    ) -> anyhow::Result<(String, serde_json::Value)> {
+        let (block_type, media_type) = media_type_for(path)
+            .ok_or_else(|| anyhow::anyhow!("unsupported attachment type: {path}"))?;
+        let bytes = tokio::fs::read(path).await?;
+        let id = format!("att-{}", uuid::Uuid::new_v4());
+        let js = async_nats::jetstream::new(self.nats.clone());
+        let store = js.get_object_store(&self.attach_bucket).await.map_err(|e| {
+            anyhow::anyhow!("object store {:?} unavailable: {e}", self.attach_bucket)
+        })?;
+        store.put(id.as_str(), &mut bytes.as_slice()).await?;
+        let name = std::path::Path::new(path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string());
+        let block = serde_json::json!({
+            "type": block_type,
+            "source": {
+                "type": "object",
+                "id": id,
+                "mediaType": media_type,
+                "size": bytes.len(),
+            },
+        });
+        Ok((format!("{name} ({} B)", bytes.len()), block))
+    }
+
     /// One event off the attach fd — anything drained during a control
     /// exchange first — or `None` once it closes (bridge exited).
     pub async fn next_event(&mut self) -> anyhow::Result<Option<AttachEvent>> {
@@ -210,6 +250,23 @@ impl Session {
             return Ok(None);
         }
         parse_attach_line(&line)
+    }
+}
+
+/// The reference block type and media type a path's extension implies; None
+/// for anything bridge can't inline (the model API takes images and PDFs).
+fn media_type_for(path: &str) -> Option<(&'static str, &'static str)> {
+    let ext = std::path::Path::new(path)
+        .extension()?
+        .to_str()?
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => Some(("image", "image/png")),
+        "jpg" | "jpeg" => Some(("image", "image/jpeg")),
+        "gif" => Some(("image", "image/gif")),
+        "webp" => Some(("image", "image/webp")),
+        "pdf" => Some(("document", "application/pdf")),
+        _ => None,
     }
 }
 

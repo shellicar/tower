@@ -30,6 +30,9 @@ pub type BlockKey = (String, usize);
 pub struct ViewState {
     pub scroll_from_bottom: usize,
     pub expanded: HashSet<BlockKey>,
+    /// The attach-file path editor, when open (Ctrl+F). The seed of command
+    /// mode: more overlays join as variants when they exist.
+    pub attach_editor: Option<Editor>,
 }
 
 impl ViewState {
@@ -230,6 +233,8 @@ pub struct Screen<'a> {
     pub approvals: &'a Approvals,
     pub editor: &'a Editor,
     pub note: Option<&'a str>,
+    /// Chip labels for the attachments pinned to the next say.
+    pub attachments: &'a [String],
 }
 
 /// Lay out and render one frame. Returns the geometry and hit map the mouse
@@ -247,12 +252,20 @@ pub fn draw(
         approvals,
         editor,
         note,
+        attachments,
     } = *screen;
-    // The input box grows with its content, up to 5 lines + borders.
-    let (editor_lines, (cursor_line, cursor_col)) = editor.lines_and_cursor();
+    // The attach-path overlay owns the input box while open; otherwise the
+    // say editor does. The box grows with its content, up to 5 lines.
+    let (input_title, active_editor) = match &view.attach_editor {
+        Some(attach) => (" attach file path (enter adds · esc closes) ", attach),
+        None => ("", editor),
+    };
+    let (editor_lines, (cursor_line, cursor_col)) = active_editor.lines_and_cursor();
     let input_height = (editor_lines.len().min(5) + 2) as u16;
-    let [main, input, status] = Layout::vertical([
+    let chips_height = u16::from(!attachments.is_empty());
+    let [main, chips, input, status] = Layout::vertical([
         Constraint::Min(1),
+        Constraint::Length(chips_height),
         Constraint::Length(input_height),
         Constraint::Length(1),
     ])
@@ -277,9 +290,19 @@ pub fn draw(
     }
     frame.render_widget(Paragraph::new(lines).block(block), main);
 
-    // Input: the visible tail of the editor's logical lines, hardware cursor
-    // placed at the buffer cursor. Enter says; alt+enter breaks the line.
-    let input_block = Block::default().borders(Borders::ALL);
+    if !attachments.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::styled(
+                format!(" 📎 {}", attachments.join(" · ")),
+                Style::default().fg(Color::Cyan),
+            )),
+            chips,
+        );
+    }
+
+    // Input: the visible tail of the active editor's logical lines, hardware
+    // cursor placed at its buffer cursor.
+    let input_block = Block::default().borders(Borders::ALL).title(input_title);
     let input_inner = input_block.inner(input);
     let visible_from = editor_lines.len().saturating_sub(input_inner.height as usize);
     let shown: Vec<Line> = editor_lines
