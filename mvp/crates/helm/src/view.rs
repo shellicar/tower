@@ -86,6 +86,31 @@ fn dim() -> Style {
     Style::default().fg(Color::DarkGray)
 }
 
+/// Markdown-lite: whole-line treatments only (headings, fences, bullets,
+/// quotes), which slot into the wrap/hit-map machinery unchanged. Inline
+/// spans (bold, `code`) need span-aware wrapping — deliberately later.
+fn lay_markdown(rows: &mut Vec<Row>, text: &str, width: usize) {
+    let mut in_fence = false;
+    for source_line in text.lines() {
+        let trimmed = source_line.trim_start();
+        if trimmed.starts_with("```") {
+            in_fence = !in_fence;
+            wrap_into(rows, source_line, width, Some(dim()), None);
+            continue;
+        }
+        let style = if in_fence {
+            Some(Style::default().fg(Color::Yellow))
+        } else if trimmed.starts_with('#') {
+            Some(Style::default().add_modifier(Modifier::BOLD).fg(Color::White))
+        } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("> ") {
+            Some(Style::default().fg(Color::Gray))
+        } else {
+            None
+        };
+        wrap_into(rows, source_line, width, style, None);
+    }
+}
+
 /// A collapsed block's one-line summary, or None for a type that renders
 /// whole (text). The summary is the click target.
 fn summary(block: &serde_json::Value) -> Option<(String, Style)> {
@@ -138,7 +163,7 @@ fn lay(conv: &Conversation, approvals: &Approvals, view: &ViewState, width: usiz
             match summary(block) {
                 None => {
                     // Whole-rendered text block: never a click target.
-                    wrap_into(&mut rows, block["text"].as_str().unwrap_or_default(), width, None, None);
+                    lay_markdown(&mut rows, block["text"].as_str().unwrap_or_default(), width);
                 }
                 Some((line, style)) => {
                     let open = view.expanded.contains(&key);
