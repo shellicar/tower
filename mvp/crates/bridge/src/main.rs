@@ -223,7 +223,7 @@ struct Host {
     client: async_nats::Client,
     world: String,
     instance: String,
-    default_model: String,
+    default_model: Arc<RwLock<String>>,
     auth: anthropic::Auth,
     skills_root: Arc<RwLock<std::path::PathBuf>>,
     system: Arc<RwLock<Option<String>>>,
@@ -266,8 +266,8 @@ impl Host {
             let model = spawn
                 .get("model")
                 .and_then(serde_json::Value::as_str)
-                .unwrap_or(&self.default_model)
-                .to_string();
+                .map(str::to_string)
+                .unwrap_or_else(|| self.default_model.read().unwrap().clone());
             let config = self.config(&conv, model);
             let Some(conv) = serve_conversation(
                 &self.client,
@@ -304,7 +304,7 @@ impl Host {
                 }
             };
             let adopted = messages.len();
-            let config = self.config(&conv, self.default_model.clone());
+            let config = self.config(&conv, self.default_model.read().unwrap().clone());
             let Some(conv) = serve_conversation(
                 &self.client,
                 &self.world,
@@ -367,6 +367,20 @@ impl Host {
             *self.system.write().unwrap() = Some(text.to_string());
             eprintln!("bridge: system prompt set ({} chars)", text.len());
             println!("{}", serde_json::json!({ "system": "set" }));
+        } else if let Some(model) = value.get("model") {
+            // The default model a spawn takes when it names none. Reaches
+            // new spawns only; a running conversation's model is fixed at
+            // birth (docs/mvp/bridge-stdio-spec.md).
+            let Some(text) = model.as_str() else {
+                println!(
+                    "{}",
+                    serde_json::json!({ "error": "model needs a string" })
+                );
+                return;
+            };
+            *self.default_model.write().unwrap() = text.to_string();
+            eprintln!("bridge: default model set ({text})");
+            println!("{}", serde_json::json!({ "model": text }));
         } else if let Some(context) = value.get("context") {
             // User context, injected at a conversation's birth and committed.
             let Some(text) = context.as_str() else {
@@ -430,7 +444,7 @@ impl Host {
                     "settings": {
                         "world": self.world,
                         "instance": self.instance,
-                        "model": self.default_model,
+                        "model": self.default_model.read().unwrap().clone(),
                         "thinkingBudget": self.thinking_budget,
                         "attachBucket": self.attach_bucket,
                         "skillsDir": skills_dir.to_string_lossy(),
@@ -598,6 +612,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Host: the shared config and live cells every control line reads. One
     // grammar, two delivery points — the -c batch, then live stdin.
+    let default_model = Arc::new(RwLock::new(default_model));
     let host = Host {
         client: client.clone(),
         world,
@@ -639,7 +654,7 @@ async fn main() -> anyhow::Result<()> {
     );
     eprintln!(
         "bridge: ready (model {}); spawn with {{\"spawn\":{{}}}}",
-        host.default_model
+        host.default_model.read().unwrap()
     );
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     while let Some(line) = lines.next_line().await? {

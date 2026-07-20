@@ -63,9 +63,9 @@ the bridge keeps serving what was already spawned until it is killed.
 
 ## Live configuration
 
-Three control lines set values held in shared cells and repointed while the
+Four control lines set values held in shared cells and repointed while the
 bridge runs. A repoint never touches anything already committed to a
-conversation's record; the three differ by where the value lands, and that
+conversation's record; the four differ by where the value lands, and that
 dictates when a change is visible.
 
 | Cell | Control line | Reaches |
@@ -73,6 +73,7 @@ dictates when a change is visible.
 | skills directory | `skills` | running conversations on their next say; new spawns whole |
 | system prompt | `system` | every conversation on its next turn |
 | user context | `context` | new spawns only; conversations already born keep theirs |
+| default model | `model` | new spawns only; a running conversation's model is fixed at birth |
 
 - **skills** is re-scanned per say. Two layers, scoped differently: the
   *directory* is per-process (`skills_root`, shared by every conversation this
@@ -88,6 +89,11 @@ dictates when a change is visible.
   persisted** to the record. A change reaches even a running conversation on
   its next turn. Because it is not in the record, a revived conversation takes
   the currently configured system prompt, not the one it was born with.
+- **model** is only ever read at spawn — a conversation's model is part of
+  its birth config, same footing as `context`. A repoint changes what the
+  *next* spawn naming no `model` gets; it cannot move a running
+  conversation onto a different model, and there is no way to do that over
+  stdio in v0.
 - **context** is injected as a `<system-reminder>` block on a conversation's
   opening user message and **is committed** to the record. It is read once, at
   conversation birth. A later change affects only conversations spawned after
@@ -156,6 +162,18 @@ Missing `dir` itself is still an error — there's no path to set at all:
 ```
 {"error": "skills needs dir"}
 ```
+
+### model
+
+Set the default model a spawn takes when it names none — a live repoint of
+`BRIDGE_MODEL`.
+
+```
+{"model": "claude-opus-5"}
+{"model": "claude-opus-5"}
+```
+
+A `spawn` naming its own `model` is unaffected; this only changes the fallback.
 
 ### system
 
