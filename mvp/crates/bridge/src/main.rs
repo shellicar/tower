@@ -579,9 +579,20 @@ async fn main() -> anyhow::Result<()> {
 
     // The attach fd is set only by a local TUI's spawn, never by tower.
     // Presence alone is worth a startup line — this is the one place bridge
-    // ever says it has a second, non-NATS interface live.
-    let attach = bridge::attach::attach_stream()
-        .map(|s| std::sync::Arc::new(tokio::sync::Mutex::new(s)));
+    // ever says it has a second, non-NATS interface live. Duplex: the write
+    // half tees events and replies; the read half serves the client's
+    // requests, proxied onto NATS here so the client dials no broker.
+    let attach = bridge::attach::attach_stream().map(|stream| {
+        let (read_half, write_half) = stream.into_split();
+        let handle = std::sync::Arc::new(tokio::sync::Mutex::new(write_half));
+        tokio::spawn(bridge::attach::serve_requests(
+            read_half,
+            std::sync::Arc::clone(&handle),
+            client.clone(),
+            attach_bucket.clone(),
+        ));
+        handle
+    });
     eprintln!(
         "bridge: attach channel {}",
         if attach.is_some() { "present (BRIDGE_ATTACH_FD)" } else { "absent" }

@@ -1,12 +1,11 @@
 //! A throwaway probe, not product code: spawns the real `bridge` binary with
-//! an attach fd wired up exactly as a helm-style TUI would, sends a spawn
-//! control line over the untouched stdio protocol, then publishes a real
-//! `say` over NATS (the same request a client always uses) and watches the
-//! attach fd for the events that turn produces — `telemetry.turn.started`
-//! and the user message commit both land before any model call goes out, so
-//! this proves the channel end to end without needing a working API key.
+//! an attach fd wired up exactly as helm does, sends a spawn control line
+//! over the untouched stdio protocol, then a `say` as an id-correlated
+//! request envelope UP the attach fd — the probe itself dials no NATS at
+//! all; bridge proxies. With an argv conversation id it adopts instead and
+//! watches the replayed history arrive.
 //!
-//! Needs NATS reachable (`docker compose up -d` at the repo's mvp/) and
+//! Needs NATS reachable for bridge itself (`docker compose up -d`) and
 //! `cargo build -p bridge` already run. Run: cargo run -p bridge --example attach_probe
 
 use std::io::{BufRead, BufReader, Write};
@@ -51,10 +50,11 @@ async fn main() -> anyhow::Result<()> {
 
     // The attach reader starts BEFORE any control line: an adopt tees its
     // whole replayed history before it replies, and a full pipe with no
-    // reader deadlocks both processes.
+    // reader deadlocks both processes. Split: the write half sends request
+    // envelopes up.
     parent_end.set_nonblocking(true)?;
-    let attach = tokio::net::UnixStream::from_std(parent_end)?;
-    let mut attach_reader = TokioBufReader::new(attach);
+    let (read_half, mut attach_write) = tokio::net::UnixStream::from_std(parent_end)?.into_split();
+    let mut attach_reader = TokioBufReader::new(read_half);
     let read_task = tokio::spawn(async move {
         loop {
             let mut line = String::new();
@@ -90,23 +90,27 @@ async fn main() -> anyhow::Result<()> {
         .to_string();
 
     if adopt_target.is_none() {
-        let nats_url =
-            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
-        let client = async_nats::connect(&nats_url).await?;
-        let subject = format!("conv.v2.{conv}.requests.say");
+        // The say goes UP the attach fd as a request envelope — no NATS
+        // client in this process; bridge proxies onto the wire. The reply
+        // comes back down the same fd, printed by the read task above.
         let say = wire::SayCommand {
             conv: wire::ConversationId(conv.clone()),
             text: "hello from attach_probe".into(),
             tip: None,
             attachments: Vec::new(),
         };
-        let payload = wire::encode_say(&say, &wire::now_iso());
-        println!("attach_probe: publishing say to {subject}");
-        let reply = client.request(subject, payload.into()).await?;
-        println!(
-            "attach_probe: say reply: {}",
-            String::from_utf8_lossy(&reply.payload)
-        );
+        let payload: serde_json::Value =
+            serde_json::from_slice(&wire::encode_say(&say, &wire::now_iso()))?;
+        let envelope = serde_json::json!({
+            "id": "probe-1",
+            "subject": format!("conv.v2.{conv}.requests.say"),
+            "payload": payload,
+        });
+        println!("attach_probe: sending say up the attach fd");
+        use tokio::io::AsyncWriteExt;
+        let mut line = serde_json::to_vec(&envelope)?;
+        line.push(b'\n');
+        attach_write.write_all(&line).await?;
     }
 
     tokio::time::sleep(Duration::from_secs(5)).await;

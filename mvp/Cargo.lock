@@ -775,7 +775,7 @@ name = "helm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-nats",
+ "base64",
  "bridge",
  "crossterm",
  "libc",
@@ -783,7 +783,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "uuid",
  "wire",
 ]
 

@@ -114,10 +114,11 @@ stdio `skills` control line repoints the directory live).
 
 The terminal client (`mvp/crates/helm`): one bridge, spawned as a child,
 dialed over a second fd (`BRIDGE_ATTACH_FD`, a socketpair dup'd to fd 3 —
-stdio keeps the control protocol untouched; the fd carries events out only).
-Bridge tees every conv.v2 and approval.v1 publish onto it; requests (say,
-cancel, answer) go over NATS like any client's. Bridge's lifetime is its
-stdin: helm dies, bridge exits. Internal shape mirrors
+stdio keeps the control protocol untouched). The fd is duplex: events and
+replies flow down (`{subject,payload}` / `{id,payload}`), requests and
+uploads flow up (`{id,subject,payload}` / `{id,upload}`) and bridge proxies
+them onto NATS — helm is genuinely NATS-less; the broker is bridge's concern
+alone. Bridge's lifetime is its stdin: helm dies, bridge exits. Internal shape mirrors
 `frontend/src/lib/concerns/` — transport owns the wire, conversation /
 usage / approvals / editor are self-contained folds, fixture-tested; ratatui
 owns present/platform, `view.rs` wraps in-house so every visual row maps to
@@ -128,7 +129,7 @@ HELM_BRIDGE_PATH=./target/debug/bridge cargo run -p helm
 ```
 
 Env: `HELM_BRIDGE_PATH`, `HELM_BRIDGE_LOG` (bridge stderr, default
-`/tmp/helm-bridge.log`), `NATS_URL`.
+`/tmp/helm-bridge.log`).
 
 Known debt, deliberate, fix shapes agreed:
 
