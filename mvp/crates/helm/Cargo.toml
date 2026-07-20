@@ -1,0 +1,20 @@
+[package]
+name = "helm"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+# helm: the standalone terminal client. One bridge, spawned locally and dialed
+# over its attach fd (bridge::attach) — no NATS client of its own, no tower.
+# Bridge stays fully NATS-connected regardless; helm is a second, local,
+# direct interface into the one conversation it spawned.
+[dependencies]
+bridge = { path = "../bridge" }
+wire = { path = "../wire" }
+anyhow.workspace = true
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

@@ -648,6 +648,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "helm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bridge",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "wire",
+]
+
+[[package]]
 name = "http"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
