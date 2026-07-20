@@ -26,12 +26,20 @@ pub struct Session {
     control_out: tokio::process::ChildStdin,
     control_in: BufReader<tokio::process::ChildStdout>,
     attach: BufReader<tokio::net::UnixStream>,
+    /// Every real request (say, cancel) still goes over NATS — the attach fd
+    /// only ever carries events out, never requests in (conv.v2's own
+    /// `.requests` subject is what a servicer subscribes to). helm dials NATS
+    /// itself for this, same as any other client; it is not routed through
+    /// bridge's stdio or its attach fd.
+    nats: async_nats::Client,
 }
 
 impl Session {
     /// Spawn `bridge_path` with a fresh attach fd dup'd in as fd 3
-    /// (`BRIDGE_ATTACH_FD`), alongside its ordinary stdio control pipes.
-    pub fn spawn(bridge_path: &str) -> anyhow::Result<Self> {
+    /// (`BRIDGE_ATTACH_FD`), alongside its ordinary stdio control pipes, and
+    /// dial the NATS url a say/cancel will need. `nats_url` defaults to
+    /// bridge's own default (`nats://127.0.0.1:4222`) when None.
+    pub async fn spawn(bridge_path: &str, nats_url: Option<&str>) -> anyhow::Result<Self> {
         let (parent_end, child_end) = StdUnixStream::pair()?;
         let child_raw = child_end.as_raw_fd();
 
@@ -61,11 +69,17 @@ impl Session {
         parent_end.set_nonblocking(true)?;
         let attach = BufReader::new(tokio::net::UnixStream::from_std(parent_end)?);
 
+        let nats_url = nats_url
+            .map(str::to_string)
+            .unwrap_or_else(|| "nats://127.0.0.1:4222".into());
+        let nats = async_nats::connect(&nats_url).await?;
+
         Ok(Self {
             child,
             control_out,
             control_in,
             attach,
+            nats,
         })
     }
 
@@ -87,6 +101,25 @@ impl Session {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("spawn reply carried no conversationId: {reply}"))?;
         Ok(wire::ConversationId(id.to_string()))
+    }
+
+    /// Say into the conversation this session spawned: a real `conv.v2
+    /// requests.say`, id-correlated, exactly what any client (tower
+    /// included) sends. `tip: None` claims "empty so far" — correct only
+    /// while helm has spawned a fresh conversation and never yet revised
+    /// its own premise; a real editor concern will need to track the true
+    /// tip once one exists.
+    pub async fn say(&self, conv: &wire::ConversationId, text: &str) -> anyhow::Result<wire::SayOutcome> {
+        let subject = format!("conv.v2.{}.requests.say", conv.0);
+        let cmd = wire::SayCommand {
+            conv: conv.clone(),
+            text: text.to_string(),
+            tip: None,
+            attachments: Vec::new(),
+        };
+        let payload = wire::encode_say(&cmd, &wire::now_iso());
+        let reply = self.nats.request(subject, payload.into()).await?;
+        Ok(wire::parse_say_reply(&reply.payload))
     }
 
     /// One event off the attach fd, or `None` once it closes (bridge exited).
