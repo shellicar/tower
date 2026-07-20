@@ -33,7 +33,6 @@
 
 mod agent;
 mod anthropic;
-mod attach;
 mod approval;
 mod decisions;
 mod delete;
@@ -243,7 +242,7 @@ struct Host {
     // The local TUI's direct duplex, if this instance was spawned with one
     // (BRIDGE_ATTACH_FD). None for every tower-spawned instance today; NATS
     // stays the only channel regardless of this field's value.
-    attach: Option<attach::AttachHandle>,
+    attach: Option<bridge::attach::AttachHandle>,
 }
 
 impl Host {
@@ -575,7 +574,7 @@ async fn main() -> anyhow::Result<()> {
     // The attach fd is set only by a local TUI's spawn, never by tower.
     // Presence alone is worth a startup line — this is the one place bridge
     // ever says it has a second, non-NATS interface live.
-    let attach = attach::attach_stream()
+    let attach = bridge::attach::attach_stream()
         .map(|s| std::sync::Arc::new(tokio::sync::Mutex::new(s)));
     eprintln!(
         "bridge: attach channel {}",

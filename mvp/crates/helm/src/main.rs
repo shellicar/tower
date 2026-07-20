@@ -1,10 +1,14 @@
 //! helm: the standalone terminal client. Spawns its own bridge (or dials one
-//! given by path), sends the one spawn control line, then prints whatever
-//! arrives on the attach fd. No document model, no rendering yet — this is
-//! the transport proven from helm's own crate, the seam the rest builds on.
+//! given by path), sends the one spawn control line, then folds whatever
+//! arrives on the attach fd into the conversation document model. No
+//! layout/compose/present/platform yet (tui-architecture.md's render side) —
+//! this is transport + document model proven together, the seam the rest
+//! builds on.
 
+mod conversation;
 mod transport;
 
+use conversation::Conversation;
 use transport::Session;
 
 #[tokio::main]
@@ -13,11 +17,22 @@ async fn main() -> anyhow::Result<()> {
     eprintln!("helm: spawning {bridge_path}");
     let mut session = Session::spawn(&bridge_path)?;
 
-    let conv = session.spawn_conversation().await?;
-    println!("helm: conversation {}", conv.0);
+    let conv_id = session.spawn_conversation().await?;
+    println!("helm: conversation {}", conv_id.0);
 
+    let mut conv = Conversation::default();
     while let Some(event) = session.next_event().await? {
-        println!("helm: <- {} {}", event.subject, event.payload);
+        let Some(wire::WireEvent::Conv(decoded)) = wire::parse_wire(&event.subject, &event.payload)
+        else {
+            continue; // not conv.v2 traffic, or a frame this build doesn't model
+        };
+        conv.fold(&decoded.kind);
+        println!(
+            "helm: {} messages, query {:?}, streaming {:?}",
+            conv.messages.len(),
+            conv.query_state,
+            conv.streaming
+        );
     }
     println!("helm: attach fd closed, exiting");
     Ok(())

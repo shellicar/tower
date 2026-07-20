@@ -91,7 +91,7 @@ pub struct AgentConfig {
     /// The local TUI's attach handle, if this instance was spawned with one.
     /// None for every tower-spawned instance — NATS carries every event
     /// regardless; this is purely an additional local mirror.
-    pub attach: Option<crate::attach::AttachHandle>,
+    pub attach: Option<bridge::attach::AttachHandle>,
 }
 
 /// Subscribe to the conversation's requests. main calls this BEFORE
@@ -114,7 +114,7 @@ struct Publisher {
     client: async_nats::Client,
     conv: ConversationId,
     history: crate::history::HistoryStore,
-    attach: Option<crate::attach::AttachHandle>,
+    attach: Option<bridge::attach::AttachHandle>,
 }
 
 impl Publisher {
@@ -122,7 +122,7 @@ impl Publisher {
         client: &async_nats::Client,
         conv: &ConversationId,
         history: &crate::history::HistoryStore,
-        attach: Option<crate::attach::AttachHandle>,
+        attach: Option<bridge::attach::AttachHandle>,
     ) -> Self {
         Self {
             client: client.clone(),
@@ -154,7 +154,7 @@ impl Publisher {
         if let Err(e) = self.client.publish(subject.clone(), bytes.clone().into()).await {
             eprintln!("bridge[{}]: publish failed: {e}", self.conv.0);
         }
-        crate::attach::tee(&self.attach, &subject, &bytes).await;
+        bridge::attach::tee(&self.attach, &subject, &bytes).await;
     }
 
     /// Commit a message to the record (`changes.message`): the change stream
@@ -455,7 +455,7 @@ struct TurnContext {
     memory: crate::memory::MemoryStore,
     history_store: crate::history::HistoryStore,
     thinking_budget: Option<i64>,
-    attach: Option<crate::attach::AttachHandle>,
+    attach: Option<bridge::attach::AttachHandle>,
 }
 
 /// Resolves when the cancel signal flips; never resolves if it never does

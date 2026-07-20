@@ -13,11 +13,11 @@ use tokio::process::{Child, Command};
 
 /// One event as it arrived over the attach fd. `subject` is conv.v2's own
 /// leaf (the routing axis spells the type, per the wire spec); `payload` is
-/// the raw JSON body, left for the conversation concern to decode into
-/// wire's typed events.
+/// the raw JSON bytes, undecoded here — `wire::parse_wire(subject, payload)`
+/// is the one decode, same as ingest's own edge fold.
 pub struct AttachEvent {
     pub subject: String,
-    pub payload: serde_json::Value,
+    pub payload: Vec<u8>,
 }
 
 pub struct Session {
@@ -98,7 +98,7 @@ impl Session {
         }
         let envelope: serde_json::Value = serde_json::from_str(line.trim_end())?;
         let subject = envelope["subject"].as_str().unwrap_or_default().to_string();
-        let payload = envelope["payload"].clone();
+        let payload = serde_json::to_vec(&envelope["payload"])?;
         Ok(Some(AttachEvent { subject, payload }))
     }
 }
