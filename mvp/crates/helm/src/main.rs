@@ -149,11 +149,17 @@ async fn main() -> anyhow::Result<()> {
                     let Some(event) = event else { break };
                     match event {
                         // Ctrl+/ is command mode's one door, from any state.
-                        // Legacy terminals send 0x1F for it, which crossterm
-                        // may report as ctrl+'_' — both spellings accepted.
+                        // Kitty-protocol terminals report it as ctrl+'/';
+                        // the legacy byte is 0x1F, which crossterm decodes as
+                        // ctrl+'7' (0x1C..=0x1F → '4'..='7') and xterm lore
+                        // calls ctrl+'_' — all three spellings accepted,
+                        // because tmux strips the kitty protocol back to
+                        // legacy bytes regardless of the outer terminal.
                         TermEvent::Key(key)
-                            if matches!(key.code, KeyCode::Char('/') | KeyCode::Char('_'))
-                                && key.modifiers.contains(KeyModifiers::CONTROL) =>
+                            if matches!(
+                                key.code,
+                                KeyCode::Char('/') | KeyCode::Char('_') | KeyCode::Char('7')
+                            ) && key.modifiers.contains(KeyModifiers::CONTROL) =>
                         {
                             view_state.command.toggle();
                         }
