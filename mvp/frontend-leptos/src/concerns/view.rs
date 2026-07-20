@@ -65,6 +65,9 @@ pub struct View {
     /// footing as `active` (a fact about this viewer, not the shared
     /// workspace). Mirrors mvp/frontend's `view.approvalsOpen`.
     pub approvals_open: bool,
+    /// Whether the fleet-wide unread/stale-conversations panel is showing —
+    /// same footing as `approvals_open`.
+    pub unread_open: bool,
 }
 
 impl Default for View {
@@ -73,6 +76,7 @@ impl Default for View {
             tabs: vec![Tab { name: "main".to_owned(), convs: Vec::new(), view: ViewConfig::default() }],
             active: 0,
             approvals_open: false,
+            unread_open: false,
         }
     }
 }
@@ -193,6 +197,14 @@ impl View {
 
     pub fn close_approvals(&mut self) {
         self.approvals_open = false;
+    }
+
+    pub fn toggle_unread(&mut self) {
+        self.unread_open = !self.unread_open;
+    }
+
+    pub fn close_unread(&mut self) {
+        self.unread_open = false;
     }
 
     /// The active tab's config — what the rail reads and mutates.

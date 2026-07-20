@@ -242,6 +242,20 @@ impl Rail {
         &self.stale
     }
 
+    /// The stale conversations as rows, oldest-touched first — the unread
+    /// pane's list. A conv can be stale before its row ever arrives (a fresh
+    /// connection ordering quirk); those are skipped rather than shown
+    /// titleless, since the row snapshot always follows moments later.
+    pub fn stale_rows(&self) -> Vec<WsRow> {
+        let mut rows: Vec<WsRow> = self
+            .stale
+            .iter()
+            .filter_map(|conv| self.rows.get(conv).cloned())
+            .collect();
+        rows.sort_by_key(|r| r.last_event);
+        rows
+    }
+
     /// Conversations with a LIVE pending ask (unsettled and not void), for the
     /// rail's marker — the rail's own slice of the approval stream, derived
     /// against the passed clock.

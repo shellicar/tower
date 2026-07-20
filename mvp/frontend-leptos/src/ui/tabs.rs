@@ -8,11 +8,13 @@
 
 use leptos::prelude::*;
 
+use crate::concerns::rail::Rail;
 use crate::concerns::view::View;
 
 #[component]
 pub fn TabBar(
     view: RwSignal<View>,
+    rail: RwSignal<Rail>,
     on_switch: Callback<usize>,
     on_add: Callback<()>,
     on_close: Callback<usize>,
@@ -30,8 +32,15 @@ pub fn TabBar(
                         .map(|(i, tab)| {
                             let name = tab.name.clone();
                             let is_active = i == active;
+                            let stale_count = rail.with(|r| {
+                                let stale = r.stale_convs();
+                                tab.convs.iter().filter(|c| stale.contains(*c)).count()
+                            });
                             view! {
                                 <span class="tab" class:active=is_active>
+                                    {(stale_count > 0).then(|| view! {
+                                        <span class="tab-unread" title="unread in this tab">{format!("● {stale_count}")}</span>
+                                    })}
                                     <button
                                         class="tab-name"
                                         on:click=move |_| {

@@ -33,6 +33,7 @@ use crate::ui::approvals::ApprovalsView;
 use crate::ui::conversation::ConversationView;
 use crate::ui::rail::RailView;
 use crate::ui::tabs::TabBar;
+use crate::ui::unread::UnreadView;
 
 fn now_ms() -> Millis {
     #[cfg(target_arch = "wasm32")]
@@ -207,6 +208,12 @@ pub fn App(ws_url: String) -> impl IntoView {
         view.update(|v| v.close_approvals());
         open_conversation.run(conv);
     });
+    let toggle_unread = Callback::new(move |()| view.update(|v| v.toggle_unread()));
+    let close_unread = Callback::new(move |()| view.update(|v| v.close_unread()));
+    let open_conversation_from_unread = Callback::new(move |conv: String| {
+        view.update(|v| v.close_unread());
+        open_conversation.run(conv);
+    });
     let dismiss_attachment = Callback::new(move |conv: String| {
         let id = next_id();
         let msg = rail.with(|r| r.dismiss_attachment(&conv, id));
@@ -229,9 +236,10 @@ pub fn App(ws_url: String) -> impl IntoView {
                 on_toggle=on_toggle
                 on_dismiss_attachment=dismiss_attachment
                 on_toggle_approvals=toggle_approvals
+                on_toggle_unread=toggle_unread
             />
             <main class="conversation">
-                <TabBar view=view on_switch=switch_tab on_add=add_tab on_close=close_tab on_rename=rename_tab />
+                <TabBar view=view rail=rail on_switch=switch_tab on_add=add_tab on_close=close_tab on_rename=rename_tab />
                 <div class="panels">
                     {move || {
                         view.with(|v| v.approvals_open).then(|| view! {
@@ -247,8 +255,18 @@ pub fn App(ws_url: String) -> impl IntoView {
                         })
                     }}
                     {move || {
+                        view.with(|v| v.unread_open).then(|| view! {
+                            <UnreadView
+                                rail=rail
+                                now=now
+                                on_open_conversation=open_conversation_from_unread
+                                on_close=close_unread
+                            />
+                        })
+                    }}
+                    {move || {
                         let convs = view.with(|v| v.tab().convs.clone());
-                        (convs.is_empty() && !view.with(|v| v.approvals_open))
+                        (convs.is_empty() && !view.with(|v| v.approvals_open) && !view.with(|v| v.unread_open))
                             .then(|| view! { <p class="empty">"Open a conversation from the rail."</p> })
                     }}
                     <For

@@ -2,7 +2,10 @@
   import ApprovalsView from './lib/ApprovalsView.svelte';
   import ConversationPanel from './lib/ConversationPanel.svelte';
   import RowList from './lib/RowList.svelte';
-  import { approvals, conversations, transport, view } from './lib/app';
+  import UnreadView from './lib/UnreadView.svelte';
+  import { approvals, conversations, rail, transport, view } from './lib/app';
+
+  const tabStaleCount = (convs: string[]) => convs.filter((c) => rail.staleConvs.has(c)).length;
 </script>
 
 <!-- Staleness first: the list is always there, ordered by last event; open
@@ -18,6 +21,14 @@
             onclick={() => (view.approvalsOpen = !view.approvalsOpen)}
           >
             ⚠ {approvals.pendingApprovals.length}
+          </button>
+        {/if}
+        {#if rail.staleRows.length > 0}
+          <button
+            class="cursor-pointer text-sky-300 hover:text-sky-200"
+            onclick={() => (view.unreadOpen = !view.unreadOpen)}
+          >
+            ● {rail.staleRows.length}
           </button>
         {/if}
         <span class={transport.connected ? 'text-green-500' : 'text-red-400'}>
@@ -48,6 +59,9 @@
                 ? view.renameTab(i, prompt('tab name', t.name) ?? t.name)
                 : view.switchTab(i)}>{t.name}</button
           >
+          {#if tabStaleCount(t.convs) > 0}
+            <span class="text-sky-300" title="unread in this tab">● {tabStaleCount(t.convs)}</span>
+          {/if}
           <!-- Closing is deliberate: only the active tab offers it, and it
                confirms — a tab is a mission control, not a scratch view. -->
           {#if view.tabs.length > 1 && i === view.active}
@@ -69,11 +83,14 @@
       {#if view.approvalsOpen}
         <ApprovalsView />
       {/if}
+      {#if view.unreadOpen}
+        <UnreadView />
+      {/if}
       <!-- Only the active tab's conversations render. -->
       {#each view.tab.convs.filter((c) => conversations.get(c) !== undefined) as conv (conv)}
         <ConversationPanel oc={conversations.get(conv)!} />
       {:else}
-        {#if !view.approvalsOpen}
+        {#if !view.approvalsOpen && !view.unreadOpen}
           <p class="m-auto text-neutral-500">Open a conversation from the list.</p>
         {/if}
       {/each}

@@ -101,6 +101,7 @@ pub fn RailView(
     on_toggle: Callback<String>,
     on_dismiss_attachment: Callback<String>,
     on_toggle_approvals: Callback<()>,
+    on_toggle_unread: Callback<()>,
 ) -> impl IntoView {
     // Which key's values are expanded in the facet bar; component-local UI
     // state, same footing as Svelte's `expandedKey` in `RowList.svelte`.
@@ -119,6 +120,14 @@ pub fn RailView(
                         (n > 0).then(|| view! {
                             <button class="awaiting" on:click=move |_| on_toggle_approvals.run(())>
                                 {format!("⚠ {n}")}
+                            </button>
+                        })
+                    }}
+                    {move || {
+                        let n = rail.with(|r| r.stale_rows().len());
+                        (n > 0).then(|| view! {
+                            <button class="unread-toggle" on:click=move |_| on_toggle_unread.run(())>
+                                {format!("● {n}")}
                             </button>
                         })
                     }}

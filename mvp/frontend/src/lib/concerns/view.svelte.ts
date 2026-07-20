@@ -51,6 +51,8 @@ export class View {
   active = $state<number>(readActiveTab());
   /** Whether the approvals view is showing — pure view state, local only. */
   approvalsOpen = $state(false);
+  /** Whether the unread/stale-conversations view is showing — same footing. */
+  unreadOpen = $state(false);
 
   readonly #conversations: Conversations;
   readonly #transport: Transport;
