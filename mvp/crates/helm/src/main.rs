@@ -7,9 +7,11 @@
 
 mod conversation;
 mod transport;
+mod usage;
 
 use conversation::Conversation;
 use transport::Session;
+use usage::Usage;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -29,17 +31,25 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let mut conv = Conversation::default();
+    let mut usage = Usage::default();
     while let Some(event) = session.next_event().await? {
         let Some(wire::WireEvent::Conv(decoded)) = wire::parse_wire(&event.subject, &event.payload)
         else {
             continue; // not conv.v2 traffic, or a frame this build doesn't model
         };
         conv.fold(&decoded.kind);
+        usage.fold(&decoded.kind);
         println!(
-            "helm: {} messages, query {:?}, streaming {:?}",
+            "helm: {} messages, query {:?}, streaming {:?}, {} in / {} out{}",
             conv.messages.len(),
             conv.query_state,
-            conv.streaming
+            conv.streaming,
+            usage.input_tokens + usage.cache_creation_tokens + usage.cache_read_tokens,
+            usage.output_tokens,
+            usage
+                .cost_usd
+                .map(|c| format!(", ${c:.4}"))
+                .unwrap_or_default(),
         );
     }
     println!("helm: attach fd closed, exiting");
