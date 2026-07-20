@@ -25,7 +25,7 @@
 
 use std::collections::HashMap;
 
-use leptos::prelude::{Dispose, RwSignal, Update, With};
+use leptos::prelude::{RwSignal, Update, With};
 use serde_json::Value;
 use ws_types::{ClientMsg, ServerMsg, WsMessage};
 
@@ -157,9 +157,15 @@ impl Conversations {
         })
     }
 
+    /// Doesn't dispose the removed signal: a close can race a panel still
+    /// mid-render (e.g. the reconcile effect firing around a tab switch),
+    /// and a read after dispose panics — observed live as the Send button
+    /// getting stuck disabled forever once that happened. A leaked signal on
+    /// close is a small, bounded cost against that; letting Leptos's own GC
+    /// (page reload, or a future real disposal point once the ordering is
+    /// provably safe) reclaim it is the safer default for now.
     pub fn close(&mut self, conv: &str, id: String) -> Option<ClientMsg> {
-        let oc = self.open.remove(conv)?;
-        oc.dispose();
+        self.open.remove(conv)?;
         Some(ClientMsg::Close {
             id,
             conv: conv.to_owned(),
