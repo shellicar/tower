@@ -33,6 +33,7 @@
 
 mod agent;
 mod anthropic;
+mod attach;
 mod approval;
 mod decisions;
 mod delete;
@@ -239,6 +240,10 @@ struct Host {
     refs_path: std::path::PathBuf,
     memory_path: std::path::PathBuf,
     history_path: std::path::PathBuf,
+    // The local TUI's direct duplex, if this instance was spawned with one
+    // (BRIDGE_ATTACH_FD). None for every tower-spawned instance today; NATS
+    // stays the only channel regardless of this field's value.
+    attach: Option<attach::AttachHandle>,
 }
 
 impl Host {
@@ -256,6 +261,7 @@ impl Host {
             memory: Arc::clone(&self.memory),
             history: Arc::clone(&self.history),
             thinking_budget: self.thinking_budget,
+            attach: self.attach.clone(),
         }
     }
 
@@ -566,6 +572,16 @@ async fn main() -> anyhow::Result<()> {
 
     let client = async_nats::connect(&nats_url).await?; // fail-fast
 
+    // The attach fd is set only by a local TUI's spawn, never by tower.
+    // Presence alone is worth a startup line — this is the one place bridge
+    // ever says it has a second, non-NATS interface live.
+    let attach = attach::attach_stream()
+        .map(|s| std::sync::Arc::new(tokio::sync::Mutex::new(s)));
+    eprintln!(
+        "bridge: attach channel {}",
+        if attach.is_some() { "present (BRIDGE_ATTACH_FD)" } else { "absent" }
+    );
+
     // Ready once subscriptions can be made, then the liveness promise: "you
     // will hear from me again within PULSE_INTERVAL_S seconds". One pulse per
     // instance, never per conversation.
@@ -624,6 +640,7 @@ async fn main() -> anyhow::Result<()> {
         refs_path: refs_path_for_settings,
         memory_path: memory_path_for_settings,
         history_path: history_path_for_settings,
+        attach,
         auth,
         skills_root,
         system: Arc::new(RwLock::new(None)),

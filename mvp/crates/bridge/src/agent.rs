@@ -88,6 +88,10 @@ pub struct AgentConfig {
     pub history: crate::history::HistoryStore,
     /// Extended thinking budget; None = thinking off.
     pub thinking_budget: Option<i64>,
+    /// The local TUI's attach handle, if this instance was spawned with one.
+    /// None for every tower-spawned instance — NATS carries every event
+    /// regardless; this is purely an additional local mirror.
+    pub attach: Option<crate::attach::AttachHandle>,
 }
 
 /// Subscribe to the conversation's requests. main calls this BEFORE
@@ -110,6 +114,7 @@ struct Publisher {
     client: async_nats::Client,
     conv: ConversationId,
     history: crate::history::HistoryStore,
+    attach: Option<crate::attach::AttachHandle>,
 }
 
 impl Publisher {
@@ -117,11 +122,13 @@ impl Publisher {
         client: &async_nats::Client,
         conv: &ConversationId,
         history: &crate::history::HistoryStore,
+        attach: Option<crate::attach::AttachHandle>,
     ) -> Self {
         Self {
             client: client.clone(),
             conv: conv.clone(),
             history: crate::history::HistoryStore::clone(history),
+            attach,
         }
     }
 
@@ -144,9 +151,10 @@ impl Publisher {
             self.conv.0,
             bytes.len()
         );
-        if let Err(e) = self.client.publish(subject, bytes.into()).await {
+        if let Err(e) = self.client.publish(subject.clone(), bytes.clone().into()).await {
             eprintln!("bridge[{}]: publish failed: {e}", self.conv.0);
         }
+        crate::attach::tee(&self.attach, &subject, &bytes).await;
     }
 
     /// Commit a message to the record (`changes.message`): the change stream
@@ -420,6 +428,7 @@ async fn accept_say(
         memory: crate::memory::MemoryStore::clone(&config.memory),
         history_store: crate::history::HistoryStore::clone(&config.history),
         thinking_budget: config.thinking_budget,
+        attach: config.attach.clone(),
     };
     let done = done_tx.clone();
     let q = query.clone();
@@ -446,6 +455,7 @@ struct TurnContext {
     memory: crate::memory::MemoryStore,
     history_store: crate::history::HistoryStore,
     thinking_budget: Option<i64>,
+    attach: Option<crate::attach::AttachHandle>,
 }
 
 /// Resolves when the cancel signal flips; never resolves if it never does
@@ -494,8 +504,9 @@ async fn run_query(
         memory,
         history_store,
         thinking_budget,
+        attach,
     } = &ctx;
-    let pubr = Publisher::new(client, conv, history_store);
+    let pubr = Publisher::new(client, conv, history_store, attach.clone());
 
     // Skill only when a catalogue exists; every other tool is always this
     // same list (static_tool_schemas) — the one source main.rs's startup log
