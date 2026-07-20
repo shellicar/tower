@@ -335,6 +335,9 @@ pub fn RailView(
                                         >
                                             <span class="row-main">
                                                 {is_pending.then(|| view! { <span class="pending-mark">"⚠"</span> })}
+                                                {rail.with(|r| r.stale_convs().contains(&conv)).then(|| view! {
+                                                    <span class="stale-mark" title="nobody's looked at this since it last got new content">"●"</span>
+                                                })}
                                                 {live.map(|l| {
                                                     let cls = match l {
                                                         Liveness::Alive => "alive",

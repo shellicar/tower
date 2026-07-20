@@ -45,6 +45,7 @@ html, body {
 .dot.alive { background: #4ade80; }
 .dot.stranded { background: #f87171; }
 .pending-mark { color: #fcd34d; flex-shrink: 0; }
+.stale-mark { color: #7dd3fc; flex-shrink: 0; }
 .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-side { display: flex; flex-shrink: 0; gap: 8px; color: #a3a3a3; }
 .age.fresh { color: #4ade80; }

@@ -228,6 +228,10 @@
           <span class="flex min-w-0 items-center gap-1.5">
             {#if rail.pendingByConv.has(row.conv)}<span class="shrink-0 text-amber-300">⚠</span
               >{/if}
+            {#if rail.staleConvs.has(row.conv)}<span
+                class="shrink-0 text-sky-400"
+                title="nobody's looked at this since it last got new content">●</span
+              >{/if}
             {#if rail.verdict(row.conv) === 'alive'}
               <span class="h-2 w-2 shrink-0 rounded-full bg-green-400"></span>
             {:else if rail.verdict(row.conv) === 'stranded'}

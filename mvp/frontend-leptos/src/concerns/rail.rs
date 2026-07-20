@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
-use ws_types::{ClientMsg, ServerMsg, WsAgent, WsApproval, WsRow};
+use ws_types::{ClientMsg, ServerMsg, WsAgent, WsApproval, WsRow, WsUnread};
 
 use crate::time::{Liveness, Millis, approval_void, liveness_verdict};
 
@@ -43,6 +43,10 @@ pub struct Rail {
     instances: HashMap<String, Instance>,
     attachments: HashMap<String, Attachment>,
     asks: HashMap<String, Ask>,
+    /// Conversations currently announced stale (the unread/ticket-system
+    /// signal), folded from `StaleConversations` (replace) and
+    /// `StaleConversation` (add/remove one, by its own `stale` flag).
+    stale: HashSet<String>,
 }
 
 impl Rail {
@@ -117,6 +121,16 @@ impl Rail {
             // list, same as a real `detached` would.
             ServerMsg::AttachmentDismissed { world, instance_id, conv } => {
                 self.attachments.remove(&format!("{world}/{instance_id}/{conv}"));
+            }
+            ServerMsg::StaleConversations { conversations } => {
+                self.stale = conversations.iter().map(|u| u.conv.clone()).collect();
+            }
+            ServerMsg::StaleConversation(WsUnread { conv, stale, .. }) => {
+                if *stale {
+                    self.stale.insert(conv.clone());
+                } else {
+                    self.stale.remove(conv);
+                }
             }
             _ => {} // not the rail's concern
         }
@@ -219,6 +233,13 @@ impl Rail {
             }
         }
         out
+    }
+
+    /// Conversations currently flagged stale (unread/ticket-system signal) —
+    /// the rail's own slice, a plain set (no clock derivation needed: towerd
+    /// already re-checked the episode before broadcasting).
+    pub fn stale_convs(&self) -> &HashSet<String> {
+        &self.stale
     }
 
     /// Conversations with a LIVE pending ask (unsettled and not void), for the

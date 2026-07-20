@@ -19,6 +19,10 @@ export class Rail {
    *  fresh the holder is, whether it has settled. The live-pending set is
    *  derived against the clock. */
   #asks = $state<Map<string, { conv?: string; lastPulse: Millis; settled: boolean }>>(new Map());
+  /** Conversations currently announced stale (the unread/ticket-system
+   *  signal) — folded from `stale_conversations` (replace) and
+   *  `stale_conversation` (add/remove one, by its own `stale` flag). */
+  #stale = $state<Set<string>>(new Set());
   /** The clock-fed `now` behind the time verdicts (liveness, void); the rail's
    *  own ticker cadence, the clock injected so the verdicts test (Decision 1). */
   #now = $state(0);
@@ -126,6 +130,16 @@ export class Rail {
         this.#asks = next;
         break;
       }
+      case 'stale_conversations':
+        this.#stale = new Set(event.conversations.map((u) => u.conv));
+        break;
+      case 'stale_conversation': {
+        const next = new Set(this.#stale);
+        if (event.stale) next.add(event.conv);
+        else next.delete(event.conv);
+        this.#stale = next;
+        break;
+      }
       case 'attachment_dismissed': {
         // A human dismissed it (tower's own annotation, never a claim the
         // agent detached) — drop it, same as a real `detached` would.
@@ -186,6 +200,13 @@ export class Rail {
       if (!this.#rows.has(a.conv) && !byConv.has(a.conv)) byConv.set(a.conv, a);
     }
     return [...byConv.values()].map((a) => ({ ...a, verdict: this.verdict(a.conv) }));
+  }
+
+  /** Conversations currently flagged stale (unread/ticket-system signal) —
+   *  the rail's own slice, a plain set (no clock derivation needed: towerd
+   *  already re-checked the episode before broadcasting). */
+  get staleConvs(): Set<string> {
+    return this.#stale;
   }
 
   /** Conversations with a LIVE pending ask (unsettled and not void), for the

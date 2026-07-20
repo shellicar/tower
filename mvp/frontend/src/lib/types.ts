@@ -114,6 +114,17 @@ export interface WireTab {
   convs: string[];
 }
 
+/** One conversation's unread-episode state — a ticket-system signal ("has
+ *  anyone on the fleet looked at this"), not a personal read marker. `readId`
+ *  identifies the episode; the client never needs it (acking is inferred
+ *  server-side from having the conversation open), it's carried for parity
+ *  with the wire shape and any future debugging. */
+export interface UnreadState {
+  conv: string;
+  readId: string;
+  stale: boolean;
+}
+
 /** One agent wire fact, flat; `kind` is an open set — unknown kinds skipped. */
 export interface AgentEvent {
   kind: string;
@@ -158,6 +169,13 @@ export type ServerMsg =
    *  like `row`/`approval`. Not an agent fact: a real `detached` still
    *  arrives separately, from the agent, if it ever does. */
   | { type: 'attachment_dismissed'; world: string; instanceId: string; conv: string }
+  /** Every conversation currently announced stale, once at connect (right
+   *  after `layout`), so a late-joining client sees the badge without
+   *  waiting for a live transition. */
+  | { type: 'stale_conversations'; conversations: UnreadState[] }
+  /** One conversation's unread episode entering or leaving stale — fires
+   *  exactly twice per episode. Awareness, unconditional like `row`. */
+  | ({ type: 'stale_conversation' } & UnreadState)
   | { type: 'error'; id: string; reason: string };
 
 // client → towerd
