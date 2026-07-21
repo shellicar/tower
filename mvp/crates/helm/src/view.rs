@@ -112,6 +112,49 @@ fn strip_vs16(text: &str) -> String {
     text.replace('\u{FE0F}', "")
 }
 
+/// The terminal-colour accent for a stripped emoji base: colour the glyph
+/// the emoji would have been, without the width-contested artwork. The
+/// glyph itself never changes, so this cannot corrupt — it only stops the
+/// stripped forms reading as grey ghosts.
+fn accent_for(grapheme: &str) -> Option<Color> {
+    match grapheme.chars().next()? {
+        '\u{2139}' => Some(Color::Blue),                  // ℹ information
+        '\u{26A0}' => Some(Color::Yellow),                // ⚠ warning
+        '\u{2764}' | '\u{2665}' => Some(Color::Red),      // ❤ ♥ hearts
+        '\u{2733}' | '\u{2714}' => Some(Color::Green),    // ✳ ✔ marks
+        '\u{25B6}' | '\u{25C0}' => Some(Color::Cyan),     // ▶ ◀ arrows
+        '\u{2716}' | '\u{274C}' => Some(Color::Red),      // ✖ crosses
+        _ => None,
+    }
+}
+
+/// One wrapped segment as a line, accent glyphs coloured, everything else
+/// in the row's base style.
+fn styled_segment(segment: String, base: Option<Style>) -> Line<'static> {
+    use unicode_segmentation::UnicodeSegmentation;
+    let base = base.unwrap_or_default();
+    if !segment.graphemes(true).any(|g| accent_for(g).is_some()) {
+        return Line::styled(segment, base);
+    }
+    let mut spans: Vec<Span> = Vec::new();
+    let mut run = String::new();
+    for grapheme in segment.graphemes(true) {
+        match accent_for(grapheme) {
+            Some(color) => {
+                if !run.is_empty() {
+                    spans.push(Span::styled(std::mem::take(&mut run), base));
+                }
+                spans.push(Span::styled(grapheme.to_string(), base.fg(color)));
+            }
+            None => run.push_str(grapheme),
+        }
+    }
+    if !run.is_empty() {
+        spans.push(Span::styled(run, base));
+    }
+    Line::from(spans)
+}
+
 /// Wrap a block of text into rows; chunked rows inherit their source's hit
 /// key, so the click map stays exact through the wrap.
 fn wrap_into(rows: &mut Vec<Row>, text: &str, width: usize, style: Option<Style>, hit: Option<BlockKey>) {
@@ -119,10 +162,7 @@ fn wrap_into(rows: &mut Vec<Row>, text: &str, width: usize, style: Option<Style>
     for source_line in text.lines() {
         for segment in wrap_segments(source_line, width) {
             rows.push(Row {
-                line: match style {
-                    Some(style) => Line::styled(segment, style),
-                    None => Line::raw(segment),
-                },
+                line: styled_segment(segment, style),
                 hit: hit.clone(),
             });
         }
@@ -455,6 +495,28 @@ mod tests {
         let actual = super::strip_vs16("🎉👍");
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn stripped_emoji_bases_get_their_colour_as_an_accent() {
+        let line = super::styled_segment("a \u{2764} b".into(), None);
+
+        let heart_span = line
+            .spans
+            .iter()
+            .find(|s| s.content.contains('\u{2764}'))
+            .expect("the heart has its own span");
+        assert_eq!(heart_span.style.fg, Some(super::Color::Red));
+    }
+
+    #[test]
+    fn accent_spans_preserve_the_text_exactly() {
+        let text = "x \u{2139}\u{26A0}\u{2764} y";
+
+        let line = super::styled_segment(text.into(), None);
+        let rejoined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+
+        assert_eq!(rejoined, text);
     }
 
     #[test]
