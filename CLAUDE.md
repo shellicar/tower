@@ -131,16 +131,6 @@ HELM_BRIDGE_PATH=./target/debug/bridge cargo run -p helm
 Env: `HELM_BRIDGE_PATH`, `HELM_BRIDGE_LOG` (bridge stderr, default
 `/tmp/helm-bridge.log`).
 
-Known debt, deliberate, fix shapes agreed:
-
-- `wrap_into` counts chars, not grapheme widths — CJK/emoji mismeasure
-  (hit map stays correct). Fix: unicode-segmentation + unicode-width,
-  already in-tree via ratatui.
-- expanded blocks re-lay every frame. Fix: cache wrapped rows keyed by
-  (block, width, expanded); sealed messages make it sound by construction.
-- `Session::control` can hang forever if bridge dies mid-reply. Fix:
-  `tokio::time::timeout` + EOF = bridge gone.
-
 ## Testing
 
 - `wire` folds: pure tests, inputs from `docs/spec/scenarios.md` fixtures.

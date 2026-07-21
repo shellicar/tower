@@ -6,7 +6,7 @@
 //! claude-sdk-cli could never make once sealed content left for native
 //! scrollback.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -33,6 +33,12 @@ pub struct ViewState {
     pub expanded: HashSet<BlockKey>,
     /// Command mode — Ctrl+/ the one door in (command.rs).
     pub command: CommandMode,
+    /// Wrapped rows per sealed block, keyed by (message, block, expanded).
+    /// Sound by construction: sealed messages are immutable, a revision
+    /// invalidates explicitly, and a width change clears the lot. Purely a
+    /// CPU saving — ratatui's diff already keeps the terminal writes minimal.
+    layout_cache: HashMap<(String, usize, bool), Vec<Row>>,
+    cache_width: usize,
 }
 
 impl ViewState {
@@ -40,6 +46,12 @@ impl ViewState {
         if !self.expanded.remove(&key) {
             self.expanded.insert(key);
         }
+    }
+
+    /// A revision replaced a message's content under its stable id — the
+    /// one way a sealed block changes, so the one external invalidation.
+    pub fn invalidate_layout(&mut self) {
+        self.layout_cache.clear();
     }
 }
 
@@ -53,6 +65,7 @@ pub struct Geometry {
 
 /// One laid visual row: the line to draw and the block it belongs to, if
 /// that block is disclosable. Wrapped continuations carry the same key.
+#[derive(Clone, Debug, PartialEq)]
 struct Row {
     line: Line<'static>,
     hit: Option<BlockKey>,
@@ -70,14 +83,10 @@ fn wrap_segments(line: &str, width: usize) -> Vec<String> {
     let mut current = String::new();
     let mut current_width = 0usize;
     for grapheme in line.graphemes(true) {
-        // str-width, which counts a VS16 cluster as 2 (unicode-width's
-        // emoji-presentation rule) — measured, not assumed. This matches
-        // ratatui's own cell placement, which is the agreement that binds
-        // helm internally. It also means HELM_EMOJI=full cannot work inside
-        // tmux: tmux stores VS16 at 1 with variation-selector-always-wide
-        // off, and at 2-then-1 (the redraw bug) with it on — one path always
-        // disagrees with ratatui's 2. Hence the strip default: emit nothing
-        // contested. Full mode is for stacks where every table says 2.
+        // str-width — the same call ratatui places cells by, so helm's wrap
+        // and the renderer always agree. The vendored unicode-width patch
+        // makes VS16 clusters measure at base width, matching tmux
+        // (variation-selector-always-wide off) and wcwidth.
         let grapheme_width = grapheme.width();
         if current_width + grapheme_width > width && !current.is_empty() {
             segments.push(std::mem::take(&mut current));
@@ -243,7 +252,11 @@ fn role_line(role: &str) -> Line<'static> {
     )
 }
 
-fn lay(conv: &Conversation, approvals: &Approvals, view: &ViewState, width: usize, now_ms: i64) -> Vec<Row> {
+fn lay(conv: &Conversation, approvals: &Approvals, view: &mut ViewState, width: usize, now_ms: i64) -> Vec<Row> {
+    if view.cache_width != width {
+        view.layout_cache.clear();
+        view.cache_width = width;
+    }
     let mut rows: Vec<Row> = Vec::new();
     for message in &conv.messages {
         rows.push(Row {
@@ -252,23 +265,31 @@ fn lay(conv: &Conversation, approvals: &Approvals, view: &ViewState, width: usiz
         });
         for (index, block) in message.content.iter().enumerate() {
             let key: BlockKey = (message.id.0.clone(), index);
+            let open = view.expanded.contains(&key);
+            let cache_key = (key.0.clone(), index, open);
+            if let Some(cached) = view.layout_cache.get(&cache_key) {
+                rows.extend(cached.iter().cloned());
+                continue;
+            }
+            let mut block_rows: Vec<Row> = Vec::new();
             match summary(block) {
                 None => {
                     // Whole-rendered text block: never a click target.
-                    lay_markdown(&mut rows, block["text"].as_str().unwrap_or_default(), width);
+                    lay_markdown(&mut block_rows, block["text"].as_str().unwrap_or_default(), width);
                 }
                 Some((line, style)) => {
-                    let open = view.expanded.contains(&key);
                     let marker = if open { line.replacen('▸', "▾", 1) } else { line };
-                    rows.push(Row {
+                    block_rows.push(Row {
                         line: Line::styled(marker, style),
                         hit: Some(key.clone()),
                     });
                     if open {
-                        wrap_into(&mut rows, &expanded_body(block), width, Some(dim()), Some(key));
+                        wrap_into(&mut block_rows, &expanded_body(block), width, Some(dim()), Some(key));
                     }
                 }
             }
+            view.layout_cache.insert(cache_key, block_rows.clone());
+            rows.extend(block_rows);
         }
         rows.push(Row {
             line: Line::raw(""),
@@ -346,13 +367,14 @@ pub fn draw(
     // Command mode's active editor owns the input box while open; otherwise
     // the say editor does. The box grows with its content, up to 5 lines —
     // the widget scrolls its own viewport to follow the cursor beyond that.
-    let (input_title, active_editor) = match &view.command {
-        CommandMode::AttachEdit(attach) => (" attach file path (enter adds · esc backs out) ", attach),
-        CommandMode::ModelEdit(model) => (" model (enter sets · esc backs out) ", model),
-        CommandMode::CwdEdit(cwd) => (" cwd (enter changes · esc backs out) ", cwd),
-        _ => ("", editor),
+    // (Height first as a short borrow: `lay` below needs `view` mutably.)
+    let input_lines = match &view.command {
+        CommandMode::AttachEdit(overlay)
+        | CommandMode::ModelEdit(overlay)
+        | CommandMode::CwdEdit(overlay) => overlay.lines().len(),
+        _ => editor.lines().len(),
     };
-    let input_height = (active_editor.lines().len().min(5) + 2) as u16;
+    let input_height = (input_lines.min(5) + 2) as u16;
     let chips_height = u16::from(!attachments.is_empty());
     let [main, chips, input, status] = Layout::vertical([
         Constraint::Min(1),
@@ -380,6 +402,13 @@ pub fn draw(
         hits.push(row.hit);
     }
     frame.render_widget(Paragraph::new(lines).block(block), main);
+
+    let (input_title, active_editor) = match &view.command {
+        CommandMode::AttachEdit(attach) => (" attach file path (enter adds · esc backs out) ", attach),
+        CommandMode::ModelEdit(model) => (" model (enter sets · esc backs out) ", model),
+        CommandMode::CwdEdit(cwd) => (" cwd (enter changes · esc backs out) ", cwd),
+        _ => ("", editor),
+    };
 
     if !attachments.is_empty() {
         frame.render_widget(

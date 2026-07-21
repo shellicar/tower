@@ -195,6 +195,14 @@ async fn main() -> anyhow::Result<()> {
                     };
                     match wire::parse_wire(&event.subject, &event.payload) {
                         Some(wire::WireEvent::Conv(decoded)) => {
+                            // A revision rewrites a sealed block in place —
+                            // the one event the layout cache can't see coming.
+                            if matches!(
+                                decoded.kind,
+                                wire::EventKind::Change(wire::ConvChange::Revision(_))
+                            ) {
+                                view_state.invalidate_layout();
+                            }
                             conv.fold(&decoded.kind);
                             usage.fold(&decoded.kind);
                             // A revoked say comes home: words to the editor.
