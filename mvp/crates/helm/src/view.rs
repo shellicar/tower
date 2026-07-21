@@ -70,7 +70,13 @@ fn wrap_segments(line: &str, width: usize) -> Vec<String> {
     let mut current = String::new();
     let mut current_width = 0usize;
     for grapheme in line.graphemes(true) {
-        let grapheme_width = grapheme.width();
+        // A VS16 cluster is emoji presentation: drawn 2 columns by every
+        // emoji-capable renderer, whatever the base char's own width says.
+        let grapheme_width = if grapheme.contains('\u{FE0F}') {
+            2
+        } else {
+            grapheme.width()
+        };
         if current_width + grapheme_width > width && !current.is_empty() {
             segments.push(std::mem::take(&mut current));
             current_width = 0;
@@ -90,7 +96,19 @@ fn wrap_segments(line: &str, width: usize) -> Vec<String> {
 /// (ℹ️ was the archetype), and tmux repaints panes from its own grid, so
 /// the only defence is never emitting a contested sequence. True wide emoji
 /// carry no VS16 and pass untouched.
+///
+/// `HELM_EMOJI=full` keeps VS16 (colour over safety): the underline and
+/// wrap bugs that amplified the historical corruption are gone, and modern
+/// tmux handles VS16 width far better — the flag exists to find out whether
+/// this stack still needs the strip at all.
 fn strip_vs16(text: &str) -> String {
+    static FULL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let full = *FULL.get_or_init(|| {
+        std::env::var("HELM_EMOJI").is_ok_and(|v| v == "full")
+    });
+    if full {
+        return text.to_string();
+    }
     text.replace('\u{FE0F}', "")
 }
 
