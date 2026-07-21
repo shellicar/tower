@@ -56,6 +56,50 @@ impl Editor {
         }
     }
 
+    /// Start of the cursor's logical line.
+    fn line_start(&self) -> usize {
+        let mut i = self.cursor;
+        while i > 0 && self.chars[i - 1] != '\n' {
+            i -= 1;
+        }
+        i
+    }
+
+    /// Up one logical line, keeping the column where the line allows.
+    /// First line: no-op — there is nowhere up to go.
+    pub fn up(&mut self) {
+        let line_start = self.line_start();
+        if line_start == 0 {
+            return;
+        }
+        let column = self.cursor - line_start;
+        let prev_end = line_start - 1; // the '\n' above
+        let mut prev_start = prev_end;
+        while prev_start > 0 && self.chars[prev_start - 1] != '\n' {
+            prev_start -= 1;
+        }
+        self.cursor = prev_start + column.min(prev_end - prev_start);
+    }
+
+    /// Down one logical line, keeping the column where the line allows.
+    /// Last line: no-op.
+    pub fn down(&mut self) {
+        let column = self.cursor - self.line_start();
+        let mut line_end = self.cursor;
+        while line_end < self.chars.len() && self.chars[line_end] != '\n' {
+            line_end += 1;
+        }
+        if line_end == self.chars.len() {
+            return;
+        }
+        let next_start = line_end + 1;
+        let mut next_end = next_start;
+        while next_end < self.chars.len() && self.chars[next_end] != '\n' {
+            next_end += 1;
+        }
+        self.cursor = next_start + column.min(next_end - next_start);
+    }
+
     /// Start of the previous word: skip whitespace back, then the word.
     fn word_start_back(&self) -> usize {
         let mut i = self.cursor;
@@ -242,6 +286,53 @@ mod tests {
         let (lines, cursor) = e.lines_and_cursor();
         assert_eq!(lines, vec![" two three"]);
         assert_eq!(cursor, (0, 0));
+    }
+
+    #[test]
+    fn up_moves_to_the_same_column_of_the_line_above() {
+        let mut e = editor_with("line1\nline2\nli_e3");
+        e.left();
+        e.left(); // column 3 of the last line
+        e.up();
+
+        let expected_cursor = (1, 3); // column 3 of "line2"
+        let (_, actual_cursor) = e.lines_and_cursor();
+        assert_eq!(actual_cursor, expected_cursor);
+    }
+
+    #[test]
+    fn up_clamps_the_column_to_a_shorter_line() {
+        let mut e = editor_with("ab\nlonger");
+        e.end();
+        e.up();
+
+        let expected_cursor = (0, 2); // end of "ab"
+        let (_, actual_cursor) = e.lines_and_cursor();
+        assert_eq!(actual_cursor, expected_cursor);
+    }
+
+    #[test]
+    fn down_moves_to_the_same_column_of_the_line_below() {
+        let mut e = editor_with("alpha\nbeta");
+        e.up();
+        e.home();
+        e.right(); // (0, 1)
+        e.down();
+
+        let expected_cursor = (1, 1);
+        let (_, actual_cursor) = e.lines_and_cursor();
+        assert_eq!(actual_cursor, expected_cursor);
+    }
+
+    #[test]
+    fn up_on_the_first_line_and_down_on_the_last_are_no_ops() {
+        let mut e = editor_with("only");
+        e.up();
+        let (_, after_up) = e.lines_and_cursor();
+        assert_eq!(after_up, (0, 4));
+        e.down();
+        let (_, after_down) = e.lines_and_cursor();
+        assert_eq!(after_down, (0, 4));
     }
 
     #[test]

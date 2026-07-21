@@ -478,6 +478,8 @@ fn apply_editor_key(editor: &mut Editor, code: KeyCode, mods: KeyModifiers) {
         KeyCode::Right => editor.right(),
         KeyCode::Home => editor.home(),
         KeyCode::End => editor.end(),
+        KeyCode::Up => editor.up(),
+        KeyCode::Down => editor.down(),
         KeyCode::Char('w') if mods.contains(KeyModifiers::CONTROL) => editor.delete_word_back(),
         KeyCode::Char('d') if mods.contains(KeyModifiers::ALT) => editor.delete_word_forward(),
         KeyCode::Char('∂') => editor.delete_word_forward(),
