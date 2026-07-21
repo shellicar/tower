@@ -437,11 +437,9 @@ async fn accept_say(
 
     // The query task, cooperatively cancellable.
     let (tx, rx) = watch::channel(false);
-    // The model sees the pending say; the record does not, yet. Resolution
-    // runs over the full render at this edge (objects.rs).
+    // The model sees the pending say; the record does not, yet.
     let mut history = conversation.history();
     history.push(json!({ "role": "user", "content": user.content }));
-    crate::objects::resolve_history(client, &config.attach_bucket, &mut history).await;
 
     let ctx = TurnContext {
         client: client.clone(),
@@ -464,7 +462,13 @@ async fn accept_say(
     };
     let done = done_tx.clone();
     let q = query.clone();
+    let bucket = config.attach_bucket.clone();
     tokio::spawn(async move {
+        // Resolution (object fetches + image conditioning) runs over the full
+        // render at this edge (objects.rs) — inside the task, never ahead of
+        // the say's reply: on a long image-laden history it takes seconds, and
+        // the sender's request deadline must not pay for it.
+        crate::objects::resolve_history(&ctx.client, &bucket, &mut history).await;
         let end = run_query(ctx, history, rx).await;
         let _ = done.send((q, end)).await;
     });
