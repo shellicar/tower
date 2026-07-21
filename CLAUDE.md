@@ -8,6 +8,13 @@ terminal client that spawns its own bridge. Hand-built, no mission machinery.
 The rest of the repo is specs (live contract), the planning design corpus (see
 below — not archive), and the poc.
 
+Known follow-up: a conversation panel (Svelte and Leptos both) renders its
+whole message history into the DOM, however long the conversation — some run
+400+ turns. Live profiling (21 Jul) found this the real ceiling on render
+cost with several panels open and streaming at once. A virtual list (render
+only messages near the viewport, a spacer sized to the rest) would cap DOM
+size regardless of history length; not yet designed or built.
+
 ## The documents govern
 
 Pointers, not restatements. The doc wins where code and doc disagree;

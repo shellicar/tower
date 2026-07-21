@@ -9,6 +9,12 @@
 //! the plan's question 2 (full Svelte parity) was answered. Tabs live in
 //! `ui/tabs.rs` and the `view` concern instead.
 //!
+//! `oc` (this conversation's own `RwSignal<ConversationState>`) is a `Copy`
+//! handle fetched once by the composition root and passed down, not looked
+//! up from a shared `Conversations` signal on every render — that's what
+//! gives this panel its OWN reactive scope, isolated from every other open
+//! panel (a delta in another conversation cannot invalidate this one).
+//!
 //! `conv` is held as a `StoredValue<String>` (Copy), not a plain `String`:
 //! this view has a dozen reactive closures that each need the conversation
 //! id, and a plain `String` can only be moved into the first one — every
@@ -23,7 +29,7 @@ use serde_json::Value;
 use wasm_bindgen::JsCast;
 
 use crate::concerns::approvals::{Approvals, ask_input, ask_label};
-use crate::concerns::conversation::{Conversations, QueryState};
+use crate::concerns::conversation::{ConversationState, QueryState};
 use crate::concerns::rail::Rail;
 use crate::concerns::usage::Usage;
 use crate::pricing::{format_tokens, format_usd, price_usage};
@@ -108,7 +114,7 @@ fn price_usage_line(u: &ws_types::WsUsage) -> impl IntoView + use<> {
 pub fn ConversationView(
     conv: String,
     rail: RwSignal<Rail>,
-    conversations: RwSignal<Conversations>,
+    oc: RwSignal<ConversationState>,
     approvals: RwSignal<Approvals>,
     usage: RwSignal<Usage>,
     now: RwSignal<Millis>,
@@ -132,18 +138,6 @@ pub fn ConversationView(
         }
         at_bottom.set(true);
     };
-    let autosize = move || {
-        if let Some(el) = editor_ref.get() {
-            // `.style()` on the leptos-wrapped element resolves to tachys's
-            // reactive-attribute method, not web_sys's `CSSStyleDeclaration`
-            // getter, so borrow the underlying DOM element explicitly.
-            let html_el: &web_sys::HtmlElement = el.unchecked_ref();
-            html_el.style().set_property("height", "auto").ok();
-            let h = el.scroll_height();
-            html_el.style().set_property("height", &format!("{h}px")).ok();
-        }
-    };
-
     // Local upload state — a component's own, per the architecture doc; the
     // concern only ever holds the ref once it's won (`on_attach`).
     let uploading = RwSignal::new(0u32);
@@ -169,19 +163,15 @@ pub fn ConversationView(
 
     let send_current = Callback::new(move |()| {
         let text = draft.get_untracked();
-        let allowed = conv.with_value(|c| {
-            conversations.with(|cs| {
-                cs.get(c)
-                    .map(|oc| oc.can_send(text.trim().is_empty(), !oc.pending_attachments.is_empty(), uploading.get_untracked() > 0))
-            })
-        }).unwrap_or(false);
+        let allowed = oc.with(|s| {
+            s.can_send(text.trim().is_empty(), !s.pending_attachments.is_empty(), uploading.get_untracked() > 0)
+        });
         if !allowed {
             return;
         }
         conv.with_value(|c| save_draft(c, ""));
         draft.set(String::new());
         on_send.run(text);
-        request_animation_frame(autosize);
     });
 
     let handle_files = Callback::new(move |files: web_sys::FileList| {
@@ -198,17 +188,32 @@ pub fn ConversationView(
     });
 
     // Stick to the bottom while new content arrives and the reader hasn't
-    // scrolled away; runs after the DOM patch, so scrollHeight already
-    // reflects the new message/streaming chunk.
+    // scrolled away. Reads only THIS panel's `oc` — another open
+    // conversation's activity never fires this effect — which means it now
+    // fires exactly once per real update instead of also being nudged by
+    // unrelated traffic the way the old shared-signal version was. That
+    // exposed a real race: the effect itself runs before the browser has
+    // laid out the newly patched message DOM, so `scroll_height()` read
+    // synchronously here is still the OLD (smaller) height — observed live
+    // as a conversation opening at the top and the "latest" button never
+    // appearing (the scroll position and `at_bottom` both got set against
+    // stale geometry). Deferring to the next animation frame, same trick
+    // `autosize` already uses, reads geometry after layout instead.
     Effect::new(move |_| {
-        let count = conv.with_value(|c| {
-            conversations.with(|cs| cs.get(c).map(|oc| oc.messages.len() + oc.streaming.len()))
-        });
+        let count = oc.with(|s| s.messages.len() + s.streaming.len());
         let _ = count; // the dependency that re-triggers this effect
-        if at_bottom.get_untracked()
-            && let Some(el) = messages_ref.get()
-        {
-            el.set_scroll_top(el.scroll_height());
+        if at_bottom.get_untracked() {
+            request_animation_frame(move || {
+                if let Some(el) = messages_ref.get() {
+                    // Never read scroll_height() to compute this: that read
+                    // forces a synchronous layout right then, and profiling
+                    // live (21 Jul) showed Layout as the dominant cost with
+                    // several panels streaming at once. Writing a constant
+                    // far past any real height needs no read at all — the
+                    // browser clamps scroll_top to the actual max for you.
+                    el.set_scroll_top(1_000_000_000);
+                }
+            });
         }
     });
 
@@ -217,9 +222,7 @@ pub fn ConversationView(
     // concern already restores attachments into `pending_attachments`
     // itself, so only the text needs handling here.
     Effect::new(move |_| {
-        let restore = conv.with_value(|c| {
-            conversations.with(|cs| cs.get(c).and_then(|oc| oc.restore_say.clone()))
-        });
+        let restore = oc.with(|s| s.restore_say.clone());
         if let Some(restore) = restore {
             draft.update(|d| {
                 *d = if d.is_empty() {
@@ -228,8 +231,10 @@ pub fn ConversationView(
                     format!("{restore}\n{d}")
                 };
             });
-            conv.with_value(|c| conversations.update(|cs| cs.consume_restore(c)));
-            request_animation_frame(autosize);
+            oc.update(|s| {
+                s.restore_say = None;
+                s.restore_attachments.clear();
+            });
         }
     });
 
@@ -280,8 +285,8 @@ pub fn ConversationView(
                 <button class="close" on:click=move |_| on_close.run(())>"×"</button>
             </header>
             {move || {
-                let loaded = conv.with_value(|c| conversations.with(|cs| cs.get(c).map(|oc| oc.loaded)));
-                (loaded == Some(false)).then(|| view! { <p class="opening">"loading…"</p> })
+                let loaded = oc.with(|s| s.loaded);
+                (!loaded).then(|| view! { <p class="opening">"loading…"</p> })
             }}
             <div
                 class="messages"
@@ -294,8 +299,8 @@ pub fn ConversationView(
                 }
             >
                 {move || {
-                    let messages = conv.with_value(|c| conversations.with(|cs| cs.get(c).map(|oc| oc.messages.clone())));
-                    messages.map(|messages| {
+                    let messages = oc.with(|s| s.messages.clone());
+                    (!messages.is_empty()).then(|| {
                         messages
                             .into_iter()
                             .map(|m| {
@@ -333,37 +338,49 @@ pub fn ConversationView(
                     })
                 }}
                 {move || {
-                    let pending = conv.with_value(|c| conversations.with(|cs| cs.get(c).and_then(|oc| oc.pending_say.clone())));
+                    let pending = oc.with(|s| s.pending_say.clone());
                     pending.map(|pending| view! { <p class="pending-say">{pending}</p> })
                 }}
-                {move || {
-                    let segments = conv.with_value(|c| conversations.with(|cs| cs.get(c).map(|oc| oc.streaming.clone())));
-                    segments.map(|segments| {
-                        let total = segments.len();
-                        segments
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, seg)| {
-                                let last = i + 1 == total;
-                                let body = if last {
-                                    format!("{}▊", seg.text)
-                                } else {
-                                    seg.text
-                                };
-                                let marker = (seg.block_type != "text")
-                                    .then(|| format!("[{}] ", seg.block_type))
-                                    .unwrap_or_default();
-                                view! {
-                                    <p class="message assistant streaming">
-                                        <span class="who">"agent"</span>
-                                        {marker}
-                                        {body}
-                                    </p>
-                                }
-                            })
-                            .collect_view()
-                    })
-                }}
+                // Keyed by index, not a cloned-and-rebuilt Vec: `each` here
+                // only actually differs in SHAPE (add/remove) when a new
+                // block starts, so a delta appended to the growing segment's
+                // text never tears down and recreates every prior `<p>` —
+                // the old `.collect_view()` over a fresh clone did exactly
+                // that on EVERY chunk, which live profiling (21 Jul) showed
+                // as the actual driver of the periodic Layout-dominated CPU
+                // spikes during active streaming (not the scroll-to-bottom
+                // read fixed earlier the same night). Each item's own body
+                // is its own `move ||`, so only the segment whose text
+                // actually changed gets its content patched.
+                <For
+                    each=move || {
+                        let n = oc.with(|s| s.streaming.len());
+                        (0..n).collect::<Vec<usize>>()
+                    }
+                    key=|i| *i
+                    let(i)
+                >
+                    {move || {
+                        oc.with(|s| s.streaming.get(i).cloned()).map(|seg| {
+                            let last = i + 1 == oc.with(|s| s.streaming.len());
+                            let body = if last {
+                                format!("{}▊", seg.text)
+                            } else {
+                                seg.text
+                            };
+                            let marker = (seg.block_type != "text")
+                                .then(|| format!("[{}] ", seg.block_type))
+                                .unwrap_or_default();
+                            view! {
+                                <p class="message assistant streaming">
+                                    <span class="who">"agent"</span>
+                                    {marker}
+                                    {body}
+                                </p>
+                            }
+                        })
+                    }}
+                </For>
             </div>
 
             {move || {
@@ -417,12 +434,12 @@ pub fn ConversationView(
                         })))
                     }}
                     {move || {
-                        let state = conv.with_value(|c| conversations.with(|cs| cs.get(c).map(|oc| oc.query_state)));
+                        let state = oc.with(|s| s.query_state);
                         match state {
-                            Some(QueryState::Unknown) => {
+                            QueryState::Unknown => {
                                 view! { <span class="badge unknown" title="no evidence yet whether a query is running">"state unknown"</span> }.into_any()
                             }
-                            Some(QueryState::Live) => {
+                            QueryState::Live => {
                                 view! {
                                     <>
                                         <span class="badge live">"query running"</span>
@@ -442,7 +459,7 @@ pub fn ConversationView(
                 }}
 
                 {move || {
-                    let note = conv.with_value(|c| conversations.with(|cs| cs.get(c).and_then(|oc| oc.last_say.clone())));
+                    let note = oc.with(|s| s.last_say.clone());
                     note.map(|n| view! { <p class="last-say">{n}</p> })
                 }}
                 {move || {
@@ -451,9 +468,7 @@ pub fn ConversationView(
                 }}
 
                 {move || {
-                    let pending = conv.with_value(|c| {
-                        conversations.with(|cs| cs.get(c).map(|oc| oc.pending_attachments.clone()))
-                    }).unwrap_or_default();
+                    let pending = oc.with(|s| s.pending_attachments.clone());
                     let n_uploading = uploading.get();
                     (!pending.is_empty() || n_uploading > 0).then(|| {
                         let chips: Vec<AnyView> = pending
@@ -464,7 +479,11 @@ pub fn ConversationView(
                                 view! {
                                     <span class="chip">
                                         {label}
-                                        <button on:click=move |_| conv.with_value(|c| conversations.update(|cs| cs.remove_pending_attachment(c, i)))>"×"</button>
+                                        <button on:click=move |_| oc.update(|s| {
+                                            if i < s.pending_attachments.len() {
+                                                s.pending_attachments.remove(i);
+                                            }
+                                        })>"×"</button>
                                     </span>
                                 }
                                 .into_any()
@@ -488,7 +507,6 @@ pub fn ConversationView(
                         let value = event_target_value(&ev);
                         conv.with_value(|c| save_draft(c, &value));
                         draft.set(value);
-                        autosize();
                     }
                     on:keydown=move |ev: ev::KeyboardEvent| {
                         if ev.key() == "Enter" && (ev.meta_key() || ev.ctrl_key()) {
@@ -528,17 +546,13 @@ pub fn ConversationView(
                         // UI-local reads (draft, uploading), never re-derives the
                         // rule itself.
                         disabled=move || {
-                            !conv.with_value(|c| {
-                                conversations.with(|cs| {
-                                    cs.get(c).map(|oc| {
-                                        oc.can_send(
-                                            draft.with(|d| d.trim().is_empty()),
-                                            !oc.pending_attachments.is_empty(),
-                                            uploading.get() > 0,
-                                        )
-                                    })
-                                })
-                            }).unwrap_or(false)
+                            !oc.with(|s| {
+                                s.can_send(
+                                    draft.with(|d| d.trim().is_empty()),
+                                    !s.pending_attachments.is_empty(),
+                                    uploading.get() > 0,
+                                )
+                            })
                         }
                         on:click=move |_| send_current.run(())
                     >"Send"</button>

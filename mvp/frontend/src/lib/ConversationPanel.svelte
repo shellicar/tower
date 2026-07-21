@@ -1,9 +1,11 @@
 <script lang="ts">
   import MessageView from './MessageView.svelte';
+  import VirtualList from './VirtualList.svelte';
   import { approvals, conversations, rail, usage, view } from './app';
   import { age } from './core/time';
   import { formatTokens, formatUsd, priceUsage } from './core/pricing';
   import { uploadAttachment } from './core/uploads';
+  import { measurePlainTextHeight } from './core/textHeight';
   import type { ConversationState } from './concerns/conversation.svelte';
   import type { AttachmentRef } from './types';
 
@@ -99,13 +101,18 @@
   // never touch it. A panel opens anchored.
   let anchored = $state(true);
   // Set while *we* move the scroll, so the scroll event it fires isn't
-  // mistaken for the reader scrolling away.
-  let pinning = false;
+  // mistaken for the reader scrolling away. Reactive: VirtualList reads it
+  // too, to skip re-reading a scrollTop it already knows it just set.
+  let pinning = $state(false);
 
   function pin() {
     if (!scroller) return;
     pinning = true;
-    scroller.scrollTop = scroller.scrollHeight;
+    // Never read scrollHeight to compute this: that read forces a synchronous
+    // layout, and live profiling (21 Jul) showed Layout as the dominant cost
+    // with several panels streaming at once. A constant far past any real
+    // height needs no read — the browser clamps scrollTop to the actual max.
+    scroller.scrollTop = 1_000_000_000;
     requestAnimationFrame(() => (pinning = false));
   }
 
@@ -116,20 +123,15 @@
     anchored = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 2;
   }
 
-  // Auto-grow the editor to its content (the max-h class caps it; beyond
-  // that it scrolls) so the line being typed is never below the fold.
-  function autosize() {
-    if (!editor) return;
-    editor.style.height = 'auto';
-    editor.style.height = `${editor.scrollHeight}px`;
-    if (anchored) pin(); // editor growth steals viewport; keep the pin
+  // The editor grows to fit content via CSS (field-sizing: content on the
+  // textarea), clamped by min/max-height, no JS measurement — a keystroke
+  // never forces a synchronous height=auto/scrollHeight/height=result dance
+  // (live profiling 21 Jul found this the actual cost of typing lag, same as
+  // the Leptos side same night). Growth still steals viewport, so re-pin
+  // while anchored on any input.
+  function oninput() {
+    if (anchored) pin();
   }
-
-  // A restored draft needs the editor sized to it on mount — autosize
-  // otherwise only runs on input.
-  $effect(() => {
-    if (editor && draft !== '') autosize();
-  });
 
   // A revoked say comes back whole — words to the editor (prepended so a
   // newer half-typed thought survives), files back to the chips. The cancel
@@ -143,7 +145,6 @@
         attachments = [...oc.restoreAttachments, ...attachments];
       }
       conversations.consumeRestore(oc.conv);
-      requestAnimationFrame(autosize);
     }
   });
 
@@ -186,8 +187,8 @@
     uploadNote = '';
     draft = '';
     // Deliberately no re-anchor: a reader scrolled up for a reason stays
-    // exactly where they are.
-    requestAnimationFrame(autosize); // shrink back after the bind clears
+    // exactly where they are. field-sizing: content shrinks the box back on
+    // its own once the bind clears — no JS measurement needed.
   }
 
   // Enter is a newline; Cmd+Enter (mac) / Ctrl+Enter submits.
@@ -277,36 +278,49 @@
   </header>
 
   <div class="relative min-h-0 flex-1">
-    <div class="h-full overflow-y-auto px-3 py-2" bind:this={scroller} {onscroll}>
-      {#if !oc.loaded}
-        <p class="text-neutral-500">loading…</p>
-      {/if}
-      {#each oc.messages as message (message.id)}
+    <!-- px-3 (24px) on the scroller + MessageView's border-l-2 pl-2 (10px)
+         eat into the row's content width before text wraps. -->
+    <VirtualList
+      items={oc.messages}
+      bind:scroller
+      {pinning}
+      {onscroll}
+      measureHeight={(message, contentWidth) => measurePlainTextHeight(message, contentWidth - 34)}
+      class="h-full overflow-y-auto px-3 py-2"
+    >
+      {#snippet header()}
+        {#if !oc.loaded}
+          <p class="text-neutral-500">loading…</p>
+        {/if}
+      {/snippet}
+      {#snippet row(message)}
         <MessageView {message} />
-      {/each}
-      {#if oc.pendingSay}
-        <!-- The say in flight: accepted, not yet committed — the record
-             doesn't hold it, so it renders greyed, not as a message. -->
-        <div class="my-2 border-l-2 border-neutral-700 pl-2 opacity-50">
-          <div class="whitespace-pre-wrap text-neutral-300">{oc.pendingSay}</div>
-        </div>
-      {/if}
-      {#if oc.streaming.length > 0}
-        <div class="my-2 border-l-2 border-indigo-800 pl-2">
-          {#each oc.streaming as segment, i (i)}
-            {#if segment.text}
-              {#if segment.blockType === 'thinking'}
-                <div class="whitespace-pre-wrap text-neutral-500 italic">{segment.text}</div>
-              {:else if segment.blockType === 'tool_use'}
-                <div class="wrap-anywhere whitespace-pre-wrap text-neutral-500">⚒ {segment.text}</div>
-              {:else}
-                <div class="whitespace-pre-wrap text-indigo-200">{segment.text}</div>
+      {/snippet}
+      {#snippet footer()}
+        {#if oc.pendingSay}
+          <!-- The say in flight: accepted, not yet committed — the record
+               doesn't hold it, so it renders greyed, not as a message. -->
+          <div class="my-2 border-l-2 border-neutral-700 pl-2 opacity-50">
+            <div class="whitespace-pre-wrap text-neutral-300">{oc.pendingSay}</div>
+          </div>
+        {/if}
+        {#if oc.streaming.length > 0}
+          <div class="my-2 border-l-2 border-indigo-800 pl-2">
+            {#each oc.streaming as segment, i (i)}
+              {#if segment.text}
+                {#if segment.blockType === 'thinking'}
+                  <div class="whitespace-pre-wrap text-neutral-500 italic">{segment.text}</div>
+                {:else if segment.blockType === 'tool_use'}
+                  <div class="wrap-anywhere whitespace-pre-wrap text-neutral-500">⚒ {segment.text}</div>
+                {:else}
+                  <div class="whitespace-pre-wrap text-indigo-200">{segment.text}</div>
+                {/if}
               {/if}
-            {/if}
-          {/each}
-        </div>
-      {/if}
-    </div>
+            {/each}
+          </div>
+        {/if}
+      {/snippet}
+    </VirtualList>
     {#if !anchored}
       <button
         class="absolute bottom-2 left-1/2 -translate-x-1/2 cursor-pointer rounded border border-neutral-600 bg-neutral-900/90 px-3 py-1 text-neutral-300 hover:text-neutral-100"
@@ -396,10 +410,10 @@
       </p>
     {/if}
     <textarea
-      class="max-h-48 min-h-16 w-full resize-none border border-neutral-700 bg-neutral-900 px-2 py-1.5 disabled:opacity-50"
+      class="max-h-48 min-h-16 w-full resize-none border border-neutral-700 bg-neutral-900 px-2 py-1.5 [field-sizing:content] overflow-y-auto disabled:opacity-50"
       bind:value={draft}
       bind:this={editor}
-      oninput={autosize}
+      {oninput}
       {onkeydown}
       {onpaste}
       disabled={oc.liveQuery !== null}

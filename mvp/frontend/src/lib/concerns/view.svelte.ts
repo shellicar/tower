@@ -99,6 +99,12 @@ export class View {
     }));
     if (this.active >= this.tabs.length) this.active = this.tabs.length - 1;
     saveActiveTab(this.active);
+    // The snapshot can replace the active tab's convs with ones never opened
+    // in this session (a fresh connection's `onConnect` open ran against the
+    // still-default empty tab, before this snapshot arrived) — without this,
+    // App.svelte's `conversations.get(c) !== undefined` filter hides every
+    // conv until something else happens to call setOpen (e.g. a tab switch).
+    this.#conversations.setOpen(this.tab.convs);
   }
 
   /** The active tab; tabs always number at least one. */

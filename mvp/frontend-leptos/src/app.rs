@@ -24,6 +24,7 @@ use ws_types::ClientMsg;
 
 use crate::concerns::approvals::Approvals;
 use crate::concerns::conversation::Conversations;
+use crate::concerns::conversation::ConversationState;
 use crate::concerns::rail::Rail;
 use crate::concerns::usage::Usage;
 use crate::concerns::view::View;
@@ -70,7 +71,12 @@ fn save_active(i: usize) {
 #[component]
 pub fn App(ws_url: String) -> impl IntoView {
     let rail = RwSignal::new(Rail::default());
-    let conversations = RwSignal::new(Conversations::default());
+    // NOT an `RwSignal`: which conversations exist is already reactive
+    // through `view.tab().convs`; each open conversation's OWN content lives
+    // in its own `RwSignal<ConversationState>` (see concerns/conversation.rs)
+    // so a delta in one panel cannot invalidate another's render — the fix
+    // for CPU that scaled with open-panel count under load.
+    let conversations = StoredValue::new(Conversations::default());
     let approvals = RwSignal::new(Approvals::default());
     let usage = RwSignal::new(Usage::default());
     let view = RwSignal::new({
@@ -86,7 +92,7 @@ pub fn App(ws_url: String) -> impl IntoView {
             // Fan-out: one decoded frame, offered to every concern's own
             // `apply`. Each concern's own match decides what it folds.
             rail.update(|r| r.apply(&frame));
-            conversations.update(|c| c.apply(&frame));
+            conversations.update_value(|c| c.apply(&frame));
             approvals.update(|a| a.apply(&frame));
             usage.update(|u| u.apply(&frame));
             view.maybe_update(|v| v.apply(&frame, crate::ui::rail::load_view));
@@ -113,7 +119,7 @@ pub fn App(ws_url: String) -> impl IntoView {
     let sync_open = move || {
         let wanted = view.with(|v| v.tab().convs.clone());
         let mut mint = next_id;
-        let msgs = conversations.try_update(|c| c.set_open(&wanted, &mut mint));
+        let msgs = conversations.try_update_value(|c| c.set_open(&wanted, &mut mint));
         for msg in msgs.into_iter().flatten() {
             send(msg);
         }
@@ -275,11 +281,21 @@ pub fn App(ws_url: String) -> impl IntoView {
                         let(conv)
                     >
                         {
+                            // Rendering is driven by `view.tab().convs`
+                            // (reactive); `conversations` (a `StoredValue`) is
+                            // not, so this must tolerate the open-set not
+                            // having caught up yet rather than filter the
+                            // list on it — `get_or_create` supplies a fresh
+                            // signal on demand, `sync_open`'s own insert
+                            // becomes a no-op once it lands.
+                            let oc: RwSignal<ConversationState> = conversations
+                                .try_update_value(|c| c.get_or_create(&conv))
+                                .expect("conversations StoredValue is never disposed");
                             let on_send = Callback::new({
                                 let conv = conv.clone();
                                 move |text: String| {
                                     let id = next_id();
-                                    if let Some(msg) = conversations.try_update(|c| c.say(&conv, text, id)).flatten() {
+                                    if let Some(msg) = conversations.try_update_value(|c| c.say(&conv, text, id)).flatten() {
                                         send(msg);
                                     }
                                 }
@@ -288,7 +304,7 @@ pub fn App(ws_url: String) -> impl IntoView {
                                 let conv = conv.clone();
                                 move |()| {
                                     let id = next_id();
-                                    if let Some(msg) = conversations.try_update(|c| c.cancel(&conv, id)).flatten() {
+                                    if let Some(msg) = conversations.try_update_value(|c| c.cancel(&conv, id)).flatten() {
                                         send(msg);
                                     }
                                 }
@@ -296,7 +312,7 @@ pub fn App(ws_url: String) -> impl IntoView {
                             let on_attach = Callback::new({
                                 let conv = conv.clone();
                                 move |attachment| {
-                                    conversations.update(|c| c.attach(&conv, vec![attachment]));
+                                    conversations.update_value(|c| c.attach(&conv, vec![attachment]));
                                 }
                             });
                             let on_set_title = Callback::new({
@@ -322,7 +338,7 @@ pub fn App(ws_url: String) -> impl IntoView {
                                 <ConversationView
                                     conv=conv
                                     rail=rail
-                                    conversations=conversations
+                                    oc=oc
                                     approvals=approvals
                                     usage=usage
                                     now=now
