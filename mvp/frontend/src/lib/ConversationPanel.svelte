@@ -5,6 +5,7 @@
   import { age } from './core/time';
   import { formatTokens, formatUsd, priceUsage } from './core/pricing';
   import { uploadAttachment } from './core/uploads';
+  import { measurePlainTextHeight } from './core/textHeight';
   import type { ConversationState } from './concerns/conversation.svelte';
   import type { AttachmentRef } from './types';
 
@@ -277,11 +278,14 @@
   </header>
 
   <div class="relative min-h-0 flex-1">
+    <!-- px-3 (24px) on the scroller + MessageView's border-l-2 pl-2 (10px)
+         eat into the row's content width before text wraps. -->
     <VirtualList
       items={oc.messages}
       bind:scroller
       {pinning}
       {onscroll}
+      measureHeight={(message, contentWidth) => measurePlainTextHeight(message, contentWidth - 34)}
       class="h-full overflow-y-auto px-3 py-2"
     >
       {#snippet header()}

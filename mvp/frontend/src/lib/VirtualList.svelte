@@ -2,9 +2,11 @@
   // Minimal hand-rolled virtual list (spike 1: does windowing actually cut
   // Rendering/Layout cost — CLAUDE.md "Known follow-up"). Only rows within
   // `overscan` px of the viewport mount; a spacer above and below stands in
-  // for the rest, sized from a per-id height cache. No pretext/canvas
-  // measurement (spike 2) and no library (spike 3) — real DOM rows, measured
-  // once mounted, cached by id.
+  // for the rest, sized from a per-id height cache. `measureHeight` (spike
+  // 2) lets a caller hand in a precomputed height for the cases its
+  // technique covers, skipping the mount-time DOM read entirely; anything
+  // it can't compute (returns undefined) still falls back to measuring the
+  // mounted row, same as before. No library (spike 3) — real DOM rows.
   import type { Snippet } from 'svelte';
 
   let {
@@ -18,6 +20,7 @@
     pinning = false,
     onscroll,
     class: className = '',
+    measureHeight,
   }: {
     items: T[];
     row: Snippet<[T]>;
@@ -39,6 +42,10 @@
     pinning?: boolean;
     onscroll?: () => void;
     class?: string;
+    /** Precomputed height (px) for `item`, given the row's content width —
+     *  spike 2. Return `undefined` for anything the technique doesn't cover;
+     *  that row still measures itself once mounted, unchanged. */
+    measureHeight?: (item: T, contentWidth: number) => number | undefined;
   } = $props();
 
   // Keyed by item id, not index: an id's measured height survives reordering
@@ -48,6 +55,7 @@
 
   let scrollTop = $state(0);
   let viewportHeight = $state(0);
+  let viewportWidth = $state(0);
 
   function handleScroll() {
     if (!scroller) return;
@@ -62,7 +70,11 @@
     if (!scroller) return;
     const el = scroller;
     viewportHeight = el.clientHeight;
-    const ro = new ResizeObserver(() => (viewportHeight = el.clientHeight));
+    viewportWidth = el.clientWidth;
+    const ro = new ResizeObserver((entries) => {
+      viewportHeight = el.clientHeight;
+      viewportWidth = entries[0].contentRect.width;
+    });
     ro.observe(el);
     return () => ro.disconnect();
   });
@@ -124,15 +136,18 @@
     }
   }
 
-  /** Measures once mounted (the only forced-layout read — there's no cached
-   *  height yet to hand it), then tracks resize (content reflow, font load,
-   *  image decode) via the size ResizeObserver already computed off the
-   *  render path — never re-reading getBoundingClientRect, which would force
-   *  a layout on every entry instead of using the one the browser already did. */
-  function measureAction(node: HTMLElement, id: string) {
-    setHeight(id, node.getBoundingClientRect().height);
+  /** Measures once mounted, unless `measureHeight` already computed an exact
+   *  height for this item (spike 2) — then that value seeds the cache and
+   *  the mount-time getBoundingClientRect() read is skipped entirely. Either
+   *  way, resize (content reflow, font load, image decode) is tracked via
+   *  the size the ResizeObserver already computed off the render path —
+   *  never re-reading getBoundingClientRect, which would force a layout on
+   *  every entry instead of using the one the browser already did. */
+  function measureAction(node: HTMLElement, item: T) {
+    const exact = measureHeight?.(item, viewportWidth);
+    setHeight(item.id, exact ?? node.getBoundingClientRect().height);
     const ro = new ResizeObserver((entries) => {
-      setHeight(id, entries[0].borderBoxSize?.[0]?.blockSize ?? entries[0].contentRect.height);
+      setHeight(item.id, entries[0].borderBoxSize?.[0]?.blockSize ?? entries[0].contentRect.height);
     });
     ro.observe(node);
     return {
@@ -147,7 +162,7 @@
   {#if header}{@render header()}{/if}
   <div style="height: {before}px"></div>
   {#each visible as item (item.id)}
-    <div use:measureAction={item.id}>
+    <div use:measureAction={item}>
       {@render row(item)}
     </div>
   {/each}
