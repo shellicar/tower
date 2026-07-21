@@ -105,7 +105,11 @@
   function pin() {
     if (!scroller) return;
     pinning = true;
-    scroller.scrollTop = scroller.scrollHeight;
+    // Never read scrollHeight to compute this: that read forces a synchronous
+    // layout, and live profiling (21 Jul) showed Layout as the dominant cost
+    // with several panels streaming at once. A constant far past any real
+    // height needs no read — the browser clamps scrollTop to the actual max.
+    scroller.scrollTop = 1_000_000_000;
     requestAnimationFrame(() => (pinning = false));
   }
 
@@ -116,20 +120,15 @@
     anchored = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 2;
   }
 
-  // Auto-grow the editor to its content (the max-h class caps it; beyond
-  // that it scrolls) so the line being typed is never below the fold.
-  function autosize() {
-    if (!editor) return;
-    editor.style.height = 'auto';
-    editor.style.height = `${editor.scrollHeight}px`;
-    if (anchored) pin(); // editor growth steals viewport; keep the pin
+  // The editor grows to fit content via CSS (field-sizing: content on the
+  // textarea), clamped by min/max-height, no JS measurement — a keystroke
+  // never forces a synchronous height=auto/scrollHeight/height=result dance
+  // (live profiling 21 Jul found this the actual cost of typing lag, same as
+  // the Leptos side same night). Growth still steals viewport, so re-pin
+  // while anchored on any input.
+  function oninput() {
+    if (anchored) pin();
   }
-
-  // A restored draft needs the editor sized to it on mount — autosize
-  // otherwise only runs on input.
-  $effect(() => {
-    if (editor && draft !== '') autosize();
-  });
 
   // A revoked say comes back whole — words to the editor (prepended so a
   // newer half-typed thought survives), files back to the chips. The cancel
@@ -143,7 +142,6 @@
         attachments = [...oc.restoreAttachments, ...attachments];
       }
       conversations.consumeRestore(oc.conv);
-      requestAnimationFrame(autosize);
     }
   });
 
@@ -186,8 +184,8 @@
     uploadNote = '';
     draft = '';
     // Deliberately no re-anchor: a reader scrolled up for a reason stays
-    // exactly where they are.
-    requestAnimationFrame(autosize); // shrink back after the bind clears
+    // exactly where they are. field-sizing: content shrinks the box back on
+    // its own once the bind clears — no JS measurement needed.
   }
 
   // Enter is a newline; Cmd+Enter (mac) / Ctrl+Enter submits.
@@ -396,10 +394,10 @@
       </p>
     {/if}
     <textarea
-      class="max-h-48 min-h-16 w-full resize-none border border-neutral-700 bg-neutral-900 px-2 py-1.5 disabled:opacity-50"
+      class="max-h-48 min-h-16 w-full resize-none border border-neutral-700 bg-neutral-900 px-2 py-1.5 [field-sizing:content] overflow-y-auto disabled:opacity-50"
       bind:value={draft}
       bind:this={editor}
-      oninput={autosize}
+      {oninput}
       {onkeydown}
       {onpaste}
       disabled={oc.liveQuery !== null}
