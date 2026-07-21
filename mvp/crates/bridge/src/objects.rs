@@ -27,15 +27,20 @@ pub async fn resolve_history(client: &async_nats::Client, bucket: &str, history:
     }
     let js = async_nats::jetstream::new(client.clone());
     let store = js.get_object_store(bucket).await.ok();
+    // Every block resolves concurrently: fetches overlap on the wire and
+    // conditioning overlaps on the blocking pool (imaging.rs), so a history
+    // with many images pays for the slowest one, not the sum.
+    let mut slots: Vec<&mut Value> = Vec::new();
     for message in history.iter_mut() {
         let Some(blocks) = message["content"].as_array_mut() else {
             continue;
         };
-        for block in blocks.iter_mut() {
-            if is_object_source(block) {
-                *block = resolve_one(store.as_ref(), block).await;
-            }
-        }
+        slots.extend(blocks.iter_mut().filter(|b| is_object_source(b)));
+    }
+    let resolved =
+        futures::future::join_all(slots.iter().map(|b| resolve_one(store.as_ref(), b))).await;
+    for (slot, value) in slots.into_iter().zip(resolved) {
+        *slot = value;
     }
 }
 
