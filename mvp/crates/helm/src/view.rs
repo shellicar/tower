@@ -70,13 +70,13 @@ fn wrap_segments(line: &str, width: usize) -> Vec<String> {
     let mut current = String::new();
     let mut current_width = 0usize;
     for grapheme in line.graphemes(true) {
-        // A VS16 cluster is emoji presentation: drawn 2 columns by every
-        // emoji-capable renderer, whatever the base char's own width says.
-        let grapheme_width = if grapheme.contains('\u{FE0F}') {
-            2
-        } else {
-            grapheme.width()
-        };
+        // VS16 clusters measure at their BASE width (FE0F is zero) — i.e. 1
+        // for the ambiguous bases. This matches tmux with
+        // `variation-selector-always-wide off` (the fix for its two-position
+        // redraw bug): the artwork may visually overlap the next cell, but
+        // the grid stays consistent, which is the property that matters.
+        // Measuring these at 2 corrupts under that setting — proven live.
+        let grapheme_width = grapheme.width();
         if current_width + grapheme_width > width && !current.is_empty() {
             segments.push(std::mem::take(&mut current));
             current_width = 0;
