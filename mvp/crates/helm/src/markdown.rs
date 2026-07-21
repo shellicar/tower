@@ -1,8 +1,8 @@
 //! Markdown layout for text blocks: a token walk over pulldown-cmark emitting
 //! styled, wrapped display lines — the Rust twin of claude-sdk-cli's
 //! markdownLayout.ts, with the same palette (heading grades 39/74/110, accent
-//! 33, link 39, code 180) and the same out-of-scope fallthrough (tables, raw
-//! HTML pass through untouched). Lines come back pre-wrapped because helm's
+//! 33, link 39, code 180). Tables render one pipe-joined row per line; raw
+//! HTML passes through untouched. Lines come back pre-wrapped because helm's
 //! hit map needs every visual row accounted for here, not by ratatui.
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
@@ -25,7 +25,7 @@ fn dim() -> Style {
 /// columns. Pure: text and width in, lines out.
 pub fn lay(text: &str, width: usize) -> Vec<Line<'static>> {
     let mut renderer = Renderer::new(width);
-    let parser = Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH);
+    let parser = Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES);
     for event in parser {
         renderer.event(event);
     }
@@ -345,6 +345,8 @@ impl Renderer {
                 self.marker_width = marker.width();
                 self.marker = Some(marker);
             }
+            Tag::Table(_) => self.blank(),
+            Tag::TableHead | Tag::TableRow => self.current.push(Span::raw("| ")),
             Tag::Emphasis => self.italic += 1,
             Tag::Strong => self.bold += 1,
             Tag::Strikethrough => self.strike += 1,
@@ -375,6 +377,8 @@ impl Renderer {
                     self.marker_width = 0;
                 }
             }
+            TagEnd::TableHead | TagEnd::TableRow => self.flush(),
+            TagEnd::TableCell => self.current.push(Span::raw(" | ")),
             TagEnd::Emphasis => self.italic = self.italic.saturating_sub(1),
             TagEnd::Strong => self.bold = self.bold.saturating_sub(1),
             TagEnd::Strikethrough => self.strike = self.strike.saturating_sub(1),
@@ -513,13 +517,14 @@ mod tests {
     }
 
     #[test]
-    fn a_table_falls_through_as_raw_text() {
+    fn a_table_renders_one_row_per_line() {
         let source = "| a | b |\n|---|---|\n| 1 | 2 |";
 
         let lines = lay(source, 40);
         let rows: Vec<String> = lines.iter().map(row_text).collect();
 
-        assert!(rows.iter().any(|r| r.contains("| a | b |")));
+        assert!(rows.iter().any(|r| r.starts_with("| a | b |")));
+        assert!(rows.iter().any(|r| r.starts_with("| 1 | 2 |")));
     }
 
     #[test]

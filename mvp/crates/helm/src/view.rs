@@ -332,7 +332,14 @@ fn lay(
             line: Line::styled(format!("[{}…]", segment.block_type), dim()),
             hit: None,
         });
-        wrap_into(&mut rows, &segment.text, width, None, None);
+        // A streaming text block re-renders as markdown every frame: content
+        // is small (workload facts), so the re-lay is microseconds, and the
+        // still-open tail never caches anyway.
+        if segment.block_type == "text" {
+            lay_markdown(&mut rows, &segment.text, width);
+        } else {
+            wrap_into(&mut rows, &segment.text, width, None, None);
+        }
     }
     for (id, ask) in approvals.live(now_ms) {
         rows.push(Row {
