@@ -449,16 +449,17 @@ async fn main() -> anyhow::Result<()> {
                                     let index = (mouse.row - inner.y) as usize;
                                     let column = (mouse.column - inner.x) as usize;
                                     if let Some(hit) = hits.get(index) {
-                                        // Links open on cmd+click only — a bare
-                                        // click in the terminal must never fire
-                                        // a browser by accident.
-                                        let cmd_held = mouse.modifiers.contains(KeyModifiers::SUPER);
+                                        // Links open on option+click only — a bare
+                                        // click must never fire a browser, and alt is
+                                        // a modifier the mouse protocol actually
+                                        // carries (cmd/super has no wire bit).
+                                        let alt_held = mouse.modifiers.contains(KeyModifiers::ALT);
                                         let link = hit
                                             .links
                                             .iter()
                                             .find(|l| column >= l.start && column < l.end);
                                         match link {
-                                            Some(link) if cmd_held => {
+                                            Some(link) if alt_held => {
                                                 note = open_link(&link.href)
                                                     .err()
                                                     .map(|e| e.to_string());
