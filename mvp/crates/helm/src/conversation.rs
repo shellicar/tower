@@ -149,7 +149,8 @@ mod tests {
     fn replay(fixture: &str) -> Conversation {
         let mut conv = Conversation::default();
         for line in fixture.lines().filter(|l| !l.is_empty()) {
-            let record: serde_json::Value = serde_json::from_str(line).expect("fixture line is json");
+            let record: serde_json::Value =
+                serde_json::from_str(line).expect("fixture line is json");
             let subject = record["subject"].as_str().expect("subject");
             let payload = serde_json::to_vec(&record["message"]).expect("message");
             if let Some(WireEvent::Conv(event)) = wire::parse_wire(subject, &payload) {
@@ -201,8 +202,10 @@ mod tests {
 
     #[test]
     fn a_committed_human_say_supersedes_the_pending_one_but_a_tool_result_does_not() {
-        let mut conv = Conversation::default();
-        conv.pending_say = Some("hello".into());
+        let mut conv = Conversation {
+            pending_say: Some("hello".into()),
+            ..Conversation::default()
+        };
         // A tool_result commits as role user with agent provenance — the
         // pending say must survive it.
         let mut tool_result = message("m1", "2026-07-07T21:00:00+10:00", "user", vec![]);
@@ -218,8 +221,10 @@ mod tests {
 
     #[test]
     fn a_query_closing_with_the_say_still_pending_sends_it_home() {
-        let mut conv = Conversation::default();
-        conv.pending_say = Some("hello".into());
+        let mut conv = Conversation {
+            pending_say: Some("hello".into()),
+            ..Conversation::default()
+        };
         let closure = wire::Query {
             ts: "2026-07-07T21:00:02+10:00".into(),
             query_id: wire::QueryId("q1".into()),

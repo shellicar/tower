@@ -10,6 +10,7 @@ mod approvals;
 mod clipboard;
 mod command;
 mod conversation;
+mod markdown;
 mod submit;
 mod transport;
 mod usage;
@@ -24,8 +25,8 @@ use crossterm::event::{
     PushKeyboardEnhancementFlags,
 };
 use submit::{Chip, FileKind, build_submit};
-use tui_textarea::TextArea;
 use transport::Session;
+use tui_textarea::TextArea;
 use usage::Usage;
 use view::{BlockKey, Geometry, ViewState};
 
@@ -82,7 +83,10 @@ async fn main() -> anyhow::Result<()> {
     };
 
     if let Some(text) = one_shot {
-        session.requester().say(&conv_id, &text, None, Vec::new()).await?;
+        session
+            .requester()
+            .say(&conv_id, &text, None, Vec::new())
+            .await?;
     }
 
     let requester = session.requester();

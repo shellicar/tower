@@ -128,12 +128,12 @@ fn strip_vs16(text: &str) -> String {
 /// stripped forms reading as grey ghosts.
 fn accent_for(grapheme: &str) -> Option<Color> {
     match grapheme.chars().next()? {
-        '\u{2139}' => Some(Color::Blue),                  // ℹ information
-        '\u{26A0}' => Some(Color::Yellow),                // ⚠ warning
-        '\u{2764}' | '\u{2665}' => Some(Color::Red),      // ❤ ♥ hearts
-        '\u{2733}' | '\u{2714}' => Some(Color::Green),    // ✳ ✔ marks
-        '\u{25B6}' | '\u{25C0}' => Some(Color::Cyan),     // ▶ ◀ arrows
-        '\u{2716}' | '\u{274C}' => Some(Color::Red),      // ✖ crosses
+        '\u{2139}' => Some(Color::Blue),               // ℹ information
+        '\u{26A0}' => Some(Color::Yellow),             // ⚠ warning
+        '\u{2764}' | '\u{2665}' => Some(Color::Red),   // ❤ ♥ hearts
+        '\u{2733}' | '\u{2714}' => Some(Color::Green), // ✳ ✔ marks
+        '\u{25B6}' | '\u{25C0}' => Some(Color::Cyan),  // ▶ ◀ arrows
+        '\u{2716}' | '\u{274C}' => Some(Color::Red),   // ✖ crosses
         _ => None,
     }
 }
@@ -167,7 +167,13 @@ fn styled_segment(segment: String, base: Option<Style>) -> Line<'static> {
 
 /// Wrap a block of text into rows; chunked rows inherit their source's hit
 /// key, so the click map stays exact through the wrap.
-fn wrap_into(rows: &mut Vec<Row>, text: &str, width: usize, style: Option<Style>, hit: Option<BlockKey>) {
+fn wrap_into(
+    rows: &mut Vec<Row>,
+    text: &str,
+    width: usize,
+    style: Option<Style>,
+    hit: Option<BlockKey>,
+) {
     let text = if strip_enabled() {
         strip_vs16(text)
     } else {
@@ -187,28 +193,17 @@ fn dim() -> Style {
     Style::default().fg(Color::DarkGray)
 }
 
-/// Markdown-lite: whole-line treatments only (headings, fences, bullets,
-/// quotes), which slot into the wrap/hit-map machinery unchanged. Inline
-/// spans (bold, `code`) need span-aware wrapping — deliberately later.
+/// A text block rendered as markdown: the module returns pre-wrapped styled
+/// lines, so they slot straight into rows. Text blocks are never click
+/// targets, so every row carries no hit key.
 fn lay_markdown(rows: &mut Vec<Row>, text: &str, width: usize) {
-    let mut in_fence = false;
-    for source_line in text.lines() {
-        let trimmed = source_line.trim_start();
-        if trimmed.starts_with("```") {
-            in_fence = !in_fence;
-            wrap_into(rows, source_line, width, Some(dim()), None);
-            continue;
-        }
-        let style = if in_fence {
-            Some(Style::default().fg(Color::Yellow))
-        } else if trimmed.starts_with('#') {
-            Some(Style::default().add_modifier(Modifier::BOLD).fg(Color::White))
-        } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("> ") {
-            Some(Style::default().fg(Color::Gray))
-        } else {
-            None
-        };
-        wrap_into(rows, source_line, width, style, None);
+    let text = if strip_enabled() {
+        strip_vs16(text)
+    } else {
+        text.to_string()
+    };
+    for line in crate::markdown::lay(&text, width) {
+        rows.push(Row { line, hit: None });
     }
 }
 
@@ -252,7 +247,13 @@ fn role_line(role: &str) -> Line<'static> {
     )
 }
 
-fn lay(conv: &Conversation, approvals: &Approvals, view: &mut ViewState, width: usize, now_ms: i64) -> Vec<Row> {
+fn lay(
+    conv: &Conversation,
+    approvals: &Approvals,
+    view: &mut ViewState,
+    width: usize,
+    now_ms: i64,
+) -> Vec<Row> {
     if view.cache_width != width {
         view.layout_cache.clear();
         view.cache_width = width;
@@ -275,16 +276,30 @@ fn lay(conv: &Conversation, approvals: &Approvals, view: &mut ViewState, width: 
             match summary(block) {
                 None => {
                     // Whole-rendered text block: never a click target.
-                    lay_markdown(&mut block_rows, block["text"].as_str().unwrap_or_default(), width);
+                    lay_markdown(
+                        &mut block_rows,
+                        block["text"].as_str().unwrap_or_default(),
+                        width,
+                    );
                 }
                 Some((line, style)) => {
-                    let marker = if open { line.replacen('▸', "▾", 1) } else { line };
+                    let marker = if open {
+                        line.replacen('▸', "▾", 1)
+                    } else {
+                        line
+                    };
                     block_rows.push(Row {
                         line: Line::styled(marker, style),
                         hit: Some(key.clone()),
                     });
                     if open {
-                        wrap_into(&mut block_rows, &expanded_body(block), width, Some(dim()), Some(key));
+                        wrap_into(
+                            &mut block_rows,
+                            &expanded_body(block),
+                            width,
+                            Some(dim()),
+                            Some(key),
+                        );
                     }
                 }
             }
@@ -326,7 +341,9 @@ fn lay(conv: &Conversation, approvals: &Approvals, view: &mut ViewState, width: 
                     "APPROVAL {id}: {} — y approve / n deny",
                     ask.ask["name"].as_str().unwrap_or("?")
                 ),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
             hit: None,
         });
@@ -404,7 +421,9 @@ pub fn draw(
     frame.render_widget(Paragraph::new(lines).block(block), main);
 
     let (input_title, active_editor) = match &view.command {
-        CommandMode::AttachEdit(attach) => (" attach file path (enter adds · esc backs out) ", attach),
+        CommandMode::AttachEdit(attach) => {
+            (" attach file path (enter adds · esc backs out) ", attach)
+        }
         CommandMode::ModelEdit(model) => (" model (enter sets · esc backs out) ", model),
         CommandMode::CwdEdit(cwd) => (" cwd (enter changes · esc backs out) ", cwd),
         _ => ("", editor),
@@ -474,7 +493,6 @@ pub fn draw(
 
     (Geometry { inner }, hits)
 }
-
 
 #[cfg(test)]
 mod tests {

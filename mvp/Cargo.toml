@@ -71,6 +71,10 @@ tui-textarea = "0.7"
 # Asian widths, the same crates ratatui itself measures with.
 unicode-segmentation = "1"
 unicode-width = "0.2"
+# helm's markdown renderer: a real CommonMark pull-parser for the token walk
+# (inline emphasis resolution is the part not worth hand-rolling). Maintained
+# (0.13.x, 2026 releases), no default-feature baggage.
+pulldown-cmark = { version = "0.13", default-features = false }
 
 # Vendored patch: upstream unicode-width promotes VS16 emoji-presentation
 # sequences to width 2, which no terminal chain on this machine agrees with

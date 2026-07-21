@@ -110,7 +110,8 @@ mod tests {
     fn replay(fixture: &str) -> Approvals {
         let mut approvals = Approvals::default();
         for line in fixture.lines().filter(|l| !l.is_empty()) {
-            let record: serde_json::Value = serde_json::from_str(line).expect("fixture line is json");
+            let record: serde_json::Value =
+                serde_json::from_str(line).expect("fixture line is json");
             let subject = record["subject"].as_str().expect("subject");
             let payload = serde_json::to_vec(&record["message"]).expect("message");
             if let Some(WireEvent::Approval(event)) = wire::parse_wire(subject, &payload) {
@@ -146,7 +147,11 @@ mod tests {
         // Just after the last pulse: alive. Beyond three missed pulses: void.
         assert!(!approvals.is_void(ask, ask.last_pulse_ms + 1_000));
         assert!(approvals.is_void(ask, ask.last_pulse_ms + VOID_AFTER_MS + 1));
-        assert!(approvals.live(ask.last_pulse_ms + VOID_AFTER_MS + 1).is_empty());
+        assert!(
+            approvals
+                .live(ask.last_pulse_ms + VOID_AFTER_MS + 1)
+                .is_empty()
+        );
     }
 
     #[test]
@@ -158,6 +163,6 @@ mod tests {
                 ts: "2026-07-07T21:00:00+10:00".into(),
             },
         );
-        assert!(approvals.asks.get("apr-ghost").is_none());
+        assert!(!approvals.asks.contains_key("apr-ghost"));
     }
 }
