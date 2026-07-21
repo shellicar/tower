@@ -449,14 +449,25 @@ async fn main() -> anyhow::Result<()> {
                                     let index = (mouse.row - inner.y) as usize;
                                     let column = (mouse.column - inner.x) as usize;
                                     if let Some(hit) = hits.get(index) {
-                                        if let Some(link) = hit
+                                        // Links open on cmd+click only — a bare
+                                        // click in the terminal must never fire
+                                        // a browser by accident.
+                                        let cmd_held = mouse.modifiers.contains(KeyModifiers::SUPER);
+                                        let link = hit
                                             .links
                                             .iter()
-                                            .find(|l| column >= l.start && column < l.end)
-                                        {
-                                            note = open_link(&link.href).err().map(|e| e.to_string());
-                                        } else if let Some(key) = &hit.block {
-                                            view_state.toggle(key.clone());
+                                            .find(|l| column >= l.start && column < l.end);
+                                        match link {
+                                            Some(link) if cmd_held => {
+                                                note = open_link(&link.href)
+                                                    .err()
+                                                    .map(|e| e.to_string());
+                                            }
+                                            _ => {
+                                                if let Some(key) = &hit.block {
+                                                    view_state.toggle(key.clone());
+                                                }
+                                            }
                                         }
                                     }
                                 }
