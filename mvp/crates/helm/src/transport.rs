@@ -139,13 +139,23 @@ impl Session {
     /// Send one control line, read its one reply line — bridge's existing
     /// stdio contract, untouched by helm's presence. The pump drains the
     /// attach fd throughout, so an adopt's history flood can never deadlock
-    /// this exchange.
+    /// this exchange. Bounded: a local child answers in milliseconds — an
+    /// adopt's replay is the slow case and stays well inside — so silence
+    /// past the bound means bridge is gone, and EOF says so outright.
     pub async fn control(&mut self, line: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
         let mut bytes = serde_json::to_vec(line)?;
         bytes.push(b'\n');
         self.control_out.write_all(&bytes).await?;
         let mut reply = String::new();
-        self.control_in.read_line(&mut reply).await?;
+        let n = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            self.control_in.read_line(&mut reply),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("bridge did not answer the control line within 30s"))??;
+        if n == 0 {
+            anyhow::bail!("bridge closed stdout before answering — it has exited");
+        }
         Ok(serde_json::from_str(reply.trim_end())?)
     }
 

@@ -66,3 +66,8 @@ crossterm = "0.28"
 # entry with cursor-following viewport scroll, word ops, undo. Replaces a
 # hand-rolled editor that was growing scroll logic the shelf already has.
 tui-textarea = "0.7"
+# helm's layout measures its own wrap (the hit map demands row→block truth),
+# so it must measure the way the renderer does: grapheme clusters and East
+# Asian widths, the same crates ratatui itself measures with.
+unicode-segmentation = "1"
+unicode-width = "0.2"

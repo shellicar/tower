@@ -58,26 +58,41 @@ struct Row {
     hit: Option<BlockKey>,
 }
 
-/// Naive char-count wrap. Good enough until measurement needs to be
-/// grapheme-accurate; the hit map is what must never be wrong, and chunked
-/// rows inherit their source's key so it can't be.
-fn wrap_into(rows: &mut Vec<Row>, text: &str, width: usize, style: Option<Style>, hit: Option<BlockKey>) {
+/// Split one logical line into display rows of at most `width` columns,
+/// measuring grapheme clusters at their East Asian / emoji widths — the
+/// same measurement the renderer applies, so a wrapped row never overflows
+/// its cells. Pure, so the measurement is testable on its own.
+fn wrap_segments(line: &str, width: usize) -> Vec<String> {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
     let width = width.max(1);
-    for source_line in text.lines() {
-        let chars: Vec<char> = source_line.chars().collect();
-        if chars.is_empty() {
-            rows.push(Row {
-                line: Line::raw(""),
-                hit: hit.clone(),
-            });
-            continue;
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+    for grapheme in line.graphemes(true) {
+        let grapheme_width = grapheme.width();
+        if current_width + grapheme_width > width && !current.is_empty() {
+            segments.push(std::mem::take(&mut current));
+            current_width = 0;
         }
-        for chunk in chars.chunks(width) {
-            let s: String = chunk.iter().collect();
+        current.push_str(grapheme);
+        current_width += grapheme_width;
+    }
+    if !current.is_empty() || segments.is_empty() {
+        segments.push(current);
+    }
+    segments
+}
+
+/// Wrap a block of text into rows; chunked rows inherit their source's hit
+/// key, so the click map stays exact through the wrap.
+fn wrap_into(rows: &mut Vec<Row>, text: &str, width: usize, style: Option<Style>, hit: Option<BlockKey>) {
+    for source_line in text.lines() {
+        for segment in wrap_segments(source_line, width) {
             rows.push(Row {
                 line: match style {
-                    Some(style) => Line::styled(s, style),
-                    None => Line::raw(s),
+                    Some(style) => Line::styled(segment, style),
+                    None => Line::raw(segment),
                 },
                 hit: hit.clone(),
             });
@@ -355,4 +370,50 @@ pub fn draw(
     frame.render_widget(Paragraph::new(Line::from(status_spans)), status);
 
     (Geometry { inner }, hits)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::wrap_segments;
+
+    #[test]
+    fn ascii_wraps_at_the_column_width() {
+        let expected = vec!["abcde", "fgh"];
+
+        let actual = wrap_segments("abcdefgh", 5);
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn wide_cjk_counts_two_columns_per_glyph() {
+        // Four ideographs are eight columns: a width of 4 fits two per row.
+        let expected = vec!["日本", "語漢"];
+
+        let actual = wrap_segments("日本語漢", 4);
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_multi_codepoint_emoji_stays_one_cluster() {
+        // The family emoji is many codepoints, one grapheme — a wrap must
+        // never split inside it.
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+        let text = format!("ab{family}cd");
+
+        let actual = wrap_segments(&text, 4);
+
+        assert!(actual.iter().any(|segment| segment.contains(family)));
+    }
+
+    #[test]
+    fn an_empty_line_is_one_blank_row() {
+        let expected = vec![""];
+
+        let actual = wrap_segments("", 10);
+
+        assert_eq!(actual, expected);
+    }
 }
