@@ -78,9 +78,20 @@ async fn resolve_one(
         Err(_) => return placeholder(),
     };
 
+    // Condition at the model-facing edge, never in the store: the record and
+    // the transit object stay verbatim (whatever the client sent), and every
+    // attachment source — helm, tower, an adopted record — gets the same
+    // bounded long edge on its way into a request.
+    let block_type = block["type"].as_str().unwrap_or("image");
+    let (bytes, media_type) = if block_type == "image" {
+        crate::imaging::condition_image(bytes, media_type).await
+    } else {
+        (bytes, media_type.to_string())
+    };
+
     let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
     json!({
-        "type": block["type"].as_str().unwrap_or("image"),
+        "type": block_type,
         "source": { "type": "base64", "media_type": media_type, "data": data },
     })
 }
