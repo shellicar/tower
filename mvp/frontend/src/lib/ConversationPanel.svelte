@@ -1,5 +1,6 @@
 <script lang="ts">
   import MessageView from './MessageView.svelte';
+  import VirtualList from './VirtualList.svelte';
   import { approvals, conversations, rail, usage, view } from './app';
   import { age } from './core/time';
   import { formatTokens, formatUsd, priceUsage } from './core/pricing';
@@ -99,8 +100,9 @@
   // never touch it. A panel opens anchored.
   let anchored = $state(true);
   // Set while *we* move the scroll, so the scroll event it fires isn't
-  // mistaken for the reader scrolling away.
-  let pinning = false;
+  // mistaken for the reader scrolling away. Reactive: VirtualList reads it
+  // too, to skip re-reading a scrollTop it already knows it just set.
+  let pinning = $state(false);
 
   function pin() {
     if (!scroller) return;
@@ -275,36 +277,46 @@
   </header>
 
   <div class="relative min-h-0 flex-1">
-    <div class="h-full overflow-y-auto px-3 py-2" bind:this={scroller} {onscroll}>
-      {#if !oc.loaded}
-        <p class="text-neutral-500">loading…</p>
-      {/if}
-      {#each oc.messages as message (message.id)}
+    <VirtualList
+      items={oc.messages}
+      bind:scroller
+      {pinning}
+      {onscroll}
+      class="h-full overflow-y-auto px-3 py-2"
+    >
+      {#snippet header()}
+        {#if !oc.loaded}
+          <p class="text-neutral-500">loading…</p>
+        {/if}
+      {/snippet}
+      {#snippet row(message)}
         <MessageView {message} />
-      {/each}
-      {#if oc.pendingSay}
-        <!-- The say in flight: accepted, not yet committed — the record
-             doesn't hold it, so it renders greyed, not as a message. -->
-        <div class="my-2 border-l-2 border-neutral-700 pl-2 opacity-50">
-          <div class="whitespace-pre-wrap text-neutral-300">{oc.pendingSay}</div>
-        </div>
-      {/if}
-      {#if oc.streaming.length > 0}
-        <div class="my-2 border-l-2 border-indigo-800 pl-2">
-          {#each oc.streaming as segment, i (i)}
-            {#if segment.text}
-              {#if segment.blockType === 'thinking'}
-                <div class="whitespace-pre-wrap text-neutral-500 italic">{segment.text}</div>
-              {:else if segment.blockType === 'tool_use'}
-                <div class="wrap-anywhere whitespace-pre-wrap text-neutral-500">⚒ {segment.text}</div>
-              {:else}
-                <div class="whitespace-pre-wrap text-indigo-200">{segment.text}</div>
+      {/snippet}
+      {#snippet footer()}
+        {#if oc.pendingSay}
+          <!-- The say in flight: accepted, not yet committed — the record
+               doesn't hold it, so it renders greyed, not as a message. -->
+          <div class="my-2 border-l-2 border-neutral-700 pl-2 opacity-50">
+            <div class="whitespace-pre-wrap text-neutral-300">{oc.pendingSay}</div>
+          </div>
+        {/if}
+        {#if oc.streaming.length > 0}
+          <div class="my-2 border-l-2 border-indigo-800 pl-2">
+            {#each oc.streaming as segment, i (i)}
+              {#if segment.text}
+                {#if segment.blockType === 'thinking'}
+                  <div class="whitespace-pre-wrap text-neutral-500 italic">{segment.text}</div>
+                {:else if segment.blockType === 'tool_use'}
+                  <div class="wrap-anywhere whitespace-pre-wrap text-neutral-500">⚒ {segment.text}</div>
+                {:else}
+                  <div class="whitespace-pre-wrap text-indigo-200">{segment.text}</div>
+                {/if}
               {/if}
-            {/if}
-          {/each}
-        </div>
-      {/if}
-    </div>
+            {/each}
+          </div>
+        {/if}
+      {/snippet}
+    </VirtualList>
     {#if !anchored}
       <button
         class="absolute bottom-2 left-1/2 -translate-x-1/2 cursor-pointer rounded border border-neutral-600 bg-neutral-900/90 px-3 py-1 text-neutral-300 hover:text-neutral-100"
