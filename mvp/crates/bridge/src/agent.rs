@@ -61,7 +61,12 @@ pub fn static_tool_schemas() -> Vec<Value> {
 
 pub struct AgentConfig {
     pub conv: ConversationId,
-    pub model: String,
+    /// The model cell. A spawn that named no model shares the host's live
+    /// default, so a stdio `model` line reaches its next turn; a spawn that
+    /// named one is pinned to its own cell. The model is an instance fact,
+    /// not a conversation attribute — `turn.started` states what served each
+    /// turn.
+    pub model: Arc<std::sync::RwLock<String>>,
     /// The system prompt cell, shared and read fresh each turn so a stdio
     /// `system` control line reaches even a running conversation. Never
     /// persisted to the record.
@@ -424,7 +429,9 @@ async fn accept_say(
     let ctx = TurnContext {
         client: client.clone(),
         conv: config.conv.clone(),
-        model: config.model.clone(),
+        // Read fresh per query: a stdio `model` line reaches even a running
+        // conversation, here, on its next say.
+        model: config.model.read().unwrap().clone(),
         system: Arc::clone(&config.system),
         auth: config.auth.clone(),
         skills,

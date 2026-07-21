@@ -249,11 +249,14 @@ struct Host {
     // (BRIDGE_ATTACH_FD). None for every tower-spawned instance today; NATS
     // stays the only channel regardless of this field's value.
     attach: Option<bridge::attach::AttachHandle>,
+    /// Conversations this instance serves — what a chdir republishes
+    /// `attached` for (the cwd is causal; agent-spec scenario a4).
+    served: Arc<RwLock<Vec<String>>>,
 }
 
 impl Host {
     /// Build the config for a new or adopted conversation from the live cells.
-    fn config(&self, conv: &str, model: String) -> agent::AgentConfig {
+    fn config(&self, conv: &str, model: Arc<RwLock<String>>) -> agent::AgentConfig {
         agent::AgentConfig {
             conv: wire::ConversationId(conv.to_string()),
             model,
@@ -274,11 +277,12 @@ impl Host {
     async fn handle(&self, value: serde_json::Value) {
         if let Some(spawn) = value.get("spawn") {
             let conv = uuid::Uuid::new_v4().to_string();
-            let model = spawn
-                .get("model")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| self.default_model.read().unwrap().clone());
+            // A named model pins its own cell; none shares the live default,
+            // so a later `model` line reaches this conversation's next turn.
+            let model = match spawn.get("model").and_then(serde_json::Value::as_str) {
+                Some(m) => Arc::new(RwLock::new(m.to_string())),
+                None => Arc::clone(&self.default_model),
+            };
             let config = self.config(&conv, model);
             let Some(conv) = serve_conversation(
                 &self.client,
@@ -291,6 +295,7 @@ impl Host {
             else {
                 return;
             };
+            self.served.write().unwrap().push(conv.clone());
             println!("{}", serde_json::json!({ "conversationId": conv }));
         } else if let Some(adopt) = value.get("adopt") {
             let Some(conv) = adopt
@@ -315,7 +320,7 @@ impl Host {
                 }
             };
             let adopted = messages.len();
-            let config = self.config(&conv, self.default_model.read().unwrap().clone());
+            let config = self.config(&conv, Arc::clone(&self.default_model));
             let Some(conv) = serve_conversation(
                 &self.client,
                 &self.world,
@@ -327,6 +332,7 @@ impl Host {
             else {
                 return;
             };
+            self.served.write().unwrap().push(conv.clone());
             println!(
                 "{}",
                 serde_json::json!({ "conversationId": conv, "adoptedMessages": adopted })
@@ -379,9 +385,9 @@ impl Host {
             eprintln!("bridge: system prompt set ({} chars)", text.len());
             println!("{}", serde_json::json!({ "system": "set" }));
         } else if let Some(model) = value.get("model") {
-            // The default model a spawn takes when it names none. Reaches
-            // new spawns only; a running conversation's model is fixed at
-            // birth (docs/mvp/bridge-stdio-spec.md).
+            // The live default cell: new spawns that name no model take it,
+            // and every running conversation sharing it picks the change up
+            // on its next say. A spawn that named its own model stays pinned.
             let Some(text) = model.as_str() else {
                 println!(
                     "{}",
@@ -392,6 +398,47 @@ impl Host {
             *self.default_model.write().unwrap() = text.to_string();
             eprintln!("bridge: default model set ({text})");
             println!("{}", serde_json::json!({ "model": text }));
+        } else if let Some(cwd) = value.get("cwd") {
+            // Where this instance lives — an instance fact, changeable any
+            // time, never a conversation attribute. The chdir republishes
+            // `attached` with the new cwd for every served conversation:
+            // cwd is causal (an input to how a conversation unfolds), and
+            // observers learn it from the attachment (agent-spec, a4).
+            let Some(path) = cwd.as_str() else {
+                println!("{}", serde_json::json!({ "error": "cwd needs a string" }));
+                return;
+            };
+            let path = expand_tilde(path);
+            match std::env::set_current_dir(&path) {
+                Ok(()) => {
+                    let now = std::env::current_dir()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| path.to_string_lossy().to_string());
+                    eprintln!("bridge: cwd → {now}");
+                    let served: Vec<String> = self.served.read().unwrap().clone();
+                    for conv in served {
+                        publish_agent(
+                            &self.client,
+                            &self.world,
+                            "attached",
+                            serde_json::json!({
+                                "ts": now_iso(),
+                                "instanceId": self.instance,
+                                "conversationId": conv,
+                                "cwd": now,
+                            }),
+                        )
+                        .await;
+                    }
+                    println!("{}", serde_json::json!({ "cwd": now }));
+                }
+                Err(e) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("chdir failed: {e}") })
+                    );
+                }
+            }
         } else if let Some(context) = value.get("context") {
             // User context, injected at a conversation's birth and committed.
             let Some(text) = context.as_str() else {
@@ -455,6 +502,9 @@ impl Host {
                     "settings": {
                         "world": self.world,
                         "instance": self.instance,
+                        "cwd": std::env::current_dir()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default(),
                         "model": self.default_model.read().unwrap().clone(),
                         "thinkingBudget": self.thinking_budget,
                         "attachBucket": self.attach_bucket,
@@ -657,6 +707,7 @@ async fn main() -> anyhow::Result<()> {
         memory_path: memory_path_for_settings,
         history_path: history_path_for_settings,
         attach,
+        served: Arc::new(RwLock::new(Vec::new())),
         auth,
         skills_root,
         system: Arc::new(RwLock::new(None)),

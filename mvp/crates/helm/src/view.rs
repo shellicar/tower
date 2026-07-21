@@ -258,6 +258,8 @@ pub fn draw(
     // the say editor does. The box grows with its content, up to 5 lines.
     let (input_title, active_editor) = match &view.command {
         CommandMode::AttachEdit(attach) => (" attach file path (enter adds · esc backs out) ", attach),
+        CommandMode::ModelEdit(model) => (" model (enter sets · esc backs out) ", model),
+        CommandMode::CwdEdit(cwd) => (" cwd (enter changes · esc backs out) ", cwd),
         _ => ("", editor),
     };
     let (editor_lines, (cursor_line, cursor_col)) = active_editor.lines_and_cursor();
@@ -348,13 +350,15 @@ pub fn draw(
     }
     status_spans.push(match view.command {
         CommandMode::Root => Span::styled(
-            " · command: t text · i image · f file · d drop · y/n approval · esc/^/ exit",
+            " · command: t text · i image · f file · d drop · y/n approval · m model · c cwd · esc/^/ exit",
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         ),
-        CommandMode::AttachEdit(_) => Span::styled(
-            " · attach: ↵ adds · esc backs out · ^/ closes",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        ),
+        CommandMode::AttachEdit(_) | CommandMode::ModelEdit(_) | CommandMode::CwdEdit(_) => {
+            Span::styled(
+                " · ↵ submits · esc backs out · ^/ closes",
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            )
+        }
         CommandMode::Closed => {
             Span::raw(" · ^/ commands · ⌘↵/^↵ says · ↵ breaks · esc cancels · ^c quits")
         }

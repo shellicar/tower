@@ -225,6 +225,12 @@ async fn main() -> anyhow::Result<()> {
                                     KeyCode::Char('d') => {
                                         attachments.pop();
                                     }
+                                    KeyCode::Char('m') => {
+                                        view_state.command = CommandMode::ModelEdit(Editor::default());
+                                    }
+                                    KeyCode::Char('c') => {
+                                        view_state.command = CommandMode::CwdEdit(Editor::default());
+                                    }
                                     KeyCode::Char(answer @ ('y' | 'n')) => {
                                         let target = approvals
                                             .live(now_ms())
@@ -258,6 +264,61 @@ async fn main() -> anyhow::Result<()> {
                                             note = None;
                                         }
                                         // Back to root, still in command mode.
+                                        view_state.command.escape();
+                                    }
+                                    (KeyCode::Backspace, _) => overlay.backspace(),
+                                    (KeyCode::Delete, _) => overlay.delete(),
+                                    (KeyCode::Left, _) => overlay.left(),
+                                    (KeyCode::Right, _) => overlay.right(),
+                                    (KeyCode::Home, _) => overlay.home(),
+                                    (KeyCode::End, _) => overlay.end(),
+                                    (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+                                        overlay.insert(c);
+                                    }
+                                    _ => {}
+                                },
+                                CommandMode::ModelEdit(overlay) => match (key.code, key.modifiers) {
+                                    (KeyCode::Esc, _) => view_state.command.escape(),
+                                    (KeyCode::Enter, _) => {
+                                        let model = overlay.take().trim().to_string();
+                                        if !model.is_empty() {
+                                            let reply = session
+                                                .control(&serde_json::json!({ "model": model }))
+                                                .await?;
+                                            note = match reply["model"].as_str() {
+                                                Some(m) => Some(format!("model → {m}")),
+                                                None => Some(format!("model change failed: {reply}")),
+                                            };
+                                        }
+                                        view_state.command.escape();
+                                    }
+                                    (KeyCode::Backspace, _) => overlay.backspace(),
+                                    (KeyCode::Delete, _) => overlay.delete(),
+                                    (KeyCode::Left, _) => overlay.left(),
+                                    (KeyCode::Right, _) => overlay.right(),
+                                    (KeyCode::Home, _) => overlay.home(),
+                                    (KeyCode::End, _) => overlay.end(),
+                                    (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+                                        overlay.insert(c);
+                                    }
+                                    _ => {}
+                                },
+                                CommandMode::CwdEdit(overlay) => match (key.code, key.modifiers) {
+                                    (KeyCode::Esc, _) => view_state.command.escape(),
+                                    (KeyCode::Enter, _) => {
+                                        let path = overlay.take().trim().to_string();
+                                        if !path.is_empty() {
+                                            let reply = session
+                                                .control(&serde_json::json!({ "cwd": path }))
+                                                .await?;
+                                            note = match reply["cwd"].as_str() {
+                                                Some(cwd) => Some(format!("cwd → {cwd}")),
+                                                None => Some(format!(
+                                                    "cwd change failed: {}",
+                                                    reply["error"].as_str().unwrap_or("?")
+                                                )),
+                                            };
+                                        }
                                         view_state.command.escape();
                                     }
                                     (KeyCode::Backspace, _) => overlay.backspace(),

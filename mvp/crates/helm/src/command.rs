@@ -11,10 +11,15 @@ use crate::editor::Editor;
 pub enum CommandMode {
     #[default]
     Closed,
-    /// The root binding set: f attach · d drop attachment · y/n approval.
+    /// The root binding set: t/i/f attachments · d drop · y/n approval ·
+    /// m model · c cwd.
     Root,
-    /// The attach path editor (f) — Enter submits, Esc backs out to root.
+    /// The attach path editor (f) — Enter adds the chip, Esc backs out.
     AttachEdit(Editor),
+    /// The model editor (m) — Enter sends the `model` control line.
+    ModelEdit(Editor),
+    /// The cwd editor (c) — Enter sends the `cwd` control line.
+    CwdEdit(Editor),
 }
 
 impl CommandMode {
@@ -33,7 +38,9 @@ impl CommandMode {
     /// Esc — pops one level: an open editor backs out to root, root closes.
     pub fn escape(&mut self) {
         *self = match self {
-            CommandMode::AttachEdit(_) => CommandMode::Root,
+            CommandMode::AttachEdit(_) | CommandMode::ModelEdit(_) | CommandMode::CwdEdit(_) => {
+                CommandMode::Root
+            }
             _ => CommandMode::Closed,
         };
     }
@@ -57,10 +64,15 @@ mod tests {
 
     #[test]
     fn escape_pops_one_level() {
-        let mut mode = CommandMode::AttachEdit(Editor::default());
-        mode.escape();
-        assert!(matches!(mode, CommandMode::Root));
-        mode.escape();
-        assert!(matches!(mode, CommandMode::Closed));
+        for mut mode in [
+            CommandMode::AttachEdit(Editor::default()),
+            CommandMode::ModelEdit(Editor::default()),
+            CommandMode::CwdEdit(Editor::default()),
+        ] {
+            mode.escape();
+            assert!(matches!(mode, CommandMode::Root));
+            mode.escape();
+            assert!(matches!(mode, CommandMode::Closed));
+        }
     }
 }
