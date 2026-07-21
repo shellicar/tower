@@ -56,6 +56,51 @@ impl Editor {
         }
     }
 
+    /// Start of the previous word: skip whitespace back, then the word.
+    fn word_start_back(&self) -> usize {
+        let mut i = self.cursor;
+        while i > 0 && self.chars[i - 1].is_whitespace() {
+            i -= 1;
+        }
+        while i > 0 && !self.chars[i - 1].is_whitespace() {
+            i -= 1;
+        }
+        i
+    }
+
+    /// End of the next word: skip whitespace forward, then the word.
+    fn word_end_forward(&self) -> usize {
+        let mut i = self.cursor;
+        while i < self.chars.len() && self.chars[i].is_whitespace() {
+            i += 1;
+        }
+        while i < self.chars.len() && !self.chars[i].is_whitespace() {
+            i += 1;
+        }
+        i
+    }
+
+    pub fn word_left(&mut self) {
+        self.cursor = self.word_start_back();
+    }
+
+    pub fn word_right(&mut self) {
+        self.cursor = self.word_end_forward();
+    }
+
+    /// Option/Ctrl+Backspace: delete back to the previous word's start.
+    pub fn delete_word_back(&mut self) {
+        let start = self.word_start_back();
+        self.chars.drain(start..self.cursor);
+        self.cursor = start;
+    }
+
+    /// Option/Ctrl+Delete: delete forward through the next word.
+    pub fn delete_word_forward(&mut self) {
+        let end = self.word_end_forward();
+        self.chars.drain(self.cursor..end);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.chars.iter().all(|c| c.is_whitespace())
     }
@@ -175,5 +220,41 @@ mod tests {
         let (lines, cursor) = e.lines_and_cursor();
         assert_eq!(lines, vec!["bc"]);
         assert_eq!(cursor, (0, 0));
+    }
+
+    #[test]
+    fn word_backspace_eats_the_previous_word_and_its_gap() {
+        let mut e = editor_with("hello brave world");
+        e.delete_word_back();
+        let (lines, cursor) = e.lines_and_cursor();
+        assert_eq!(lines, vec!["hello brave "]);
+        assert_eq!(cursor, (0, 12));
+        e.delete_word_back();
+        let (lines, _) = e.lines_and_cursor();
+        assert_eq!(lines, vec!["hello "]);
+    }
+
+    #[test]
+    fn word_delete_eats_the_next_word() {
+        let mut e = editor_with("one two three");
+        e.home();
+        e.delete_word_forward();
+        let (lines, cursor) = e.lines_and_cursor();
+        assert_eq!(lines, vec![" two three"]);
+        assert_eq!(cursor, (0, 0));
+    }
+
+    #[test]
+    fn word_navigation_jumps_word_boundaries() {
+        let mut e = editor_with("alpha beta");
+        e.word_left();
+        let (_, cursor) = e.lines_and_cursor();
+        assert_eq!(cursor, (0, 6)); // start of "beta"
+        e.word_left();
+        let (_, cursor) = e.lines_and_cursor();
+        assert_eq!(cursor, (0, 0));
+        e.word_right();
+        let (_, cursor) = e.lines_and_cursor();
+        assert_eq!(cursor, (0, 5)); // end of "alpha"
     }
 }

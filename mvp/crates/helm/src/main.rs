@@ -332,16 +332,7 @@ async fn main() -> anyhow::Result<()> {
                                         // Back to root, still in command mode.
                                         view_state.command.escape();
                                     }
-                                    (KeyCode::Backspace, _) => overlay.backspace(),
-                                    (KeyCode::Delete, _) => overlay.delete(),
-                                    (KeyCode::Left, _) => overlay.left(),
-                                    (KeyCode::Right, _) => overlay.right(),
-                                    (KeyCode::Home, _) => overlay.home(),
-                                    (KeyCode::End, _) => overlay.end(),
-                                    (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-                                        overlay.insert(c);
-                                    }
-                                    _ => {}
+                                    _ => apply_editor_key(overlay, key.code, key.modifiers),
                                 },
                                 CommandMode::ModelEdit(overlay) => match (key.code, key.modifiers) {
                                     (KeyCode::Esc, _) => view_state.command.escape(),
@@ -358,16 +349,7 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                         view_state.command.escape();
                                     }
-                                    (KeyCode::Backspace, _) => overlay.backspace(),
-                                    (KeyCode::Delete, _) => overlay.delete(),
-                                    (KeyCode::Left, _) => overlay.left(),
-                                    (KeyCode::Right, _) => overlay.right(),
-                                    (KeyCode::Home, _) => overlay.home(),
-                                    (KeyCode::End, _) => overlay.end(),
-                                    (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-                                        overlay.insert(c);
-                                    }
-                                    _ => {}
+                                    _ => apply_editor_key(overlay, key.code, key.modifiers),
                                 },
                                 CommandMode::CwdEdit(overlay) => match (key.code, key.modifiers) {
                                     (KeyCode::Esc, _) => view_state.command.escape(),
@@ -387,16 +369,7 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                         view_state.command.escape();
                                     }
-                                    (KeyCode::Backspace, _) => overlay.backspace(),
-                                    (KeyCode::Delete, _) => overlay.delete(),
-                                    (KeyCode::Left, _) => overlay.left(),
-                                    (KeyCode::Right, _) => overlay.right(),
-                                    (KeyCode::Home, _) => overlay.home(),
-                                    (KeyCode::End, _) => overlay.end(),
-                                    (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-                                        overlay.insert(c);
-                                    }
-                                    _ => {}
+                                    _ => apply_editor_key(overlay, key.code, key.modifiers),
                                 },
                                 CommandMode::Closed => unreachable!("guarded by is_open"),
                             }
@@ -442,22 +415,13 @@ async fn main() -> anyhow::Result<()> {
                                     });
                                 }
                             }
-                            (KeyCode::Backspace, _) => editor.backspace(),
-                            (KeyCode::Delete, _) => editor.delete(),
-                            (KeyCode::Left, _) => editor.left(),
-                            (KeyCode::Right, _) => editor.right(),
-                            (KeyCode::Home, _) => editor.home(),
-                            (KeyCode::End, _) => editor.end(),
                             (KeyCode::PageUp, _) => view_state.scroll_from_bottom += geometry.inner.height as usize,
                             (KeyCode::PageDown, _) => {
                                 view_state.scroll_from_bottom = view_state
                                     .scroll_from_bottom
                                     .saturating_sub(geometry.inner.height as usize);
                             }
-                            (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-                                editor.insert(c);
-                            }
-                            _ => {}
+                            _ => apply_editor_key(&mut editor, key.code, key.modifiers),
                         },
                         TermEvent::Mouse(mouse) => match mouse.kind {
                             MouseEventKind::ScrollUp => view_state.scroll_from_bottom += WHEEL_LINES,
@@ -493,6 +457,35 @@ async fn main() -> anyhow::Result<()> {
     let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     result
+}
+
+/// The one editing key map, shared by the say editor and every command-mode
+/// overlay. Word ops answer every spelling the terminals produce (the
+/// reference input decoder's own list): Alt/Ctrl+Backspace — tmux says
+/// Ctrl+W — delete the previous word; Alt/Ctrl+Delete — tmux says Alt+d,
+/// bare macOS option says ∂ — the next; Alt/Ctrl+arrows — tmux says
+/// Alt+b/f — jump words.
+fn apply_editor_key(editor: &mut Editor, code: KeyCode, mods: KeyModifiers) {
+    let word = mods.contains(KeyModifiers::ALT) || mods.contains(KeyModifiers::CONTROL);
+    match code {
+        KeyCode::Backspace if word => editor.delete_word_back(),
+        KeyCode::Backspace => editor.backspace(),
+        KeyCode::Delete if word => editor.delete_word_forward(),
+        KeyCode::Delete => editor.delete(),
+        KeyCode::Left if word => editor.word_left(),
+        KeyCode::Left => editor.left(),
+        KeyCode::Right if word => editor.word_right(),
+        KeyCode::Right => editor.right(),
+        KeyCode::Home => editor.home(),
+        KeyCode::End => editor.end(),
+        KeyCode::Char('w') if mods.contains(KeyModifiers::CONTROL) => editor.delete_word_back(),
+        KeyCode::Char('d') if mods.contains(KeyModifiers::ALT) => editor.delete_word_forward(),
+        KeyCode::Char('∂') => editor.delete_word_forward(),
+        KeyCode::Char('b') if mods.contains(KeyModifiers::ALT) => editor.word_left(),
+        KeyCode::Char('f') if mods.contains(KeyModifiers::ALT) => editor.word_right(),
+        KeyCode::Char(c) if mods.is_empty() || mods == KeyModifiers::SHIFT => editor.insert(c),
+        _ => {}
+    }
 }
 
 /// Insert text into an editor at its cursor — the restore path for a failed
