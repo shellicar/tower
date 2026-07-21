@@ -28,7 +28,7 @@ use submit::{Chip, FileKind, build_submit};
 use transport::Session;
 use tui_textarea::TextArea;
 use usage::Usage;
-use view::{BlockKey, Geometry, ViewState};
+use view::{Geometry, ViewState};
 
 const WHEEL_LINES: usize = 3;
 
@@ -115,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
     // Attachments pinned to the next say (submit.rs: the format contract).
     let mut attachments: Vec<Chip> = Vec::new();
     let mut geometry = Geometry::default();
-    let mut hits: Vec<Option<BlockKey>> = Vec::new();
+    let mut hits: Vec<view::HitRow> = Vec::new();
 
     let result: anyhow::Result<()> = async {
         loop {
@@ -447,8 +447,17 @@ async fn main() -> anyhow::Result<()> {
                                     && mouse.row < inner.y + inner.height;
                                 if inside {
                                     let index = (mouse.row - inner.y) as usize;
-                                    if let Some(Some(key)) = hits.get(index) {
-                                        view_state.toggle(key.clone());
+                                    let column = (mouse.column - inner.x) as usize;
+                                    if let Some(hit) = hits.get(index) {
+                                        if let Some(link) = hit
+                                            .links
+                                            .iter()
+                                            .find(|l| column >= l.start && column < l.end)
+                                        {
+                                            note = open_link(&link.href).err().map(|e| e.to_string());
+                                        } else if let Some(key) = &hit.block {
+                                            view_state.toggle(key.clone());
+                                        }
                                     }
                                 }
                             }
@@ -467,6 +476,16 @@ async fn main() -> anyhow::Result<()> {
     let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     result
+}
+
+/// Open a clicked link in the system browser. Scheme-gated to web URLs so a
+/// crafted href can't point `open` at files or app schemes.
+fn open_link(href: &str) -> anyhow::Result<()> {
+    if !(href.starts_with("https://") || href.starts_with("http://")) {
+        anyhow::bail!("not a web link: {href}");
+    }
+    std::process::Command::new("open").arg(href).status()?;
+    Ok(())
 }
 
 /// A fresh editor with the widget defaults helm doesn't want: the default

@@ -21,9 +21,34 @@ fn dim() -> Style {
     Style::default().fg(Color::DarkGray)
 }
 
+/// A clickable region on one display row: columns [start, end) and the href
+/// a click there opens. Columns are relative to the row's own left edge.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinkHit {
+    pub start: usize,
+    pub end: usize,
+    pub href: String,
+}
+
+/// One laid display row: the styled line and any link regions on it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MdLine {
+    pub line: Line<'static>,
+    pub links: Vec<LinkHit>,
+}
+
+impl MdLine {
+    fn plain(line: Line<'static>) -> Self {
+        Self {
+            line,
+            links: Vec::new(),
+        }
+    }
+}
+
 /// Lay one markdown text out into styled display lines of at most `width`
 /// columns. Pure: text and width in, lines out.
-pub fn lay(text: &str, width: usize) -> Vec<Line<'static>> {
+pub fn lay(text: &str, width: usize) -> Vec<MdLine> {
     let mut renderer = Renderer::new(width);
     let parser = Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES);
     for event in parser {
@@ -32,21 +57,35 @@ pub fn lay(text: &str, width: usize) -> Vec<Line<'static>> {
     renderer.finish()
 }
 
-/// Wrap styled spans into rows of at most `width` columns, splitting on
+/// A styled fragment of the logical line being assembled, carrying the href
+/// it belongs to so the click region survives the wrap.
+#[derive(Clone)]
+struct Seg {
+    text: String,
+    style: Style,
+    href: Option<String>,
+}
+
+/// Wrap styled segments into rows of at most `width` columns, splitting on
 /// grapheme clusters measured the way the renderer places cells — the same
-/// contract as view.rs's wrap_segments, carried per-span so styles survive.
-fn wrap_spans(spans: &[Span<'static>], width: usize) -> Vec<Vec<Span<'static>>> {
+/// contract as view.rs's wrap_segments, carried per-segment so styles and
+/// hrefs survive.
+fn wrap_segs(segs: &[Seg], width: usize) -> Vec<Vec<Seg>> {
     let width = width.max(1);
-    let mut lines: Vec<Vec<Span<'static>>> = Vec::new();
-    let mut current: Vec<Span<'static>> = Vec::new();
+    let mut lines: Vec<Vec<Seg>> = Vec::new();
+    let mut current: Vec<Seg> = Vec::new();
     let mut current_width = 0usize;
-    for span in spans {
+    for seg in segs {
         let mut piece = String::new();
-        for grapheme in span.content.graphemes(true) {
+        for grapheme in seg.text.graphemes(true) {
             let grapheme_width = grapheme.width();
             if current_width + grapheme_width > width && current_width > 0 {
                 if !piece.is_empty() {
-                    current.push(Span::styled(std::mem::take(&mut piece), span.style));
+                    current.push(Seg {
+                        text: std::mem::take(&mut piece),
+                        style: seg.style,
+                        href: seg.href.clone(),
+                    });
                 }
                 lines.push(std::mem::take(&mut current));
                 current_width = 0;
@@ -55,7 +94,11 @@ fn wrap_spans(spans: &[Span<'static>], width: usize) -> Vec<Vec<Span<'static>>> 
             current_width += grapheme_width;
         }
         if !piece.is_empty() {
-            current.push(Span::styled(piece, span.style));
+            current.push(Seg {
+                text: piece,
+                style: seg.style,
+                href: seg.href.clone(),
+            });
         }
     }
     if !current.is_empty() || lines.is_empty() {
@@ -66,12 +109,14 @@ fn wrap_spans(spans: &[Span<'static>], width: usize) -> Vec<Vec<Span<'static>>> 
 
 struct Renderer {
     width: usize,
-    out: Vec<Line<'static>>,
-    current: Vec<Span<'static>>,
+    out: Vec<MdLine>,
+    current: Vec<Seg>,
     bold: usize,
     italic: usize,
     strike: usize,
     link: usize,
+    /// The open link's destination, stamped onto every seg inside it.
+    link_href: Option<String>,
     heading: Option<HeadingLevel>,
     quote_depth: usize,
     /// One entry per open list: the next ordered number, or None for bullets.
@@ -93,6 +138,7 @@ impl Renderer {
             italic: 0,
             strike: 0,
             link: 0,
+            link_href: None,
             heading: None,
             quote_depth: 0,
             lists: Vec::new(),
@@ -157,7 +203,8 @@ impl Renderer {
         (spans, width)
     }
 
-    /// Flush the assembled logical line into wrapped display rows.
+    /// Flush the assembled logical line into wrapped display rows, turning
+    /// each seg's href into a column-ranged link hit.
     fn flush(&mut self) {
         let content = std::mem::take(&mut self.current);
         if content.is_empty() {
@@ -165,10 +212,33 @@ impl Renderer {
         }
         let (_, prefix_width) = self.prefix(true);
         let available = self.width.saturating_sub(prefix_width).max(1);
-        for (row, mut segments) in wrap_spans(&content, available).into_iter().enumerate() {
-            let (mut line, _) = self.prefix(row == 0);
-            line.append(&mut segments);
-            self.out.push(Line::from(line));
+        for (row, segs) in wrap_segs(&content, available).into_iter().enumerate() {
+            let (mut spans, _) = self.prefix(row == 0);
+            let mut links: Vec<LinkHit> = Vec::new();
+            let mut col = prefix_width;
+            for seg in segs {
+                let seg_width = seg.text.width();
+                if let Some(href) = &seg.href
+                    && seg_width > 0
+                {
+                    match links.last_mut() {
+                        Some(last) if last.end == col && last.href == *href => {
+                            last.end += seg_width;
+                        }
+                        _ => links.push(LinkHit {
+                            start: col,
+                            end: col + seg_width,
+                            href: href.clone(),
+                        }),
+                    }
+                }
+                col += seg_width;
+                spans.push(Span::styled(seg.text, seg.style));
+            }
+            self.out.push(MdLine {
+                line: Line::from(spans),
+                links,
+            });
             self.marker = None;
         }
     }
@@ -177,7 +247,7 @@ impl Renderer {
     fn push_row(&mut self, mut segments: Vec<Span<'static>>) {
         let (mut line, _) = self.prefix(true);
         line.append(&mut segments);
-        self.out.push(Line::from(line));
+        self.out.push(MdLine::plain(Line::from(line)));
         self.marker = None;
     }
 
@@ -186,9 +256,9 @@ impl Renderer {
         if self
             .out
             .last()
-            .is_some_and(|line| !line.spans.iter().all(|s| s.content.is_empty()))
+            .is_some_and(|row| !row.line.spans.iter().all(|s| s.content.is_empty()))
         {
-            self.out.push(Line::raw(""));
+            self.out.push(MdLine::plain(Line::raw("")));
         }
     }
 
@@ -198,7 +268,11 @@ impl Renderer {
         let mut parts = text.split('\n').peekable();
         while let Some(part) = parts.next() {
             if !part.is_empty() {
-                self.current.push(Span::styled(part.to_string(), style));
+                self.current.push(Seg {
+                    text: part.to_string(),
+                    style,
+                    href: self.link_href.clone(),
+                });
             }
             if parts.peek().is_some() {
                 self.flush();
@@ -211,13 +285,13 @@ impl Renderer {
         let max_inner = self.width.saturating_sub(prefix_width + 4).max(1);
         let mut wrapped: Vec<String> = Vec::new();
         for line in body.lines() {
-            for segment in wrap_spans(&[Span::raw(line.to_string())], max_inner) {
-                wrapped.push(
-                    segment
-                        .into_iter()
-                        .map(|s| s.content.into_owned())
-                        .collect(),
-                );
+            let seg = Seg {
+                text: line.to_string(),
+                style: Style::default(),
+                href: None,
+            };
+            for segment in wrap_segs(&[seg], max_inner) {
+                wrapped.push(segment.into_iter().map(|s| s.text).collect());
             }
         }
         let lang = if lang.is_empty() { "plaintext" } else { lang };
@@ -275,10 +349,18 @@ impl Renderer {
             Event::End(tag) => self.end(tag),
             Event::Text(text) => self.text(&text),
             Event::Code(code) => {
-                self.current
-                    .push(Span::styled(code.into_string(), self.style().fg(CODE_FG)));
+                let seg = Seg {
+                    text: code.into_string(),
+                    style: self.style().fg(CODE_FG),
+                    href: self.link_href.clone(),
+                };
+                self.current.push(seg);
             }
-            Event::SoftBreak => self.current.push(Span::raw(" ")),
+            Event::SoftBreak => self.current.push(Seg {
+                text: " ".into(),
+                style: Style::default(),
+                href: None,
+            }),
             Event::HardBreak => self.flush(),
             Event::Rule => {
                 self.blank();
@@ -287,7 +369,11 @@ impl Renderer {
             }
             Event::TaskListMarker(done) => {
                 let mark = if done { "[x] " } else { "[ ] " };
-                self.current.push(Span::styled(mark.to_string(), dim()));
+                self.current.push(Seg {
+                    text: mark.to_string(),
+                    style: dim(),
+                    href: None,
+                });
             }
             Event::Html(html) | Event::InlineHtml(html) => self.text(&html),
             Event::FootnoteReference(name) => self.text(&format!("[^{name}]")),
@@ -346,11 +432,18 @@ impl Renderer {
                 self.marker = Some(marker);
             }
             Tag::Table(_) => self.blank(),
-            Tag::TableHead | Tag::TableRow => self.current.push(Span::raw("| ")),
+            Tag::TableHead | Tag::TableRow => self.current.push(Seg {
+                text: "| ".into(),
+                style: Style::default(),
+                href: None,
+            }),
             Tag::Emphasis => self.italic += 1,
             Tag::Strong => self.bold += 1,
             Tag::Strikethrough => self.strike += 1,
-            Tag::Link { .. } | Tag::Image { .. } => self.link += 1,
+            Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. } => {
+                self.link += 1;
+                self.link_href = Some(dest_url.to_string());
+            }
             _ => {}
         }
     }
@@ -378,16 +471,25 @@ impl Renderer {
                 }
             }
             TagEnd::TableHead | TagEnd::TableRow => self.flush(),
-            TagEnd::TableCell => self.current.push(Span::raw(" | ")),
+            TagEnd::TableCell => self.current.push(Seg {
+                text: " | ".into(),
+                style: Style::default(),
+                href: None,
+            }),
             TagEnd::Emphasis => self.italic = self.italic.saturating_sub(1),
             TagEnd::Strong => self.bold = self.bold.saturating_sub(1),
             TagEnd::Strikethrough => self.strike = self.strike.saturating_sub(1),
-            TagEnd::Link | TagEnd::Image => self.link = self.link.saturating_sub(1),
+            TagEnd::Link | TagEnd::Image => {
+                self.link = self.link.saturating_sub(1);
+                if self.link == 0 {
+                    self.link_href = None;
+                }
+            }
             _ => {}
         }
     }
 
-    fn finish(mut self) -> Vec<Line<'static>> {
+    fn finish(mut self) -> Vec<MdLine> {
         self.flush();
         self.out
     }
@@ -397,10 +499,10 @@ impl Renderer {
 mod tests {
     use ratatui::style::{Color, Modifier};
 
-    use super::lay;
+    use super::{MdLine, lay};
 
-    fn row_text(line: &ratatui::text::Line<'_>) -> String {
-        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    fn row_text(row: &MdLine) -> String {
+        row.line.spans.iter().map(|s| s.content.as_ref()).collect()
     }
 
     #[test]
@@ -409,6 +511,7 @@ mod tests {
 
         assert_eq!(row_text(&lines[0]), "plain loud plain");
         let loud = lines[0]
+            .line
             .spans
             .iter()
             .find(|s| s.content == "loud")
@@ -421,6 +524,7 @@ mod tests {
         let lines = lay("run `just build` now", 40);
 
         let code = lines[0]
+            .line
             .spans
             .iter()
             .find(|s| s.content == "just build")
@@ -433,9 +537,9 @@ mod tests {
         let lines = lay("## Title", 40);
 
         assert_eq!(row_text(&lines[0]), "Title");
-        assert_eq!(lines[0].spans[0].style.fg, Some(Color::Indexed(74)));
+        assert_eq!(lines[0].line.spans[0].style.fg, Some(Color::Indexed(74)));
         assert!(
-            lines[0].spans[0]
+            lines[0].line.spans[0]
                 .style
                 .add_modifier
                 .contains(Modifier::BOLD)
@@ -471,7 +575,7 @@ mod tests {
         let lines = lay("> quoted", 40);
 
         assert_eq!(row_text(&lines[0]), "\u{2502} quoted");
-        let body = lines[0].spans.last().expect("quote body span");
+        let body = lines[0].line.spans.last().expect("quote body span");
         assert!(body.style.add_modifier.contains(Modifier::ITALIC));
     }
 
@@ -498,11 +602,35 @@ mod tests {
 
         assert_eq!(row_text(&lines[0]), "see the spec here");
         let label = lines[0]
+            .line
             .spans
             .iter()
             .find(|s| s.content == "the spec")
             .expect("the label has its own span");
         assert!(label.style.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn a_link_carries_its_click_range_and_href() {
+        let lines = lay("see [the spec](https://example.com) here", 40);
+
+        let link = lines[0].links.first().expect("one link on the row");
+        assert_eq!(link.href, "https://example.com");
+        // "see " is four columns; the label is eight.
+        assert_eq!((link.start, link.end), (4, 12));
+    }
+
+    #[test]
+    fn a_wrapped_link_carries_a_range_on_each_row() {
+        let lines = lay("[abcdefghij](https://example.com)", 6);
+
+        assert!(lines.len() > 1);
+        assert!(lines.iter().all(|l| !l.links.is_empty()));
+        assert!(
+            lines
+                .iter()
+                .all(|l| l.links[0].href == "https://example.com")
+        );
     }
 
     #[test]

@@ -63,12 +63,31 @@ pub struct Geometry {
     pub inner: Rect,
 }
 
-/// One laid visual row: the line to draw and the block it belongs to, if
-/// that block is disclosable. Wrapped continuations carry the same key.
+/// One laid visual row: the line to draw, the block it belongs to if that
+/// block is disclosable, and any link regions markdown put on it. Wrapped
+/// continuations carry the same key.
 #[derive(Clone, Debug, PartialEq)]
 struct Row {
     line: Line<'static>,
     hit: Option<BlockKey>,
+    links: Vec<crate::markdown::LinkHit>,
+}
+
+impl Row {
+    fn plain(line: Line<'static>, hit: Option<BlockKey>) -> Self {
+        Self {
+            line,
+            hit,
+            links: Vec::new(),
+        }
+    }
+}
+
+/// What one visible row offers a click: its disclosable block and its links.
+#[derive(Clone, Debug, Default)]
+pub struct HitRow {
+    pub block: Option<BlockKey>,
+    pub links: Vec<crate::markdown::LinkHit>,
 }
 
 /// Split one logical line into display rows of at most `width` columns,
@@ -181,10 +200,7 @@ fn wrap_into(
     };
     for source_line in text.lines() {
         for segment in wrap_segments(source_line, width) {
-            rows.push(Row {
-                line: styled_segment(segment, style),
-                hit: hit.clone(),
-            });
+            rows.push(Row::plain(styled_segment(segment, style), hit.clone()));
         }
     }
 }
@@ -202,8 +218,12 @@ fn lay_markdown(rows: &mut Vec<Row>, text: &str, width: usize) {
     } else {
         text.to_string()
     };
-    for line in crate::markdown::lay(&text, width) {
-        rows.push(Row { line, hit: None });
+    for md in crate::markdown::lay(&text, width) {
+        rows.push(Row {
+            line: md.line,
+            hit: None,
+            links: md.links,
+        });
     }
 }
 
@@ -260,10 +280,7 @@ fn lay(
     }
     let mut rows: Vec<Row> = Vec::new();
     for message in &conv.messages {
-        rows.push(Row {
-            line: role_line(&message.role),
-            hit: None,
-        });
+        rows.push(Row::plain(role_line(&message.role), None));
         for (index, block) in message.content.iter().enumerate() {
             let key: BlockKey = (message.id.0.clone(), index);
             let open = view.expanded.contains(&key);
@@ -288,10 +305,7 @@ fn lay(
                     } else {
                         line
                     };
-                    block_rows.push(Row {
-                        line: Line::styled(marker, style),
-                        hit: Some(key.clone()),
-                    });
+                    block_rows.push(Row::plain(Line::styled(marker, style), Some(key.clone())));
                     if open {
                         wrap_into(
                             &mut block_rows,
@@ -306,32 +320,23 @@ fn lay(
             view.layout_cache.insert(cache_key, block_rows.clone());
             rows.extend(block_rows);
         }
-        rows.push(Row {
-            line: Line::raw(""),
-            hit: None,
-        });
+        rows.push(Row::plain(Line::raw(""), None));
     }
     // The say in flight: accepted, not yet committed — greyed until its
     // committed message supersedes it (or a revoke sends it home).
     if let Some(pending) = &conv.pending_say {
-        rows.push(Row {
-            line: role_line("user"),
-            hit: None,
-        });
+        rows.push(Row::plain(role_line("user"), None));
         wrap_into(&mut rows, pending, width, Some(dim()), None);
-        rows.push(Row {
-            line: Line::raw(""),
-            hit: None,
-        });
+        rows.push(Row::plain(Line::raw(""), None));
     }
     for segment in &conv.streaming {
         if segment.text.is_empty() {
             continue;
         }
-        rows.push(Row {
-            line: Line::styled(format!("[{}…]", segment.block_type), dim()),
-            hit: None,
-        });
+        rows.push(Row::plain(
+            Line::styled(format!("[{}…]", segment.block_type), dim()),
+            None,
+        ));
         // A streaming text block re-renders as markdown every frame: content
         // is small (workload facts), so the re-lay is microseconds, and the
         // still-open tail never caches anyway.
@@ -342,8 +347,8 @@ fn lay(
         }
     }
     for (id, ask) in approvals.live(now_ms) {
-        rows.push(Row {
-            line: Line::styled(
+        rows.push(Row::plain(
+            Line::styled(
                 format!(
                     "APPROVAL {id}: {} — y approve / n deny",
                     ask.ask["name"].as_str().unwrap_or("?")
@@ -352,8 +357,8 @@ fn lay(
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             ),
-            hit: None,
-        });
+            None,
+        ));
     }
     rows
 }
@@ -378,7 +383,7 @@ pub fn draw(
     screen: &Screen<'_>,
     view: &mut ViewState,
     now_ms: i64,
-) -> (Geometry, Vec<Option<BlockKey>>) {
+) -> (Geometry, Vec<HitRow>) {
     let Screen {
         conv_id,
         conv,
@@ -423,7 +428,10 @@ pub fn draw(
     let mut hits = Vec::with_capacity(height.min(rows.len()));
     for row in rows.into_iter().skip(skip).take(height) {
         lines.push(row.line);
-        hits.push(row.hit);
+        hits.push(HitRow {
+            block: row.hit,
+            links: row.links,
+        });
     }
     frame.render_widget(Paragraph::new(lines).block(block), main);
 
