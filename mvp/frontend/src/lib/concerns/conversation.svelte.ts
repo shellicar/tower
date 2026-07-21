@@ -6,11 +6,15 @@
 // conversations are open (tabs) and calls setOpen; this concern owns their
 // content, never tabs.
 //
-// Every fold is an immutable REPLACEMENT — new map, new state object — because
-// a keyed render never re-reads a mutated plain object, and (the incident this
-// architecture answers) a $state write mutated across an await can freeze the
-// flush. Assign, never mutate in place; the #update helper enforces it.
+// Every fold replaces its conversation's state object (never mutates one in
+// place) because a keyed render never re-reads a mutated plain object, and
+// (the incident this architecture answers) a $state write mutated across an
+// await can freeze the flush. The map itself is a SvelteMap: each key owns its
+// own reactive source, so #update's per-key set() only invalidates readers of
+// that one conversation, not every open panel. The #update helper is the one
+// door through which state changes, so the discipline lives in one place.
 
+import { SvelteMap } from 'svelte/reactivity';
 import type { Transport } from '../core/transport.svelte';
 import type { AttachmentRef, ConversationMessage, ServerMsg } from '../types';
 
@@ -83,7 +87,10 @@ function insertMessage(
 }
 
 export class Conversations {
-  #open = $state<Map<string, ConversationState>>(new Map());
+  // SvelteMap: each key owns its own reactive source, so .get(id) subscribes
+  // only to that conversation's entry, not every open conversation's writes
+  // (a whole-map $state<Map> would invalidate every reader on any conv's fold).
+  #open = new SvelteMap<string, ConversationState>();
   readonly #transport: Transport;
 
   constructor(transport: Transport) {
@@ -111,17 +118,13 @@ export class Conversations {
 
   open(conv: string): void {
     if (this.#open.has(conv)) return;
-    const next = new Map(this.#open);
-    next.set(conv, fresh(conv));
-    this.#open = next;
+    this.#open.set(conv, fresh(conv));
     this.#transport.send({ type: 'open', id: this.#transport.id(), conv, after: null });
   }
 
   close(conv: string): void {
     if (!this.#open.has(conv)) return;
-    const next = new Map(this.#open);
-    next.delete(conv);
-    this.#open = next;
+    this.#open.delete(conv);
     this.#transport.send({ type: 'close', id: this.#transport.id(), conv });
   }
 
@@ -274,14 +277,13 @@ export class Conversations {
     };
   }
 
-  /** Immutable single-conversation update: new map, new state object. The one
+  /** Immutable single-conversation update: new state object, set on the
+   *  SvelteMap so only this conversation's readers are invalidated. The one
    *  door through which this concern's state changes, so the discipline lives
    *  in one place instead of every fold. */
   #update(conv: string, patch: (oc: ConversationState) => ConversationState): void {
     const oc = this.#open.get(conv);
     if (!oc) return;
-    const next = new Map(this.#open);
-    next.set(conv, patch(oc));
-    this.#open = next;
+    this.#open.set(conv, patch(oc));
   }
 }
