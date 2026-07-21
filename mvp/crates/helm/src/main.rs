@@ -106,7 +106,7 @@ async fn main() -> anyhow::Result<()> {
     let mut usage = Usage::default();
     let mut approvals = Approvals::default();
     let mut view_state = ViewState::default();
-    let mut editor = TextArea::default();
+    let mut editor = new_editor();
     let mut note: Option<String> = None;
     // Attachments pinned to the next say (submit.rs: the format contract).
     let mut attachments: Vec<Chip> = Vec::new();
@@ -275,7 +275,7 @@ async fn main() -> anyhow::Result<()> {
                                         // Prefill the path editor from the clipboard
                                         // when it holds a path (terminal, VS Code,
                                         // Finder — the reference's three stages).
-                                        let mut path_editor = TextArea::default();
+                                        let mut path_editor = new_editor();
                                         if let Some(path) = clipboard::read_path().await {
                                             path_editor.insert_str(&path);
                                         }
@@ -285,10 +285,10 @@ async fn main() -> anyhow::Result<()> {
                                         attachments.pop();
                                     }
                                     KeyCode::Char('m') => {
-                                        view_state.command = CommandMode::ModelEdit(TextArea::default());
+                                        view_state.command = CommandMode::ModelEdit(new_editor());
                                     }
                                     KeyCode::Char('c') => {
-                                        view_state.command = CommandMode::CwdEdit(TextArea::default());
+                                        view_state.command = CommandMode::CwdEdit(new_editor());
                                     }
                                     KeyCode::Char(answer @ ('y' | 'n')) => {
                                         let target = approvals
@@ -457,21 +457,36 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
+/// A fresh editor with the widget defaults helm doesn't want: the default
+/// cursor-line underline smears across wide glyphs in tmux, so it goes.
+fn new_editor() -> TextArea<'static> {
+    let mut editor = TextArea::default();
+    editor.set_cursor_line_style(ratatui::style::Style::default());
+    editor
+}
+
 /// Forward a key to a textarea. The widget's own emacs-flavoured map covers
 /// the word ops in every terminal spelling except macOS's bare-option ∂
-/// (option+d with "alt sends escape" off), pre-mapped here.
+/// (option+d with "alt sends escape" off), pre-mapped here. VS16 (U+FE0F)
+/// is swallowed at this edge: the width-contested byte never enters the
+/// buffer, so the editor renders clean and the say carries text-presentation
+/// emoji — same defence the conversation layout applies on the way out.
 fn forward_key(editor: &mut TextArea<'static>, key: crossterm::event::KeyEvent) {
-    if matches!(key.code, KeyCode::Char('∂')) {
-        editor.delete_next_word();
-        return;
+    match key.code {
+        KeyCode::Char('∂') => {
+            editor.delete_next_word();
+        }
+        KeyCode::Char('\u{FE0F}') => {}
+        _ => {
+            editor.input(key);
+        }
     }
-    editor.input(key);
 }
 
 /// Take the whole buffer for a submit, resetting the editor.
 fn drain(editor: &mut TextArea<'static>) -> String {
     let text = editor.lines().join("\n");
-    *editor = TextArea::default();
+    *editor = new_editor();
     text
 }
 
