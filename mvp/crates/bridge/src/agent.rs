@@ -254,10 +254,25 @@ pub async fn run(
                 cancel_tx = None;
             }
             maybe = requests.next() => {
-                let Some(msg) = maybe else { break };
+                let Some(msg) = maybe else {
+                    // A lapsed subscription is a dead conversation: events
+                    // would keep streaming from live query tasks while every
+                    // request times out — say it loudly.
+                    eprintln!(
+                        "bridge[{}]: requests subscription ended — no longer serving",
+                        config.conv.0
+                    );
+                    break;
+                };
                 let Some(reply_to) = msg.reply.clone() else { continue };
                 // v2: the leaf spells the operation; read it off the subject.
                 let leaf = msg.subject.strip_prefix(prefix.as_str()).unwrap_or("");
+                eprintln!(
+                    "{} bridge[{}]: ← request {leaf} ({} B)",
+                    now_iso(),
+                    config.conv.0,
+                    msg.payload.len()
+                );
                 let response = match parse_request(leaf, &msg.payload) {
                     ConvRequest::Say { text, tip, from, attachments } => {
                         let has_new_content = !text.trim().is_empty() || !attachments.is_empty();
@@ -316,7 +331,9 @@ pub async fn run(
                         encode_rejected("unsupported")
                     }
                 };
-                let _ = client.publish(reply_to, response.into()).await;
+                if let Err(e) = client.publish(reply_to, response.into()).await {
+                    eprintln!("bridge[{}]: reply publish failed: {e}", config.conv.0);
+                }
             }
         }
     }
