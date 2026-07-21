@@ -70,12 +70,14 @@ fn wrap_segments(line: &str, width: usize) -> Vec<String> {
     let mut current = String::new();
     let mut current_width = 0usize;
     for grapheme in line.graphemes(true) {
-        // VS16 clusters measure at their BASE width (FE0F is zero) — i.e. 1
-        // for the ambiguous bases. This matches tmux with
-        // `variation-selector-always-wide off` (the fix for its two-position
-        // redraw bug): the artwork may visually overlap the next cell, but
-        // the grid stays consistent, which is the property that matters.
-        // Measuring these at 2 corrupts under that setting — proven live.
+        // str-width, which counts a VS16 cluster as 2 (unicode-width's
+        // emoji-presentation rule) — measured, not assumed. This matches
+        // ratatui's own cell placement, which is the agreement that binds
+        // helm internally. It also means HELM_EMOJI=full cannot work inside
+        // tmux: tmux stores VS16 at 1 with variation-selector-always-wide
+        // off, and at 2-then-1 (the redraw bug) with it on — one path always
+        // disagrees with ratatui's 2. Hence the strip default: emit nothing
+        // contested. Full mode is for stacks where every table says 2.
         let grapheme_width = grapheme.width();
         if current_width + grapheme_width > width && !current.is_empty() {
             segments.push(std::mem::take(&mut current));
