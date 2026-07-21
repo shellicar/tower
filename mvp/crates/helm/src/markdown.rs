@@ -1,8 +1,8 @@
 //! Markdown layout for text blocks: a token walk over pulldown-cmark emitting
 //! styled, wrapped display lines — the Rust twin of claude-sdk-cli's
 //! markdownLayout.ts, with the same palette (heading grades 39/74/110, accent
-//! 33, link 39, code 180). Tables render one pipe-joined row per line; raw
-//! HTML passes through untouched. Lines come back pre-wrapped because helm's
+//! 33, link 39, code 180). Tables render aligned columns with a bold ruled
+//! header; raw HTML passes through untouched. Lines come back pre-wrapped because helm's
 //! hit map needs every visual row accounted for here, not by ratatui.
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
@@ -126,6 +126,10 @@ struct Renderer {
     marker_width: usize,
     /// An open fenced/indented code block: language and accumulated body.
     code_block: Option<(String, String)>,
+    /// An open table: completed rows of cells, and the current row so far.
+    /// Cell content accumulates in `current` and is drained at each cell end.
+    table: Option<Vec<Vec<Vec<Seg>>>>,
+    table_row: Vec<Vec<Seg>>,
 }
 
 impl Renderer {
@@ -145,6 +149,8 @@ impl Renderer {
             marker: None,
             marker_width: 0,
             code_block: None,
+            table: None,
+            table_row: Vec::new(),
         }
     }
 
@@ -328,6 +334,53 @@ impl Renderer {
         )]);
     }
 
+    /// Render a completed table with aligned columns: the first row is the
+    /// header (bold, ruled off), cells pad to their column's widest content,
+    /// dim │ separators between columns.
+    fn table_box(&mut self, rows: Vec<Vec<Vec<Seg>>>) {
+        if rows.is_empty() {
+            return;
+        }
+        let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+        let cell_width = |cell: &[Seg]| cell.iter().map(|s| s.text.width()).sum::<usize>();
+        let mut widths = vec![0usize; columns];
+        for row in &rows {
+            for (i, cell) in row.iter().enumerate() {
+                widths[i] = widths[i].max(cell_width(cell));
+            }
+        }
+        for (index, row) in rows.into_iter().enumerate() {
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            for (i, width) in widths.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled(" \u{2502} ", dim()));
+                }
+                let cell = row.get(i).cloned().unwrap_or_default();
+                let pad = width.saturating_sub(cell_width(&cell));
+                for seg in cell {
+                    let style = if index == 0 {
+                        seg.style.add_modifier(Modifier::BOLD)
+                    } else {
+                        seg.style
+                    };
+                    spans.push(Span::styled(seg.text, style));
+                }
+                if pad > 0 {
+                    spans.push(Span::raw(" ".repeat(pad)));
+                }
+            }
+            self.push_row(spans);
+            if index == 0 {
+                let rule = widths
+                    .iter()
+                    .map(|w| "\u{2500}".repeat(*w))
+                    .collect::<Vec<_>>()
+                    .join("\u{2500}\u{253c}\u{2500}");
+                self.push_row(vec![Span::styled(rule, dim())]);
+            }
+        }
+    }
+
     fn event(&mut self, event: Event<'_>) {
         if let Some((_, body)) = &mut self.code_block {
             // Inside a fence everything is literal text until the End.
@@ -431,12 +484,10 @@ impl Renderer {
                 self.marker_width = marker.width();
                 self.marker = Some(marker);
             }
-            Tag::Table(_) => self.blank(),
-            Tag::TableHead | Tag::TableRow => self.current.push(Seg {
-                text: "| ".into(),
-                style: Style::default(),
-                href: None,
-            }),
+            Tag::Table(_) => {
+                self.blank();
+                self.table = Some(Vec::new());
+            }
             Tag::Emphasis => self.italic += 1,
             Tag::Strong => self.bold += 1,
             Tag::Strikethrough => self.strike += 1,
@@ -470,12 +521,21 @@ impl Renderer {
                     self.marker_width = 0;
                 }
             }
-            TagEnd::TableHead | TagEnd::TableRow => self.flush(),
-            TagEnd::TableCell => self.current.push(Seg {
-                text: " | ".into(),
-                style: Style::default(),
-                href: None,
-            }),
+            TagEnd::TableCell => {
+                let cell = std::mem::take(&mut self.current);
+                self.table_row.push(cell);
+            }
+            TagEnd::TableHead | TagEnd::TableRow => {
+                let row = std::mem::take(&mut self.table_row);
+                if let Some(rows) = &mut self.table {
+                    rows.push(row);
+                }
+            }
+            TagEnd::Table => {
+                if let Some(rows) = self.table.take() {
+                    self.table_box(rows);
+                }
+            }
             TagEnd::Emphasis => self.italic = self.italic.saturating_sub(1),
             TagEnd::Strong => self.bold = self.bold.saturating_sub(1),
             TagEnd::Strikethrough => self.strike = self.strike.saturating_sub(1),
@@ -645,14 +705,21 @@ mod tests {
     }
 
     #[test]
-    fn a_table_renders_one_row_per_line() {
-        let source = "| a | b |\n|---|---|\n| 1 | 2 |";
+    fn a_table_renders_aligned_columns_with_a_ruled_header() {
+        let source = "| left | b |\n|---|---|\n| 1 | 22 |";
 
         let lines = lay(source, 40);
         let rows: Vec<String> = lines.iter().map(row_text).collect();
 
-        assert!(rows.iter().any(|r| r.starts_with("| a | b |")));
-        assert!(rows.iter().any(|r| r.starts_with("| 1 | 2 |")));
+        assert_eq!(rows, vec!["left │ b ", "─────┼───", "1    │ 22"]);
+    }
+
+    #[test]
+    fn a_table_header_is_bold() {
+        let lines = lay("| h |\n|---|\n| x |", 40);
+
+        let header = lines[0].line.spans.first().expect("header cell span");
+        assert!(header.style.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]
