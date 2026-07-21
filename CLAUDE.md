@@ -19,12 +19,18 @@ you build first, port it to the other before calling the work done. Wire
 shape and bridge/towerd behaviour are shared already (both read the same
 WS contract); only the two renderings can drift, and drift is the bug.
 
-Known follow-up: a conversation panel (Svelte and Leptos both) renders its
-whole message history into the DOM, however long the conversation — some run
-400+ turns. Live profiling (21 Jul) found this the real ceiling on render
-cost with several panels open and streaming at once. A virtual list (render
-only messages near the viewport, a spacer sized to the rest) would cap DOM
-size regardless of history length; not yet designed or built.
+The Svelte frontend's message list is a windowed virtual list
+(VirtualList.svelte) with pre-mount height prediction for plain-text
+messages (core/textHeight.ts, via @chenglou/pretext). The prediction is
+exact-most-of-the-time, not exact: verified line-by-line against Chrome
+(22 Jul), pretext occasionally disagrees with the engine about whether one
+more word fits at a wrap boundary — off by a line on some messages, and
+engine behaviour drifts across browser versions. The mounted row's
+ResizeObserver correction is load-bearing for exactly this; never remove
+it on the argument that the prediction is accurate. Leptos has no virtual
+list yet; when it gets one, the technique ports via web-sys canvas
+measureText, but pretext's line-breaking logic would need a port
+(gpui-pretext on crates.io claims to be one — unverified).
 
 ## The documents govern
 

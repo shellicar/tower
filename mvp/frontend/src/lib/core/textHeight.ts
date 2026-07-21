@@ -1,48 +1,47 @@
-// Exact-enough row height for plain-text messages, computed via canvas
-// measureText + line-break arithmetic ahead of mounting the row (spike 2:
-// CLAUDE.md "Known follow-up" / docs/planning, pretext technique). Hand-
-// rolled rather than the pretext library: the body font is monospace and
-// BlockView wraps text with `wrap-anywhere` (break anywhere, not
-// word-break), so every character is the same width and line count is
-// `ceil(textWidth / maxWidth)` per explicit line — simpler than pretext's
-// word/grapheme-boundary wrap model, which doesn't match this CSS anyway.
+// Exact-enough row height for plain-text messages, computed ahead of
+// mounting the row (CLAUDE.md "Known follow-up") via @chenglou/pretext's
+// canvas measurement + line-break arithmetic (prepare/layout) — no DOM
+// read, no forced layout.
+//
+// Verification spike found the hand-rolled ceil(width/maxWidth) version
+// this replaced was a MODEL error, not a tunable one: break-anywhere CSS
+// still prefers word boundaries in real browsers, falling back to a
+// mid-word break only when a whole word can't fit — so "perfect packing"
+// arithmetic undercounts the line count itself on wrapped prose (measured
+// off by up to 32px on real content vs pretext's 14px). Ties the hand-
+// rolled version on short/simple text, wins by a wide margin on wrapped
+// prose and long unbroken tokens.
+//
+// This is a prediction, not the truth. Verified line-by-line against
+// Chrome (22 Jul): pretext occasionally disagrees with the engine about
+// whether one more word fits at a wrap boundary, shifting the total by a
+// line — and any snapshot of engine behaviour drifts as browsers update.
+// The mounted row's ResizeObserver correction is load-bearing for exactly
+// this reason; it is not vestigial and must not be removed.
 //
 // Scope: only covers a message whose content is ALL `text` blocks — no
 // code fences, thinking, tool_use, tool_result, image or document. Those
 // return `undefined` and the caller falls back to measuring the mounted
 // row, unchanged.
+import { layout, prepare } from '@chenglou/pretext';
 import type { ConversationMessage } from '../types';
 
 const FONT = '13px ui-monospace, "SF Mono", Menlo, monospace';
-// Calibrated against this body's line-height/spacing at 13px monospace;
-// approximate by construction (see module comment) — the row's
-// ResizeObserver corrects any drift once mounted, without a forced read.
-const LINE_HEIGHT = 18;
-const HEADER_HEIGHT = 21; // header row (13px text) + its mb-1 (4px)
-const VERTICAL_PADDING = 12; // article's py-1.5, top + bottom
+// Matches BlockView's text block: whitespace-pre-wrap (\n and runs of
+// spaces are significant, same as a textarea) + wrap-anywhere.
+//
+// Calibrated by solving corrected = BASE_HEIGHT + lines * LINE_HEIGHT
+// against real mounted-row measurements (not the CSS box model's assumed
+// 21px header + 12px padding = 33px) — real line-height is 19.5px, real
+// base is 35.5px; the previous 18/33 guess was a consistent ~8% underseed
+// across every measured message.
+const LINE_HEIGHT = 19.5;
+const BASE_HEIGHT = 35.5; // header row + its margin + article's vertical padding
 
-let ctx: CanvasRenderingContext2D | null | undefined;
-
-function measureCtx(): CanvasRenderingContext2D | undefined {
-  if (ctx !== undefined) return ctx ?? undefined;
-  ctx = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
-  if (ctx) ctx.font = FONT;
-  return ctx ?? undefined;
-}
-
-function linesFor(text: string, maxWidth: number): number {
-  const c = measureCtx();
-  if (!c || maxWidth <= 0) return 1;
-  let lines = 0;
-  for (const paragraph of text.split('\n')) {
-    if (paragraph === '') {
-      lines += 1;
-      continue;
-    }
-    const width = c.measureText(paragraph).width;
-    lines += Math.max(1, Math.ceil(width / maxWidth));
-  }
-  return Math.max(1, lines);
+function blockHeight(text: string, maxWidth: number): number {
+  if (maxWidth <= 0) return LINE_HEIGHT;
+  const prepared = prepare(text, FONT, { whiteSpace: 'pre-wrap' });
+  return layout(prepared, maxWidth, LINE_HEIGHT).height;
 }
 
 /** `undefined` means this message has a block type the technique doesn't
@@ -54,9 +53,10 @@ export function measurePlainTextHeight(
   if (message.content.length === 0 || message.content.some((b) => b.type !== 'text')) {
     return undefined;
   }
-  const textLines = message.content.reduce(
-    (sum, b) => sum + linesFor(String((b as { text?: unknown }).text ?? ''), maxWidth),
+  const textHeight = message.content.reduce(
+    (sum, b) => sum + blockHeight(String((b as { text?: unknown }).text ?? ''), maxWidth),
     0,
   );
-  return HEADER_HEIGHT + VERTICAL_PADDING + textLines * LINE_HEIGHT;
+  return BASE_HEIGHT + textHeight;
 }
+
