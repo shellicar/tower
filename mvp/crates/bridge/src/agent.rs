@@ -61,7 +61,12 @@ pub fn static_tool_schemas() -> Vec<Value> {
 
 pub struct AgentConfig {
     pub conv: ConversationId,
-    pub model: String,
+    /// The model cell. A spawn that named no model shares the host's live
+    /// default, so a stdio `model` line reaches its next turn; a spawn that
+    /// named one is pinned to its own cell. The model is an instance fact,
+    /// not a conversation attribute — `turn.started` states what served each
+    /// turn.
+    pub model: Arc<std::sync::RwLock<String>>,
     /// The system prompt cell, shared and read fresh each turn so a stdio
     /// `system` control line reaches even a running conversation. Never
     /// persisted to the record.
@@ -88,6 +93,10 @@ pub struct AgentConfig {
     pub history: crate::history::HistoryStore,
     /// Extended thinking budget; None = thinking off.
     pub thinking_budget: Option<i64>,
+    /// The local TUI's attach handle, if this instance was spawned with one.
+    /// None for every tower-spawned instance — NATS carries every event
+    /// regardless; this is purely an additional local mirror.
+    pub attach: Option<bridge::attach::AttachHandle>,
 }
 
 /// Subscribe to the conversation's requests. main calls this BEFORE
@@ -110,6 +119,7 @@ struct Publisher {
     client: async_nats::Client,
     conv: ConversationId,
     history: crate::history::HistoryStore,
+    attach: Option<bridge::attach::AttachHandle>,
 }
 
 impl Publisher {
@@ -117,11 +127,13 @@ impl Publisher {
         client: &async_nats::Client,
         conv: &ConversationId,
         history: &crate::history::HistoryStore,
+        attach: Option<bridge::attach::AttachHandle>,
     ) -> Self {
         Self {
             client: client.clone(),
             conv: conv.clone(),
             history: crate::history::HistoryStore::clone(history),
+            attach,
         }
     }
 
@@ -131,6 +143,10 @@ impl Publisher {
 
     fn conv(&self) -> &ConversationId {
         &self.conv
+    }
+
+    fn attach(&self) -> &Option<bridge::attach::AttachHandle> {
+        &self.attach
     }
 
     /// `leaf` is the class-and-event path after the id (`changes.message`,
@@ -144,6 +160,11 @@ impl Publisher {
             self.conv.0,
             bytes.len()
         );
+        // Tee first: it only borrows, so the NATS publish can take the bytes
+        // by move — no per-event clone on the hot path (tool results run to
+        // hundreds of KB; a tower-only instance must not pay for a mirror it
+        // doesn't have).
+        bridge::attach::tee(&self.attach, &subject, &bytes).await;
         if let Err(e) = self.client.publish(subject, bytes.into()).await {
             eprintln!("bridge[{}]: publish failed: {e}", self.conv.0);
         }
@@ -233,10 +254,25 @@ pub async fn run(
                 cancel_tx = None;
             }
             maybe = requests.next() => {
-                let Some(msg) = maybe else { break };
+                let Some(msg) = maybe else {
+                    // A lapsed subscription is a dead conversation: events
+                    // would keep streaming from live query tasks while every
+                    // request times out — say it loudly.
+                    eprintln!(
+                        "bridge[{}]: requests subscription ended — no longer serving",
+                        config.conv.0
+                    );
+                    break;
+                };
                 let Some(reply_to) = msg.reply.clone() else { continue };
                 // v2: the leaf spells the operation; read it off the subject.
                 let leaf = msg.subject.strip_prefix(prefix.as_str()).unwrap_or("");
+                eprintln!(
+                    "{} bridge[{}]: ← request {leaf} ({} B)",
+                    now_iso(),
+                    config.conv.0,
+                    msg.payload.len()
+                );
                 let response = match parse_request(leaf, &msg.payload) {
                     ConvRequest::Say { text, tip, from, attachments } => {
                         let has_new_content = !text.trim().is_empty() || !attachments.is_empty();
@@ -295,7 +331,9 @@ pub async fn run(
                         encode_rejected("unsupported")
                     }
                 };
-                let _ = client.publish(reply_to, response.into()).await;
+                if let Err(e) = client.publish(reply_to, response.into()).await {
+                    eprintln!("bridge[{}]: reply publish failed: {e}", config.conv.0);
+                }
             }
         }
     }
@@ -399,16 +437,16 @@ async fn accept_say(
 
     // The query task, cooperatively cancellable.
     let (tx, rx) = watch::channel(false);
-    // The model sees the pending say; the record does not, yet. Resolution
-    // runs over the full render at this edge (objects.rs).
+    // The model sees the pending say; the record does not, yet.
     let mut history = conversation.history();
     history.push(json!({ "role": "user", "content": user.content }));
-    crate::objects::resolve_history(client, &config.attach_bucket, &mut history).await;
 
     let ctx = TurnContext {
         client: client.clone(),
         conv: config.conv.clone(),
-        model: config.model.clone(),
+        // Read fresh per query: a stdio `model` line reaches even a running
+        // conversation, here, on its next say.
+        model: config.model.read().unwrap().clone(),
         system: Arc::clone(&config.system),
         auth: config.auth.clone(),
         skills,
@@ -420,10 +458,17 @@ async fn accept_say(
         memory: crate::memory::MemoryStore::clone(&config.memory),
         history_store: crate::history::HistoryStore::clone(&config.history),
         thinking_budget: config.thinking_budget,
+        attach: config.attach.clone(),
     };
     let done = done_tx.clone();
     let q = query.clone();
+    let bucket = config.attach_bucket.clone();
     tokio::spawn(async move {
+        // Resolution (object fetches + image conditioning) runs over the full
+        // render at this edge (objects.rs) — inside the task, never ahead of
+        // the say's reply: on a long image-laden history it takes seconds, and
+        // the sender's request deadline must not pay for it.
+        crate::objects::resolve_history(&ctx.client, &bucket, &mut history).await;
         let end = run_query(ctx, history, rx).await;
         let _ = done.send((q, end)).await;
     });
@@ -446,6 +491,7 @@ struct TurnContext {
     memory: crate::memory::MemoryStore,
     history_store: crate::history::HistoryStore,
     thinking_budget: Option<i64>,
+    attach: Option<bridge::attach::AttachHandle>,
 }
 
 /// Resolves when the cancel signal flips; never resolves if it never does
@@ -494,8 +540,9 @@ async fn run_query(
         memory,
         history_store,
         thinking_budget,
+        attach,
     } = &ctx;
-    let pubr = Publisher::new(client, conv, history_store);
+    let pubr = Publisher::new(client, conv, history_store, attach.clone());
 
     // Skill only when a catalogue exists; every other tool is always this
     // same list (static_tool_schemas) — the one source main.rs's startup log
@@ -545,6 +592,7 @@ async fn run_query(
                 &history,
                 &tools,
                 *thinking_budget,
+                attach,
             ) => outcome,
             _ = cancelled(&mut cancel) => {
                 pubr.event(
@@ -798,8 +846,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         let command = block["input"]["command"].as_str().unwrap_or("");
@@ -826,8 +881,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         match crate::exec::parse_commands(&block["input"]) {
@@ -892,8 +954,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         crate::mutate::run_create_file(&block["input"]).await
@@ -913,8 +982,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         crate::mutate::run_append_file(&block["input"]).await
@@ -934,8 +1010,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         crate::editfile::run_edit_file(&block["input"]).await
@@ -955,8 +1038,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         crate::delete::run_delete(&block["input"]).await
@@ -977,8 +1067,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         crate::memtools::run_write_memory(memory, &block["input"]).await
@@ -998,8 +1095,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         crate::memtools::run_delete_memory(memory, &block["input"])

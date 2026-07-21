@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/wire", "crates/ws-types", "crates/towerd", "crates/bridge"]
+members = ["crates/wire", "crates/ws-types", "crates/towerd", "crates/bridge", "crates/helm"]
 
 [workspace.package]
 version = "0.1.0"
@@ -55,3 +55,32 @@ base64 = "0.22"
 # yaml-serde) — skills frontmatter is YAML, and hand-parsing YAML is an
 # approximation that already bit once (block-scalar descriptions).
 yaml_serde = "0.10"
+# helm's terminal engine: ratatui owns the present/platform layers of
+# docs/planning/tui-architecture.md (cell diffing, resize, alt screen) so
+# helm only writes layout — the whole reason a Rust TUI is cheap to build.
+# crossterm is ratatui's platform backend, depended on directly for the
+# input events (raw keys) ratatui doesn't wrap.
+ratatui = "0.29"
+crossterm = "0.28"
+# The editing widget ratatui deliberately doesn't ship: multi-line text
+# entry with cursor-following viewport scroll, word ops, undo. Replaces a
+# hand-rolled editor that was growing scroll logic the shelf already has.
+tui-textarea = "0.7"
+# helm's layout measures its own wrap (the hit map demands row→block truth),
+# so it must measure the way the renderer does: grapheme clusters and East
+# Asian widths, the same crates ratatui itself measures with.
+unicode-segmentation = "1"
+unicode-width = "0.2"
+# helm's markdown renderer: a real CommonMark pull-parser for the token walk
+# (inline emphasis resolution is the part not worth hand-rolling). Maintained
+# (0.13.x, 2026 releases), no default-feature baggage.
+pulldown-cmark = { version = "0.13", default-features = false }
+
+# Vendored patch: upstream unicode-width promotes VS16 emoji-presentation
+# sequences to width 2, which no terminal chain on this machine agrees with
+# (tmux with variation-selector-always-wide off, wcwidth, Node all say base
+# width). One neutered function (tables.rs set_emoji_presentation); flows
+# into ratatui and tui-textarea too, so the whole TUI measures like the
+# terminal renders.
+[patch.crates-io]
+unicode-width = { path = "vendor-unicode-width" }

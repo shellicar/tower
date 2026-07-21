@@ -27,15 +27,20 @@ pub async fn resolve_history(client: &async_nats::Client, bucket: &str, history:
     }
     let js = async_nats::jetstream::new(client.clone());
     let store = js.get_object_store(bucket).await.ok();
+    // Every block resolves concurrently: fetches overlap on the wire and
+    // conditioning overlaps on the blocking pool (imaging.rs), so a history
+    // with many images pays for the slowest one, not the sum.
+    let mut slots: Vec<&mut Value> = Vec::new();
     for message in history.iter_mut() {
         let Some(blocks) = message["content"].as_array_mut() else {
             continue;
         };
-        for block in blocks.iter_mut() {
-            if is_object_source(block) {
-                *block = resolve_one(store.as_ref(), block).await;
-            }
-        }
+        slots.extend(blocks.iter_mut().filter(|b| is_object_source(b)));
+    }
+    let resolved =
+        futures::future::join_all(slots.iter().map(|b| resolve_one(store.as_ref(), b))).await;
+    for (slot, value) in slots.into_iter().zip(resolved) {
+        *slot = value;
     }
 }
 
@@ -78,9 +83,20 @@ async fn resolve_one(
         Err(_) => return placeholder(),
     };
 
+    // Condition at the model-facing edge, never in the store: the record and
+    // the transit object stay verbatim (whatever the client sent), and every
+    // attachment source — helm, tower, an adopted record — gets the same
+    // bounded long edge on its way into a request.
+    let block_type = block["type"].as_str().unwrap_or("image");
+    let (bytes, media_type) = if block_type == "image" {
+        crate::imaging::condition_image(bytes, media_type).await
+    } else {
+        (bytes, media_type.to_string())
+    };
+
     let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
     json!({
-        "type": block["type"].as_str().unwrap_or("image"),
+        "type": block_type,
         "source": { "type": "base64", "media_type": media_type, "data": data },
     })
 }
