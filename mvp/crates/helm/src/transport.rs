@@ -3,16 +3,24 @@
 //! decodes attach-fd lines, and sends requests up the same fd as
 //! id-correlated envelopes bridge proxies onto NATS. helm dials nothing but
 //! its own child's pipes — NATS is bridge's concern alone. Holds no domain
-//! state — same contract as tower frontend's core/transport.ts.
+//! state — same contract as tower frontend's core/transport.ts, pump
+//! included: a background task owns the read half from the first instant
+//! (events to a channel, replies to correlated oneshots), so no await ever
+//! blocks the render loop and a reply-before-drain deadlock is structurally
+//! impossible.
 
+use std::collections::HashMap;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream as StdUnixStream;
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use base64::Engine;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::process::{Child, Command};
+use tokio::sync::{mpsc, oneshot};
 
 /// One event as it arrived over the attach fd. `subject` is conv.v2's own
 /// leaf (the routing axis spells the type, per the wire spec); `payload` is
@@ -28,15 +36,44 @@ pub struct Session {
     child: Child,
     control_out: tokio::process::ChildStdin,
     control_in: BufReader<tokio::process::ChildStdout>,
-    attach_read: BufReader<OwnedReadHalf>,
-    attach_write: OwnedWriteHalf,
-    /// Events drained while a reply was awaited — an adopt replays history
-    /// onto the fd BEFORE its reply, and the pipe's buffer is finite, so
-    /// whoever awaits a reply must keep draining or deadlock bridge.
-    /// `next_event` serves these first.
-    buffered: std::collections::VecDeque<AttachEvent>,
-    /// Request-envelope correlation ids, monotonic per session.
-    next_id: u64,
+    requester: Requester,
+    events: mpsc::UnboundedReceiver<AttachEvent>,
+}
+
+/// The cloneable request half: any task can send an envelope and await its
+/// correlated reply without touching the read side — the pump routes replies
+/// to the oneshot registered here.
+#[derive(Clone)]
+pub struct Requester {
+    write: Arc<tokio::sync::Mutex<OwnedWriteHalf>>,
+    pending: Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>>>,
+    next_id: Arc<AtomicU64>,
+}
+
+/// The read half's one owner: events fan to the channel, replies resolve
+/// their oneshot. Unparseable lines are skipped (tolerance); EOF drops the
+/// sender, which ends `next_event` with None.
+async fn pump(
+    read: OwnedReadHalf,
+    events: mpsc::UnboundedSender<AttachEvent>,
+    pending: Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>>>,
+) {
+    let mut lines = BufReader::new(read).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        match parse_attach_line(&line) {
+            Ok(Parsed::Event(event)) => {
+                if events.send(event).is_err() {
+                    return;
+                }
+            }
+            Ok(Parsed::Reply { id, payload }) => {
+                if let Some(tx) = pending.lock().unwrap().remove(&id) {
+                    let _ = tx.send(payload);
+                }
+            }
+            Err(_) => {}
+        }
+    }
 }
 
 impl Session {
@@ -77,48 +114,39 @@ impl Session {
         parent_end.set_nonblocking(true)?;
         let (read_half, write_half) = tokio::net::UnixStream::from_std(parent_end)?.into_split();
 
+        let (events_tx, events_rx) = mpsc::unbounded_channel();
+        let pending = Arc::new(std::sync::Mutex::new(HashMap::new()));
+        tokio::spawn(pump(read_half, events_tx, Arc::clone(&pending)));
+
         Ok(Self {
             child,
             control_out,
             control_in,
-            attach_read: BufReader::new(read_half),
-            attach_write: write_half,
-            buffered: std::collections::VecDeque::new(),
-            next_id: 0,
+            requester: Requester {
+                write: Arc::new(tokio::sync::Mutex::new(write_half)),
+                pending,
+                next_id: Arc::new(AtomicU64::new(0)),
+            },
+            events: events_rx,
         })
     }
 
+    /// A cloneable handle for spawned request tasks.
+    pub fn requester(&self) -> Requester {
+        self.requester.clone()
+    }
+
     /// Send one control line, read its one reply line — bridge's existing
-    /// stdio contract, untouched by helm's presence. The attach fd keeps
-    /// draining while the reply is awaited: bridge may tee (an adopt's whole
-    /// replayed history) before it answers, and a full pipe with no reader
-    /// deadlocks both processes.
+    /// stdio contract, untouched by helm's presence. The pump drains the
+    /// attach fd throughout, so an adopt's history flood can never deadlock
+    /// this exchange.
     pub async fn control(&mut self, line: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
         let mut bytes = serde_json::to_vec(line)?;
         bytes.push(b'\n');
         self.control_out.write_all(&bytes).await?;
         let mut reply = String::new();
-        // Both accumulators persist across select iterations: read_line is
-        // not cancellation-safe, but its partial progress lives in the String
-        // it appends to — keeping the Strings keeps the bytes.
-        let mut attach_line = String::new();
-        loop {
-            tokio::select! {
-                n = self.control_in.read_line(&mut reply) => {
-                    n?;
-                    return Ok(serde_json::from_str(reply.trim_end())?);
-                }
-                n = self.attach_read.read_line(&mut attach_line) => {
-                    if n? == 0 {
-                        anyhow::bail!("attach fd closed while awaiting a control reply");
-                    }
-                    if let Parsed::Event(event) = parse_attach_line(&attach_line)? {
-                        self.buffered.push_back(event);
-                    }
-                    attach_line.clear();
-                }
-            }
-        }
+        self.control_in.read_line(&mut reply).await?;
+        Ok(serde_json::from_str(reply.trim_end())?)
     }
 
     /// The conversation this session's spawn control line minted.
@@ -144,40 +172,38 @@ impl Session {
         Ok(wire::ConversationId(id.to_string()))
     }
 
-    /// One request envelope up the fd, its correlated reply back down.
-    /// Events arriving while the reply is awaited buffer for `next_event` —
-    /// the same drain discipline as `control`.
-    async fn request(&mut self, mut envelope: serde_json::Value) -> anyhow::Result<serde_json::Value> {
-        self.next_id += 1;
-        let id = format!("r{}", self.next_id);
+    /// One event off the attach fd, or `None` once it closes (bridge exited).
+    pub async fn next_event(&mut self) -> Option<AttachEvent> {
+        self.events.recv().await
+    }
+}
+
+impl Requester {
+    /// One request envelope up the fd, its correlated reply awaited on a
+    /// oneshot the pump resolves. Callable from any spawned task.
+    async fn request(&self, mut envelope: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+        let id = format!("r{}", self.next_id.fetch_add(1, Ordering::Relaxed) + 1);
         envelope["id"] = serde_json::Value::String(id.clone());
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().unwrap().insert(id.clone(), tx);
         let mut bytes = serde_json::to_vec(&envelope)?;
         bytes.push(b'\n');
-        self.attach_write.write_all(&bytes).await?;
-
-        let mut line = String::new();
-        loop {
-            let n = self.attach_read.read_line(&mut line).await?;
-            if n == 0 {
-                anyhow::bail!("attach fd closed while awaiting a reply");
-            }
-            match parse_attach_line(&line)? {
-                Parsed::Event(event) => self.buffered.push_back(event),
-                Parsed::Reply { id: reply_id, payload } if reply_id == id => {
-                    if let Some(error) = payload["error"].as_str() {
-                        anyhow::bail!("{error}");
-                    }
-                    return Ok(payload);
-                }
-                Parsed::Reply { .. } => {} // an orphan reply: nothing awaits it
-            }
-            line.clear();
+        {
+            let mut write = self.write.lock().await;
+            write.write_all(&bytes).await?;
         }
+        let payload = rx
+            .await
+            .map_err(|_| anyhow::anyhow!("attach fd closed while awaiting a reply"))?;
+        if let Some(error) = payload["error"].as_str() {
+            anyhow::bail!("{error}");
+        }
+        Ok(payload)
     }
 
     /// A proxied NATS request: bridge forwards `payload` to `subject` and
     /// relays the responder's reply. The reply parsers want bytes.
-    async fn request_subject(&mut self, subject: String, payload: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+    async fn request_subject(&self, subject: String, payload: Vec<u8>) -> anyhow::Result<Vec<u8>> {
         let payload: serde_json::Value = serde_json::from_slice(&payload)?;
         let reply = self
             .request(serde_json::json!({ "subject": subject, "payload": payload }))
@@ -190,7 +216,7 @@ impl Session {
     /// the wire. `tip` is the sender's premise — the latest message id this
     /// client holds, `None` claiming "empty so far".
     pub async fn say(
-        &mut self,
+        &self,
         conv: &wire::ConversationId,
         text: &str,
         tip: Option<wire::MessageId>,
@@ -212,7 +238,7 @@ impl Session {
     /// Acceptance is all a reply means; the outcome lands on the record as
     /// events like everything else.
     pub async fn cancel(
-        &mut self,
+        &self,
         conv: &wire::ConversationId,
         query: &str,
     ) -> anyhow::Result<wire::CancelOutcome> {
@@ -228,7 +254,7 @@ impl Session {
     /// settlement arrives back over the attach fd as an ordinary lifecycle
     /// event, same as tower sees it.
     pub async fn answer(
-        &mut self,
+        &self,
         approval_id: &str,
         approved: bool,
     ) -> anyhow::Result<wire::AnswerOutcome> {
@@ -243,7 +269,7 @@ impl Session {
     /// images come this way — files attach as path metadata in the submit
     /// text (submit.rs, the reference's format), never as bytes.
     pub async fn upload_bytes(
-        &mut self,
+        &self,
         name: &str,
         block_type: &str,
         media_type: &str,
@@ -261,25 +287,6 @@ impl Session {
             }))
             .await?;
         Ok((format!("{name} ({size} B)"), block))
-    }
-
-    /// One event off the attach fd — anything drained during a reply wait
-    /// first — or `None` once it closes (bridge exited).
-    pub async fn next_event(&mut self) -> anyhow::Result<Option<AttachEvent>> {
-        if let Some(event) = self.buffered.pop_front() {
-            return Ok(Some(event));
-        }
-        let mut line = String::new();
-        loop {
-            let n = self.attach_read.read_line(&mut line).await?;
-            if n == 0 {
-                return Ok(None);
-            }
-            match parse_attach_line(&line)? {
-                Parsed::Event(event) => return Ok(Some(event)),
-                Parsed::Reply { .. } => line.clear(), // orphan reply: skip
-            }
-        }
     }
 }
 

@@ -83,8 +83,14 @@ async fn main() -> anyhow::Result<()> {
     };
 
     if let Some(text) = one_shot {
-        session.say(&conv_id, &text, None, Vec::new()).await?;
+        session.requester().say(&conv_id, &text, None, Vec::new()).await?;
     }
+
+    let requester = session.requester();
+    // Request outcomes fold back through this channel: the render loop never
+    // awaits a round-trip (the frontend's async-say shape — optimistic
+    // state, reconciled when the outcome lands).
+    let (done_tx, mut done_rx) = tokio::sync::mpsc::unbounded_channel::<Done>();
 
     let mut terminal = ratatui::init(); // alt screen + raw mode, restored by ratatui::restore
     let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
@@ -127,8 +133,65 @@ async fn main() -> anyhow::Result<()> {
             })?;
 
             tokio::select! {
+                done = done_rx.recv() => {
+                    let Some(done) = done else { break };
+                    match done {
+                        Done::Say { typed, chips, outcome } => match outcome {
+                            Ok(wire::SayOutcome::Accepted { .. }) => note = None,
+                            Ok(wire::SayOutcome::Rejected { reason }) => {
+                                note = Some(format!("say rejected: {reason}"));
+                                conv.pending_say = None;
+                                restore_to(&mut editor, &typed);
+                                attachments.extend(chips);
+                            }
+                            Ok(wire::SayOutcome::Unreachable) => {
+                                note = Some("say unreachable".into());
+                                conv.pending_say = None;
+                                restore_to(&mut editor, &typed);
+                                attachments.extend(chips);
+                            }
+                            Err(e) => {
+                                note = Some(format!("say failed: {e}"));
+                                conv.pending_say = None;
+                                restore_to(&mut editor, &typed);
+                                attachments.extend(chips);
+                            }
+                        },
+                        Done::Cancel(outcome) => {
+                            note = match outcome {
+                                Ok(wire::CancelOutcome::Accepted) => None,
+                                Ok(wire::CancelOutcome::Rejected { reason }) => {
+                                    Some(format!("cancel rejected: {reason}"))
+                                }
+                                Ok(wire::CancelOutcome::Unreachable) => {
+                                    Some("cancel unreachable".into())
+                                }
+                                Err(e) => Some(format!("cancel failed: {e}")),
+                            };
+                        }
+                        Done::Answer(outcome) => {
+                            note = match outcome {
+                                Ok(wire::AnswerOutcome::Accepted) => None,
+                                Ok(wire::AnswerOutcome::Rejected { reason }) => {
+                                    Some(format!("answer rejected: {reason}"))
+                                }
+                                Ok(wire::AnswerOutcome::Unreachable) => {
+                                    Some("answer unreachable — the holder is gone".into())
+                                }
+                                Err(e) => Some(format!("answer failed: {e}")),
+                            };
+                        }
+                        Done::Upload(result) => match result {
+                            Ok((label, block)) => {
+                                attachments.push(Chip::Image { label, block });
+                                note = None;
+                            }
+                            Err(e) => note = Some(format!("attach failed: {e}")),
+                        },
+                    }
+                }
                 event = session.next_event() => {
-                    let Some(event) = event? else {
+                    let Some(event) = event else {
                         break; // attach fd closed: bridge is gone
                     };
                     match wire::parse_wire(&event.subject, &event.payload) {
@@ -188,29 +251,26 @@ async fn main() -> anyhow::Result<()> {
                                         // exits it (Ctrl+/ or Esc), never an intent.
                                     }
                                     KeyCode::Char('i') => {
-                                        // Clipboard image → upload → chip.
-                                        match clipboard::read_image().await {
-                                            Some((bytes, media_type)) => {
-                                                let name = format!("clipboard.{}", &media_type[6..]);
-                                                match session
-                                                    .upload_bytes(&name, "image", media_type, bytes)
+                                        // Clipboard image → upload → chip, off-loop:
+                                        // pngpaste and the upload both take real time.
+                                        let req = requester.clone();
+                                        let tx = done_tx.clone();
+                                        tokio::spawn(async move {
+                                            let result = async {
+                                                let (bytes, media_type) =
+                                                    clipboard::read_image().await.ok_or_else(|| {
+                                                        anyhow::anyhow!(
+                                                            "clipboard: no image (pngpaste installed?)"
+                                                        )
+                                                    })?;
+                                                let name =
+                                                    format!("clipboard.{}", &media_type[6..]);
+                                                req.upload_bytes(&name, "image", media_type, bytes)
                                                     .await
-                                                {
-                                                    Ok((label, block)) => {
-                                                        attachments.push(Chip::Image { label, block });
-                                                        note = None;
-                                                    }
-                                                    Err(e) => {
-                                                        note = Some(format!("attach failed: {e}"));
-                                                    }
-                                                }
                                             }
-                                            None => {
-                                                note = Some(
-                                                    "clipboard: no image (pngpaste installed?)".into(),
-                                                );
-                                            }
-                                        }
+                                            .await;
+                                            let _ = tx.send(Done::Upload(result));
+                                        });
                                     }
                                     KeyCode::Char('f') => {
                                         // Prefill the path editor from the clipboard
@@ -237,7 +297,13 @@ async fn main() -> anyhow::Result<()> {
                                             .first()
                                             .map(|(id, _)| id.to_string());
                                         if let Some(id) = target {
-                                            session.answer(&id, answer == 'y').await?;
+                                            let req = requester.clone();
+                                            let tx = done_tx.clone();
+                                            tokio::spawn(async move {
+                                                let _ = tx.send(Done::Answer(
+                                                    req.answer(&id, answer == 'y').await,
+                                                ));
+                                            });
                                         }
                                     }
                                     _ => {}
@@ -342,25 +408,22 @@ async fn main() -> anyhow::Result<()> {
                                     || m.contains(KeyModifiers::CONTROL) =>
                             {
                                 if !editor.is_empty() || !attachments.is_empty() {
+                                    // Optimistic: pending say and cleared chips now,
+                                    // reconciled when the outcome folds back.
                                     let typed = editor.take();
                                     let (text, blocks) = build_submit(&typed, &attachments);
                                     let tip = conv.messages.last().map(|m| m.id.clone());
-                                    match session.say(&conv_id, &text, tip, blocks).await? {
-                                        wire::SayOutcome::Accepted { .. } => {
-                                            note = None;
-                                            conv.pending_say = Some(text);
-                                            attachments.clear(); // committed with the say
-                                        }
-                                        wire::SayOutcome::Rejected { reason } => {
-                                            note = Some(format!("say rejected: {reason}"));
-                                            restore_to(&mut editor, &text);
-                                        }
-                                        wire::SayOutcome::Unreachable => {
-                                            note = Some("say unreachable".into());
-                                            restore_to(&mut editor, &text);
-                                        }
-                                    }
+                                    let chips = std::mem::take(&mut attachments);
+                                    conv.pending_say = Some(text.clone());
                                     view_state.scroll_from_bottom = 0; // a say re-pins to the tail
+                                    let req = requester.clone();
+                                    let tx = done_tx.clone();
+                                    let conv_target = conv_id.clone();
+                                    tokio::spawn(async move {
+                                        let outcome =
+                                            req.say(&conv_target, &text, tip, blocks).await;
+                                        let _ = tx.send(Done::Say { typed, chips, outcome });
+                                    });
                                 }
                             }
                             (KeyCode::Enter, _) => editor.newline(),
@@ -369,15 +432,14 @@ async fn main() -> anyhow::Result<()> {
                                 if view_state.scroll_from_bottom > 0 {
                                     view_state.scroll_from_bottom = 0;
                                 } else if let Some(query) = conv.live_query.clone() {
-                                    note = match session.cancel(&conv_id, &query).await? {
-                                        wire::CancelOutcome::Accepted => None,
-                                        wire::CancelOutcome::Rejected { reason } => {
-                                            Some(format!("cancel rejected: {reason}"))
-                                        }
-                                        wire::CancelOutcome::Unreachable => {
-                                            Some("cancel unreachable".into())
-                                        }
-                                    };
+                                    let req = requester.clone();
+                                    let tx = done_tx.clone();
+                                    let conv_target = conv_id.clone();
+                                    tokio::spawn(async move {
+                                        let _ = tx.send(Done::Cancel(
+                                            req.cancel(&conv_target, &query).await,
+                                        ));
+                                    });
                                 }
                             }
                             (KeyCode::Backspace, _) => editor.backspace(),
@@ -439,6 +501,19 @@ fn restore_to(editor: &mut Editor, text: &str) {
     for c in text.chars() {
         editor.insert(c);
     }
+}
+
+/// One spawned request's outcome, folded back into the loop's state — the
+/// reconcile half of the optimistic submit.
+enum Done {
+    Say {
+        typed: String,
+        chips: Vec<Chip>,
+        outcome: anyhow::Result<wire::SayOutcome>,
+    },
+    Cancel(anyhow::Result<wire::CancelOutcome>),
+    Answer(anyhow::Result<wire::AnswerOutcome>),
+    Upload(anyhow::Result<(String, serde_json::Value)>),
 }
 
 /// `~`/`~/...` → $HOME, the reference's own expansion; anything else passes
