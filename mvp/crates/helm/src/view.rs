@@ -372,6 +372,8 @@ pub struct Screen<'a> {
     pub approvals: &'a Approvals,
     pub editor: &'a TextArea<'static>,
     pub note: Option<&'a str>,
+    /// The href under the pointer — the status line's link preview.
+    pub hover: Option<&'a str>,
     /// Chip labels for the attachments pinned to the next say.
     pub attachments: &'a [String],
 }
@@ -391,6 +393,7 @@ pub fn draw(
         approvals,
         editor,
         note,
+        hover,
         attachments,
     } = *screen;
     // Command mode's active editor owns the input box while open; otherwise
@@ -487,6 +490,14 @@ pub fn draw(
         status_spans.push(Span::styled(
             format!(" · {note}"),
             Style::default().fg(Color::Red),
+        ));
+    }
+    if let Some(hover) = hover {
+        status_spans.push(Span::styled(
+            format!(" · {hover}"),
+            Style::default()
+                .fg(Color::Indexed(39))
+                .add_modifier(Modifier::UNDERLINED),
         ));
     }
     status_spans.push(match view.command {

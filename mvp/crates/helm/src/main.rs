@@ -116,6 +116,9 @@ async fn main() -> anyhow::Result<()> {
     let mut attachments: Vec<Chip> = Vec::new();
     let mut geometry = Geometry::default();
     let mut hits: Vec<view::HitRow> = Vec::new();
+    // The href under the pointer, surfaced in the status line so a link's
+    // destination is visible before the click.
+    let mut hover: Option<String> = None;
 
     let result: anyhow::Result<()> = async {
         loop {
@@ -128,6 +131,7 @@ async fn main() -> anyhow::Result<()> {
                     approvals: &approvals,
                     editor: &editor,
                     note: note.as_deref(),
+                    hover: hover.as_deref(),
                     attachments: &chip_labels,
                 };
                 let (g, h) = view::draw(frame, &screen, &mut view_state, now_ms());
@@ -449,10 +453,12 @@ async fn main() -> anyhow::Result<()> {
                                     let index = (mouse.row - inner.y) as usize;
                                     let column = (mouse.column - inner.x) as usize;
                                     if let Some(hit) = hits.get(index) {
-                                        // Links open on option+click only — a bare
-                                        // click must never fire a browser, and alt is
-                                        // a modifier the mouse protocol actually
-                                        // carries (cmd/super has no wire bit).
+                                        // Links open on a modified click only — a bare
+                                        // click must never fire a browser. The mouse
+                                        // protocol's meta bit is what macOS terminals
+                                        // report for the cmd key; crossterm labels that
+                                        // bit ALT, so this catches cmd+click (SC-verified
+                                        // live in iTerm2+tmux) and option+click alike.
                                         let alt_held = mouse.modifiers.contains(KeyModifiers::ALT);
                                         let link = hit
                                             .links
@@ -472,6 +478,25 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     }
                                 }
+                            }
+                            MouseEventKind::Moved => {
+                                let inner = geometry.inner;
+                                let inside = mouse.column >= inner.x
+                                    && mouse.column < inner.x + inner.width
+                                    && mouse.row >= inner.y
+                                    && mouse.row < inner.y + inner.height;
+                                hover = inside
+                                    .then(|| {
+                                        let index = (mouse.row - inner.y) as usize;
+                                        let column = (mouse.column - inner.x) as usize;
+                                        hits.get(index).and_then(|hit| {
+                                            hit.links
+                                                .iter()
+                                                .find(|l| column >= l.start && column < l.end)
+                                                .map(|l| l.href.clone())
+                                        })
+                                    })
+                                    .flatten();
                             }
                             _ => {}
                         },
