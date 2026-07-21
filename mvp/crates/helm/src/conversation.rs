@@ -42,9 +42,13 @@ pub struct Conversation {
     pub query_state: QueryState,
     /// The query this attach has seen start, while live.
     pub live_query: Option<String>,
-    /// The say in flight: accepted but not committed — rendered greyed,
-    /// superseded by its committed message (tower's pendingSay pattern).
+    /// The say in flight: not yet committed — rendered greyed until the
+    /// acceptance reply lands, then normal, superseded by its committed
+    /// message (tower's pendingSay pattern).
     pub pending_say: Option<String>,
+    /// The in-flight say's acceptance reply arrived: the bridge holds it,
+    /// only the commit is still to come.
+    pub say_accepted: bool,
     /// A revoked say handed back for the editor; the input loop consumes it.
     pub restore_say: Option<String>,
 }
@@ -87,6 +91,7 @@ impl Conversation {
                     && m.from.as_ref().and_then(|f| f["kind"].as_str()) == Some("human")
                 {
                     self.pending_say = None;
+                    self.say_accepted = false;
                 }
                 self.insert_message(m.clone());
                 self.streaming.clear(); // a committed message supersedes the stream
@@ -107,6 +112,7 @@ impl Conversation {
                 if let Some(text) = self.pending_say.take() {
                     self.restore_say = Some(text);
                 }
+                self.say_accepted = false;
             }
             EventKind::Change(ConvChange::TipMoved(_)) => {}
             EventKind::Telemetry(ConvTelemetry::TurnStarted(t)) => {

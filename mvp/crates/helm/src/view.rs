@@ -326,7 +326,10 @@ fn lay(
     // committed message supersedes it (or a revoke sends it home).
     if let Some(pending) = &conv.pending_say {
         rows.push(Row::plain(role_line("user"), None));
-        wrap_into(&mut rows, pending, width, Some(dim()), None);
+        // Grey only until the acceptance reply: from there the words are
+        // held by the bridge, and the text reads as sent.
+        let style = if conv.say_accepted { None } else { Some(dim()) };
+        wrap_into(&mut rows, pending, width, style, None);
         rows.push(Row::plain(Line::raw(""), None));
     }
     for segment in &conv.streaming {

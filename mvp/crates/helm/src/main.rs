@@ -144,7 +144,10 @@ async fn main() -> anyhow::Result<()> {
                     let Some(done) = done else { break };
                     match done {
                         Done::Say { typed, chips, outcome } => match outcome {
-                            Ok(wire::SayOutcome::Accepted { .. }) => note = None,
+                            Ok(wire::SayOutcome::Accepted { .. }) => {
+                                note = None;
+                                conv.say_accepted = true;
+                            }
                             Ok(wire::SayOutcome::Rejected { reason }) => {
                                 note = Some(format!("say rejected: {reason}"));
                                 conv.pending_say = None;
@@ -402,6 +405,7 @@ async fn main() -> anyhow::Result<()> {
                                     let tip = conv.messages.last().map(|m| m.id.clone());
                                     let chips = std::mem::take(&mut attachments);
                                     conv.pending_say = Some(text.clone());
+                                    conv.say_accepted = false;
                                     view_state.scroll_from_bottom = 0; // a say re-pins to the tail
                                     let req = requester.clone();
                                     let tx = done_tx.clone();
