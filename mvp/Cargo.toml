@@ -71,3 +71,12 @@ tui-textarea = "0.7"
 # Asian widths, the same crates ratatui itself measures with.
 unicode-segmentation = "1"
 unicode-width = "0.2"
+
+# Vendored patch: upstream unicode-width promotes VS16 emoji-presentation
+# sequences to width 2, which no terminal chain on this machine agrees with
+# (tmux with variation-selector-always-wide off, wcwidth, Node all say base
+# width). One neutered function (tables.rs set_emoji_presentation); flows
+# into ratatui and tui-textarea too, so the whole TUI measures like the
+# terminal renders.
+[patch.crates-io]
+unicode-width = { path = "vendor-unicode-width" }

@@ -99,18 +99,17 @@ fn wrap_segments(line: &str, width: usize) -> Vec<String> {
 /// the only defence is never emitting a contested sequence. True wide emoji
 /// carry no VS16 and pass untouched.
 ///
-/// `HELM_EMOJI=full` keeps VS16 (colour over safety): the underline and
-/// wrap bugs that amplified the historical corruption are gone, and modern
-/// tmux handles VS16 width far better — the flag exists to find out whether
-/// this stack still needs the strip at all.
+/// Default: VS16 passes through — the vendored unicode-width patch measures
+/// it at base width, agreeing with tmux (variation-selector-always-wide
+/// off), wcwidth, and Node, so full-colour emoji render without corruption.
+/// `HELM_EMOJI=strip` re-enables the strip for stacks where even base-width
+/// VS16 misbehaves.
+fn strip_enabled() -> bool {
+    static STRIP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *STRIP.get_or_init(|| std::env::var("HELM_EMOJI").is_ok_and(|v| v == "strip"))
+}
+
 fn strip_vs16(text: &str) -> String {
-    static FULL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let full = *FULL.get_or_init(|| {
-        std::env::var("HELM_EMOJI").is_ok_and(|v| v == "full")
-    });
-    if full {
-        return text.to_string();
-    }
     text.replace('\u{FE0F}', "")
 }
 
@@ -160,7 +159,11 @@ fn styled_segment(segment: String, base: Option<Style>) -> Line<'static> {
 /// Wrap a block of text into rows; chunked rows inherit their source's hit
 /// key, so the click map stays exact through the wrap.
 fn wrap_into(rows: &mut Vec<Row>, text: &str, width: usize, style: Option<Style>, hit: Option<BlockKey>) {
-    let text = strip_vs16(text);
+    let text = if strip_enabled() {
+        strip_vs16(text)
+    } else {
+        text.to_string()
+    };
     for source_line in text.lines() {
         for segment in wrap_segments(source_line, width) {
             rows.push(Row {

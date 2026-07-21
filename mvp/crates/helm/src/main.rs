@@ -467,16 +467,14 @@ fn new_editor() -> TextArea<'static> {
 
 /// Forward a key to a textarea. The widget's own emacs-flavoured map covers
 /// the word ops in every terminal spelling except macOS's bare-option ∂
-/// (option+d with "alt sends escape" off), pre-mapped here. VS16 (U+FE0F)
-/// is swallowed at this edge: the width-contested byte never enters the
-/// buffer, so the editor renders clean and the say carries text-presentation
-/// emoji — same defence the conversation layout applies on the way out.
+/// (option+d with "alt sends escape" off), pre-mapped here. VS16 passes
+/// through: the vendored unicode-width patch measures it at base width, so
+/// the buffer and every renderer agree.
 fn forward_key(editor: &mut TextArea<'static>, key: crossterm::event::KeyEvent) {
     match key.code {
         KeyCode::Char('∂') => {
             editor.delete_next_word();
         }
-        KeyCode::Char('\u{FE0F}') => {}
         _ => {
             editor.input(key);
         }
