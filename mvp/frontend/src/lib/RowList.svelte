@@ -26,6 +26,10 @@
       ([k, vs]) => vs.length === 0 || vs.includes(tagOf(r, k)),
     );
   const visible = $derived(rail.ordered.filter(matches));
+  // Computed once per render, then a plain Set.has() per row below — not a
+  // fresh rail.pendingByConv per row, which would rebuild the whole Set
+  // (walking every ask) once for EACH row instead of once for the list.
+  const pendingByConv = $derived(rail.pendingByConv);
 
   /** Sections by the group key, ordered by rollup staleness; '' = one flat
    *  group. Untagged is hideable, and never outranks real groups. */
@@ -213,6 +217,7 @@
       </li>
     {/if}
     {#each section.rows as row (row.conv)}
+      {@const verdict = rail.verdict(row.conv)}
       <li>
         <button
           class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900 {view.tab.convs.includes(
@@ -226,15 +231,15 @@
               : view.openConversation(row.conv)}
         >
           <span class="flex min-w-0 items-center gap-1.5">
-            {#if rail.pendingByConv.has(row.conv)}<span class="shrink-0 text-amber-300">⚠</span
+            {#if pendingByConv.has(row.conv)}<span class="shrink-0 text-amber-300">⚠</span
               >{/if}
             {#if rail.staleConvs.has(row.conv)}<span
                 class="shrink-0 text-sky-400"
                 title="nobody's looked at this since it last got new content">●</span
               >{/if}
-            {#if rail.verdict(row.conv) === 'alive'}
+            {#if verdict === 'alive'}
               <span class="h-2 w-2 shrink-0 rounded-full bg-green-400"></span>
-            {:else if rail.verdict(row.conv) === 'stranded'}
+            {:else if verdict === 'stranded'}
               <span class="h-2 w-2 shrink-0 rounded-full bg-red-400"></span>
             {/if}
             <span class="truncate" class:text-neutral-200={row.title}>{row.title ?? row.conv}</span>
