@@ -133,9 +133,6 @@ Env: `HELM_BRIDGE_PATH`, `HELM_BRIDGE_LOG` (bridge stderr, default
 
 Known debt, deliberate, fix shapes agreed:
 
-- say/cancel/answer are awaited in the render loop — a slow broker freezes
-  keystrokes. Fix: spawn the request, fold its outcome back through a
-  channel arm (the frontend's async-say shape).
 - `wrap_into` counts chars, not grapheme widths — CJK/emoji mismeasure
   (hit map stays correct). Fix: unicode-segmentation + unicode-width,
   already in-tree via ratatui.
