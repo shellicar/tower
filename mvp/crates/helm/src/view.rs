@@ -84,9 +84,20 @@ fn wrap_segments(line: &str, width: usize) -> Vec<String> {
     segments
 }
 
+/// Strip VS16 (U+FE0F, emoji presentation) so ambiguous-width characters
+/// render text-presentation — width 1 by every table. VS16 width is where
+/// tmux's internal grid, the outer terminal, and wcwidth disagree most
+/// (ℹ️ was the archetype), and tmux repaints panes from its own grid, so
+/// the only defence is never emitting a contested sequence. True wide emoji
+/// carry no VS16 and pass untouched.
+fn strip_vs16(text: &str) -> String {
+    text.replace('\u{FE0F}', "")
+}
+
 /// Wrap a block of text into rows; chunked rows inherit their source's hit
 /// key, so the click map stays exact through the wrap.
 fn wrap_into(rows: &mut Vec<Row>, text: &str, width: usize, style: Option<Style>, hit: Option<BlockKey>) {
+    let text = strip_vs16(text);
     for source_line in text.lines() {
         for segment in wrap_segments(source_line, width) {
             rows.push(Row {
@@ -406,6 +417,26 @@ mod tests {
         let actual = wrap_segments(&text, 4);
 
         assert!(actual.iter().any(|segment| segment.contains(family)));
+    }
+
+    #[test]
+    fn vs16_is_stripped_so_ambiguous_emoji_render_text_presentation() {
+        // ℹ️ = U+2139 + VS16: the width-contested sequence that corrupted
+        // tmux. Stripped, it is plain U+2139, width 1 by every table.
+        let expected = "\u{2139}";
+
+        let actual = super::strip_vs16("\u{2139}\u{FE0F}");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn true_wide_emoji_pass_the_strip_untouched() {
+        let expected = "🎉👍";
+
+        let actual = super::strip_vs16("🎉👍");
+
+        assert_eq!(actual, expected);
     }
 
     #[test]
