@@ -130,9 +130,7 @@ pub async fn serve_requests(
             match client.request(subject, payload.into()).await {
                 Ok(response) => {
                     let payload = serde_json::from_slice::<serde_json::Value>(&response.payload)
-                        .unwrap_or_else(|_| {
-                            serde_json::json!({ "error": "unintelligible reply" })
-                        });
+                        .unwrap_or_else(|_| serde_json::json!({ "error": "unintelligible reply" }));
                     reply(&out, &id, payload).await;
                 }
                 Err(e) => reply(&out, &id, serde_json::json!({ "error": e.to_string() })).await,
@@ -157,7 +155,9 @@ async fn store_upload(
     upload: &serde_json::Value,
 ) -> anyhow::Result<serde_json::Value> {
     let block_type = upload["blockType"].as_str().unwrap_or("image");
-    let media_type = upload["mediaType"].as_str().unwrap_or("application/octet-stream");
+    let media_type = upload["mediaType"]
+        .as_str()
+        .unwrap_or("application/octet-stream");
     let encoded = upload["bytes"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("upload carries no bytes"))?;
@@ -192,9 +192,13 @@ mod tests {
     #[tokio::test]
     async fn round_trips_bytes_over_the_dupped_fd() {
         let (mut child, mut parent_end) =
-            spawn_with_attach("sh", &["-c", "cat <&3 >&3"], 3, |_cmd| {}).expect("spawn with attach fd");
+            spawn_with_attach("sh", &["-c", "cat <&3 >&3"], 3, |_cmd| {})
+                .expect("spawn with attach fd");
 
-        parent_end.write_all(b"hello over fd 3\n").await.expect("write");
+        parent_end
+            .write_all(b"hello over fd 3\n")
+            .await
+            .expect("write");
 
         let mut buf = [0u8; 64];
         let n = parent_end.read(&mut buf).await.expect("read");
@@ -221,7 +225,8 @@ mod tests {
         let n = parent_end.read(&mut buf).await.expect("read");
         let line = std::str::from_utf8(&buf[..n]).expect("utf8");
         assert!(line.ends_with('\n'));
-        let parsed: serde_json::Value = serde_json::from_str(line.trim_end()).expect("one json line");
+        let parsed: serde_json::Value =
+            serde_json::from_str(line.trim_end()).expect("one json line");
         assert_eq!(parsed["subject"], "conv.v2.abc.changes.message");
         assert_eq!(parsed["payload"]["id"], "m1");
     }

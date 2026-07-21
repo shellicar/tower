@@ -825,8 +825,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         let command = block["input"]["command"].as_str().unwrap_or("");
@@ -853,8 +860,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         match crate::exec::parse_commands(&block["input"]) {
@@ -919,8 +933,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         crate::mutate::run_create_file(&block["input"]).await
@@ -940,8 +961,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         crate::mutate::run_append_file(&block["input"]).await
@@ -961,8 +989,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         crate::editfile::run_edit_file(&block["input"]).await
@@ -982,8 +1017,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         crate::delete::run_delete(&block["input"]).await
@@ -1004,8 +1046,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         crate::memtools::run_write_memory(memory, &block["input"]).await
@@ -1025,8 +1074,15 @@ async fn run_tool_round(
                     "turnId": turn_id,
                     "toolUseId": id,
                 });
-                match crate::approval::gate(pubr.client(), pubr.attach(), &approval_id, &ask, &correlation, cancel)
-                    .await
+                match crate::approval::gate(
+                    pubr.client(),
+                    pubr.attach(),
+                    &approval_id,
+                    &ask,
+                    &correlation,
+                    cancel,
+                )
+                .await
                 {
                     crate::approval::Verdict::Approved => {
                         crate::memtools::run_delete_memory(memory, &block["input"])

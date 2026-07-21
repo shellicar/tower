@@ -10,9 +10,17 @@
 /// block minted at paste time.
 #[derive(Debug, Clone)]
 pub enum Chip {
-    Text { text: String },
-    File { path: String, kind: FileKind },
-    Image { label: String, block: serde_json::Value },
+    Text {
+        text: String,
+    },
+    File {
+        path: String,
+        kind: FileKind,
+    },
+    Image {
+        label: String,
+        block: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -82,7 +90,10 @@ pub fn build_submit(text: &str, chips: &[Chip]) -> (String, Vec<serde_json::Valu
     let submit = if items.is_empty() {
         text.to_string()
     } else {
-        format!("{text}\n\n<attachments>\n{}\n</attachments>", items.join("\n"))
+        format!(
+            "{text}\n\n<attachments>\n{}\n</attachments>",
+            items.join("\n")
+        )
     };
     (submit, images)
 }
@@ -135,7 +146,8 @@ mod tests {
 
     #[test]
     fn images_ride_as_blocks_never_text() {
-        let block = serde_json::json!({ "type": "image", "source": { "type": "object", "id": "x" } });
+        let block =
+            serde_json::json!({ "type": "image", "source": { "type": "object", "id": "x" } });
         let chips = [Chip::Image {
             label: "clipboard.png".into(),
             block: block.clone(),

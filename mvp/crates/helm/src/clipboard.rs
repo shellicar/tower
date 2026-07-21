@@ -31,7 +31,12 @@ pub fn looks_like_path(s: &str) -> bool {
     if s.is_empty() || s.len() > 1024 || s.contains('\n') || s.contains('\r') {
         return false;
     }
-    if s.starts_with('/') || s.starts_with("~/") || s == "~" || s.starts_with("./") || s.starts_with("../") {
+    if s.starts_with('/')
+        || s.starts_with("~/")
+        || s == "~"
+        || s.starts_with("./")
+        || s.starts_with("../")
+    {
         return true;
     }
     s.contains('/') && !s.chars().any(char::is_whitespace)
@@ -49,7 +54,11 @@ pub fn sanitise_furl(path: Option<String>) -> Option<String> {
 const VSCODE_FILE_LIST_JXA: &str = "ObjC.import('AppKit'); var pb = $.NSPasteboard.generalPasteboard; var d = pb.dataForType($('code/file-list')); if (!d || !d.length) throw 'no code/file-list data'; $.NSString.alloc.initWithDataEncoding(d, $.NSUTF8StringEncoding).js";
 
 async fn read_vscode_file_list() -> Option<String> {
-    let raw = exec_text("osascript", &["-l", "JavaScript", "-e", VSCODE_FILE_LIST_JXA]).await?;
+    let raw = exec_text(
+        "osascript",
+        &["-l", "JavaScript", "-e", VSCODE_FILE_LIST_JXA],
+    )
+    .await?;
     let first = raw.lines().next()?.trim();
     first.strip_prefix("file://").map(|p| {
         // Percent-decoding matters only for spaces in practice; a fuller
@@ -62,7 +71,10 @@ async fn read_finder_furl() -> Option<String> {
     sanitise_furl(
         exec_text(
             "osascript",
-            &["-e", "POSIX path of (the clipboard as \u{ab}class furl\u{bb})"],
+            &[
+                "-e",
+                "POSIX path of (the clipboard as \u{ab}class furl\u{bb})",
+            ],
         )
         .await,
     )
@@ -144,7 +156,10 @@ mod tests {
             detect_media_type(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0]),
             Some("image/png")
         );
-        assert_eq!(detect_media_type(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("image/jpeg"));
+        assert_eq!(
+            detect_media_type(&[0xFF, 0xD8, 0xFF, 0xE0]),
+            Some("image/jpeg")
+        );
         assert_eq!(detect_media_type(b"GIF89a-rest"), Some("image/gif"));
         assert_eq!(detect_media_type(b"RIFF....WEBPVP8 "), Some("image/webp"));
         assert_eq!(detect_media_type(b"plain text"), None);

@@ -47,7 +47,8 @@ mod tests {
     fn replay(fixture: &str) -> Usage {
         let mut usage = Usage::default();
         for line in fixture.lines().filter(|l| !l.is_empty()) {
-            let record: serde_json::Value = serde_json::from_str(line).expect("fixture line is json");
+            let record: serde_json::Value =
+                serde_json::from_str(line).expect("fixture line is json");
             let subject = record["subject"].as_str().expect("subject");
             let payload = serde_json::to_vec(&record["message"]).expect("message");
             if let Some(WireEvent::Conv(event)) = wire::parse_wire(subject, &payload) {

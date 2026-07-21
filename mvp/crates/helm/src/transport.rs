@@ -89,8 +89,8 @@ impl Session {
         cmd.stdout(Stdio::piped());
         // bridge's stderr must never reach helm's terminal — the alternate
         // screen is helm's alone. The log survives in a file instead.
-        let log_path = std::env::var("HELM_BRIDGE_LOG")
-            .unwrap_or_else(|_| "/tmp/helm-bridge.log".into());
+        let log_path =
+            std::env::var("HELM_BRIDGE_LOG").unwrap_or_else(|_| "/tmp/helm-bridge.log".into());
         let log = std::fs::File::create(&log_path)?;
         cmd.stderr(Stdio::from(log));
 
@@ -304,7 +304,10 @@ impl Requester {
 /// reply (`{id, payload}`).
 enum Parsed {
     Event(AttachEvent),
-    Reply { id: String, payload: serde_json::Value },
+    Reply {
+        id: String,
+        payload: serde_json::Value,
+    },
 }
 
 fn parse_attach_line(line: &str) -> anyhow::Result<Parsed> {

@@ -311,14 +311,15 @@ impl Host {
             };
             let stream_name =
                 std::env::var("BRIDGE_STREAM").unwrap_or_else(|_| "conv-approval".into());
-            let messages = match replay_conversation(&self.client, &stream_name, &conv, &self.attach).await {
-                Ok(m) => m,
-                Err(e) => {
-                    eprintln!("bridge: adopt failed for {conv}: {e:#}");
-                    println!("{}", serde_json::json!({ "error": "replay failed" }));
-                    return;
-                }
-            };
+            let messages =
+                match replay_conversation(&self.client, &stream_name, &conv, &self.attach).await {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("bridge: adopt failed for {conv}: {e:#}");
+                        println!("{}", serde_json::json!({ "error": "replay failed" }));
+                        return;
+                    }
+                };
             let adopted = messages.len();
             let config = self.config(&conv, Arc::clone(&self.default_model));
             let Some(conv) = serve_conversation(
@@ -389,10 +390,7 @@ impl Host {
             // and every running conversation sharing it picks the change up
             // on its next say. A spawn that named its own model stays pinned.
             let Some(text) = model.as_str() else {
-                println!(
-                    "{}",
-                    serde_json::json!({ "error": "model needs a string" })
-                );
+                println!("{}", serde_json::json!({ "error": "model needs a string" }));
                 return;
             };
             *self.default_model.write().unwrap() = text.to_string();
@@ -459,7 +457,9 @@ impl Host {
             // this as the message's new latest state (last-write-wins per
             // id, main.rs's `replay_conversation`).
             let (conv, message_id, content) = (
-                revise.get("conversationId").and_then(serde_json::Value::as_str),
+                revise
+                    .get("conversationId")
+                    .and_then(serde_json::Value::as_str),
                 revise.get("messageId").and_then(serde_json::Value::as_str),
                 revise.get("content").and_then(serde_json::Value::as_array),
             );
@@ -645,7 +645,11 @@ async fn main() -> anyhow::Result<()> {
     });
     eprintln!(
         "bridge: attach channel {}",
-        if attach.is_some() { "present (BRIDGE_ATTACH_FD)" } else { "absent" }
+        if attach.is_some() {
+            "present (BRIDGE_ATTACH_FD)"
+        } else {
+            "absent"
+        }
     );
 
     // Ready once subscriptions can be made, then the liveness promise: "you
