@@ -62,3 +62,7 @@ yaml_serde = "0.10"
 # input events (raw keys) ratatui doesn't wrap.
 ratatui = "0.29"
 crossterm = "0.28"
+# The editing widget ratatui deliberately doesn't ship: multi-line text
+# entry with cursor-following viewport scroll, word ops, undo. Replaces a
+# hand-rolled editor that was growing scroll logic the shelf already has.
+tui-textarea = "0.7"

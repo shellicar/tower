@@ -10,7 +10,6 @@ mod approvals;
 mod clipboard;
 mod command;
 mod conversation;
-mod editor;
 mod submit;
 mod transport;
 mod usage;
@@ -24,8 +23,8 @@ use crossterm::event::{
     KeyboardEnhancementFlags, MouseButton, MouseEventKind, PopKeyboardEnhancementFlags,
     PushKeyboardEnhancementFlags,
 };
-use editor::Editor;
 use submit::{Chip, FileKind, build_submit};
+use tui_textarea::TextArea;
 use transport::Session;
 use usage::Usage;
 use view::{BlockKey, Geometry, ViewState};
@@ -107,7 +106,7 @@ async fn main() -> anyhow::Result<()> {
     let mut usage = Usage::default();
     let mut approvals = Approvals::default();
     let mut view_state = ViewState::default();
-    let mut editor = Editor::default();
+    let mut editor = TextArea::default();
     let mut note: Option<String> = None;
     // Attachments pinned to the next say (submit.rs: the format contract).
     let mut attachments: Vec<Chip> = Vec::new();
@@ -141,19 +140,19 @@ async fn main() -> anyhow::Result<()> {
                             Ok(wire::SayOutcome::Rejected { reason }) => {
                                 note = Some(format!("say rejected: {reason}"));
                                 conv.pending_say = None;
-                                restore_to(&mut editor, &typed);
+                                editor.insert_str(&typed);
                                 attachments.extend(chips);
                             }
                             Ok(wire::SayOutcome::Unreachable) => {
                                 note = Some("say unreachable".into());
                                 conv.pending_say = None;
-                                restore_to(&mut editor, &typed);
+                                editor.insert_str(&typed);
                                 attachments.extend(chips);
                             }
                             Err(e) => {
                                 note = Some(format!("say failed: {e}"));
                                 conv.pending_say = None;
-                                restore_to(&mut editor, &typed);
+                                editor.insert_str(&typed);
                                 attachments.extend(chips);
                             }
                         },
@@ -200,7 +199,7 @@ async fn main() -> anyhow::Result<()> {
                             usage.fold(&decoded.kind);
                             // A revoked say comes home: words to the editor.
                             if let Some(text) = conv.restore_say.take() {
-                                restore_to(&mut editor, &text);
+                                editor.insert_str(&text);
                                 note = Some("say revoked — returned to the editor".into());
                             }
                         }
@@ -276,9 +275,9 @@ async fn main() -> anyhow::Result<()> {
                                         // Prefill the path editor from the clipboard
                                         // when it holds a path (terminal, VS Code,
                                         // Finder — the reference's three stages).
-                                        let mut path_editor = Editor::default();
+                                        let mut path_editor = TextArea::default();
                                         if let Some(path) = clipboard::read_path().await {
-                                            restore_to(&mut path_editor, &path);
+                                            path_editor.insert_str(&path);
                                         }
                                         view_state.command = CommandMode::AttachEdit(path_editor);
                                     }
@@ -286,10 +285,10 @@ async fn main() -> anyhow::Result<()> {
                                         attachments.pop();
                                     }
                                     KeyCode::Char('m') => {
-                                        view_state.command = CommandMode::ModelEdit(Editor::default());
+                                        view_state.command = CommandMode::ModelEdit(TextArea::default());
                                     }
                                     KeyCode::Char('c') => {
-                                        view_state.command = CommandMode::CwdEdit(Editor::default());
+                                        view_state.command = CommandMode::CwdEdit(TextArea::default());
                                     }
                                     KeyCode::Char(answer @ ('y' | 'n')) => {
                                         let target = approvals
@@ -314,8 +313,7 @@ async fn main() -> anyhow::Result<()> {
                                         // The reference's pasteFile: metadata only,
                                         // never bytes — the agent reads the path
                                         // with its own tools.
-                                        let path = overlay.take();
-                                        let path = path.trim().to_string();
+                                        let path = drain(overlay).trim().to_string();
                                         if !path.is_empty() {
                                             let expanded = expand_home(&path);
                                             let kind = match tokio::fs::metadata(&expanded).await {
@@ -332,12 +330,12 @@ async fn main() -> anyhow::Result<()> {
                                         // Back to root, still in command mode.
                                         view_state.command.escape();
                                     }
-                                    _ => apply_editor_key(overlay, key.code, key.modifiers),
+                                    _ => forward_key(overlay, key),
                                 },
                                 CommandMode::ModelEdit(overlay) => match (key.code, key.modifiers) {
                                     (KeyCode::Esc, _) => view_state.command.escape(),
                                     (KeyCode::Enter, _) => {
-                                        let model = overlay.take().trim().to_string();
+                                        let model = drain(overlay).trim().to_string();
                                         if !model.is_empty() {
                                             let reply = session
                                                 .control(&serde_json::json!({ "model": model }))
@@ -349,12 +347,12 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                         view_state.command.escape();
                                     }
-                                    _ => apply_editor_key(overlay, key.code, key.modifiers),
+                                    _ => forward_key(overlay, key),
                                 },
                                 CommandMode::CwdEdit(overlay) => match (key.code, key.modifiers) {
                                     (KeyCode::Esc, _) => view_state.command.escape(),
                                     (KeyCode::Enter, _) => {
-                                        let path = overlay.take().trim().to_string();
+                                        let path = drain(overlay).trim().to_string();
                                         if !path.is_empty() {
                                             let reply = session
                                                 .control(&serde_json::json!({ "cwd": path }))
@@ -369,7 +367,7 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                         view_state.command.escape();
                                     }
-                                    _ => apply_editor_key(overlay, key.code, key.modifiers),
+                                    _ => forward_key(overlay, key),
                                 },
                                 CommandMode::Closed => unreachable!("guarded by is_open"),
                             }
@@ -380,10 +378,10 @@ async fn main() -> anyhow::Result<()> {
                                 if m.contains(KeyModifiers::SUPER)
                                     || m.contains(KeyModifiers::CONTROL) =>
                             {
-                                if !editor.is_empty() || !attachments.is_empty() {
+                                if !is_blank(&editor) || !attachments.is_empty() {
                                     // Optimistic: pending say and cleared chips now,
                                     // reconciled when the outcome folds back.
-                                    let typed = editor.take();
+                                    let typed = drain(&mut editor);
                                     let (text, blocks) = build_submit(&typed, &attachments);
                                     let tip = conv.messages.last().map(|m| m.id.clone());
                                     let chips = std::mem::take(&mut attachments);
@@ -399,7 +397,7 @@ async fn main() -> anyhow::Result<()> {
                                     });
                                 }
                             }
-                            (KeyCode::Enter, _) => editor.newline(),
+                            (KeyCode::Enter, _) => editor.insert_newline(),
                             (KeyCode::Esc, _) => {
                                 // Scrolled: re-pin. Pinned with a live query: cancel it.
                                 if view_state.scroll_from_bottom > 0 {
@@ -421,7 +419,7 @@ async fn main() -> anyhow::Result<()> {
                                     .scroll_from_bottom
                                     .saturating_sub(geometry.inner.height as usize);
                             }
-                            _ => apply_editor_key(&mut editor, key.code, key.modifiers),
+                            _ => forward_key(&mut editor, key),
                         },
                         TermEvent::Mouse(mouse) => match mouse.kind {
                             MouseEventKind::ScrollUp => view_state.scroll_from_bottom += WHEEL_LINES,
@@ -459,43 +457,26 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-/// The one editing key map, shared by the say editor and every command-mode
-/// overlay. Word ops answer every spelling the terminals produce (the
-/// reference input decoder's own list): Alt/Ctrl+Backspace — tmux says
-/// Ctrl+W — delete the previous word; Alt/Ctrl+Delete — tmux says Alt+d,
-/// bare macOS option says ∂ — the next; Alt/Ctrl+arrows — tmux says
-/// Alt+b/f — jump words.
-fn apply_editor_key(editor: &mut Editor, code: KeyCode, mods: KeyModifiers) {
-    let word = mods.contains(KeyModifiers::ALT) || mods.contains(KeyModifiers::CONTROL);
-    match code {
-        KeyCode::Backspace if word => editor.delete_word_back(),
-        KeyCode::Backspace => editor.backspace(),
-        KeyCode::Delete if word => editor.delete_word_forward(),
-        KeyCode::Delete => editor.delete(),
-        KeyCode::Left if word => editor.word_left(),
-        KeyCode::Left => editor.left(),
-        KeyCode::Right if word => editor.word_right(),
-        KeyCode::Right => editor.right(),
-        KeyCode::Home => editor.home(),
-        KeyCode::End => editor.end(),
-        KeyCode::Up => editor.up(),
-        KeyCode::Down => editor.down(),
-        KeyCode::Char('w') if mods.contains(KeyModifiers::CONTROL) => editor.delete_word_back(),
-        KeyCode::Char('d') if mods.contains(KeyModifiers::ALT) => editor.delete_word_forward(),
-        KeyCode::Char('∂') => editor.delete_word_forward(),
-        KeyCode::Char('b') if mods.contains(KeyModifiers::ALT) => editor.word_left(),
-        KeyCode::Char('f') if mods.contains(KeyModifiers::ALT) => editor.word_right(),
-        KeyCode::Char(c) if mods.is_empty() || mods == KeyModifiers::SHIFT => editor.insert(c),
-        _ => {}
+/// Forward a key to a textarea. The widget's own emacs-flavoured map covers
+/// the word ops in every terminal spelling except macOS's bare-option ∂
+/// (option+d with "alt sends escape" off), pre-mapped here.
+fn forward_key(editor: &mut TextArea<'static>, key: crossterm::event::KeyEvent) {
+    if matches!(key.code, KeyCode::Char('∂')) {
+        editor.delete_next_word();
+        return;
     }
+    editor.input(key);
 }
 
-/// Insert text into an editor at its cursor — the restore path for a failed
-/// or revoked say, and the paste path.
-fn restore_to(editor: &mut Editor, text: &str) {
-    for c in text.chars() {
-        editor.insert(c);
-    }
+/// Take the whole buffer for a submit, resetting the editor.
+fn drain(editor: &mut TextArea<'static>) -> String {
+    let text = editor.lines().join("\n");
+    *editor = TextArea::default();
+    text
+}
+
+fn is_blank(editor: &TextArea<'static>) -> bool {
+    editor.lines().iter().all(|l| l.trim().is_empty())
 }
 
 /// One spawned request's outcome, folded back into the loop's state — the

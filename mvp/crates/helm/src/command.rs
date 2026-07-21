@@ -5,7 +5,7 @@
 //! attach path editor) nest one level; Esc pops one level, Ctrl+/ closes
 //! whole.
 
-use crate::editor::Editor;
+use tui_textarea::TextArea;
 
 #[derive(Debug, Default)]
 pub enum CommandMode {
@@ -15,11 +15,11 @@ pub enum CommandMode {
     /// m model · c cwd.
     Root,
     /// The attach path editor (f) — Enter adds the chip, Esc backs out.
-    AttachEdit(Editor),
+    AttachEdit(TextArea<'static>),
     /// The model editor (m) — Enter sends the `model` control line.
-    ModelEdit(Editor),
+    ModelEdit(TextArea<'static>),
     /// The cwd editor (c) — Enter sends the `cwd` control line.
-    CwdEdit(Editor),
+    CwdEdit(TextArea<'static>),
 }
 
 impl CommandMode {
@@ -57,7 +57,7 @@ mod tests {
         assert!(matches!(mode, CommandMode::Root));
         mode.toggle();
         assert!(matches!(mode, CommandMode::Closed));
-        let mut mode = CommandMode::AttachEdit(Editor::default());
+        let mut mode = CommandMode::AttachEdit(TextArea::default());
         mode.toggle();
         assert!(matches!(mode, CommandMode::Closed));
     }
@@ -65,9 +65,9 @@ mod tests {
     #[test]
     fn escape_pops_one_level() {
         for mut mode in [
-            CommandMode::AttachEdit(Editor::default()),
-            CommandMode::ModelEdit(Editor::default()),
-            CommandMode::CwdEdit(Editor::default()),
+            CommandMode::AttachEdit(TextArea::default()),
+            CommandMode::ModelEdit(TextArea::default()),
+            CommandMode::CwdEdit(TextArea::default()),
         ] {
             mode.escape();
             assert!(matches!(mode, CommandMode::Root));

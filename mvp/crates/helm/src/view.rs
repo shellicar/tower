@@ -17,8 +17,8 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use crate::approvals::Approvals;
 use crate::command::CommandMode;
 use crate::conversation::{Conversation, QueryState};
-use crate::editor::Editor;
 use crate::usage::Usage;
+use tui_textarea::TextArea;
 
 /// A block's stable identity for disclosure: the message that carries it and
 /// its index within that message's content.
@@ -231,7 +231,7 @@ pub struct Screen<'a> {
     pub conv: &'a Conversation,
     pub usage: &'a Usage,
     pub approvals: &'a Approvals,
-    pub editor: &'a Editor,
+    pub editor: &'a TextArea<'static>,
     pub note: Option<&'a str>,
     /// Chip labels for the attachments pinned to the next say.
     pub attachments: &'a [String],
@@ -254,16 +254,16 @@ pub fn draw(
         note,
         attachments,
     } = *screen;
-    // Command mode's attach editor owns the input box while open; otherwise
-    // the say editor does. The box grows with its content, up to 5 lines.
+    // Command mode's active editor owns the input box while open; otherwise
+    // the say editor does. The box grows with its content, up to 5 lines —
+    // the widget scrolls its own viewport to follow the cursor beyond that.
     let (input_title, active_editor) = match &view.command {
         CommandMode::AttachEdit(attach) => (" attach file path (enter adds · esc backs out) ", attach),
         CommandMode::ModelEdit(model) => (" model (enter sets · esc backs out) ", model),
         CommandMode::CwdEdit(cwd) => (" cwd (enter changes · esc backs out) ", cwd),
         _ => ("", editor),
     };
-    let (editor_lines, (cursor_line, cursor_col)) = active_editor.lines_and_cursor();
-    let input_height = (editor_lines.len().min(5) + 2) as u16;
+    let input_height = (active_editor.lines().len().min(5) + 2) as u16;
     let chips_height = u16::from(!attachments.is_empty());
     let [main, chips, input, status] = Layout::vertical([
         Constraint::Min(1),
@@ -302,22 +302,11 @@ pub fn draw(
         );
     }
 
-    // Input: the visible tail of the active editor's logical lines, hardware
-    // cursor placed at its buffer cursor.
+    // Input: the widget draws its own content, cursor, and viewport scroll.
     let input_block = Block::default().borders(Borders::ALL).title(input_title);
     let input_inner = input_block.inner(input);
-    let visible_from = editor_lines.len().saturating_sub(input_inner.height as usize);
-    let shown: Vec<Line> = editor_lines
-        .iter()
-        .skip(visible_from)
-        .map(|l| Line::raw(l.clone()))
-        .collect();
-    frame.render_widget(Paragraph::new(shown).block(input_block), input);
-    if cursor_line >= visible_from {
-        let cursor_x = input_inner.x + (cursor_col as u16).min(input_inner.width.saturating_sub(1));
-        let cursor_y = input_inner.y + (cursor_line - visible_from) as u16;
-        frame.set_cursor_position((cursor_x, cursor_y));
-    }
+    frame.render_widget(input_block, input);
+    frame.render_widget(active_editor, input_inner);
 
     let state = match conv.query_state {
         QueryState::Unknown => Span::styled("unknown", dim()),
