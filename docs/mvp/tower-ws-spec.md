@@ -152,6 +152,43 @@ bare, exactly as `say`. Response: `answer_result`. First valid answer wins
 settlement itself arrives as an `approval` event like any other, carrying
 whose decision it was.
 
+### `set_layout`
+
+```json
+{ "type": "set_layout", "id": "r8", "tabs": [ { "name": "main", "convs": ["c65b902d-…"] }, { "name": "ops", "convs": [] } ] }
+```
+
+Replace the fleet's whole layout — the shared tabs and which conversations sit
+in each — every connected session's workspace, tmux-attach style: whoever
+changes it, everyone sees it live. No `conv`: layout is fleet-wide, never
+per-conversation. Response: `layout_set`. The new layout also arrives as an
+ordinary `layout` broadcast to every connected session, this one included, so
+the ack itself carries nothing further to apply.
+
+### `dismiss_approval`
+
+```json
+{ "type": "dismiss_approval", "id": "r9", "approval": "apr-9f3" }
+```
+
+A human's own decision to stop tracking this ask — never a claim it was
+answered ("connection is authority"). The settlement stays whatever it
+already was, usually none. No dedicated response: the broadcast is an
+updated `approval` fact, `dismissed: true`, the same channel a real
+settlement rides — every connected session drops it from the pending count
+together.
+
+### `dismiss_attachment`
+
+```json
+{ "type": "dismiss_attachment", "id": "r10", "world": "mac", "instanceId": "inst-1a2f", "conv": "c65b902d-…" }
+```
+
+Same standing, for an attached-but-message-less conversation whose holder has
+gone silent — not a claim the agent detached; that fact stays the agent's
+alone to publish, if it ever comes. No dedicated response: the broadcast is
+`attachment_dismissed`, same channel every session sees.
+
 ## towerd → client
 
 ### `list` — once, on connect
@@ -324,6 +361,85 @@ Upsert into the client's two maps (`instanceId → pulse`, `conv →
 attachment`); `detached` removes the attachment. `kind` is an open set:
 unknown kinds are skipped, never fatal. `ts` is the fact's wire timestamp in
 millis; for `pulse` it is the new `lastPulse`.
+
+### `layout` — once, on connect; live, unconditional
+
+```json
+{ "type": "layout", "tabs": [ { "name": "main", "convs": ["c65b902d-…"] }, { "name": "ops", "convs": [] } ] }
+```
+
+The fleet's shared layout: sent once at connect, right after `agents`, and
+again whenever any client changes it via `set_layout` — every connected
+session sees the same shared workspace live, the tmux-attach model. Replace
+wholesale, never a delta, same discipline as `list`. Absent tabs (an empty
+array) until any client has ever set one; a client with nothing yet falls
+back to its own local default. `tabs` is `{ name, convs }` pairs — a tab's
+own view (filters, grouping) is not on the wire yet, kept client-side and
+re-matched to its tab by name across the fold.
+
+### `layout_set` — response to `set_layout`
+
+```json
+{ "type": "layout_set", "id": "r8" }
+```
+
+Acknowledgement, nothing more — the layout itself arrives, again, as the
+`layout` broadcast to this same session; no separate echo is needed.
+
+### `attachment_dismissed` — live, unconditional
+
+```json
+{ "type": "attachment_dismissed", "world": "mac", "instanceId": "inst-1a2f", "conv": "c65b902d-…" }
+```
+
+An attachment a human dismissed — broadcast to every connected session, like
+`row`/`approval`. Not an agent fact: a real `detached` still arrives
+separately, from the agent, if it ever does; this is tower's own annotation
+riding the same channel, dropping the attachment from the `agents` picture
+client-side without claiming anything about what the agent is doing.
+
+### `stale_conversations` — once, on connect
+
+```json
+{ "type": "stale_conversations", "conversations": [
+  { "conv": "c65b902d-…", "readId": "9e21f0be-…", "stale": true }
+] }
+```
+
+Every conversation currently announced stale, sent once per connection right
+after `layout` — so a client connecting after the fact sees the badge
+without waiting for a live transition. `stale` is always `true` here (only
+stale episodes qualify for the snapshot); replace the client's whole stale
+set wholesale, same discipline as `list`.
+
+### `stale_conversation` — live, unconditional
+
+```json
+{ "type": "stale_conversation", "conv": "c65b902d-…", "readId": "9e21f0be-…", "stale": true }
+{ "type": "stale_conversation", "conv": "c65b902d-…", "readId": "9e21f0be-…", "stale": false }
+```
+
+One conversation's unread episode entering or leaving stale — a
+ticket-system signal ("has anyone on the fleet looked at this"), never a
+personal read marker; awareness, unconditional like `row`. An episode begins
+silently when an assistant turn lands in a conversation that's currently
+resolved (never seen, or already acked) — nothing broadcasts yet. Further
+activity while that episode is already open does nothing (no new `readId`,
+no timer reset — a busy conversation must still eventually go stale). If
+nothing acks it within towerd's own delay (~60s), this frame fires with
+`stale: true`; a later ack fires it again with `stale: false`. An episode
+acked before the delay lapses never appears here at all, and fires at most
+twice in its whole lifetime. `readId` identifies the episode itself, so a
+late or superseded transition folds as a no-op rather than a wrong
+retraction — upsert by `conv`, keyed however suits (a plain set of stale
+convs is enough, since only the current state matters).
+
+There is no dedicated ack message: opening a conversation (`open`) is the
+ack — "I have this open, therefore I saw it" — the same mechanism that gates
+content, nothing new to send. A conversation already open when its episode
+would otherwise start acks itself the instant the qualifying content lands,
+before the timer ever gets a chance to fire, so a conversation you're
+watching never shows as stale.
 
 ### `answer_result` — response to `answer`
 
@@ -628,6 +744,17 @@ const approvalState = z.looseObject({
   }).optional(),
 });
 
+const wsTab = z.looseObject({
+  name: z.string(),
+  convs: z.array(z.string()),
+});
+
+const unreadState = z.looseObject({
+  conv: z.string(),
+  readId: z.string(),
+  stale: z.boolean(),
+});
+
 export const clientMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('open'),  id: z.string(), conv: z.string(), after: millis.nullable() }),
   z.looseObject({ type: z.literal('close'), id: z.string(), conv: z.string() }),
@@ -640,6 +767,9 @@ export const clientMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('set_title'), id: z.string(), conv: z.string(), title: z.string() }),
   z.looseObject({ type: z.literal('set_tag'), id: z.string(), conv: z.string(), key: z.string(), value: z.string() }),
   z.looseObject({ type: z.literal('answer'), id: z.string(), approval: z.string(), approved: z.boolean() }),
+  z.looseObject({ type: z.literal('set_layout'), id: z.string(), tabs: z.array(wsTab) }),
+  z.looseObject({ type: z.literal('dismiss_approval'), id: z.string(), approval: z.string() }),
+  z.looseObject({ type: z.literal('dismiss_attachment'), id: z.string(), world: z.string(), instanceId: z.string(), conv: z.string() }),
 ]);
 
 export const serverMsg = z.discriminatedUnion('type', [
@@ -654,6 +784,11 @@ export const serverMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('agent'),        kind: z.string(), world: z.string(), instanceId: z.string(), ts: millis,
                   conv: z.string().optional(), cwd: z.string().optional(), intervalS: z.number().int().optional(), host: z.string().optional() }),
   z.looseObject({ type: z.literal('approval') }).and(approvalState),
+  z.looseObject({ type: z.literal('layout'),       tabs: z.array(wsTab) }),
+  z.looseObject({ type: z.literal('layout_set'),   id: z.string() }),
+  z.looseObject({ type: z.literal('attachment_dismissed'), world: z.string(), instanceId: z.string(), conv: z.string() }),
+  z.looseObject({ type: z.literal('stale_conversations'), conversations: z.array(unreadState) }),
+  z.looseObject({ type: z.literal('stale_conversation') }).and(unreadState),
   z.looseObject({ type: z.literal('answer_result'), id: z.string(), outcome: z.literal('accepted') }),
   z.looseObject({ type: z.literal('answer_result'), id: z.string(), outcome: z.literal('rejected'), reason: z.string() }),
   z.looseObject({ type: z.literal('answer_result'), id: z.string(), outcome: z.literal('unreachable') }),
