@@ -23,6 +23,10 @@ pub struct AppState<B: Broker, C: Clock> {
     /// Optional: tests and object-store-less deployments run without it and
     /// the route answers 503 honestly.
     pub attach: Option<async_nats::jetstream::object_store::ObjectStore>,
+    /// The bucket name `attach` was opened against — rides in every upload's
+    /// reply so a reference block names its own bucket, never leaving a
+    /// servicer to guess deployment config (docs/mvp/bridge-stdio-spec.md).
+    pub attach_bucket: String,
 }
 
 pub fn router<B: Broker, C: Clock>(state: AppState<B, C>) -> Router {
@@ -101,8 +105,13 @@ async fn post_attachment<B: Broker, C: Clock>(
         )
             .into_response();
     }
-    axum::Json(serde_json::json!({ "id": id, "mediaType": media_type, "size": size }))
-        .into_response()
+    axum::Json(serde_json::json!({
+        "id": id,
+        "mediaType": media_type,
+        "size": size,
+        "bucket": state.attach_bucket,
+    }))
+    .into_response()
 }
 
 /// Preview an attachment while its object lives. Transit semantics on

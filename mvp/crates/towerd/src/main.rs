@@ -122,6 +122,7 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| "frontend-leptos/dist".into())
             .into(),
         attach,
+        attach_bucket,
     };
     let app = web::router(state);
     let listener = tokio::net::TcpListener::bind(&bind).await?;

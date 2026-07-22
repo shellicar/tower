@@ -70,10 +70,17 @@ async fn upload(file: &web_sys::File, mime: &str) -> Result<Value, String> {
 }
 
 /// Build the say's AttachmentRef from the transit store's reply
-/// (`{ id, mediaType, size }`), per the ws-spec attachment shape.
+/// (`{ id, mediaType, size, bucket }`), per the ws-spec attachment shape.
+/// `bucket` names the store the object actually landed in — carried
+/// verbatim so the servicer resolves against the bucket the object is
+/// really in, never a guess from its own deployment config
+/// (docs/mvp/bridge-stdio-spec.md). Missing it is a malformed reply, not
+/// something to paper over: the whole point is that a block with no bucket
+/// cannot be resolved, so a reply without one yields no ref at all.
 fn attachment_ref(body: &[u8]) -> Option<Value> {
     let meta: Value = serde_json::from_slice(body).ok()?;
     let id = meta.get("id")?.as_str()?;
+    let bucket = meta.get("bucket")?.as_str()?;
     let media = meta
         .get("mediaType")
         .and_then(Value::as_str)
@@ -86,7 +93,7 @@ fn attachment_ref(body: &[u8]) -> Option<Value> {
     };
     Some(json!({
         "type": kind,
-        "source": { "type": "object", "id": id, "mediaType": media, "size": size },
+        "source": { "type": "object", "id": id, "bucket": bucket, "mediaType": media, "size": size },
     }))
 }
 
@@ -122,14 +129,20 @@ mod tests {
 
     #[test]
     fn a_media_type_maps_to_image_or_document() {
-        let img = attachment_ref(br#"{"id":"o1","mediaType":"image/png","size":10}"#).unwrap();
+        let img = attachment_ref(br#"{"id":"o1","bucket":"attach","mediaType":"image/png","size":10}"#).unwrap();
         assert_eq!(img["type"], "image");
-        let doc = attachment_ref(br#"{"id":"o2","mediaType":"application/pdf","size":10}"#).unwrap();
+        assert_eq!(img["source"]["bucket"], "attach");
+        let doc = attachment_ref(br#"{"id":"o2","bucket":"attach","mediaType":"application/pdf","size":10}"#).unwrap();
         assert_eq!(doc["type"], "document");
     }
 
     #[test]
     fn an_unparseable_body_yields_none() {
         assert!(attachment_ref(b"not json").is_none());
+    }
+
+    #[test]
+    fn a_reply_missing_the_bucket_yields_none() {
+        assert!(attachment_ref(br#"{"id":"o1","mediaType":"image/png","size":10}"#).is_none());
     }
 }
