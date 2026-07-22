@@ -1,0 +1,1 @@
+{"subject":"conv.v1.conv-abc.requests","message":{"type":"say","ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"text":"what does this show?","attachments":[{"type":"image","source":{"type":"object","id":"att-7c9e…","mediaType":"image/png","size":48213}}],"precondition":{"tip":"m4"}},"reply":{"rejected":true,"reason":"attachment_unavailable"}}

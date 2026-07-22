@@ -23,6 +23,7 @@ wrong, and the fix lands twice.
 | 5 — stale premise | `fixtures/scenario-5.jsonl` |
 | 6 — approval, both endings | `fixtures/scenario-6a.jsonl`, `fixtures/scenario-6b.jsonl` |
 | 7 — the block stream | `fixtures/scenario-7.jsonl` |
+| 8 — the attachment, both endings | `fixtures/scenario-8a.jsonl`, `fixtures/scenario-8b.jsonl` |
 
 Each template lists the **required** entries: a producer's capture must contain
 them as a subsequence per subject, extras allowed (add-only honoured).
@@ -33,9 +34,10 @@ them as a subsequence per subject, extras allowed (add-only honoured).
 (conversation-spec, Subjects): leaf subjects spelling each type, and a
 `query` closure change wherever a query closes — completed in scenarios 1,
 2b, and 3; cancelled in scenario 2. Scenario 5's second query never closes
-(still live when the fixture ends) and scenario 7 is one turn's stream
-mid-query, so neither carries a closure. Scenario 6 is approval-concern
-traffic and has no v2 form.
+(still live when the fixture ends), scenario 7 is one turn's stream
+mid-query, and scenario 8b never opens a query at all (rejected before
+acceptance), so none of the three carries a closure. Scenario 6 is
+approval-concern traffic and has no v2 form.
 
 The v1 set is not superseded by the v2 set's arrival: it remains the v1
 ingest path's test surface, and retires with the last v1 speaker
@@ -199,6 +201,47 @@ compliant — the marker is additive.
   exactly as before.
 
 Fixture: `fixtures/scenario-7.jsonl`.
+
+## 8. The attachment, both endings
+
+A `say` carrying a reference block from a prior `POST /attachment` upload
+(tower-ws-spec, Attachments). The tree starts as scenario 5 left it (`m4`).
+Two captures, same shape as scenario 6's two endings:
+
+1. **Resolved** (8a) — the block names a bucket the servicer can actually
+   fetch from. The say is accepted and the committed message carries the
+   reference block **verbatim** — never the resolved bytes; resolution is a
+   model-facing render, not a record fact (conversation-spec).
+2. **Unresolvable** (8b) — the block names no bucket (or one the servicer
+   can't reach). The say rejects outright, before anything commits — no
+   placeholder, no partial accept. `reason` is the canonical token
+   `attachment_unavailable`; the specific cause (missing field, wrong
+   bucket, unreachable store) is diagnostic, not wire-visible, same footing
+   as every other short reason token here.
+
+- Exercises: an `attachments` array riding a `say`; the reference block
+  ordering (attachment blocks lead, the text block follows — same order the
+  API sees); a say-level reject distinct from `stale`/`empty`.
+- Asserts: a resolvable attachment's reference block is never rewritten by
+  acceptance — the record holds exactly what the sender sent; an
+  unresolvable one never reaches acceptance at all, so no dangling pending
+  say and no placeholder text stands in for what the sender actually
+  attached.
+
+### 8a — resolved
+
+Fixture: `fixtures/scenario-8a.jsonl`.
+
+### 8b — unresolvable
+
+Fixture: `fixtures/scenario-8b.jsonl`.
+
+This is a request-driven fixture (The two branches) with a twist: there is no
+"unsupported" branch here, because every servicer that accepts `attachments`
+at all must validate them the same way — accept-with-verbatim-block or
+reject-outright are the only two compliant outcomes for a resolvable-or-not
+block. A servicer that has never implemented attachment support simply never
+exercises this fixture (declared capability, per the two-branches rule).
 
 ## Agent scenarios
 

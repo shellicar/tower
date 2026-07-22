@@ -367,8 +367,12 @@ async fn accept_say(
     // (wrong bucket, dropped upload, unreachable store), so the say rejects
     // outright rather than let the model see a placeholder in place of what
     // the sender actually attached.
-    if let Err(reason) = crate::objects::validate_fresh(client, &attachments).await {
-        return Err(reason);
+    if let Err(detail) = crate::objects::validate_fresh(client, &attachments).await {
+        // The wire's reason is a short canonical token, same footing as
+        // `stale`/`empty`/`already_complete`; the detail (which bucket, which
+        // id, which error) is diagnostic and belongs in the log, not the reply.
+        eprintln!("bridge[{}]: attachment validation failed: {detail}", config.conv.0);
+        return Err("attachment_unavailable".to_string());
     }
     let query = uuid::Uuid::new_v4().to_string();
     let turn = uuid::Uuid::new_v4().to_string();
