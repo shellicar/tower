@@ -397,7 +397,13 @@ async fn main() -> anyhow::Result<()> {
                                 if m.contains(KeyModifiers::SUPER)
                                     || m.contains(KeyModifiers::CONTROL) =>
                             {
-                                if !is_blank(&editor) || !attachments.is_empty() {
+                                // An empty say resumes a standing premise
+                                // (tip is a dangling user message) — same
+                                // rule as the reference and both frontends.
+                                if !is_blank(&editor)
+                                    || !attachments.is_empty()
+                                    || conv.tip_is_dangling_user()
+                                {
                                     // Optimistic: pending say and cleared chips now,
                                     // reconciled when the outcome folds back.
                                     let typed = drain(&mut editor);

@@ -49,6 +49,10 @@ pub struct Conversation {
     /// The in-flight say's acceptance reply arrived: the bridge holds it,
     /// only the commit is still to come.
     pub say_accepted: bool,
+    /// The last query's closure reason when it did NOT complete (`cancelled`,
+    /// `aborted`, or an unknown token) — surfaced in the status line until
+    /// the next query starts, so an abort is never silent in the UI.
+    pub last_closure: Option<String>,
     /// A revoked say handed back for the editor; the input loop consumes it.
     pub restore_say: Option<String>,
 }
@@ -75,6 +79,14 @@ impl Conversation {
             .position(|x| after(&x.ts, &m.ts))
             .unwrap_or(self.messages.len());
         self.messages.insert(pos, m);
+    }
+
+    /// An empty say is submittable only here: the record already ends on an
+    /// unanswered user-role message (a committed tool_result is one), so the
+    /// premise is standing and the say just resumes it — ported from
+    /// claude-sdk-cli's EditorHandler#submit, same rule as the web frontends.
+    pub fn tip_is_dangling_user(&self) -> bool {
+        self.messages.last().is_some_and(|m| m.role == "user")
     }
 
     /// Fold one already-decoded wire event into the document model. Anything
@@ -104,6 +116,7 @@ impl Conversation {
             EventKind::Change(ConvChange::Query(q)) => {
                 self.query_state = QueryState::Idle;
                 self.streaming.clear();
+                self.last_closure = (q.reason != "completed").then(|| q.reason.clone());
                 if self.live_query.as_deref() == Some(q.query_id.0.as_str()) {
                     self.live_query = None;
                 }
@@ -118,6 +131,7 @@ impl Conversation {
             EventKind::Telemetry(ConvTelemetry::TurnStarted(t)) => {
                 self.query_state = QueryState::Live;
                 self.live_query = Some(t.query_id.0.clone());
+                self.last_closure = None;
             }
             EventKind::Delta(d) => {
                 self.query_state = QueryState::Live; // evidence a query is live, ours or not
@@ -204,6 +218,43 @@ mod tests {
             from: None,
             content,
         }
+    }
+
+    #[test]
+    fn a_non_completed_closure_is_surfaced_and_the_next_turn_clears_it() {
+        let mut conv = Conversation::default();
+        let closure = wire::Query {
+            ts: "2026-07-07T21:00:02+10:00".into(),
+            query_id: wire::QueryId("q1".into()),
+            reason: "aborted".into(),
+        };
+        conv.fold(&EventKind::Change(ConvChange::Query(closure)));
+        assert_eq!(conv.last_closure.as_deref(), Some("aborted"));
+
+        let started = wire::TurnStarted {
+            ts: "2026-07-07T21:00:03+10:00".into(),
+            query_id: wire::QueryId("q2".into()),
+            turn_id: wire::TurnId("t2".into()),
+            service: "anthropic".into(),
+            model: "m".into(),
+            thinking: false,
+            effort: None,
+            max_tokens: 1,
+        };
+        conv.fold(&EventKind::Telemetry(ConvTelemetry::TurnStarted(started)));
+        assert_eq!(conv.last_closure, None);
+    }
+
+    #[test]
+    fn a_completed_closure_surfaces_nothing() {
+        let mut conv = Conversation::default();
+        let closure = wire::Query {
+            ts: "2026-07-07T21:00:02+10:00".into(),
+            query_id: wire::QueryId("q1".into()),
+            reason: "completed".into(),
+        };
+        conv.fold(&EventKind::Change(ConvChange::Query(closure)));
+        assert_eq!(conv.last_closure, None);
     }
 
     #[test]

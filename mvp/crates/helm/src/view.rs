@@ -471,15 +471,20 @@ pub fn draw(
         QueryState::Idle => Span::styled("idle", Style::default().fg(Color::Green)),
         QueryState::Live => Span::styled("live", Style::default().fg(Color::Yellow)),
     };
-    let mut status_spans = vec![
-        Span::raw(" "),
-        state,
-        Span::raw(format!(
-            " · {} in / {} out",
-            usage.input_tokens + usage.cache_creation_tokens + usage.cache_read_tokens,
-            usage.output_tokens
-        )),
-    ];
+    let mut status_spans = vec![Span::raw(" "), state];
+    // A query that did not complete says so until the next one starts — an
+    // abort must never be silent in the UI.
+    if let Some(reason) = &conv.last_closure {
+        status_spans.push(Span::styled(
+            format!(" · query {reason}"),
+            Style::default().fg(Color::Red),
+        ));
+    }
+    status_spans.extend([Span::raw(format!(
+        " · {} in / {} out",
+        usage.input_tokens + usage.cache_creation_tokens + usage.cache_read_tokens,
+        usage.output_tokens
+    ))]);
     if let Some(cost) = usage.cost_usd {
         status_spans.push(Span::raw(format!(" · ${cost:.4}")));
     }
