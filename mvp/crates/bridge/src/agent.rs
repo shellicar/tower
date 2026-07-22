@@ -24,10 +24,6 @@ use crate::anthropic;
 use crate::decisions::{CancelDecision, Conversation, Message, QueryEnd, SayDecision};
 use crate::skills::Skills;
 
-/// Tool rounds per query before the bridge gives up: a runaway tool loop
-/// must not spin forever on someone's API bill.
-const MAX_TURNS_PER_QUERY: usize = 16;
-
 /// Every tool schema offered on every turn, except `Skill` (gated on a
 /// non-empty catalogue — conversation-specific, not static). The one source
 /// both `run_query`'s per-turn tool list and main.rs's startup log read
@@ -577,7 +573,7 @@ async fn run_query(
     let mut pending_user = Some(user.clone());
     let mut turn_id = turn.clone();
 
-    for round in 0.. {
+    loop {
         pubr.event(
             "telemetry.turn.started",
             json!({
@@ -721,21 +717,6 @@ async fn run_query(
             };
         }
 
-        if round + 1 >= MAX_TURNS_PER_QUERY {
-            eprintln!(
-                "bridge[{}]: query {query} exceeded {MAX_TURNS_PER_QUERY} tool rounds; aborting",
-                conv.0
-            );
-            pubr.event(
-                "changes.query",
-                json!({ "ts": now_iso(), "queryId": query, "reason": "aborted" }),
-            )
-            .await;
-            return QueryEnd::Aborted {
-                messages: committed,
-            };
-        }
-
         // Execute the tool_use blocks and commit the results as one
         // user-role message from the agent: the harness produced them. The
         // results commit at execution, unlike the say: the committed
@@ -771,7 +752,6 @@ async fn run_query(
         // The next round is a new turn of the same query.
         turn_id = uuid::Uuid::new_v4().to_string();
     }
-    unreachable!("the tool loop always returns")
 }
 
 /// One tool round: execute every `tool_use` block in the just-committed
