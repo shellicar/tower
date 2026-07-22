@@ -116,11 +116,15 @@ fn usage_fold_accumulates_and_snapshots() {
     // No usage yet: the snapshot is absent, and absent means zero.
     assert!(views.usage(&conv).unwrap().is_none());
 
-    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.telemetry.usage",
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.telemetry.turn.started",
+        r#"{"ts":"2026-07-07T20:59:59+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false,"maxTokens":8192}"#));
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.telemetry.usage",
         r#"{"ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","inputTokens":100,"cacheCreationTokens":20,"cacheCreation5mTokens":3,"cacheCreation1hTokens":17,"cacheReadTokens":5,"outputTokens":40}"#));
+    views.apply("conv-approval", 3, &event("conv.v2.conv-abc.telemetry.turn.started",
+        r#"{"ts":"2026-07-07T21:00:59+10:00","queryId":"q2","turnId":"t2","service":"anthropic.messages","model":"claude-opus-4-6","thinking":false,"maxTokens":8192}"#));
     // The second frame omits the split (an older producer) — it must not
     // regress the running totals: absent reads as 0, so they hold.
-    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.telemetry.usage",
+    views.apply("conv-approval", 4, &event("conv.v2.conv-abc.telemetry.usage",
         r#"{"ts":"2026-07-07T21:01:00+10:00","queryId":"q2","turnId":"t2","service":"anthropic.messages","model":"claude-opus-4-6","inputTokens":200,"cacheCreationTokens":0,"cacheReadTokens":300,"outputTokens":10}"#));
 
     let u = views.usage(&conv).unwrap().unwrap();
@@ -132,6 +136,8 @@ fn usage_fold_accumulates_and_snapshots() {
     assert_eq!(u.cache_creation_1h_tokens, 17);
     assert_eq!(u.cache_read_tokens, 305);
     assert_eq!(u.output_tokens, 50);
+    // turns counts turn_started events, not usage frames — two turns
+    // started, so two, regardless of how many usage frames each emitted.
     assert_eq!(u.turns, 2);
     // Context and model are the LATEST turn's, not sums: context is that
     // turn's whole prompt (input + cacheCreation + cacheRead) — named
@@ -144,15 +150,15 @@ fn usage_fold_accumulates_and_snapshots() {
     );
     assert_eq!(u.model, "claude-opus-4-6");
 
-    // Each usage event broadcasts one Usage snapshot (content) alongside
-    // the row touch (staleness).
+    // Each turn_started/usage event broadcasts one Usage snapshot (content)
+    // alongside the row touch (staleness).
     let mut usage_broadcasts = 0;
     while let Ok(ev) = rx.try_recv() {
         if let ViewEvent::Usage(_) = ev {
             usage_broadcasts += 1;
         }
     }
-    assert_eq!(usage_broadcasts, 2);
+    assert_eq!(usage_broadcasts, 4);
 }
 
 #[test]
@@ -176,6 +182,31 @@ fn an_output_only_usage_frame_never_clobbers_context_to_zero() {
     // Context holds at the last real snapshot; output still accumulates.
     assert_eq!(u.context_tokens, 630050);
     assert_eq!(u.output_tokens, 420);
+}
+
+#[test]
+fn turns_counts_turn_started_never_usage_frames() {
+    // The exact bug: a producer that reports one turn as two usage frames
+    // (a context frame, then a separate output-only frame) must not double
+    // the turn count. turn_started is the only thing that increments turns.
+    let (mut views, _rx) = fresh();
+    let conv = ConversationId("conv-abc".into());
+
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.telemetry.turn.started",
+        r#"{"ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-5","thinking":false,"maxTokens":8192}"#));
+    assert_eq!(views.usage(&conv).unwrap().unwrap().turns, 1);
+
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.telemetry.usage",
+        r#"{"ts":"2026-07-07T21:00:01+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-5","inputTokens":50,"cacheCreationTokens":0,"cacheReadTokens":630000,"outputTokens":0}"#));
+    views.apply("conv-approval", 3, &event("conv.v2.conv-abc.telemetry.usage",
+        r#"{"ts":"2026-07-07T21:00:05+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-5","inputTokens":0,"cacheCreationTokens":0,"cacheReadTokens":0,"outputTokens":420}"#));
+    // Two usage frames for the same turn: turns is still 1.
+    assert_eq!(views.usage(&conv).unwrap().unwrap().turns, 1);
+
+    views.apply("conv-approval", 4, &event("conv.v2.conv-abc.telemetry.turn.started",
+        r#"{"ts":"2026-07-07T21:01:00+10:00","queryId":"q1","turnId":"t2","service":"anthropic.messages","model":"claude-sonnet-5","thinking":false,"maxTokens":8192}"#));
+    // A genuinely new turn does increment.
+    assert_eq!(views.usage(&conv).unwrap().unwrap().turns, 2);
 }
 
 #[test]

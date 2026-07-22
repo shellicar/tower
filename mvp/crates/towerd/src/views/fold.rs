@@ -379,15 +379,37 @@ impl Views {
         // event and rematerialisation truncates this table before replay. The
         // totals are read back for the absolute snapshot the broadcast carries.
         //
-        // A turn's usage arrives as two frames (a SDK producer quirk, not a
-        // wire guarantee): a context frame (input + cache, the real point-in-
-        // time snapshot) and an output-only frame that reports outputTokens
-        // alone, with input/cache all zero. `context_tokens` is a snapshot,
-        // never a running sum (docs/mvp/tower-ws-spec.md: "the latest turn's"),
-        // so the output-only frame's zero must never overwrite the real value
-        // — the same guard claude-sdk-cli's own StatusState.update() carries
-        // locally ("the output frame would otherwise clobber it to zero").
+        // `turns` is NOT counted here. Usage is a token/cost fact, and how
+        // many usage FRAMES a turn happens to emit is a producer detail, not
+        // a turn count (a real trap: some producers report one turn as a
+        // context frame then a separate output-only frame, which would
+        // double the count if `turns` were tied to usage events at all).
+        // `turn_started` is the one signal that fires exactly once per turn,
+        // unambiguously, so it alone drives `turns` below.
+        //
+        // A turn's usage can still arrive as two frames: a context frame
+        // (input + cache, the real point-in-time snapshot) and an output-
+        // only frame that reports outputTokens alone, with input/cache all
+        // zero. `context_tokens` is a snapshot, never a running sum
+        // (docs/mvp/tower-ws-spec.md: "the latest turn's"), so the output-
+        // only frame's zero must never overwrite the real value — the same
+        // guard claude-sdk-cli's own StatusState.update() carries locally
+        // ("the output frame would otherwise clobber it to zero").
         let mut usage_snapshot: Option<UsageState> = None;
+        if let EventKind::Telemetry(ConvTelemetry::TurnStarted(t)) = &event.kind {
+            tx.execute(
+                "INSERT INTO usage
+                     (conv, input_tokens, cache_creation_tokens, cache_creation_5m_tokens,
+                      cache_creation_1h_tokens, cache_read_tokens, output_tokens, turns,
+                      context_tokens, model)
+                 VALUES (?1, 0, 0, 0, 0, 0, 0, 1, 0, ?2)
+                 ON CONFLICT(conv) DO UPDATE SET
+                     turns = usage.turns + 1,
+                     model = excluded.model",
+                rusqlite::params![conv.0, t.model],
+            )?;
+            usage_snapshot = Some(read_usage_row(&tx, conv)?);
+        }
         if let EventKind::Telemetry(ConvTelemetry::Usage(u)) = &event.kind {
             let context = u.input_tokens + u.cache_creation_tokens + u.cache_read_tokens;
             let context = if context > 0 { Some(context) } else { None };
@@ -398,7 +420,7 @@ impl Views {
                      (conv, input_tokens, cache_creation_tokens, cache_creation_5m_tokens,
                       cache_creation_1h_tokens, cache_read_tokens, output_tokens, turns,
                       context_tokens, model)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9)
                  ON CONFLICT(conv) DO UPDATE SET
                      input_tokens = usage.input_tokens + excluded.input_tokens,
                      cache_creation_tokens =
@@ -409,7 +431,6 @@ impl Views {
                          usage.cache_creation_1h_tokens + excluded.cache_creation_1h_tokens,
                      cache_read_tokens = usage.cache_read_tokens + excluded.cache_read_tokens,
                      output_tokens = usage.output_tokens + excluded.output_tokens,
-                     turns = usage.turns + 1,
                      context_tokens =
                          CASE WHEN excluded.context_tokens > 0
                               THEN excluded.context_tokens ELSE usage.context_tokens END,

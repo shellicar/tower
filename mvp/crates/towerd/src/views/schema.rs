@@ -106,12 +106,14 @@ const MIGRATIONS: &[&str] = &[
          attached_ts INTEGER NOT NULL,
          PRIMARY KEY (world, instance_id, conv)
      );",
-    // 7 — usage: the per-conversation cost surface, a materialised view
-    // folded from conv.v2.*.telemetry usage. The four token counts are
-    // cumulative over the conversation; `turns` counts the folded usage
-    // events; `model` and `context_tokens` are the LATEST turn's (the current
-    // prompt size, not a sum). In the rematerialise truncation set. Facts
-    // only — the dollar and the context percentage are the client's policy.
+    // 7 — usage: the per-conversation cost surface, folded from
+    // conv.v2.*.telemetry usage AND turn_started (fold.rs: turn_started
+    // alone drives `turns` — the one signal that fires exactly once per
+    // turn; usage is a token/cost fact, never a turn count). The four token
+    // counts are cumulative over the conversation; `model` and
+    // `context_tokens` are the LATEST turn's (the current prompt size, not
+    // a sum). In the rematerialise truncation set. Facts only — the dollar
+    // and the context percentage are the client's policy.
     "CREATE TABLE usage (
          conv                  TEXT PRIMARY KEY,
          input_tokens          INTEGER NOT NULL,
