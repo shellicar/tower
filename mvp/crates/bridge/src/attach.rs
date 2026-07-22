@@ -174,6 +174,7 @@ async fn store_upload(
         "source": {
             "type": "object",
             "id": object_id,
+            "bucket": bucket,
             "mediaType": media_type,
             "size": bytes.len(),
         },

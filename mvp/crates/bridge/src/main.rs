@@ -264,7 +264,6 @@ impl Host {
             context: Arc::clone(&self.context),
             auth: self.auth.clone(),
             skills_root: Arc::clone(&self.skills_root),
-            attach_bucket: self.attach_bucket.clone(),
             refs: Arc::clone(&self.refs),
             memory: Arc::clone(&self.memory),
             history: Arc::clone(&self.history),

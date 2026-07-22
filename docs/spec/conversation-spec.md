@@ -299,7 +299,7 @@ reference blocks, API-shaped with an `object` source:
   "text": "what does this diagram show?",
   "attachments": [
     { "type": "image",
-      "source": { "type": "object", "id": "att-7c9e…", "mediaType": "image/png", "size": 48213 } }
+      "source": { "type": "object", "id": "att-7c9e…", "bucket": "attach", "mediaType": "image/png", "size": 48213 } }
   ],
   "precondition": { "tip": "m4" }
 }
@@ -309,13 +309,25 @@ The servicer resolves at request-build: fetch the object at its own edge,
 inline the bytes for the model. The **committed message carries the
 reference block verbatim, never the bytes** — the record stays light and
 wire-legal. The store is transit, not storage: ids are opaque and
-short-lived (deployment configuration names the bucket and its expiry), and
-bytes are the servicer's private state once fetched. An object that no
-longer resolves — an adopted conversation past the transit window — renders
-in the request as a stated placeholder (media type and size, from the block
-itself); the record still holds the block, and the repair is re-attaching.
-Unknown `source.type` values get the same placeholder treatment — source
-kinds are an open set (`base64` beside `object` would be add-only).
+short-lived, and bytes are the servicer's private state once fetched.
+`source.bucket` names the store the object actually landed in — the block
+carries it, not deployment config, so a servicer never has to guess which
+bucket a sender it doesn't control used; a block minted before this field
+existed falls back to the servicer's own configured default.
+
+Failure means two different things depending on when it happens. An object
+that no longer resolves while **replaying already-committed history** — an
+adopted conversation past the transit window — is expected ageing, and
+renders in the request as a stated placeholder (media type and size, from
+the block itself); the record still holds the block, and the repair is
+re-attaching. Unknown `source.type` values get the same placeholder
+treatment — source kinds are an open set (`base64` beside `object` would be
+add-only). But an attachment that fails to resolve among the **fresh
+blocks riding THIS say** is never ageing — it means the object the sender
+just referenced genuinely isn't there. That is not a placeholder case: the
+say itself rejects, same reply shape as a stale precondition, rather than
+let the model see a placeholder in place of what the sender actually
+attached.
 
 Two candidates follow from this design and are named, not designed:
 

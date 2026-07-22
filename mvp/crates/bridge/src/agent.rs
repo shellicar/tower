@@ -82,8 +82,6 @@ pub struct AgentConfig {
     /// delta when a SKILL.md changed. A repoint surfaces as a delta on the
     /// next say of every running conversation.
     pub skills_root: Arc<std::sync::RwLock<std::path::PathBuf>>,
-    /// The transit object store attachments resolve from (objects.rs).
-    pub attach_bucket: String,
     /// The oversized-tool-output store (refs.rs) the `Ref` tool fetches from.
     pub refs: crate::refs::RefStore,
     /// The shared memory engine (memory.rs) the five Memory tools read/write.
@@ -283,21 +281,24 @@ pub async fn run(
                             // is an assistant message, or the conversation
                             // is empty) — honest and distinct from `stale`.
                             SayDecision::Empty => encode_rejected("empty"),
-                            SayDecision::Accept => {
-                                let (query, tx) = accept_say(
-                                    &client,
-                                    &config,
-                                    &mut conversation,
-                                    &mut skill_hashes,
-                                    &done_tx,
-                                    text,
-                                    from,
-                                    attachments,
-                                )
-                                .await;
-                                cancel_tx = Some(tx);
-                                encode_accepted(Some(&query))
-                            }
+                            SayDecision::Accept => match accept_say(
+                                &client,
+                                &config,
+                                &mut conversation,
+                                &mut skill_hashes,
+                                &done_tx,
+                                text,
+                                from,
+                                attachments,
+                            )
+                            .await
+                            {
+                                Ok((query, tx)) => {
+                                    cancel_tx = Some(tx);
+                                    encode_accepted(Some(&query))
+                                }
+                                Err(reason) => encode_rejected(&reason),
+                            },
                         }
                     }
                     ConvRequest::Cancel { query, .. } => {
@@ -359,7 +360,16 @@ async fn accept_say(
     text: String,
     from: Value,
     attachments: Vec<Value>,
-) -> (String, watch::Sender<bool>) {
+) -> Result<(String, watch::Sender<bool>), String> {
+    // Validate every fresh attachment BEFORE anything commits: unlike a
+    // replayed history block (objects.rs), a failure here is never ageing —
+    // it means the object this say just referenced genuinely isn't there
+    // (wrong bucket, dropped upload, unreachable store), so the say rejects
+    // outright rather than let the model see a placeholder in place of what
+    // the sender actually attached.
+    if let Err(reason) = crate::objects::validate_fresh(client, &attachments).await {
+        return Err(reason);
+    }
     let query = uuid::Uuid::new_v4().to_string();
     let turn = uuid::Uuid::new_v4().to_string();
     let message_id = uuid::Uuid::new_v4().to_string();
@@ -462,17 +472,16 @@ async fn accept_say(
     };
     let done = done_tx.clone();
     let q = query.clone();
-    let bucket = config.attach_bucket.clone();
     tokio::spawn(async move {
         // Resolution (object fetches + image conditioning) runs over the full
         // render at this edge (objects.rs) — inside the task, never ahead of
         // the say's reply: on a long image-laden history it takes seconds, and
         // the sender's request deadline must not pay for it.
-        crate::objects::resolve_history(&ctx.client, &bucket, &mut history).await;
+        crate::objects::resolve_history(&ctx.client, &mut history).await;
         let end = run_query(ctx, history, rx).await;
         let _ = done.send((q, end)).await;
     });
-    (query, tx)
+    Ok((query, tx))
 }
 
 struct TurnContext {
