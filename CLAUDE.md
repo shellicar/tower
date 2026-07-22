@@ -8,6 +8,17 @@ terminal client that spawns its own bridge. Hand-built, no mission machinery.
 The rest of the repo is specs (live contract), the planning design corpus (see
 below — not archive), and the poc.
 
+`frontend-leptos/` is a second, comparison build of the same browser client
+(docs/mvp/frontend-leptos-plan.md, frontend-comparison-leptos.md) — DOM-based
+Rust/Leptos against the wire alone (`docs/mvp/tower-ws-spec.md`), isolating
+what a Rust renderer buys over Svelte. It is not a lagging prototype: the two
+track ONE feature set. A change to what a conversation panel shows or does
+(a new usage-line field, an attachment affordance, a status badge) lands in
+both `frontend/` and `frontend-leptos/` in the same piece of work — whichever
+you build first, port it to the other before calling the work done. Wire
+shape and bridge/towerd behaviour are shared already (both read the same
+WS contract); only the two renderings can drift, and drift is the bug.
+
 Known follow-up: a conversation panel (Svelte and Leptos both) renders its
 whole message history into the DOM, however long the conversation — some run
 400+ turns. Live profiling (21 Jul) found this the real ceiling on render
