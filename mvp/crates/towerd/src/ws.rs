@@ -286,6 +286,7 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
     views: &ViewsHandle,
     broker: &B,
     clock: &C,
+    attach_bucket: &str,
     text: &str,
 ) -> Vec<ServerMsg> {
     let value: Value = match serde_json::from_str(text) {
@@ -514,8 +515,9 @@ pub async fn handle_client_text<B: Broker, C: Clock>(
             conv,
             text,
             tip,
-            attachments,
+            mut attachments,
         } => {
+            stamp_bucket(&mut attachments, attach_bucket);
             let cmd = SayCommand {
                 conv: ConversationId(conv),
                 text,
@@ -570,6 +572,21 @@ fn request_id(text: &str) -> String {
         .unwrap_or_default()
 }
 
+/// The bucket is towerd's own storage fact. The client sends only the object
+/// id it uploaded; towerd stamps the transit bucket into each object source
+/// before the say goes onto the wire, so the block names its store
+/// (conversation-spec: a servicer resolves only against the bucket a block
+/// names) without the browser ever knowing or carrying it.
+fn stamp_bucket(attachments: &mut [Value], bucket: &str) {
+    for attachment in attachments {
+        if let Some(source) = attachment.get_mut("source").and_then(Value::as_object_mut)
+            && source.get("type").and_then(Value::as_str) == Some("object")
+        {
+            source.insert("bucket".into(), Value::String(bucket.to_string()));
+        }
+    }
+}
+
 /// The socket loop. Subscribe before snapshot (duplicate-apply is harmless;
 /// a missed event is not), then `list` once, then events and requests
 /// interleave until the socket drops.
@@ -578,6 +595,7 @@ pub async fn run_session<B: Broker, C: Clock>(
     views: ViewsHandle,
     broker: B,
     clock: C,
+    attach_bucket: String,
 ) {
     use axum::extract::ws::Message as WsFrame;
     use futures::StreamExt;
@@ -720,8 +738,15 @@ pub async fn run_session<B: Broker, C: Clock>(
             frame = stream.next() => {
                 match frame {
                     Some(Ok(WsFrame::Text(text))) => {
-                        let responses =
-                            handle_client_text(&mut session, &views, &broker, &clock, &text).await;
+                        let responses = handle_client_text(
+                            &mut session,
+                            &views,
+                            &broker,
+                            &clock,
+                            &attach_bucket,
+                            &text,
+                        )
+                        .await;
                         for response in &responses {
                             if send(&mut sink, response).await.is_err() {
                                 return;
@@ -766,6 +791,19 @@ mod tests {
                 ts: 1,
             },
         }
+    }
+
+    #[test]
+    fn stamp_bucket_names_the_store_on_object_sources_only() {
+        let mut attachments = vec![
+            serde_json::json!({ "type": "image", "source": { "type": "object", "id": "att-1" } }),
+            serde_json::json!({ "type": "image", "source": { "type": "base64", "data": "…" } }),
+        ];
+
+        stamp_bucket(&mut attachments, "attach");
+
+        assert_eq!(attachments[0]["source"]["bucket"], "attach");
+        assert!(attachments[1]["source"].get("bucket").is_none());
     }
 
     #[test]

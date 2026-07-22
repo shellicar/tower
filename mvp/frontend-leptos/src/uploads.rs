@@ -70,17 +70,13 @@ async fn upload(file: &web_sys::File, mime: &str) -> Result<Value, String> {
 }
 
 /// Build the say's AttachmentRef from the transit store's reply
-/// (`{ id, mediaType, size, bucket }`), per the ws-spec attachment shape.
-/// `bucket` names the store the object actually landed in — carried
-/// verbatim so the servicer resolves against the bucket the object is
-/// really in, never a guess from its own deployment config
-/// (docs/mvp/bridge-stdio-spec.md). Missing it is a malformed reply, not
-/// something to paper over: the whole point is that a block with no bucket
-/// cannot be resolved, so a reply without one yields no ref at all.
+/// (`{ id, mediaType, size }`), per the ws-spec attachment shape. The
+/// bucket is deliberately absent: it is towerd's own storage fact, stamped
+/// into the object source server-side when the say is forwarded onto the
+/// wire — a client neither knows nor cares which store its upload landed in.
 fn attachment_ref(body: &[u8]) -> Option<Value> {
     let meta: Value = serde_json::from_slice(body).ok()?;
     let id = meta.get("id")?.as_str()?;
-    let bucket = meta.get("bucket")?.as_str()?;
     let media = meta
         .get("mediaType")
         .and_then(Value::as_str)
@@ -93,7 +89,7 @@ fn attachment_ref(body: &[u8]) -> Option<Value> {
     };
     Some(json!({
         "type": kind,
-        "source": { "type": "object", "id": id, "bucket": bucket, "mediaType": media, "size": size },
+        "source": { "type": "object", "id": id, "mediaType": media, "size": size },
     }))
 }
 

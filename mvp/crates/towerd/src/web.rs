@@ -23,9 +23,10 @@ pub struct AppState<B: Broker, C: Clock> {
     /// Optional: tests and object-store-less deployments run without it and
     /// the route answers 503 honestly.
     pub attach: Option<async_nats::jetstream::object_store::ObjectStore>,
-    /// The bucket name `attach` was opened against — rides in every upload's
-    /// reply so a reference block names its own bucket, never leaving a
-    /// servicer to guess deployment config (docs/mvp/bridge-stdio-spec.md).
+    /// The bucket name `attach` was opened against. A tower concern, never
+    /// the client's: towerd stamps it into each object source when it
+    /// forwards a say (ws.rs), so the block on the wire names its own bucket
+    /// (docs/mvp/bridge-stdio-spec.md) without the browser carrying it.
     pub attach_bucket: String,
 }
 
@@ -109,7 +110,6 @@ async fn post_attachment<B: Broker, C: Clock>(
         "id": id,
         "mediaType": media_type,
         "size": size,
-        "bucket": state.attach_bucket,
     }))
     .into_response()
 }
@@ -154,7 +154,15 @@ async fn ws_upgrade<B: Broker, C: Clock>(
     State(state): State<AppState<B, C>>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    upgrade.on_upgrade(move |socket| run_session(socket, state.views, state.broker, state.clock))
+    upgrade.on_upgrade(move |socket| {
+        run_session(
+            socket,
+            state.views,
+            state.broker,
+            state.clock,
+            state.attach_bucket,
+        )
+    })
 }
 
 /// Content-addressed, so immutable and cacheable forever. The hint is at

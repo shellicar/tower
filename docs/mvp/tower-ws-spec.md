@@ -103,7 +103,7 @@ saying which key it belongs to.
 { "type": "say", "id": "r3", "conv": "c65b902d-…", "text": "hello", "tip": "a439d18e-…" }
 { "type": "say", "id": "r4", "conv": "c65b902d-…", "text": "what does this show?", "tip": "a439d18e-…",
   "attachments": [
-    { "type": "image", "source": { "type": "object", "id": "att-7c9e…", "bucket": "attach", "mediaType": "image/png", "size": 48213 } }
+    { "type": "image", "source": { "type": "object", "id": "att-7c9e…", "mediaType": "image/png", "size": 48213 } }
   ] }
 ```
 
@@ -512,7 +512,7 @@ fetches a single ref still reads the whole dialogue.
 
 ```
 POST /attachment           body = the bytes, Content-Type = the media type
-  → 200 { "id": "att-7c9e…", "mediaType": "image/png", "size": 48213, "bucket": "attach" }
+  → 200 { "id": "att-7c9e…", "mediaType": "image/png", "size": 48213 }
 ```
 
 Upload happens over HTTP — the WS stays light — and eagerly, at attach time:
@@ -524,13 +524,13 @@ short-lived; the store's TTL is the cleanup, so an upload the user abandons
 costs nothing and needs no delete call). The id is minted random — nothing is
 kept long enough for content-addressing to buy anything.
 
-`bucket` names the store the object actually landed in and rides in every
-upload's reply — the client carries it verbatim into the reference block
-it sends with the say (conversation-spec, `attachments`). A servicer
-resolves against the bucket the block names, never a guess from its own
-deployment config; a block naming no bucket cannot be resolved and the say
-that carries it rejects (`attachment_unavailable`) rather than silently
-lose the attachment.
+The wire's rule that a block names its own `bucket` (conversation-spec,
+`attachments`; a servicer resolves only against the bucket a block names,
+never a guess from its own deployment config) is satisfied by **towerd**,
+not the client: the bucket is a tower storage fact, so towerd stamps it
+into each object source when it forwards the say onto the wire. The client
+sends only `{ type, id, mediaType, size }` — it neither receives nor
+carries a bucket, and nothing client-side may depend on one.
 
 ```
 GET /attachment/{id}   → the bytes (Content-Type from upload) — while the object lives
@@ -634,7 +634,7 @@ export const clientMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('say'),   id: z.string(), conv: z.string(), text: z.string(), tip: z.string().nullable(),
                   attachments: z.array(z.looseObject({
                     type: z.string(),
-                    source: z.looseObject({ type: z.string(), id: z.string(), bucket: z.string(), mediaType: z.string().optional(), size: z.number().int().optional() }),
+                    source: z.looseObject({ type: z.string(), id: z.string(), mediaType: z.string().optional(), size: z.number().int().optional() }),
                   })).optional() }),
   z.looseObject({ type: z.literal('cancel'), id: z.string(), conv: z.string(), query: z.string() }),
   z.looseObject({ type: z.literal('set_title'), id: z.string(), conv: z.string(), title: z.string() }),
