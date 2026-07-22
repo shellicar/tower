@@ -3,7 +3,7 @@
   import VirtualList from './VirtualList.svelte';
   import { approvals, conversations, rail, usage, view } from './app';
   import { age } from './core/time';
-  import { formatTokens, formatUsd, priceUsage } from './core/pricing';
+  import { formatTokens, formatUsd, parseModelName, priceUsage } from './core/pricing';
   import { uploadAttachment } from './core/uploads';
   import { measurePlainTextHeight } from './core/textHeight';
   import type { ConversationState } from './concerns/conversation.svelte';
@@ -370,10 +370,9 @@
       {/if}
     </p>
     {#if usageSnapshot && priced}
-      <p
-        class="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-neutral-500"
-        title={usageSnapshot.model}
-      >
+      {@const { name, version } = parseModelName(usageSnapshot.model)}
+      <p class="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-neutral-500">
+        <span class="text-neutral-300" title={usageSnapshot.model}>⚡️ {name}{version ? ` ${version}` : ''}</span>
         <span>in {formatTokens(usageSnapshot.inputTokens)}</span>
         <span title="cache write">↑{formatTokens(usageSnapshot.cacheCreationTokens)}</span>
         <span title="cache read">↓{formatTokens(usageSnapshot.cacheReadTokens)}</span>

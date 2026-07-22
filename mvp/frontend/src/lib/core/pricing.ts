@@ -105,6 +105,42 @@ export function priceUsage(u: UsageSnapshot): PricedUsage {
   return { costUsd, contextUsed: u.contextTokens, contextMax, contextPct };
 }
 
+export interface ParsedModelName {
+  name: string;
+  version: string | null;
+}
+
+/**
+ * Split a model id into a display name and version — ported from
+ * claude-sdk-cli's `parseModelName.ts` so every tool agrees:
+ *
+ *   claude-sonnet-4-6 -> { name: 'Sonnet', version: '4.6' }
+ *   claude-opus       -> { name: 'Opus', version: null }
+ *
+ * Family is the first non-numeric token after the leading `claude`; version
+ * is the trailing run of numeric tokens, joined by `.`. Model is
+ * per-conversation (a spawn may name its own, docs/mvp/bridge-stdio-spec.md),
+ * so this always reads off that conversation's own usage snapshot, never a
+ * shared default.
+ */
+export function parseModelName(model: string): ParsedModelName {
+  const parts = model.split('-');
+  const family = parts.find((p, i) => i > 0 && !/^\d/.test(p));
+  if (family == null) {
+    return { name: model, version: null };
+  }
+  const name = family.charAt(0).toUpperCase() + family.slice(1);
+
+  const trailing: string[] = [];
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i];
+    if (part == null || !/^\d+$/.test(part)) break;
+    trailing.unshift(part);
+  }
+  const version = trailing.length > 0 ? trailing.join('.') : null;
+  return { name, version };
+}
+
 /** Compact token count: 9700 → "9.7k", 2_100_000 → "2.1M", 512 → "512". */
 export function formatTokens(n: number): string {
   if (n < 1_000) return `${n}`;

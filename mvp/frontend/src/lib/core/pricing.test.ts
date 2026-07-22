@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UsageSnapshot } from '../types';
-import { formatTokens, formatUsd, priceUsage } from './pricing';
+import { formatTokens, formatUsd, parseModelName, priceUsage } from './pricing';
 
 const usage = (over: Partial<UsageSnapshot>): UsageSnapshot => ({
   conv: 'c1',
@@ -66,5 +66,18 @@ describe('formatting', () => {
 
   it('shows the dollar cost to four decimals', () => {
     expect(formatUsd(64.4029)).toBe('$64.4029');
+  });
+});
+
+describe('parseModelName', () => {
+  it('parses family and version', () => {
+    expect(parseModelName('claude-sonnet-4-6')).toEqual({ name: 'Sonnet', version: '4.6' });
+    expect(parseModelName('claude-opus')).toEqual({ name: 'Opus', version: null });
+    expect(parseModelName('claude-mrmagoo-4')).toEqual({ name: 'Mrmagoo', version: '4' });
+    expect(parseModelName('claude-mrmagoo')).toEqual({ name: 'Mrmagoo', version: null });
+  });
+
+  it('a bare model with no family token passes through', () => {
+    expect(parseModelName('claude')).toEqual({ name: 'claude', version: null });
   });
 });
