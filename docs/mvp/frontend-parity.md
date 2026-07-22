@@ -38,7 +38,7 @@ side by side. Derived from code, not from any prior claim about what's missing.
 
 ### Transport / connection lifecycle
 
-- [ ] **Leptos never reconnects after the socket closes.** `frontend-leptos/src/transport.rs`'s wasm read loop
+- [x] **Leptos never reconnects after the socket closes.** `frontend-leptos/src/transport.rs`'s wasm read loop
   (`while let Some(msg) = read.next().await`) sets `Status::Closed` when the stream ends and the async task
   simply finishes — nothing calls `Transport::connect` again. Svelte's `transport.svelte.ts` reconnects on
   every `onclose` with exponential backoff (500ms, doubling, capped at 10s) via `setTimeout(() => this.connect(), retryMs)`.
@@ -46,6 +46,7 @@ side by side. Derived from code, not from any prior claim about what's missing.
   reconnect loop around `wasm::Transport::connect` in `app.rs` (or inside `transport.rs`), same backoff shape,
   re-running the composition root's existing `sync_open`-on-reconnect effect (already correct — it re-fires
   because `Layout`/`List` land as ordinary events on any fresh connection).
+  Fixed in `frontend-leptos/src/transport.rs` (`wasm` module: `schedule_reconnect`/`attempt_reconnect`), same backoff, reset on first frame received.
 
 ### WS contract — wire-type coverage (both sides, informational)
 

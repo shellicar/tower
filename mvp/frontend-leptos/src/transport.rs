@@ -76,48 +76,43 @@ mod wasm {
     use futures::{SinkExt, StreamExt};
     use gloo_net::websocket::{Message, futures::WebSocket};
     use leptos::prelude::*;
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
+    use std::time::Duration;
+
+    /// Reconnect backoff (docs/mvp/frontend-parity.md, "Transport /
+    /// connection lifecycle"): matches the Svelte reference
+    /// (core/transport.svelte.ts) — 500ms initial, doubling, capped at 10s,
+    /// reset the moment a connection proves itself by delivering a frame.
+    const INITIAL_RETRY_MS: u32 = 500;
+    const MAX_RETRY_MS: u32 = 10_000;
+
+    type Sink = Rc<RefCell<futures::stream::SplitSink<WebSocket, Message>>>;
+    type OnMessage = Rc<dyn Fn(ServerMsg)>;
 
     pub struct Transport {
         status: RwSignal<Status>,
-        sink: Rc<RefCell<futures::stream::SplitSink<WebSocket, Message>>>,
+        sink: Sink,
     }
 
     impl Transport {
         /// Connects and spawns the read loop. `on_message` is invoked once per
         /// decoded frame — the composition root fans it out to every concern.
+        /// A closed or errored socket is not fatal: the read loop reconnects
+        /// itself with exponential backoff (`schedule_reconnect`) instead of
+        /// finishing, so a dropped connection recovers on its own rather than
+        /// leaving a dead tab until manual reload.
         pub fn connect(ws_url: &str, on_message: impl Fn(ServerMsg) + 'static) -> Result<Self, String> {
             let ws = WebSocket::open(ws_url).map_err(|e| e.to_string())?;
-            let (write, mut read) = ws.split();
+            let (write, read) = ws.split();
             let status = RwSignal::new(Status::Connecting);
+            let sink: Sink = Rc::new(RefCell::new(write));
+            let on_message: OnMessage = Rc::new(on_message);
+            let retry_ms = Rc::new(Cell::new(INITIAL_RETRY_MS));
 
-            wasm_bindgen_futures::spawn_local({
-                let status = status;
-                async move {
-                    while let Some(msg) = read.next().await {
-                        match msg {
-                            Ok(Message::Text(text)) => {
-                                status.set(Status::Connected);
-                                if let Some(frame) = decode(&text) {
-                                    on_message(frame);
-                                }
-                            }
-                            Ok(Message::Bytes(_)) => {} // binary: nothing to decode
-                            Err(err) => {
-                                log(&format!("transport: socket error: {err}"));
-                                status.set(Status::Closed);
-                            }
-                        }
-                    }
-                    status.set(Status::Closed);
-                }
-            });
+            spawn_read_loop(ws_url.to_string(), status, sink.clone(), on_message, read, retry_ms);
 
-            Ok(Self {
-                status,
-                sink: Rc::new(RefCell::new(write)),
-            })
+            Ok(Self { status, sink })
         }
 
         pub fn status(&self) -> Status {
@@ -134,6 +129,74 @@ mod wasm {
                     log(&format!("transport: send failed: {err}"));
                 }
             });
+        }
+    }
+
+    /// Runs one connection's read loop until the socket closes or errors,
+    /// then hands off to `schedule_reconnect` — the task never finishes for
+    /// good while the tab is alive, matching Svelte's `ws.onclose` always
+    /// rearming a fresh `connect()`.
+    fn spawn_read_loop(
+        ws_url: String,
+        status: RwSignal<Status>,
+        sink: Sink,
+        on_message: OnMessage,
+        mut read: futures::stream::SplitStream<WebSocket>,
+        retry_ms: Rc<Cell<u32>>,
+    ) {
+        wasm_bindgen_futures::spawn_local(async move {
+            while let Some(msg) = read.next().await {
+                match msg {
+                    Ok(Message::Text(text)) => {
+                        status.set(Status::Connected);
+                        // A frame proves the connection: reset the backoff,
+                        // same as Svelte resetting `#retryMs` in `ws.onopen`.
+                        retry_ms.set(INITIAL_RETRY_MS);
+                        if let Some(frame) = decode(&text) {
+                            on_message(frame);
+                        }
+                    }
+                    Ok(Message::Bytes(_)) => {} // binary: nothing to decode
+                    Err(err) => {
+                        log(&format!("transport: socket error: {err}"));
+                        break;
+                    }
+                }
+            }
+            status.set(Status::Closed);
+            schedule_reconnect(ws_url, status, sink, on_message, retry_ms);
+        });
+    }
+
+    /// Waits the current backoff, then reopens the socket — 500ms, doubling,
+    /// capped at 10s (mirrors core/transport.svelte.ts's
+    /// `setTimeout(() => this.connect(), retryMs)` followed by
+    /// `retryMs = min(retryMs * 2, 10_000)`).
+    fn schedule_reconnect(ws_url: String, status: RwSignal<Status>, sink: Sink, on_message: OnMessage, retry_ms: Rc<Cell<u32>>) {
+        let delay_ms = retry_ms.get();
+        retry_ms.set((delay_ms * 2).min(MAX_RETRY_MS));
+        set_timeout(
+            move || attempt_reconnect(ws_url, status, sink, on_message, retry_ms),
+            Duration::from_millis(delay_ms as u64),
+        );
+    }
+
+    /// One reconnect attempt. A synchronous open failure (the socket
+    /// constructor itself rejecting, distinct from a later close) is treated
+    /// the same as a dropped connection: log it and back off again.
+    fn attempt_reconnect(ws_url: String, status: RwSignal<Status>, sink: Sink, on_message: OnMessage, retry_ms: Rc<Cell<u32>>) {
+        status.set(Status::Connecting);
+        match WebSocket::open(&ws_url) {
+            Ok(ws) => {
+                let (write, read) = ws.split();
+                *sink.borrow_mut() = write;
+                spawn_read_loop(ws_url, status, sink, on_message, read, retry_ms);
+            }
+            Err(err) => {
+                log(&format!("transport: reconnect failed: {err}"));
+                status.set(Status::Closed);
+                schedule_reconnect(ws_url, status, sink, on_message, retry_ms);
+            }
         }
     }
 }
