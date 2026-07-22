@@ -137,6 +137,39 @@ pub fn price_usage(u: &WsUsage) -> PricedUsage {
     PricedUsage { cost_usd, context_used: u.context_tokens, context_max, context_pct }
 }
 
+/// Split a model id into a display name and version — ported from
+/// claude-sdk-cli's `parseModelName.ts` so the two tools agree:
+///
+///   claude-sonnet-4-6 -> ("Sonnet", Some("4.6"))
+///   claude-opus       -> ("Opus", None)
+///
+/// Family is the first non-numeric token after the leading `claude`;
+/// version is the trailing run of numeric tokens, joined by `.`. Model is
+/// per-conversation (a spawn may name its own), never a host-wide fact, so
+/// this always reads off that conversation's own usage snapshot, never a
+/// shared default.
+pub fn parse_model_name(model: &str) -> (String, Option<String>) {
+    let parts: Vec<&str> = model.split('-').collect();
+    let Some(family) = parts.iter().skip(1).find(|p| !p.starts_with(|c: char| c.is_ascii_digit())) else {
+        return (model.to_owned(), None);
+    };
+    let mut chars = family.chars();
+    let name = match chars.next() {
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    };
+    let mut trailing: Vec<&str> = Vec::new();
+    for part in parts.iter().rev() {
+        if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+            break;
+        }
+        trailing.push(part);
+    }
+    trailing.reverse();
+    let version = (!trailing.is_empty()).then(|| trailing.join("."));
+    (name, version)
+}
+
 /// Compact token count: 9700 → "9.7k", 2_100_000 → "2.1M", 512 → "512".
 pub fn format_tokens(n: i64) -> String {
     if n < 1_000 {
@@ -247,5 +280,18 @@ mod tests {
     #[test]
     fn shows_the_dollar_cost_to_four_decimals() {
         assert_eq!(format_usd(64.4029), "$64.4029");
+    }
+
+    #[test]
+    fn parses_family_and_version() {
+        assert_eq!(parse_model_name("claude-sonnet-4-6"), ("Sonnet".to_owned(), Some("4.6".to_owned())));
+        assert_eq!(parse_model_name("claude-opus"), ("Opus".to_owned(), None));
+        assert_eq!(parse_model_name("claude-mrmagoo-4"), ("Mrmagoo".to_owned(), Some("4".to_owned())));
+        assert_eq!(parse_model_name("claude-mrmagoo"), ("Mrmagoo".to_owned(), None));
+    }
+
+    #[test]
+    fn a_bare_model_with_no_family_token_passes_through() {
+        assert_eq!(parse_model_name("claude"), ("claude".to_owned(), None));
     }
 }

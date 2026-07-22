@@ -32,7 +32,7 @@ use crate::concerns::approvals::{Approvals, ask_input, ask_label};
 use crate::concerns::conversation::{ConversationState, QueryState};
 use crate::concerns::rail::Rail;
 use crate::concerns::usage::Usage;
-use crate::pricing::{format_tokens, format_usd, price_usage};
+use crate::pricing::{format_tokens, format_usd, parse_model_name, price_usage};
 use crate::time::{Millis, age, format_time};
 use crate::ui::block::render_block;
 use crate::ui::{short, truncate};
@@ -92,11 +92,21 @@ fn media_label(v: &Value) -> String {
 
 /// The conversation's cost surface: towerd ships the token facts, priced
 /// here ($ and context %) — the client owns that policy, same split as
-/// mvp/frontend's `ConversationPanel.svelte`.
+/// mvp/frontend's `ConversationPanel.svelte`. Model leads the line: it's a
+/// per-conversation fact (a spawn may name its own, docs/mvp/bridge-stdio-
+/// spec.md), read off THIS conversation's own usage snapshot — never a
+/// host-wide default — same footing claude-sdk-cli gives it front and
+/// centre in its own status line.
 fn price_usage_line(u: &ws_types::WsUsage) -> impl IntoView + use<> {
     let p = price_usage(u);
+    let (name, version) = parse_model_name(&u.model);
+    let model_label = match version {
+        Some(v) => format!("⚡ {name} {v}"),
+        None => format!("⚡ {name}"),
+    };
     view! {
-        <p class="usage-line" title=u.model.clone()>
+        <p class="usage-line">
+            <span class="model" title=u.model.clone()>{model_label}</span>
             <span>{format!("in {}", format_tokens(u.input_tokens))}</span>
             <span title="cache write">{format!("↑{}", format_tokens(u.cache_creation_tokens))}</span>
             <span title="cache read">{format!("↓{}", format_tokens(u.cache_read_tokens))}</span>
