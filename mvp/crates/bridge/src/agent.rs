@@ -367,7 +367,10 @@ async fn accept_say(
         // The wire's reason is a short canonical token, same footing as
         // `stale`/`empty`/`already_complete`; the detail (which bucket, which
         // id, which error) is diagnostic and belongs in the log, not the reply.
-        eprintln!("bridge[{}]: attachment validation failed: {detail}", config.conv.0);
+        eprintln!(
+            "bridge[{}]: attachment validation failed: {detail}",
+            config.conv.0
+        );
         return Err("attachment_unavailable".to_string());
     }
     let query = uuid::Uuid::new_v4().to_string();

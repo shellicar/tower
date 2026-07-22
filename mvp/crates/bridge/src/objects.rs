@@ -209,4 +209,3 @@ mod tests {
         assert_eq!(out["type"], "text");
     }
 }
-
