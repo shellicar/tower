@@ -378,9 +378,19 @@ impl Views {
         // applied exactly once — safe because the cursor advances past every
         // event and rematerialisation truncates this table before replay. The
         // totals are read back for the absolute snapshot the broadcast carries.
+        //
+        // A turn's usage arrives as two frames (a SDK producer quirk, not a
+        // wire guarantee): a context frame (input + cache, the real point-in-
+        // time snapshot) and an output-only frame that reports outputTokens
+        // alone, with input/cache all zero. `context_tokens` is a snapshot,
+        // never a running sum (docs/mvp/tower-ws-spec.md: "the latest turn's"),
+        // so the output-only frame's zero must never overwrite the real value
+        // — the same guard claude-sdk-cli's own StatusState.update() carries
+        // locally ("the output frame would otherwise clobber it to zero").
         let mut usage_snapshot: Option<UsageState> = None;
         if let EventKind::Telemetry(ConvTelemetry::Usage(u)) = &event.kind {
             let context = u.input_tokens + u.cache_creation_tokens + u.cache_read_tokens;
+            let context = if context > 0 { Some(context) } else { None };
             let cc5 = u.cache_creation_5m_tokens.unwrap_or(0);
             let cc1h = u.cache_creation_1h_tokens.unwrap_or(0);
             tx.execute(
@@ -400,7 +410,9 @@ impl Views {
                      cache_read_tokens = usage.cache_read_tokens + excluded.cache_read_tokens,
                      output_tokens = usage.output_tokens + excluded.output_tokens,
                      turns = usage.turns + 1,
-                     context_tokens = excluded.context_tokens,
+                     context_tokens =
+                         CASE WHEN excluded.context_tokens > 0
+                              THEN excluded.context_tokens ELSE usage.context_tokens END,
                      model = excluded.model",
                 rusqlite::params![
                     conv.0,
@@ -410,7 +422,7 @@ impl Views {
                     cc1h,
                     u.cache_read_tokens,
                     u.output_tokens,
-                    context,
+                    context.unwrap_or(0),
                     u.model,
                 ],
             )?;

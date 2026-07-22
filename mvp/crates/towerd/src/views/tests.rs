@@ -156,6 +156,29 @@ fn usage_fold_accumulates_and_snapshots() {
 }
 
 #[test]
+fn an_output_only_usage_frame_never_clobbers_context_to_zero() {
+    // Some producers (claude-sdk-cli) report a turn's usage as TWO frames:
+    // a context frame (input + cache, the real snapshot) and an output-only
+    // frame that carries just outputTokens, with input/cache all zero. The
+    // second frame arriving after the first must not erase the real context.
+    let (mut views, _rx) = fresh();
+    let conv = ConversationId("conv-abc".into());
+
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.telemetry.usage",
+        r#"{"ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-5","inputTokens":50,"cacheCreationTokens":0,"cacheReadTokens":630000,"outputTokens":0}"#));
+    let u = views.usage(&conv).unwrap().unwrap();
+    assert_eq!(u.context_tokens, 630050);
+
+    // The output-only frame: real output, zero everywhere else.
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.telemetry.usage",
+        r#"{"ts":"2026-07-07T21:00:05+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-5","inputTokens":0,"cacheCreationTokens":0,"cacheReadTokens":0,"outputTokens":420}"#));
+    let u = views.usage(&conv).unwrap().unwrap();
+    // Context holds at the last real snapshot; output still accumulates.
+    assert_eq!(u.context_tokens, 630050);
+    assert_eq!(u.output_tokens, 420);
+}
+
+#[test]
 fn delta_streams_but_never_stores() {
     let (mut views, mut rx) = fresh();
     views.apply(
