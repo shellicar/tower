@@ -25,6 +25,7 @@
 // row, unchanged.
 import { layout, prepare } from '@chenglou/pretext';
 import type { ConversationMessage } from '../types';
+import { hasMarkdownConstructs } from './markdown';
 
 const FONT = '13px ui-monospace, "SF Mono", Menlo, monospace';
 // Matches BlockView's text block: whitespace-pre-wrap (\n and runs of
@@ -51,6 +52,15 @@ export function measurePlainTextHeight(
   maxWidth: number,
 ): number | undefined {
   if (message.content.length === 0 || message.content.some((b) => b.type !== 'text')) {
+    return undefined;
+  }
+  // Assistant text renders as markdown, whose non-uniform line heights
+  // (headings, lists, code fences, tables) the plain-line model below
+  // doesn't cover — bail to measure-after-mount rather than teach it.
+  if (
+    message.role === 'assistant' &&
+    message.content.some((b) => hasMarkdownConstructs(String((b as { text?: unknown }).text ?? '')))
+  ) {
     return undefined;
   }
   const textHeight = message.content.reduce(

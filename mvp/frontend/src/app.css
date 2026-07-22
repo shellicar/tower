@@ -9,3 +9,107 @@ body {
   background: #111;
   color: #ddd;
 }
+
+/* Assistant text renders through marked; scoped here rather than @apply
+   since the shapes below (nested selectors, :not(:last-child)) don't fit
+   Tailwind utility classes one-to-one. */
+.markdown-content {
+  white-space: normal;
+}
+.markdown-content > *:not(:last-child) {
+  margin-bottom: 0.5em;
+}
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  font-weight: 700;
+  margin-top: 0.5em;
+}
+.markdown-content h1 {
+  color: #7dd3fc;
+  font-size: 1.15em;
+}
+.markdown-content h2 {
+  color: #7dd3fc;
+  font-size: 1.1em;
+}
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  color: #a5b4fc;
+  font-size: 1em;
+}
+.markdown-content p {
+  white-space: pre-wrap;
+}
+.markdown-content strong {
+  font-weight: 700;
+}
+.markdown-content em {
+  font-style: italic;
+}
+.markdown-content del {
+  text-decoration: line-through;
+}
+.markdown-content a {
+  color: #38bdf8;
+  text-decoration: underline;
+}
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 1.4em;
+}
+.markdown-content ul {
+  list-style-type: disc;
+}
+.markdown-content ol {
+  list-style-type: decimal;
+}
+.markdown-content li > ul,
+.markdown-content li > ol {
+  margin-top: 0.25em;
+}
+.markdown-content blockquote {
+  border-left: 2px solid #525252;
+  padding-left: 0.6em;
+  color: #a3a3a3;
+  font-style: italic;
+}
+.markdown-content code {
+  background: #262626;
+  padding: 0.1em 0.3em;
+  border-radius: 2px;
+  color: #d4d4d4;
+}
+.markdown-content pre {
+  background: #171717;
+  padding: 0.5em;
+  overflow-x: auto;
+}
+.markdown-content pre code {
+  background: none;
+  padding: 0;
+}
+.markdown-content hr {
+  border: none;
+  border-top: 1px solid #404040;
+  margin: 0.5em 0;
+}
+.markdown-content table {
+  border-collapse: collapse;
+}
+.markdown-content th,
+.markdown-content td {
+  border: 1px solid #404040;
+  padding: 0.2em 0.5em;
+  text-align: left;
+}
+.markdown-content th {
+  color: #d4d4d4;
+  font-weight: 700;
+}
+
