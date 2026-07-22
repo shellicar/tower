@@ -27,6 +27,6 @@
     <span>{time}</span>
   </header>
   {#each message.content as block, i (i)}
-    <BlockView {block} />
+    <BlockView {block} markdown={message.role === 'assistant'} />
   {/each}
 </article>

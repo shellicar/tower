@@ -1,8 +1,9 @@
 <script lang="ts">
+  import MarkdownRenderer from './MarkdownRenderer.svelte';
   import RefView from './RefView.svelte';
   import { isRef, type ContentBlock } from './types';
 
-  let { block }: { block: ContentBlock } = $props();
+  let { block, markdown = false }: { block: ContentBlock; markdown?: boolean } = $props();
 
   // Per-message collapsing is the primary render lever: tool traffic and
   // thinking fold to summary lines; text stands open.
@@ -34,7 +35,11 @@
 </script>
 
 {#if block.type === 'text'}
-  <div class="wrap-anywhere whitespace-pre-wrap">{block.text}</div>
+  {#if markdown}
+    <MarkdownRenderer text={String(block.text)} />
+  {:else}
+    <div class="wrap-anywhere whitespace-pre-wrap">{block.text}</div>
+  {/if}
 {:else if block.type === 'thinking'}
   <details>
     <summary class="cursor-pointer text-neutral-400">thinking</summary>

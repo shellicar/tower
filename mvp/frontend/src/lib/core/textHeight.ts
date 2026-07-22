@@ -12,6 +12,7 @@
 // return `undefined` and the caller falls back to measuring the mounted
 // row, unchanged.
 import type { ConversationMessage } from '../types';
+import { hasMarkdownConstructs } from './markdown';
 
 const FONT = '13px ui-monospace, "SF Mono", Menlo, monospace';
 // Calibrated against this body's line-height/spacing at 13px monospace;
@@ -52,6 +53,15 @@ export function measurePlainTextHeight(
   maxWidth: number,
 ): number | undefined {
   if (message.content.length === 0 || message.content.some((b) => b.type !== 'text')) {
+    return undefined;
+  }
+  // Assistant text renders as markdown, whose non-uniform line heights
+  // (headings, lists, code fences, tables) the plain-line model below
+  // doesn't cover — bail to measure-after-mount rather than teach it.
+  if (
+    message.role === 'assistant' &&
+    message.content.some((b) => hasMarkdownConstructs(String((b as { text?: unknown }).text ?? '')))
+  ) {
     return undefined;
   }
   const textLines = message.content.reduce(

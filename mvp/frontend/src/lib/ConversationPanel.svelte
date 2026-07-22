@@ -1,4 +1,5 @@
 <script lang="ts">
+  import MarkdownRenderer from './MarkdownRenderer.svelte';
   import MessageView from './MessageView.svelte';
   import VirtualList from './VirtualList.svelte';
   import { approvals, conversations, rail, usage, view } from './app';
@@ -313,7 +314,7 @@
                 {:else if segment.blockType === 'tool_use'}
                   <div class="wrap-anywhere whitespace-pre-wrap text-neutral-500">⚒ {segment.text}</div>
                 {:else}
-                  <div class="whitespace-pre-wrap text-indigo-200">{segment.text}</div>
+                  <div class="text-indigo-200"><MarkdownRenderer text={segment.text} /></div>
                 {/if}
               {/if}
             {/each}
