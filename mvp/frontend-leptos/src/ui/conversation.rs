@@ -100,9 +100,13 @@ fn media_label(v: &Value) -> String {
 fn price_usage_line(u: &ws_types::WsUsage) -> impl IntoView + use<> {
     let p = price_usage(u);
     let (name, version) = parse_model_name(&u.model);
+    // U+26A1 defaults to TEXT presentation in the Unicode emoji spec (unlike
+    // most emoji, which default to colour) — without the U+FE0F variation
+    // selector a browser renders it as a plain monochrome glyph, not the
+    // colour bolt.
     let model_label = match version {
-        Some(v) => format!("⚡ {name} {v}"),
-        None => format!("⚡ {name}"),
+        Some(v) => format!("⚡\u{fe0f} {name} {v}"),
+        None => format!("⚡\u{fe0f} {name}"),
     };
     view! {
         <p class="usage-line">
