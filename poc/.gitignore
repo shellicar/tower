@@ -4,4 +4,6 @@ dist/
 .DS_Store
 claude-sdk-cli.log
 .claude/
+# ptyspike's hooktest needs its hook config tracked — it's the mechanism, not local config
+!ptyspike/hooktest/.claude/
 tower-wasm/bin/

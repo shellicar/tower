@@ -1,0 +1,14 @@
+[package]
+name = "ptyspike"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-nats.workspace = true
+crossterm = "0.29"
+futures.workspace = true
+portable-pty = "0.9"
+serde_json.workspace = true
+tokio = { workspace = true, features = ["full"] }
+uuid = { version = "1", features = ["v4"] }

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["fake-model", "agent", "tui", "tower/backend"]
+members = ["fake-model", "agent", "tui", "tower/backend", "ptyspike"]
 # tower-wasm is its own workspace; it stays separate.
 exclude = ["tower-wasm"]
 
