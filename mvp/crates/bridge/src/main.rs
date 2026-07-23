@@ -47,6 +47,7 @@ mod memory;
 mod memtools;
 mod mutate;
 mod objects;
+mod permissions;
 mod pipe;
 mod read;
 mod readfile;
@@ -252,6 +253,11 @@ struct Host {
     /// Conversations this instance serves — what a chdir republishes
     /// `attached` for (the cwd is causal; agent-spec scenario a4).
     served: Arc<RwLock<Vec<String>>>,
+    /// The path-scoped permission matrix (permissions.rs): one scoped blob,
+    /// live-repointable by a `permissions` control line, same discipline as
+    /// `skills_root`. Strict-default until a line sets it: every gated
+    /// operation asks, identical to bridge's behavior before this existed.
+    permissions: Arc<RwLock<permissions::PermissionSet>>,
 }
 
 impl Host {
@@ -269,6 +275,12 @@ impl Host {
             history: Arc::clone(&self.history),
             thinking_budget: self.thinking_budget,
             attach: self.attach.clone(),
+            // Captured once, now, from bridge's current default — an
+            // instance fact at the moment of spawn, never yanked around by
+            // a later `cwd` control line the way `attached`'s cwd is. Each
+            // conversation's "$PWD" means this, permanently.
+            cwd: std::env::current_dir().unwrap_or_default(),
+            permissions: Arc::clone(&self.permissions),
         }
     }
 
@@ -384,6 +396,24 @@ impl Host {
             *self.system.write().unwrap() = Some(text.to_string());
             eprintln!("bridge: system prompt set ({} chars)", text.len());
             println!("{}", serde_json::json!({ "system": "set" }));
+        } else if let Some(perms) = value.get("permissions") {
+            // One scoped blob, sent whole, replacing whatever was there —
+            // no partial edits, the sender already holds the full list.
+            // Existing conversations' AgentConfig shares this same Arc, so
+            // a repoint reaches every running conversation's next check.
+            match serde_json::from_value::<permissions::PermissionSet>(perms.clone()) {
+                Ok(set) => {
+                    *self.permissions.write().unwrap() = set;
+                    eprintln!("bridge: permissions repointed");
+                    println!("{}", serde_json::json!({ "permissions": "ok" }));
+                }
+                Err(e) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("invalid permissions: {e}") })
+                    );
+                }
+            }
         } else if let Some(model) = value.get("model") {
             // The live default cell: new spawns that name no model take it,
             // and every running conversation sharing it picks the change up
@@ -717,6 +747,7 @@ async fn main() -> anyhow::Result<()> {
         context: Arc::new(RwLock::new(None)),
         attach_bucket,
         thinking_budget,
+        permissions: Arc::new(RwLock::new(permissions::PermissionSet::strict_default())),
     };
 
     // -c: a batch of control lines run before stdin takes over. Each writes its

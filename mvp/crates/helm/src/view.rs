@@ -510,7 +510,7 @@ pub fn draw(
     }
     status_spans.push(match view.command {
         CommandMode::Root => Span::styled(
-            " · command: t text · i image · f file · d drop · y/n approval · m model · c cwd · esc/^/ exit",
+            " · command: t text · i image · f file · d drop · y/n approval · m model · c cwd · j config · esc/^/ exit",
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         ),
         CommandMode::AttachEdit(_) | CommandMode::ModelEdit(_) | CommandMode::CwdEdit(_) => {
@@ -519,6 +519,13 @@ pub fn draw(
                 Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
             )
         }
+        // Enter has to stay a newline here (a config batch is routinely
+        // multi-line, unlike the single-line editors above), so submit
+        // moves to the same modifier the main say editor already uses.
+        CommandMode::ConfigEdit(_) => Span::styled(
+            " · ↵ newline · ⌘↵/^↵ submits · esc backs out · ^/ closes",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ),
         CommandMode::Closed => {
             Span::raw(" · ^/ commands · ⌘↵/^↵ says · ↵ breaks · esc cancels · ^c quits")
         }

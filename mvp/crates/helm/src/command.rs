@@ -12,7 +12,7 @@ pub enum CommandMode {
     #[default]
     Closed,
     /// The root binding set: t/i/f attachments · d drop · y/n approval ·
-    /// m model · c cwd.
+    /// m model · c cwd · j config.
     Root,
     /// The attach path editor (f) — Enter adds the chip, Esc backs out.
     AttachEdit(TextArea<'static>),
@@ -20,6 +20,11 @@ pub enum CommandMode {
     ModelEdit(TextArea<'static>),
     /// The cwd editor (c) — Enter sends the `cwd` control line.
     CwdEdit(TextArea<'static>),
+    /// The config editor (j) — same grammar as `-c`: one JSON object per
+    /// line, plain Enter breaks a line (multi-line, unlike the single-line
+    /// editors above), Ctrl/Cmd+Enter sends every line through
+    /// `apply_config_line` (config.rs).
+    ConfigEdit(TextArea<'static>),
 }
 
 impl CommandMode {
@@ -38,9 +43,10 @@ impl CommandMode {
     /// Esc — pops one level: an open editor backs out to root, root closes.
     pub fn escape(&mut self) {
         *self = match self {
-            CommandMode::AttachEdit(_) | CommandMode::ModelEdit(_) | CommandMode::CwdEdit(_) => {
-                CommandMode::Root
-            }
+            CommandMode::AttachEdit(_)
+            | CommandMode::ModelEdit(_)
+            | CommandMode::CwdEdit(_)
+            | CommandMode::ConfigEdit(_) => CommandMode::Root,
             _ => CommandMode::Closed,
         };
     }
@@ -60,6 +66,9 @@ mod tests {
         let mut mode = CommandMode::AttachEdit(TextArea::default());
         mode.toggle();
         assert!(matches!(mode, CommandMode::Closed));
+        let mut mode = CommandMode::ConfigEdit(TextArea::default());
+        mode.toggle();
+        assert!(matches!(mode, CommandMode::Closed));
     }
 
     #[test]
@@ -68,6 +77,7 @@ mod tests {
             CommandMode::AttachEdit(TextArea::default()),
             CommandMode::ModelEdit(TextArea::default()),
             CommandMode::CwdEdit(TextArea::default()),
+            CommandMode::ConfigEdit(TextArea::default()),
         ] {
             mode.escape();
             assert!(matches!(mode, CommandMode::Root));

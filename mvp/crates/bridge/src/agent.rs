@@ -91,6 +91,14 @@ pub struct AgentConfig {
     /// None for every tower-spawned instance — NATS carries every event
     /// regardless; this is purely an additional local mirror.
     pub attach: Option<bridge::attach::AttachHandle>,
+    /// This conversation's own working directory — captured once at spawn,
+    /// independent of bridge's shared instance-wide cwd thereafter (main.rs's
+    /// `Host::config`). What "$PWD" resolves to in `permissions` for this
+    /// conversation specifically.
+    pub cwd: std::path::PathBuf,
+    /// The path-scoped permission matrix (permissions.rs), shared and live-
+    /// repointable by a `permissions` control line.
+    pub permissions: Arc<std::sync::RwLock<crate::permissions::PermissionSet>>,
 }
 
 /// Subscribe to the conversation's requests. main calls this BEFORE
@@ -472,6 +480,8 @@ async fn accept_say(
         history_store: crate::history::HistoryStore::clone(&config.history),
         thinking_budget: config.thinking_budget,
         attach: config.attach.clone(),
+        cwd: config.cwd.clone(),
+        permissions: Arc::clone(&config.permissions),
     };
     let done = done_tx.clone();
     let q = query.clone();
@@ -504,6 +514,8 @@ struct TurnContext {
     history_store: crate::history::HistoryStore,
     thinking_budget: Option<i64>,
     attach: Option<bridge::attach::AttachHandle>,
+    cwd: std::path::PathBuf,
+    permissions: Arc<std::sync::RwLock<crate::permissions::PermissionSet>>,
 }
 
 /// Resolves when the cancel signal flips; never resolves if it never does
@@ -553,6 +565,8 @@ async fn run_query(
         history_store,
         thinking_budget,
         attach,
+        cwd,
+        permissions,
     } = &ctx;
     let pubr = Publisher::new(client, conv, history_store, attach.clone());
 
@@ -736,6 +750,8 @@ async fn run_query(
             &turn_id,
             &done.content,
             &mut cancel,
+            cwd,
+            permissions,
         )
         .await;
 
@@ -757,6 +773,35 @@ async fn run_query(
     }
 }
 
+/// A tool's own path argument, resolved against the conversation's cwd —
+/// relative the same way a shell would read it, absolute left untouched.
+fn resolve_against(cwd: &std::path::Path, raw: &str) -> std::path::PathBuf {
+    let p = std::path::Path::new(raw);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        cwd.join(p)
+    }
+}
+
+/// One action's permission verdict from whatever path(s) it touches —
+/// `paths` is one item for a single-path tool, several for `Delete`;
+/// `resolve_set` folds either to its strictest member, same mechanism.
+fn permission_verdict(
+    permissions: &std::sync::RwLock<crate::permissions::PermissionSet>,
+    cwd: &std::path::Path,
+    home: &std::path::Path,
+    operation: &str,
+    paths: &[std::path::PathBuf],
+) -> crate::permissions::Verdict {
+    permissions.read().unwrap().resolve_set(
+        paths.iter().map(std::path::PathBuf::as_path),
+        operation,
+        cwd,
+        home,
+    )
+}
+
 /// One tool round: execute every `tool_use` block in the just-committed
 /// assistant turn and return the `tool_result` blocks, in order. The action
 /// is published as telemetry before it runs (`input` included - the action
@@ -775,7 +820,12 @@ async fn run_tool_round(
     turn_id: &str,
     content: &[Value],
     cancel: &mut watch::Receiver<bool>,
+    cwd: &std::path::Path,
+    permissions: &std::sync::RwLock<crate::permissions::PermissionSet>,
 ) -> Vec<Value> {
+    let home = std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
     // The gate: a tool_use for anything not in THIS turn's offered set is
     // refused before any dispatch touches it, never executed. A schema
     // absent from `tools` is not a suggestion the model might ignore — it is
@@ -942,114 +992,196 @@ async fn run_tool_round(
             // CreateFile/AppendFile gate behind the same human approval as
             // Bash/Exec — a mutation, same discipline.
             "CreateFile" => {
-                let approval_id = uuid::Uuid::new_v4().to_string();
-                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
-                let correlation = json!({
-                    "conversationId": pubr.conv().0,
-                    "queryId": query,
-                    "turnId": turn_id,
-                    "toolUseId": id,
-                });
-                match crate::approval::gate(
-                    pubr.client(),
-                    pubr.attach(),
-                    &approval_id,
-                    &ask,
-                    &correlation,
-                    cancel,
-                )
-                .await
-                {
-                    crate::approval::Verdict::Approved => {
+                let path = resolve_against(cwd, block["input"]["path"].as_str().unwrap_or(""));
+                match permission_verdict(
+                    permissions,
+                    cwd,
+                    &home,
+                    "write",
+                    std::slice::from_ref(&path),
+                ) {
+                    crate::permissions::Verdict::Deny => {
+                        ("denied by permissions policy".to_string(), true)
+                    }
+                    crate::permissions::Verdict::Allow => {
                         crate::mutate::run_create_file(&block["input"]).await
                     }
-                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
-                    crate::approval::Verdict::Cancelled => {
-                        ("cancelled by user before approval".to_string(), true)
+                    crate::permissions::Verdict::Ask => {
+                        let approval_id = uuid::Uuid::new_v4().to_string();
+                        let ask =
+                            json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                        let correlation = json!({
+                            "conversationId": pubr.conv().0,
+                            "queryId": query,
+                            "turnId": turn_id,
+                            "toolUseId": id,
+                        });
+                        match crate::approval::gate(
+                            pubr.client(),
+                            pubr.attach(),
+                            &approval_id,
+                            &ask,
+                            &correlation,
+                            cancel,
+                        )
+                        .await
+                        {
+                            crate::approval::Verdict::Approved => {
+                                crate::mutate::run_create_file(&block["input"]).await
+                            }
+                            crate::approval::Verdict::Denied { by } => {
+                                (format!("denied by {by}"), true)
+                            }
+                            crate::approval::Verdict::Cancelled => {
+                                ("cancelled by user before approval".to_string(), true)
+                            }
+                        }
                     }
                 }
             }
             "AppendFile" => {
-                let approval_id = uuid::Uuid::new_v4().to_string();
-                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
-                let correlation = json!({
-                    "conversationId": pubr.conv().0,
-                    "queryId": query,
-                    "turnId": turn_id,
-                    "toolUseId": id,
-                });
-                match crate::approval::gate(
-                    pubr.client(),
-                    pubr.attach(),
-                    &approval_id,
-                    &ask,
-                    &correlation,
-                    cancel,
-                )
-                .await
-                {
-                    crate::approval::Verdict::Approved => {
+                let path = resolve_against(cwd, block["input"]["path"].as_str().unwrap_or(""));
+                match permission_verdict(
+                    permissions,
+                    cwd,
+                    &home,
+                    "write",
+                    std::slice::from_ref(&path),
+                ) {
+                    crate::permissions::Verdict::Deny => {
+                        ("denied by permissions policy".to_string(), true)
+                    }
+                    crate::permissions::Verdict::Allow => {
                         crate::mutate::run_append_file(&block["input"]).await
                     }
-                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
-                    crate::approval::Verdict::Cancelled => {
-                        ("cancelled by user before approval".to_string(), true)
+                    crate::permissions::Verdict::Ask => {
+                        let approval_id = uuid::Uuid::new_v4().to_string();
+                        let ask =
+                            json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                        let correlation = json!({
+                            "conversationId": pubr.conv().0,
+                            "queryId": query,
+                            "turnId": turn_id,
+                            "toolUseId": id,
+                        });
+                        match crate::approval::gate(
+                            pubr.client(),
+                            pubr.attach(),
+                            &approval_id,
+                            &ask,
+                            &correlation,
+                            cancel,
+                        )
+                        .await
+                        {
+                            crate::approval::Verdict::Approved => {
+                                crate::mutate::run_append_file(&block["input"]).await
+                            }
+                            crate::approval::Verdict::Denied { by } => {
+                                (format!("denied by {by}"), true)
+                            }
+                            crate::approval::Verdict::Cancelled => {
+                                ("cancelled by user before approval".to_string(), true)
+                            }
+                        }
                     }
                 }
             }
             "EditFile" => {
-                let approval_id = uuid::Uuid::new_v4().to_string();
-                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
-                let correlation = json!({
-                    "conversationId": pubr.conv().0,
-                    "queryId": query,
-                    "turnId": turn_id,
-                    "toolUseId": id,
-                });
-                match crate::approval::gate(
-                    pubr.client(),
-                    pubr.attach(),
-                    &approval_id,
-                    &ask,
-                    &correlation,
-                    cancel,
-                )
-                .await
-                {
-                    crate::approval::Verdict::Approved => {
+                let path = resolve_against(cwd, block["input"]["path"].as_str().unwrap_or(""));
+                match permission_verdict(
+                    permissions,
+                    cwd,
+                    &home,
+                    "write",
+                    std::slice::from_ref(&path),
+                ) {
+                    crate::permissions::Verdict::Deny => {
+                        ("denied by permissions policy".to_string(), true)
+                    }
+                    crate::permissions::Verdict::Allow => {
                         crate::editfile::run_edit_file(&block["input"]).await
                     }
-                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
-                    crate::approval::Verdict::Cancelled => {
-                        ("cancelled by user before approval".to_string(), true)
+                    crate::permissions::Verdict::Ask => {
+                        let approval_id = uuid::Uuid::new_v4().to_string();
+                        let ask =
+                            json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                        let correlation = json!({
+                            "conversationId": pubr.conv().0,
+                            "queryId": query,
+                            "turnId": turn_id,
+                            "toolUseId": id,
+                        });
+                        match crate::approval::gate(
+                            pubr.client(),
+                            pubr.attach(),
+                            &approval_id,
+                            &ask,
+                            &correlation,
+                            cancel,
+                        )
+                        .await
+                        {
+                            crate::approval::Verdict::Approved => {
+                                crate::editfile::run_edit_file(&block["input"]).await
+                            }
+                            crate::approval::Verdict::Denied { by } => {
+                                (format!("denied by {by}"), true)
+                            }
+                            crate::approval::Verdict::Cancelled => {
+                                ("cancelled by user before approval".to_string(), true)
+                            }
+                        }
                     }
                 }
             }
             "Delete" => {
-                let approval_id = uuid::Uuid::new_v4().to_string();
-                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
-                let correlation = json!({
-                    "conversationId": pubr.conv().0,
-                    "queryId": query,
-                    "turnId": turn_id,
-                    "toolUseId": id,
-                });
-                match crate::approval::gate(
-                    pubr.client(),
-                    pubr.attach(),
-                    &approval_id,
-                    &ask,
-                    &correlation,
-                    cancel,
-                )
-                .await
-                {
-                    crate::approval::Verdict::Approved => {
+                let paths: Vec<std::path::PathBuf> = block["input"]["paths"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| resolve_against(cwd, s))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                match permission_verdict(permissions, cwd, &home, "delete", &paths) {
+                    crate::permissions::Verdict::Deny => {
+                        ("denied by permissions policy".to_string(), true)
+                    }
+                    crate::permissions::Verdict::Allow => {
                         crate::delete::run_delete(&block["input"]).await
                     }
-                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
-                    crate::approval::Verdict::Cancelled => {
-                        ("cancelled by user before approval".to_string(), true)
+                    crate::permissions::Verdict::Ask => {
+                        let approval_id = uuid::Uuid::new_v4().to_string();
+                        let ask =
+                            json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                        let correlation = json!({
+                            "conversationId": pubr.conv().0,
+                            "queryId": query,
+                            "turnId": turn_id,
+                            "toolUseId": id,
+                        });
+                        match crate::approval::gate(
+                            pubr.client(),
+                            pubr.attach(),
+                            &approval_id,
+                            &ask,
+                            &correlation,
+                            cancel,
+                        )
+                        .await
+                        {
+                            crate::approval::Verdict::Approved => {
+                                crate::delete::run_delete(&block["input"]).await
+                            }
+                            crate::approval::Verdict::Denied { by } => {
+                                (format!("denied by {by}"), true)
+                            }
+                            crate::approval::Verdict::Cancelled => {
+                                ("cancelled by user before approval".to_string(), true)
+                            }
+                        }
                     }
                 }
             }

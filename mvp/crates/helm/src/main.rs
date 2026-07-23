@@ -9,6 +9,7 @@
 mod approvals;
 mod clipboard;
 mod command;
+mod config;
 mod conversation;
 mod markdown;
 mod submit;
@@ -64,13 +65,19 @@ async fn main() -> anyhow::Result<()> {
     let bridge_path = std::env::var("HELM_BRIDGE_PATH").unwrap_or_else(|_| "bridge".into());
 
     // Args: `--adopt <conv-id>` resumes an existing conversation (history
-    // replayed over the attach fd); a free argument is a one-shot say.
+    // replayed over the attach fd); `-c <batch>` is bridge's own startup-config
+    // grammar one layer up (config.rs) — one JSON object per line, applied in
+    // order right after spawn/adopt, before the first keystroke is read; a
+    // free argument is a one-shot say.
     let mut adopt: Option<String> = None;
     let mut one_shot: Option<String> = None;
+    let mut config_batch: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--adopt" {
             adopt = args.next();
+        } else if arg == "-c" {
+            config_batch = args.next();
         } else {
             one_shot = Some(arg);
         }
@@ -81,6 +88,16 @@ async fn main() -> anyhow::Result<()> {
         Some(conv) => session.adopt_conversation(conv).await?,
         None => session.spawn_conversation().await?,
     };
+
+    if let Some(batch) = config_batch {
+        for outcome in config::apply_config_batch(&mut session, &batch).await {
+            match outcome {
+                config::Applied::Local(msg) => eprintln!("helm: config (local): {msg}"),
+                config::Applied::Forwarded(reply) => eprintln!("helm: config (bridge): {reply}"),
+                config::Applied::Invalid(err) => eprintln!("helm: config line skipped: {err}"),
+            }
+        }
+    }
 
     if let Some(text) = one_shot {
         session
@@ -309,6 +326,9 @@ async fn main() -> anyhow::Result<()> {
                                     KeyCode::Char('c') => {
                                         view_state.command = CommandMode::CwdEdit(new_editor());
                                     }
+                                    KeyCode::Char('j') => {
+                                        view_state.command = CommandMode::ConfigEdit(new_editor());
+                                    }
                                     KeyCode::Char(answer @ ('y' | 'n')) => {
                                         let target = approvals
                                             .live(now_ms())
@@ -383,6 +403,42 @@ async fn main() -> anyhow::Result<()> {
                                                     reply["error"].as_str().unwrap_or("?")
                                                 )),
                                             };
+                                        }
+                                        view_state.command.escape();
+                                    }
+                                    _ => forward_key(overlay, key),
+                                },
+                                CommandMode::ConfigEdit(overlay) => match (key.code, key.modifiers) {
+                                    (KeyCode::Esc, _) => view_state.command.escape(),
+                                    // Ctrl/Cmd+Enter submits (the same convention as the
+                                    // main say editor) — plain Enter has to stay a newline
+                                    // insert, unlike ModelEdit/CwdEdit's single-line editors,
+                                    // because a config batch is routinely multi-line.
+                                    (KeyCode::Enter, m)
+                                        if m.contains(KeyModifiers::SUPER)
+                                            || m.contains(KeyModifiers::CONTROL) =>
+                                    {
+                                        let batch = drain(overlay);
+                                        if !batch.trim().is_empty() {
+                                            let outcomes =
+                                                config::apply_config_batch(&mut session, &batch)
+                                                    .await;
+                                            let ok = outcomes
+                                                .iter()
+                                                .filter(|o| {
+                                                    matches!(
+                                                        o,
+                                                        config::Applied::Local(_)
+                                                            | config::Applied::Forwarded(_)
+                                                    )
+                                                })
+                                                .count();
+                                            let failed = outcomes.len() - ok;
+                                            note = Some(if failed == 0 {
+                                                format!("config: {ok} line(s) applied")
+                                            } else {
+                                                format!("config: {ok} applied, {failed} failed")
+                                            });
                                         }
                                         view_state.command.escape();
                                     }
