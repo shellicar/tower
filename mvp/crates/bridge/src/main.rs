@@ -544,6 +544,7 @@ impl Host {
                         "refsDb": self.refs_path.to_string_lossy(),
                         "memoryDb": self.memory_path.to_string_lossy(),
                         "historyDb": self.history_path.to_string_lossy(),
+                        "permissions": &*self.permissions.read().unwrap(),
                     }
                 })
             );
@@ -752,10 +753,22 @@ async fn main() -> anyhow::Result<()> {
 
     // -c: a batch of control lines run before stdin takes over. Each writes its
     // response to stdout, so a launcher reads back a spawn's conversationId.
+    // A streamed parse, not a newline split: a value is whatever JSON says it
+    // is, not whatever fit on one line — a hand-written, pretty-printed
+    // `{"permissions": [...]}` spanning several lines is exactly as valid a
+    // single value as one crammed onto one line, and splitting on '\n' first
+    // would shred it into fragments that are each invalid (or worse, valid
+    // but meaningless) on their own.
     let args: Vec<String> = std::env::args().collect();
     if let Some(batch) = c_flag(&args) {
-        for line in batch.lines() {
-            handle_line(&host, line).await;
+        for parsed in serde_json::Deserializer::from_str(&batch).into_iter::<serde_json::Value>() {
+            match parsed {
+                Ok(value) => host.handle(value).await,
+                Err(e) => println!(
+                    "{}",
+                    serde_json::json!({ "error": format!("invalid JSON in -c batch: {e}") })
+                ),
+            }
         }
     }
 

@@ -39,6 +39,15 @@ pub struct ViewState {
     /// CPU saving — ratatui's diff already keeps the terminal writes minimal.
     layout_cache: HashMap<(String, usize, bool), Vec<Row>>,
     cache_width: usize,
+    /// Every config exchange (`j` mode or `-c`), pretty-printed, oldest
+    /// first — in memory, in the TUI, not a file: the whole reason this
+    /// exists is to be something you can actually look at without leaving.
+    pub config_log: Vec<String>,
+    /// The main panel shows the config log instead of the conversation
+    /// while this is set — its own scroll position, independent of the
+    /// conversation's, so flipping back and forth never loses either place.
+    pub secondary_open: bool,
+    pub secondary_scroll: usize,
 }
 
 impl ViewState {
@@ -52,6 +61,13 @@ impl ViewState {
     /// one way a sealed block changes, so the one external invalidation.
     pub fn invalidate_layout(&mut self) {
         self.layout_cache.clear();
+    }
+
+    /// One config exchange, appended — called from both entry points
+    /// (`-c`'s startup batch and the live `j` editor), so neither has its
+    /// own notion of what gets kept.
+    pub fn log_config(&mut self, line: &str) {
+        self.config_log.push(line.to_string());
     }
 }
 
@@ -406,7 +422,8 @@ pub fn draw(
     let input_lines = match &view.command {
         CommandMode::AttachEdit(overlay)
         | CommandMode::ModelEdit(overlay)
-        | CommandMode::CwdEdit(overlay) => overlay.lines().len(),
+        | CommandMode::CwdEdit(overlay)
+        | CommandMode::ConfigEdit(overlay) => overlay.lines().len(),
         _ => editor.lines().len(),
     };
     let input_height = (input_lines.min(5) + 2) as u16;
@@ -418,27 +435,49 @@ pub fn draw(
         Constraint::Length(1),
     ])
     .areas(frame.area());
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" {conv_id} "));
+    // The config log is a second, independent thing the main panel can show
+    // instead of the conversation — own title, own scroll, no hit map (there's
+    // nothing clickable in it), never touching the conversation's own state.
+    let title = if view.secondary_open {
+        " config log — esc/^/ closes ".to_string()
+    } else {
+        format!(" {conv_id} ")
+    };
+    let block = Block::default().borders(Borders::ALL).title(title);
     let inner = block.inner(main);
-
-    let rows = lay(conv, approvals, view, inner.width as usize, now_ms);
     let height = inner.height as usize;
-    // Clamp the scroll to the content, then window from the bottom.
-    let max_scroll = rows.len().saturating_sub(height);
-    view.scroll_from_bottom = view.scroll_from_bottom.min(max_scroll);
-    let skip = max_scroll - view.scroll_from_bottom;
 
-    let mut lines = Vec::with_capacity(height.min(rows.len()));
-    let mut hits = Vec::with_capacity(height.min(rows.len()));
-    for row in rows.into_iter().skip(skip).take(height) {
-        lines.push(row.line);
-        hits.push(HitRow {
-            block: row.hit,
-            links: row.links,
-        });
-    }
+    let (lines, hits) = if view.secondary_open {
+        let mut all: Vec<Line> = Vec::new();
+        for (i, entry) in view.config_log.iter().enumerate() {
+            if i > 0 {
+                all.push(Line::from(String::new()));
+            }
+            all.extend(entry.lines().map(|l| Line::from(l.to_string())));
+        }
+        let max_scroll = all.len().saturating_sub(height);
+        view.secondary_scroll = view.secondary_scroll.min(max_scroll);
+        let skip = max_scroll - view.secondary_scroll;
+        let lines: Vec<Line> = all.into_iter().skip(skip).take(height).collect();
+        (lines, Vec::new())
+    } else {
+        let rows = lay(conv, approvals, view, inner.width as usize, now_ms);
+        // Clamp the scroll to the content, then window from the bottom.
+        let max_scroll = rows.len().saturating_sub(height);
+        view.scroll_from_bottom = view.scroll_from_bottom.min(max_scroll);
+        let skip = max_scroll - view.scroll_from_bottom;
+
+        let mut lines = Vec::with_capacity(height.min(rows.len()));
+        let mut hits = Vec::with_capacity(height.min(rows.len()));
+        for row in rows.into_iter().skip(skip).take(height) {
+            lines.push(row.line);
+            hits.push(HitRow {
+                block: row.hit,
+                links: row.links,
+            });
+        }
+        (lines, hits)
+    };
     frame.render_widget(Paragraph::new(lines).block(block), main);
 
     let (input_title, active_editor) = match &view.command {
@@ -447,6 +486,10 @@ pub fn draw(
         }
         CommandMode::ModelEdit(model) => (" model (enter sets · esc backs out) ", model),
         CommandMode::CwdEdit(cwd) => (" cwd (enter changes · esc backs out) ", cwd),
+        CommandMode::ConfigEdit(config) => (
+            " config (⌘↵/^↵ sends · ↵ newline · esc backs out) ",
+            config,
+        ),
         _ => ("", editor),
     };
 
@@ -508,9 +551,15 @@ pub fn draw(
                 .add_modifier(Modifier::UNDERLINED),
         ));
     }
-    status_spans.push(match view.command {
+    status_spans.push(if view.secondary_open {
+        Span::styled(
+            " · config log · ↑/k ↓/j scroll · pgup/pgdn · esc/^/ closes",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )
+    } else {
+        match view.command {
         CommandMode::Root => Span::styled(
-            " · command: t text · i image · f file · d drop · y/n approval · m model · c cwd · j config · esc/^/ exit",
+            " · command: t text · i image · f file · d drop · y/n approval · m model · c cwd · j config · l log · esc/^/ exit",
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         ),
         CommandMode::AttachEdit(_) | CommandMode::ModelEdit(_) | CommandMode::CwdEdit(_) => {
@@ -528,6 +577,7 @@ pub fn draw(
         ),
         CommandMode::Closed => {
             Span::raw(" · ^/ commands · ⌘↵/^↵ says · ↵ breaks · esc cancels · ^c quits")
+        }
         }
     });
     frame.render_widget(Paragraph::new(Line::from(status_spans)), status);

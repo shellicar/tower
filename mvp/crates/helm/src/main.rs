@@ -89,13 +89,16 @@ async fn main() -> anyhow::Result<()> {
         None => session.spawn_conversation().await?,
     };
 
+    // Created here, before the alt screen, so the -c batch's outcomes have
+    // somewhere to land (`l` reopens this later in-session) as well as
+    // printing to stderr — the one moment this process can still write to
+    // the real terminal directly, before ratatui::init() claims the screen.
+    let mut view_state = ViewState::default();
     if let Some(batch) = config_batch {
         for outcome in config::apply_config_batch(&mut session, &batch).await {
-            match outcome {
-                config::Applied::Local(msg) => eprintln!("helm: config (local): {msg}"),
-                config::Applied::Forwarded(reply) => eprintln!("helm: config (bridge): {reply}"),
-                config::Applied::Invalid(err) => eprintln!("helm: config line skipped: {err}"),
-            }
+            let line = format_config_outcome(&outcome);
+            eprintln!("helm: {line}");
+            view_state.log_config(&line);
         }
     }
 
@@ -126,7 +129,6 @@ async fn main() -> anyhow::Result<()> {
     let mut conv = Conversation::default();
     let mut usage = Usage::default();
     let mut approvals = Approvals::default();
-    let mut view_state = ViewState::default();
     let mut editor = new_editor();
     let mut note: Option<String> = None;
     // Attachments pinned to the next say (submit.rs: the format contract).
@@ -261,8 +263,35 @@ async fn main() -> anyhow::Result<()> {
                                 KeyCode::Char('/') | KeyCode::Char('_') | KeyCode::Char('7')
                             ) && key.modifiers.contains(KeyModifiers::CONTROL) =>
                         {
-                            view_state.command.toggle();
+                            // Ctrl+/ closes the secondary view first if it's open —
+                            // command mode stays closed while the log is up (opening
+                            // it sets command to Closed), so toggle() would otherwise
+                            // open Root instead of closing what's actually showing.
+                            if view_state.secondary_open {
+                                view_state.secondary_open = false;
+                            } else {
+                                view_state.command.toggle();
+                            }
                         }
+                        // The secondary view claims keys the same way command mode
+                        // does while it's open: esc closes it, everything else here
+                        // scrolls its own position, never the conversation's.
+                        TermEvent::Key(key) if view_state.secondary_open => match key.code {
+                            KeyCode::Esc => view_state.secondary_open = false,
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                view_state.secondary_scroll += 1;
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                view_state.secondary_scroll =
+                                    view_state.secondary_scroll.saturating_sub(1);
+                            }
+                            KeyCode::PageUp => view_state.secondary_scroll += 10,
+                            KeyCode::PageDown => {
+                                view_state.secondary_scroll =
+                                    view_state.secondary_scroll.saturating_sub(10);
+                            }
+                            _ => {}
+                        },
                         // While command mode is open it claims every key:
                         // bound ones fire intents, the rest are swallowed.
                         TermEvent::Key(key) if view_state.command.is_open() => {
@@ -328,6 +357,10 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                     KeyCode::Char('j') => {
                                         view_state.command = CommandMode::ConfigEdit(new_editor());
+                                    }
+                                    KeyCode::Char('l') => {
+                                        view_state.secondary_open = true;
+                                        view_state.command = CommandMode::Closed;
                                     }
                                     KeyCode::Char(answer @ ('y' | 'n')) => {
                                         let target = approvals
@@ -423,22 +456,10 @@ async fn main() -> anyhow::Result<()> {
                                             let outcomes =
                                                 config::apply_config_batch(&mut session, &batch)
                                                     .await;
-                                            let ok = outcomes
-                                                .iter()
-                                                .filter(|o| {
-                                                    matches!(
-                                                        o,
-                                                        config::Applied::Local(_)
-                                                            | config::Applied::Forwarded(_)
-                                                    )
-                                                })
-                                                .count();
-                                            let failed = outcomes.len() - ok;
-                                            note = Some(if failed == 0 {
-                                                format!("config: {ok} line(s) applied")
-                                            } else {
-                                                format!("config: {ok} applied, {failed} failed")
-                                            });
+                                            for outcome in &outcomes {
+                                                view_state.log_config(&format_config_outcome(outcome));
+                                            }
+                                            note = Some(summarize_config_outcomes(&outcomes));
                                         }
                                         view_state.command.escape();
                                     }
@@ -504,6 +525,13 @@ async fn main() -> anyhow::Result<()> {
                             _ => forward_key(&mut editor, key),
                         },
                         TermEvent::Mouse(mouse) => match mouse.kind {
+                            MouseEventKind::ScrollUp if view_state.secondary_open => {
+                                view_state.secondary_scroll += WHEEL_LINES;
+                            }
+                            MouseEventKind::ScrollDown if view_state.secondary_open => {
+                                view_state.secondary_scroll =
+                                    view_state.secondary_scroll.saturating_sub(WHEEL_LINES);
+                            }
                             MouseEventKind::ScrollUp => view_state.scroll_from_bottom += WHEEL_LINES,
                             MouseEventKind::ScrollDown => {
                                 view_state.scroll_from_bottom =
@@ -589,6 +617,37 @@ fn open_link(href: &str) -> anyhow::Result<()> {
     }
     std::process::Command::new("open").arg(href).status()?;
     Ok(())
+}
+
+/// One outcome, pretty-printed — shared by both entry points (`-c`'s
+/// startup batch and the live `j` editor) so the config log reads the
+/// same regardless of which one produced a line.
+fn format_config_outcome(outcome: &config::Applied) -> String {
+    match outcome {
+        config::Applied::Local(msg) => format!("config (local): {msg}"),
+        config::Applied::Forwarded(reply) => format!(
+            "config (bridge): {}",
+            serde_json::to_string_pretty(reply).unwrap_or_else(|_| reply.to_string())
+        ),
+        config::Applied::Invalid(err) => format!("config error: {err}"),
+    }
+}
+
+/// The status bar is one fixed-height line (view.rs's `Constraint::Length(1)`)
+/// — nowhere near readable for a full `{"settings":{}}` reply. Every outcome
+/// already went into `view_state.config_log` (`l` opens it, scrollable, in
+/// the TUI); this is just a short pointer, not the content itself.
+fn summarize_config_outcomes(outcomes: &[config::Applied]) -> String {
+    let failed = outcomes
+        .iter()
+        .filter(|o| matches!(o, config::Applied::Invalid(_)))
+        .count();
+    let ok = outcomes.len() - failed;
+    if failed == 0 {
+        format!("config: {ok} line(s) applied — l to view")
+    } else {
+        format!("config: {ok} applied, {failed} failed — l to view")
+    }
 }
 
 /// A fresh editor with the widget defaults helm doesn't want: the default

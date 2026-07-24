@@ -13,11 +13,11 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// `Allow < Ask < Deny` by derive order — `Ord::max` across a set picks the
 /// strictest verdict without a bespoke comparison.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Verdict {
     Allow,
@@ -30,7 +30,7 @@ pub enum Verdict {
 /// (`read`, `write`, `delete`, `exec`, ...) it wants to override. Operation
 /// is an open label, never a fixed enum — a new tool just introduces a new
 /// key, nothing here constrains what exists.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rule {
     #[serde(rename = "match")]
     pub pattern: String,
@@ -42,7 +42,7 @@ pub struct Rule {
 /// The whole ordered list, as delivered by a `permissions` control line —
 /// one scoped blob, sent whole, replacing whatever was there. No partial
 /// edits: whoever configures this already holds the full list.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionSet(pub Vec<Rule>);
 
 impl PermissionSet {

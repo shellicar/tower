@@ -76,6 +76,22 @@ async fn pump(
     }
 }
 
+/// Append one control-line exchange to the same log bridge's own stderr
+/// goes to (`HELM_BRIDGE_LOG`) — one file for everything about the bridge
+/// conversation, not a second path to know about. Best-effort: a logging
+/// failure must never be why a control line itself fails.
+fn log_stdio(direction: &str, value: &serde_json::Value) {
+    let log_path = std::env::var("HELM_BRIDGE_LOG").unwrap_or_else(|_| "/tmp/helm-bridge.log".into());
+    if let Ok(mut log) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        use std::io::Write;
+        let _ = writeln!(log, "{direction} {value}");
+    }
+}
+
 impl Session {
     /// Spawn `bridge_path` with a fresh attach fd dup'd in as fd 3
     /// (`BRIDGE_ATTACH_FD`), alongside its ordinary stdio control pipes.
@@ -142,9 +158,15 @@ impl Session {
     /// this exchange. Bounded: a local child answers in milliseconds — an
     /// adopt's replay is the slow case and stays well inside — so silence
     /// past the bound means bridge is gone, and EOF says so outright.
+    ///
+    /// Every line either direction is logged unconditionally (`log_stdio`) —
+    /// this is the one channel bridge's control surface rides, spawn/adopt/
+    /// model/skills/permissions/settings alike, so it's infrastructure, not
+    /// a feature toggle: on regardless of what called `control`.
     pub async fn control(&mut self, line: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
         let mut bytes = serde_json::to_vec(line)?;
         bytes.push(b'\n');
+        log_stdio("→", line);
         self.control_out.write_all(&bytes).await?;
         let mut reply = String::new();
         let n = tokio::time::timeout(
@@ -156,7 +178,9 @@ impl Session {
         if n == 0 {
             anyhow::bail!("bridge closed stdout before answering — it has exited");
         }
-        Ok(serde_json::from_str(reply.trim_end())?)
+        let value: serde_json::Value = serde_json::from_str(reply.trim_end())?;
+        log_stdio("←", &value);
+        Ok(value)
     }
 
     /// The conversation this session's spawn control line minted.

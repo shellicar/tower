@@ -21,38 +21,78 @@ pub enum Applied {
     Invalid(String),
 }
 
-/// One JSON object, dispatched. A key helm recognizes as its own would be
-/// applied locally here first and never reach bridge — none exist yet:
-/// helm has no local config surface implemented today, so this is the
-/// hook such a key would join, not a placeholder standing in for one that
-/// already works. Everything else rides through to bridge's control
-/// channel exactly as given, unexamined; bridge's own validation is what
-/// decides whether an unrecognized key was ever valid config at all.
-pub async fn apply_config_line(session: &mut Session, line: &str) -> Applied {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return Applied::Invalid("empty line".to_string());
-    }
-    let value: serde_json::Value = match serde_json::from_str(trimmed) {
-        Ok(v) => v,
-        Err(e) => return Applied::Invalid(format!("invalid JSON: {e}")),
-    };
+/// One already-parsed JSON value, dispatched. A key helm recognizes as its
+/// own would be applied locally here first and never reach bridge — none
+/// exist yet: helm has no local config surface implemented today, so this
+/// is the hook such a key would join, not a placeholder standing in for
+/// one that already works. Everything else rides through to bridge's
+/// control channel exactly as given, unexamined; bridge's own validation
+/// is what decides whether an unrecognized key was ever valid config.
+pub async fn apply_config_value(session: &mut Session, value: serde_json::Value) -> Applied {
     match session.control(&value).await {
         Ok(reply) => Applied::Forwarded(reply),
         Err(e) => Applied::Invalid(format!("control failed: {e}")),
     }
 }
 
-/// Every non-blank line of a `-c`-style batch, applied in order — the
-/// same grammar and the same one-line-at-a-time discipline bridge's own
-/// `-c` uses, one layer up.
+/// A streamed parse, not a newline split: every complete JSON value in
+/// `batch`, in order, however many lines each one happens to span. A
+/// hand-written, pretty-printed value (a `permissions` list is routinely
+/// several lines) is exactly as valid as one crammed onto a single line;
+/// splitting on '\n' first would shred it into fragments that are each
+/// invalid, or worse, valid but meaningless, on their own — bridge's own
+/// `-c` has the identical fix for the identical reason. Pulled out from
+/// `apply_config_batch` so this part is testable without a live `Session`.
+fn parse_batch(batch: &str) -> Vec<Result<serde_json::Value, String>> {
+    serde_json::Deserializer::from_str(batch)
+        .into_iter::<serde_json::Value>()
+        .map(|r| r.map_err(|e| e.to_string()))
+        .collect()
+}
+
+/// Every value in a `-c`-style batch, applied in order.
 pub async fn apply_config_batch(session: &mut Session, batch: &str) -> Vec<Applied> {
     let mut results = Vec::new();
-    for line in batch.lines() {
-        if line.trim().is_empty() {
-            continue;
+    for parsed in parse_batch(batch) {
+        match parsed {
+            Ok(value) => results.push(apply_config_value(session, value).await),
+            Err(e) => results.push(Applied::Invalid(format!("invalid JSON: {e}"))),
         }
-        results.push(apply_config_line(session, line).await);
     }
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_batch;
+
+    #[test]
+    fn a_pretty_printed_multiline_value_parses_as_one_value_not_shredded_by_line() {
+        // The exact shape that broke: a permissions list, written the way a
+        // human actually writes one, spanning several lines.
+        let batch = r#"{"permissions": [
+  { "match": "$PWD", "default": "allow", "delete": "ask" },
+  { "match": "*", "default": "ask" }
+]}"#;
+        let results = parse_batch(batch);
+        assert_eq!(results.len(), 1, "one value, however many lines it spans");
+        let value = results[0].as_ref().expect("valid JSON");
+        assert_eq!(value["permissions"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn multiple_values_back_to_back_each_parse_separately() {
+        let batch = "{\"model\": \"a\"}\n{\"cwd\": \"/tmp\"}\n";
+        let results = parse_batch(batch);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].as_ref().unwrap()["model"], "a");
+        assert_eq!(results[1].as_ref().unwrap()["cwd"], "/tmp");
+    }
+
+    #[test]
+    fn genuinely_broken_json_is_reported_not_silently_dropped() {
+        let results = parse_batch("{ not json");
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_err());
+    }
 }
