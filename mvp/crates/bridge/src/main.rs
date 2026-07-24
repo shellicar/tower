@@ -58,6 +58,7 @@ mod stream;
 
 use std::sync::{Arc, RwLock};
 
+use anyhow::Context;
 use futures::StreamExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use wire::now_iso;
@@ -655,7 +656,11 @@ async fn main() -> anyhow::Result<()> {
     let history_store = history::open(&history_path).map_err(|e| anyhow::anyhow!(e))?;
     let history_path_for_settings = history_path.clone();
 
-    let client = async_nats::connect(&nats_url).await?; // fail-fast
+    let client = async_nats::connect(&nats_url).await.with_context(|| {
+        format!(
+            "could not reach NATS at {nats_url} — is it running? (docker compose up -d, or set NATS_URL)"
+        )
+    })?; // fail-fast
 
     // The attach pipes are set only by a local TUI's spawn, never by tower.
     // Presence alone is worth a startup line — this is the one place bridge

@@ -2,6 +2,7 @@
 //! is the design's: open db → read cursor → connect broker → spawn loops.
 //! Shutdown = crash: transactions make them the same path.
 
+use anyhow::Context;
 use tokio::sync::{broadcast, mpsc};
 
 use towerd::broker::{NatsBroker, SystemClock};
@@ -37,7 +38,9 @@ async fn main() -> anyhow::Result<()> {
     let db = rusqlite::Connection::open(&db_path)?;
     apply_schema(&db)?;
 
-    let client = async_nats::connect(&nats_url).await?; // fail-fast
+    let client = async_nats::connect(&nats_url).await.with_context(|| {
+        format!("could not reach NATS at {nats_url} — is it running? (docker compose up -d, or set NATS_URL)")
+    })?; // fail-fast
 
     let (events_tx, events_rx) = mpsc::channel::<(String, u64, wire::WireEvent)>(1024);
     let (queries_tx, queries_rx) = mpsc::channel::<views::ViewQuery>(64);
