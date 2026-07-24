@@ -120,7 +120,7 @@ target_max_age_for() {
   esac
 }
 
-echo "## Phase 1: release every existing stream to current \u2229 final (safe, removal-only)"
+echo "## Phase 1: release every existing stream to current ∩ final (safe, removal-only)"
 for stream in $ALL_STREAMS; do
   if ! stream_exists "$stream"; then
     continue

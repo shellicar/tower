@@ -1,0 +1,4 @@
+# Shell scripts run inside Linux containers (stream-init.sh via nats-box) —
+# a CRLF checkout on Windows breaks them at the first line ("\r: not found",
+# "set: illegal option -"). Force LF regardless of the machine's autocrlf.
+*.sh text eol=lf
