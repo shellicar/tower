@@ -21,9 +21,9 @@ use approvals::Approvals;
 use command::CommandMode;
 use conversation::Conversation;
 use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, Event as TermEvent, KeyCode, KeyModifiers,
-    KeyboardEnhancementFlags, MouseButton, MouseEventKind, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    DisableMouseCapture, EnableMouseCapture, Event as TermEvent, KeyCode, KeyEventKind,
+    KeyModifiers, KeyboardEnhancementFlags, MouseButton, MouseEventKind,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use submit::{Chip, FileKind, build_submit};
 use transport::Session;
@@ -47,6 +47,14 @@ fn spawn_input_thread() -> tokio::sync::mpsc::UnboundedReceiver<TermEvent> {
     std::thread::spawn(move || {
         loop {
             match crossterm::event::read() {
+                // Windows' console reports key-up (release) alongside key-down
+                // regardless of which enhancement flags are requested; Linux
+                // terminals only ever send this without REPORT_EVENT_TYPES
+                // (not requested here), so every key there is a Press. Without
+                // this filter, Windows fires every binding twice per physical
+                // press — a toggle undoes itself, and holding a key repeats
+                // the press/release pair rapidly.
+                Ok(TermEvent::Key(key)) if key.kind != KeyEventKind::Press => {}
                 Ok(event @ (TermEvent::Key(_) | TermEvent::Mouse(_))) => {
                     if tx.send(event).is_err() {
                         return;
