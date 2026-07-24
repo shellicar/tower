@@ -147,7 +147,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      # pnpm/action-setup reads `packageManager` from the repo ROOT
+      # package.json (there isn't one — mvp/frontend/package.json is a
+      # subdirectory), so the version has to be passed explicitly here
+      # instead of relying on file detection.
       - uses: pnpm/action-setup@v4
+        with:
+          version: 11
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
