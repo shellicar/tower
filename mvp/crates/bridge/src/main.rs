@@ -58,6 +58,7 @@ mod stream;
 
 use std::sync::{Arc, RwLock};
 
+use anyhow::Context;
 use futures::StreamExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use wire::now_iso;
@@ -69,11 +70,11 @@ const PULSE_INTERVAL_S: i64 = 30;
 /// ever resolved — anywhere else, it stays a literal tilde character.
 fn expand_tilde(path: &str) -> std::path::PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
+        if let Some(home) = bridge::home::home_dir() {
             return std::path::PathBuf::from(home).join(rest);
         }
     } else if path == "~"
-        && let Ok(home) = std::env::var("HOME")
+        && let Some(home) = bridge::home::home_dir()
     {
         return std::path::PathBuf::from(home);
     }
@@ -232,6 +233,9 @@ struct Host {
     instance: String,
     default_model: Arc<RwLock<String>>,
     auth: anthropic::Auth,
+    /// The shared, keepalive-configured HTTP client (anthropic.rs's
+    /// `build_http_client`) every conversation's messages-API calls share.
+    http: reqwest::Client,
     skills_root: Arc<RwLock<std::path::PathBuf>>,
     system: Arc<RwLock<Option<String>>>,
     context: Arc<RwLock<Option<String>>>,
@@ -246,9 +250,9 @@ struct Host {
     refs_path: std::path::PathBuf,
     memory_path: std::path::PathBuf,
     history_path: std::path::PathBuf,
-    // The local TUI's direct duplex, if this instance was spawned with one
-    // (BRIDGE_ATTACH_FD). None for every tower-spawned instance today; NATS
-    // stays the only channel regardless of this field's value.
+    // The local TUI's direct channel, if this instance was spawned with one
+    // (BRIDGE_ATTACH_FD_DOWN/_UP). None for every tower-spawned instance
+    // today; NATS stays the only channel regardless of this field's value.
     attach: Option<bridge::attach::AttachHandle>,
     /// Conversations this instance serves — what a chdir republishes
     /// `attached` for (the cwd is causal; agent-spec scenario a4).
@@ -269,6 +273,7 @@ impl Host {
             system: Arc::clone(&self.system),
             context: Arc::clone(&self.context),
             auth: self.auth.clone(),
+            http: self.http.clone(),
             skills_root: Arc::clone(&self.skills_root),
             refs: Arc::clone(&self.refs),
             memory: Arc::clone(&self.memory),
@@ -632,9 +637,9 @@ async fn main() -> anyhow::Result<()> {
     let memory_path = std::env::var("BRIDGE_MEMORY_DB")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {
-            std::env::var("HOME")
+            bridge::home::home_dir()
                 .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join(".claude")
                 .join("memory.db")
         });
@@ -646,27 +651,31 @@ async fn main() -> anyhow::Result<()> {
     let history_path = std::env::var("BRIDGE_HISTORY_DB")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {
-            std::env::var("HOME")
+            bridge::home::home_dir()
                 .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join(".claude")
                 .join("history.db")
         });
     let history_store = history::open(&history_path).map_err(|e| anyhow::anyhow!(e))?;
     let history_path_for_settings = history_path.clone();
 
-    let client = async_nats::connect(&nats_url).await?; // fail-fast
+    let client = async_nats::connect(&nats_url).await.with_context(|| {
+        format!(
+            "could not reach NATS at {nats_url} — is it running? (docker compose up -d, or set NATS_URL)"
+        )
+    })?; // fail-fast
 
-    // The attach fd is set only by a local TUI's spawn, never by tower.
+    // The attach pipes are set only by a local TUI's spawn, never by tower.
     // Presence alone is worth a startup line — this is the one place bridge
-    // ever says it has a second, non-NATS interface live. Duplex: the write
-    // half tees events and replies; the read half serves the client's
-    // requests, proxied onto NATS here so the client dials no broker.
-    let attach = bridge::attach::attach_stream().map(|stream| {
-        let (read_half, write_half) = stream.into_split();
-        let handle = std::sync::Arc::new(tokio::sync::Mutex::new(write_half));
+    // ever says it has a second, non-NATS interface live. Two one-way pipes,
+    // not a duplex socket: the down sender tees events and replies; the up
+    // recver serves the client's requests, proxied onto NATS here so the
+    // client dials no broker.
+    let attach = bridge::attach::attach_stream().map(|(down_tx, up_rx)| {
+        let handle = std::sync::Arc::new(tokio::sync::Mutex::new(down_tx));
         tokio::spawn(bridge::attach::serve_requests(
-            read_half,
+            up_rx,
             std::sync::Arc::clone(&handle),
             client.clone(),
             attach_bucket.clone(),
@@ -676,7 +685,7 @@ async fn main() -> anyhow::Result<()> {
     eprintln!(
         "bridge: attach channel {}",
         if attach.is_some() {
-            "present (BRIDGE_ATTACH_FD)"
+            "present (BRIDGE_ATTACH_FD_DOWN/_UP)"
         } else {
             "absent"
         }
@@ -743,6 +752,7 @@ async fn main() -> anyhow::Result<()> {
         attach,
         served: Arc::new(RwLock::new(Vec::new())),
         auth,
+        http: anthropic::build_http_client(),
         skills_root,
         system: Arc::new(RwLock::new(None)),
         context: Arc::new(RwLock::new(None)),

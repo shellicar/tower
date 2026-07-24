@@ -11,6 +11,35 @@ use wire::ConversationId;
 
 pub const MAX_TOKENS: i64 = 8192;
 
+/// Built once at startup (main.rs) and threaded down through `AgentConfig`/
+/// `TurnContext` alongside the NATS client, `Auth`, and every other shared
+/// resource — the same pattern this crate already uses for state that many
+/// concurrent conversations share, not a special case for this one. A
+/// multi-agent headless bridge can easily have several of these streaming
+/// requests open to the messages API at once, and `reqwest::Client`'s pool
+/// (cheap to clone; internally `Arc`-backed) is built for exactly that kind
+/// of concurrent, shared use — each request still gets its own connection
+/// (no `http2` cargo feature is enabled; see `Cargo.toml`'s comment on
+/// keeping this crate's reqwest footprint to plain streamed HTTPS), but the
+/// pool still avoids a fresh TCP+TLS handshake per turn.
+///
+/// Keepalive is the point of building it explicitly rather than
+/// `Client::new()`: a streaming request sits genuinely idle at the TCP level
+/// for however long the model takes to produce its first byte (extended
+/// thinking can be a long wait), and with no traffic at all in that window
+/// some path in between — a NAT, a firewall, Windows' own stack, a corporate
+/// proxy — can decide the connection is dead and reset it, surfacing here as
+/// `os error 10054` ("An existing connection was forcibly closed by the
+/// remote host") on Windows specifically, though nothing about the cause is
+/// actually Windows-only. TCP keepalive gives the connection a heartbeat so
+/// it's never mistaken for dead during that idle stretch.
+pub fn build_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .tcp_keepalive(std::time::Duration::from_secs(30))
+        .build()
+        .expect("reqwest client")
+}
+
 /// The OAuth token endpoint and client id claude-sdk-cli itself uses
 /// (packages/claude-sdk/src/private/Client/Auth/consts.ts) — refreshing a
 /// Claude Code credential means speaking the same grant to the same client.
@@ -41,7 +70,8 @@ impl Auth {
         if std::env::var_os("ANTHROPIC_API_KEY").is_some() {
             return Ok(Auth::ApiKey);
         }
-        let home = std::env::var("HOME").map_err(|_| anyhow::anyhow!("HOME not set"))?;
+        let home = bridge::home::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("HOME (or USERPROFILE) not set"))?;
         let path = format!("{home}/.claude/.credentials.json");
         read_credentials(&path)?; // validate now, discard the secret
         Ok(Auth::OAuth { path })
@@ -52,6 +82,7 @@ impl Auth {
     async fn apply(
         &self,
         request: reqwest::RequestBuilder,
+        http: &reqwest::Client,
     ) -> anyhow::Result<reqwest::RequestBuilder> {
         Ok(match self {
             Auth::ApiKey => {
@@ -62,7 +93,7 @@ impl Auth {
             Auth::OAuth { path } => request
                 .header(
                     "authorization",
-                    format!("Bearer {}", oauth_token(path).await?),
+                    format!("Bearer {}", oauth_token(path, http).await?),
                 )
                 .header("anthropic-beta", "oauth-2025-04-20"),
         })
@@ -88,7 +119,7 @@ fn now_ms() -> i64 {
 /// file first if `expiresAt` has passed — the same check claude-sdk-cli's
 /// `isExpired` makes — so an expired token degrades to one extra round trip
 /// instead of failing the turn. Called fresh per request; nothing cached.
-async fn oauth_token(path: &str) -> anyhow::Result<String> {
+async fn oauth_token(path: &str, http: &reqwest::Client) -> anyhow::Result<String> {
     let mut creds = read_credentials(path)?;
     let expires_at = creds["claudeAiOauth"]["expiresAt"].as_i64().unwrap_or(0);
     if now_ms() >= expires_at {
@@ -96,7 +127,7 @@ async fn oauth_token(path: &str) -> anyhow::Result<String> {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("{path} has no claudeAiOauth.refreshToken"))?
             .to_string();
-        creds = refresh_credentials(&refresh_token).await?;
+        creds = refresh_credentials(&refresh_token, http).await?;
         // Write back so the next process — this bridge or a live claude-sdk-cli
         // sharing the same file — picks up the refreshed token too.
         std::fs::write(path, serde_json::to_vec_pretty(&creds)?)
@@ -114,8 +145,8 @@ async fn oauth_token(path: &str) -> anyhow::Result<String> {
 /// readable by the CLI too. `subscriptionType`/`rateLimitTier` reset to empty
 /// on refresh — the token endpoint doesn't return them, and the reference
 /// implementation does the same.
-async fn refresh_credentials(refresh_token: &str) -> anyhow::Result<Value> {
-    let response = reqwest::Client::new()
+async fn refresh_credentials(refresh_token: &str, http: &reqwest::Client) -> anyhow::Result<Value> {
+    let response = http
         .post(TOKEN_URL)
         .json(&json!({
             "grant_type": "refresh_token",
@@ -204,6 +235,7 @@ pub struct TurnDone {
 #[allow(clippy::too_many_arguments)]
 pub async fn stream_turn(
     client: &async_nats::Client,
+    http: &reqwest::Client,
     conv: &ConversationId,
     auth: &Auth,
     model: &str,
@@ -261,11 +293,11 @@ pub async fn stream_turn(
             json!({ "type": "enabled", "budget_tokens": budget, "display": "summarized" });
     }
 
-    let request = reqwest::Client::new()
+    let request = http
         .post("https://api.anthropic.com/v1/messages")
         .header("anthropic-version", "2023-06-01")
         .json(&body);
-    let response = auth.apply(request).await?.send().await?;
+    let response = auth.apply(request, http).await?.send().await?;
     if !response.status().is_success() {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();

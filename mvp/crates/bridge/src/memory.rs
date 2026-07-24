@@ -298,6 +298,12 @@ pub fn types(store: &MemoryStore) -> Result<Vec<(String, i64)>, String> {
 pub async fn read_git_environment(cwd: Option<&str>) -> Value {
     let mut cmd = tokio::process::Command::new("git");
     cmd.args(["config", "--get", "remote.origin.url"]);
+    // Explicit, not inherited: bridge's own stdin is a pipe from helm's
+    // control protocol (transport.rs), and leaving a child's stdio on
+    // Windows default/inherited has been a suspect for a hang here.
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
@@ -346,7 +352,6 @@ mod tests {
         migrate(&conn).unwrap();
         Arc::new(Mutex::new(conn))
     }
-
     fn draft(title: &str, body: &str, kind: &str, keywords: &[&str]) -> MemoryDraft {
         MemoryDraft {
             title: title.into(),

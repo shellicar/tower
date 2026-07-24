@@ -5,3 +5,4 @@
 //! duplicating it.
 
 pub mod attach;
+pub mod home;

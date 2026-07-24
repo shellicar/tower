@@ -72,6 +72,10 @@ pub struct AgentConfig {
     /// conversations spawned after it.
     pub context: Arc<std::sync::RwLock<Option<String>>>,
     pub auth: crate::anthropic::Auth,
+    /// The shared, keepalive-configured HTTP client every turn's messages-API
+    /// call goes through (anthropic.rs's `build_http_client`) — built once at
+    /// startup, threaded the same way as every other shared resource here.
+    pub http: reqwest::Client,
     /// The skills directory, shared and mutable so a stdio `skills` control
     /// line can repoint it live. Re-scanned per say: the first say commits the
     /// full catalogue and records the delta baseline; later says commit a
@@ -470,6 +474,7 @@ async fn accept_say(
         model: config.model.read().unwrap().clone(),
         system: Arc::clone(&config.system),
         auth: config.auth.clone(),
+        http: config.http.clone(),
         skills,
         query: query.clone(),
         turn,
@@ -503,6 +508,7 @@ struct TurnContext {
     model: String,
     system: Arc<std::sync::RwLock<Option<String>>>,
     auth: crate::anthropic::Auth,
+    http: reqwest::Client,
     skills: Arc<Skills>,
     query: String,
     turn: String,
@@ -555,6 +561,7 @@ async fn run_query(
         model,
         system,
         auth,
+        http,
         skills,
         query,
         turn,
@@ -611,6 +618,7 @@ async fn run_query(
         let outcome = tokio::select! {
             outcome = anthropic::stream_turn(
                 client,
+                http,
                 conv,
                 auth,
                 model,
@@ -823,7 +831,7 @@ async fn run_tool_round(
     cwd: &std::path::Path,
     permissions: &std::sync::RwLock<crate::permissions::PermissionSet>,
 ) -> Vec<Value> {
-    let home = std::env::var("HOME")
+    let home = bridge::home::home_dir()
         .map(std::path::PathBuf::from)
         .unwrap_or_default();
     // The gate: a tool_use for anything not in THIS turn's offered set is
@@ -889,8 +897,13 @@ async fn run_tool_round(
             // currently runs.
             "Bash" => {
                 let here = cwd.to_path_buf();
-                match permission_verdict(permissions, cwd, &home, "exec", std::slice::from_ref(&here))
-                {
+                match permission_verdict(
+                    permissions,
+                    cwd,
+                    &home,
+                    "exec",
+                    std::slice::from_ref(&here),
+                ) {
                     crate::permissions::Verdict::Deny => {
                         ("denied by permissions policy".to_string(), true)
                     }
@@ -900,7 +913,8 @@ async fn run_tool_round(
                     }
                     crate::permissions::Verdict::Ask => {
                         let approval_id = uuid::Uuid::new_v4().to_string();
-                        let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                        let ask =
+                            json!({ "type": "tool_use", "name": name, "input": block["input"] });
                         let correlation = json!({
                             "conversationId": pubr.conv().0,
                             "queryId": query,
@@ -961,8 +975,7 @@ async fn run_tool_round(
                         }
                         crate::permissions::Verdict::Ask => {
                             let approval_id = uuid::Uuid::new_v4().to_string();
-                            let ask =
-                                json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                            let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
                             let correlation = json!({
                                 "conversationId": pubr.conv().0,
                                 "queryId": query,

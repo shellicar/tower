@@ -1,29 +1,28 @@
-//! The one thing that touches the attach fd and bridge's stdio: spawns
+//! The one thing that touches the attach channel and bridge's stdio: spawns
 //! bridge, speaks its untouched one-line-in/one-line-out control protocol,
-//! decodes attach-fd lines, and sends requests up the same fd as
+//! decodes attach lines, and sends requests up the same channel as
 //! id-correlated envelopes bridge proxies onto NATS. helm dials nothing but
 //! its own child's pipes — NATS is bridge's concern alone. Holds no domain
 //! state — same contract as tower frontend's core/transport.ts, pump
-//! included: a background task owns the read half from the first instant
+//! included: a background task owns the recver from the first instant
 //! (events to a channel, replies to correlated oneshots), so no await ever
 //! blocks the render loop and a reply-before-drain deadlock is structurally
 //! impossible.
 
 use std::collections::HashMap;
-use std::os::fd::AsRawFd;
-use std::os::unix::net::UnixStream as StdUnixStream;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::Context;
 use base64::Engine;
+use bridge::attach::AttachHandle;
+use interprocess::unnamed_pipe::tokio::Recver;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
 
-/// One event as it arrived over the attach fd. `subject` is conv.v2's own
+/// One event as it arrived over the attach channel. `subject` is conv.v2's own
 /// leaf (the routing axis spells the type, per the wire spec); `payload` is
 /// the raw JSON bytes, undecoded here — `wire::parse_wire(subject, payload)`
 /// is the one decode, same as ingest's own edge fold.
@@ -42,20 +41,20 @@ pub struct Session {
 }
 
 /// The cloneable request half: any task can send an envelope and await its
-/// correlated reply without touching the read side — the pump routes replies
+/// correlated reply without touching the down pipe — the pump routes replies
 /// to the oneshot registered here.
 #[derive(Clone)]
 pub struct Requester {
-    write: Arc<tokio::sync::Mutex<OwnedWriteHalf>>,
+    write: AttachHandle,
     pending: Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>>>,
     next_id: Arc<AtomicU64>,
 }
 
-/// The read half's one owner: events fan to the channel, replies resolve
+/// The down pipe's one reader: events fan to the channel, replies resolve
 /// their oneshot. Unparseable lines are skipped (tolerance); EOF drops the
 /// sender, which ends `next_event` with None.
 async fn pump(
-    read: OwnedReadHalf,
+    read: Recver,
     events: mpsc::UnboundedSender<AttachEvent>,
     pending: Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>>>,
 ) {
@@ -82,7 +81,11 @@ async fn pump(
 /// conversation, not a second path to know about. Best-effort: a logging
 /// failure must never be why a control line itself fails.
 fn log_stdio(direction: &str, value: &serde_json::Value) {
-    let log_path = std::env::var("HELM_BRIDGE_LOG").unwrap_or_else(|_| "/tmp/helm-bridge.log".into());
+    // Same default as Session::spawn's own log file - see its comment for
+    // why a bare "/tmp/..." is a Windows portability bug, not just style.
+    let log_path = std::env::var("HELM_BRIDGE_LOG")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir().join("helm-bridge.log"));
     if let Ok(mut log) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -94,58 +97,67 @@ fn log_stdio(direction: &str, value: &serde_json::Value) {
 }
 
 impl Session {
-    /// Spawn `bridge_path` with a fresh attach fd dup'd in as fd 3
-    /// (`BRIDGE_ATTACH_FD`), alongside its ordinary stdio control pipes.
+    /// Spawn `bridge_path` with a fresh attach channel (two inheritable
+    /// pipes, named by `bridge::attach::ATTACH_FD_DOWN`/`ATTACH_FD_UP`),
+    /// alongside its ordinary stdio control pipes.
     pub async fn spawn(bridge_path: &str) -> anyhow::Result<Self> {
-        let (parent_end, child_end) = StdUnixStream::pair()?;
-        let child_raw = child_end.as_raw_fd();
+        let pipes = bridge::attach::attach_pipes()?;
 
         let mut cmd = Command::new(bridge_path);
-        cmd.env("BRIDGE_ATTACH_FD", "3");
+        cmd.env(bridge::attach::ATTACH_FD_DOWN, &pipes.down_value);
+        cmd.env(bridge::attach::ATTACH_FD_UP, &pipes.up_value);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
-        // bridge's stderr must never reach helm's terminal — the alternate
+        // Belt and suspenders: bridge is meant to notice its own stdin close
+        // and exit itself, but on Windows an orphaned bridge.exe has been
+        // observed to sit around indefinitely after helm exits (e.g. via
+        // Ctrl+C) instead of ever seeing that EOF. `kill_on_drop` makes helm
+        // itself responsible for bridge's lifetime: whenever this `Child`
+        // is dropped - clean exit, Ctrl+C, or a panic mid-unwind - the OS is
+        // told to end the process directly, with no dependence on bridge
+        // ever observing anything.
+        cmd.kill_on_drop(true);
+        // bridge's stderr must never reach helm's terminal - the alternate
         // screen is helm's alone. The log survives in a file instead.
-        let log_path =
-            std::env::var("HELM_BRIDGE_LOG").unwrap_or_else(|_| "/tmp/helm-bridge.log".into());
-        let log = std::fs::File::create(&log_path)
-            .with_context(|| format!("failed to create bridge log at '{log_path}' (set HELM_BRIDGE_LOG to a writable path)"))?;
+        // `/tmp` is a Unix-only default: a hardcoded `/tmp/...` resolves on
+        // Windows to `\tmp` on the *current drive*, which usually doesn't
+        // exist, so `File::create` fails and bridge never spawns at all -
+        // silently, before raw mode, so it just looks like helm exited (or,
+        // on a machine where `C:\tmp` happens to exist already, works by
+        // accident instead of by design). `temp_dir()` is `%TEMP%` on
+        // Windows and `/tmp` on Unix, so one default works everywhere;
+        // `HELM_BRIDGE_LOG` still overrides it explicitly.
+        let log_path = std::env::var("HELM_BRIDGE_LOG")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir().join("helm-bridge.log"));
+        let log = std::fs::File::create(&log_path).with_context(|| {
+            format!(
+                "failed to create bridge log at '{}' (set HELM_BRIDGE_LOG to a writable path)",
+                log_path.display()
+            )
+        })?;
         cmd.stderr(Stdio::from(log));
-
-        // SAFETY: dup2 only, between fork and exec — see bridge::attach's
-        // own doc for the same discipline.
-        unsafe {
-            cmd.pre_exec(move || {
-                if libc::dup2(child_raw, 3) < 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
 
         let mut child = cmd.spawn().with_context(|| {
             format!(
                 "failed to spawn bridge at '{bridge_path}' — set HELM_BRIDGE_PATH to its binary"
             )
         })?;
-        drop(child_end);
+        let (up_tx, down_rx) = pipes.forget_child_ends();
 
         let control_out = child.stdin.take().expect("piped stdin");
         let control_in = BufReader::new(child.stdout.take().expect("piped stdout"));
 
-        parent_end.set_nonblocking(true)?;
-        let (read_half, write_half) = tokio::net::UnixStream::from_std(parent_end)?.into_split();
-
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         let pending = Arc::new(std::sync::Mutex::new(HashMap::new()));
-        tokio::spawn(pump(read_half, events_tx, Arc::clone(&pending)));
+        tokio::spawn(pump(down_rx, events_tx, Arc::clone(&pending)));
 
         Ok(Self {
             child,
             control_out,
             control_in,
             requester: Requester {
-                write: Arc::new(tokio::sync::Mutex::new(write_half)),
+                write: Arc::new(tokio::sync::Mutex::new(up_tx)),
                 pending,
                 next_id: Arc::new(AtomicU64::new(0)),
             },
@@ -160,7 +172,7 @@ impl Session {
 
     /// Send one control line, read its one reply line — bridge's existing
     /// stdio contract, untouched by helm's presence. The pump drains the
-    /// attach fd throughout, so an adopt's history flood can never deadlock
+    /// attach channel throughout, so an adopt's history flood can never deadlock
     /// this exchange. Bounded: a local child answers in milliseconds — an
     /// adopt's replay is the slow case and stays well inside — so silence
     /// past the bound means bridge is gone, and EOF says so outright.
@@ -200,7 +212,7 @@ impl Session {
 
     /// Adopt an existing conversation: bridge replays the record from the
     /// capture stream, serves on from its tip, and — with this session's
-    /// attach fd present — tees the replayed frames to us, so the history
+    /// attach channel present — tees the replayed frames to us, so the history
     /// arrives through the same fold as live traffic. No client-side store.
     pub async fn adopt_conversation(&mut self, conv: &str) -> anyhow::Result<wire::ConversationId> {
         let reply = self
@@ -212,14 +224,14 @@ impl Session {
         Ok(wire::ConversationId(id.to_string()))
     }
 
-    /// One event off the attach fd, or `None` once it closes (bridge exited).
+    /// One event off the attach channel, or `None` once it closes (bridge exited).
     pub async fn next_event(&mut self) -> Option<AttachEvent> {
         self.events.recv().await
     }
 }
 
 impl Requester {
-    /// One request envelope up the fd, its correlated reply awaited on a
+    /// One request envelope up the channel, its correlated reply awaited on a
     /// oneshot the pump resolves. Callable from any spawned task.
     async fn request(&self, mut envelope: serde_json::Value) -> anyhow::Result<serde_json::Value> {
         let id = format!("r{}", self.next_id.fetch_add(1, Ordering::Relaxed) + 1);
@@ -234,7 +246,7 @@ impl Requester {
         }
         let payload = rx
             .await
-            .map_err(|_| anyhow::anyhow!("attach fd closed while awaiting a reply"))?;
+            .map_err(|_| anyhow::anyhow!("attach channel closed while awaiting a reply"))?;
         if let Some(error) = payload["error"].as_str() {
             anyhow::bail!("{error}");
         }
@@ -304,7 +316,7 @@ impl Requester {
         Ok(wire::parse_answer_reply(&reply))
     }
 
-    /// Upload raw bytes for an attachment: base64 up the fd, bridge puts them
+    /// Upload raw bytes for an attachment: base64 up the channel, bridge puts them
     /// in the transit object store and mints the reference block back. Only
     /// images come this way — files attach as path metadata in the submit
     /// text (submit.rs, the reference's format), never as bytes.
@@ -330,7 +342,7 @@ impl Requester {
     }
 }
 
-/// One framed line off the fd: an event (`{subject, payload}`) or a request
+/// One framed line off the down pipe: an event (`{subject, payload}`) or a request
 /// reply (`{id, payload}`).
 enum Parsed {
     Event(AttachEvent),

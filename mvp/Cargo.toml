@@ -75,6 +75,14 @@ unicode-width = "0.2"
 # (inline emphasis resolution is the part not worth hand-rolling). Maintained
 # (0.13.x, 2026 releases), no default-feature baggage.
 pulldown-cmark = { version = "0.13", default-features = false }
+# The attach channel's cross-platform inheritable pipe (bridge/helm): fork +
+# pre_exec + dup2 has no Windows equivalent (no fork). interprocess's
+# unnamed_pipe gives an inheritable OS pipe on both platforms (Unix pipe(),
+# Windows CreatePipe()) behind one API — the child-side raw handle/fd value
+# still rides an env var exactly as BRIDGE_ATTACH_FD does today, so
+# attach.rs/transport.rs stay one code path. Investigated 2026-07-24: 2.4.x,
+# 0BSD/Apache-2.0, actively released, MSRV 1.75 (well under our 1.96.1 pin).
+interprocess = { version = "2", features = ["tokio"] }
 
 # Vendored patch: upstream unicode-width promotes VS16 emoji-presentation
 # sequences to width 2, which no terminal chain on this machine agrees with

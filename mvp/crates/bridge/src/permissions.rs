@@ -137,7 +137,12 @@ impl PermissionSet {
                 let mut obj = serde_json::Map::new();
                 obj.insert("match".to_string(), serde_json::json!(rule.pattern));
                 for op in &ops {
-                    let verdict = rule.operations.get(*op).copied().or(rule.default).unwrap_or(Verdict::Ask);
+                    let verdict = rule
+                        .operations
+                        .get(*op)
+                        .copied()
+                        .or(rule.default)
+                        .unwrap_or(Verdict::Ask);
                     obj.insert((*op).to_string(), serde_json::to_value(verdict).unwrap());
                 }
                 serde_json::Value::Object(obj)
