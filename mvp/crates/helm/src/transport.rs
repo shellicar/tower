@@ -81,8 +81,11 @@ async fn pump(
 /// conversation, not a second path to know about. Best-effort: a logging
 /// failure must never be why a control line itself fails.
 fn log_stdio(direction: &str, value: &serde_json::Value) {
-    let log_path =
-        std::env::var("HELM_BRIDGE_LOG").unwrap_or_else(|_| "/tmp/helm-bridge.log".into());
+    // Same default as Session::spawn's own log file - see its comment for
+    // why a bare "/tmp/..." is a Windows portability bug, not just style.
+    let log_path = std::env::var("HELM_BRIDGE_LOG")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir().join("helm-bridge.log"));
     if let Ok(mut log) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -105,12 +108,25 @@ impl Session {
         cmd.env(bridge::attach::ATTACH_FD_UP, &pipes.up_value);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
-        // bridge's stderr must never reach helm's terminal — the alternate
+        // bridge's stderr must never reach helm's terminal - the alternate
         // screen is helm's alone. The log survives in a file instead.
-        let log_path =
-            std::env::var("HELM_BRIDGE_LOG").unwrap_or_else(|_| "/tmp/helm-bridge.log".into());
-        let log = std::fs::File::create(&log_path)
-            .with_context(|| format!("failed to create bridge log at '{log_path}' (set HELM_BRIDGE_LOG to a writable path)"))?;
+        // `/tmp` is a Unix-only default: a hardcoded `/tmp/...` resolves on
+        // Windows to `\tmp` on the *current drive*, which usually doesn't
+        // exist, so `File::create` fails and bridge never spawns at all -
+        // silently, before raw mode, so it just looks like helm exited (or,
+        // on a machine where `C:\tmp` happens to exist already, works by
+        // accident instead of by design). `temp_dir()` is `%TEMP%` on
+        // Windows and `/tmp` on Unix, so one default works everywhere;
+        // `HELM_BRIDGE_LOG` still overrides it explicitly.
+        let log_path = std::env::var("HELM_BRIDGE_LOG")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir().join("helm-bridge.log"));
+        let log = std::fs::File::create(&log_path).with_context(|| {
+            format!(
+                "failed to create bridge log at '{}' (set HELM_BRIDGE_LOG to a writable path)",
+                log_path.display()
+            )
+        })?;
         cmd.stderr(Stdio::from(log));
 
         let mut child = cmd.spawn().with_context(|| {
