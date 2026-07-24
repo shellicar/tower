@@ -1,2 +1,14 @@
 packages:
   - mvp/frontend
+
+ignoreScripts: false
+minimumReleaseAge: 1440
+blockExoticSubdeps: true
+trustPolicy: no-downgrade
+
+allowBuilds:
+  esbuild: false
+
+trustPolicyExclude:
+  - chokidar@4.0.3 # accepted: known trust-downgrade, pnpm docs' own example
+
