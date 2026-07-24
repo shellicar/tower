@@ -47,14 +47,6 @@ fn spawn_input_thread() -> tokio::sync::mpsc::UnboundedReceiver<TermEvent> {
     std::thread::spawn(move || {
         loop {
             match crossterm::event::read() {
-                // Windows' console reports key-up (release) alongside key-down
-                // regardless of which enhancement flags are requested; Linux
-                // terminals only ever send this without REPORT_EVENT_TYPES
-                // (not requested here), so every key there is a Press. Without
-                // this filter, Windows fires every binding twice per physical
-                // press — a toggle undoes itself, and holding a key repeats
-                // the press/release pair rapidly.
-                Ok(TermEvent::Key(key)) if key.kind != KeyEventKind::Press => {}
                 Ok(event @ (TermEvent::Key(_) | TermEvent::Mouse(_))) => {
                     if tx.send(event).is_err() {
                         return;
@@ -143,17 +135,43 @@ async fn main() -> anyhow::Result<()> {
 
     let mut terminal = ratatui::init(); // alt screen + raw mode, restored by ratatui::restore
     let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
+    // Windows' console always reports a genuine key-up independently of any
+    // of this — it isn't a VT/kitty-protocol thing there, it's how the
+    // native console API works. Everywhere else, a release/repeat only ever
+    // arrives if the terminal actually honours REPORT_EVENT_TYPES; ask for
+    // it only where `supports_keyboard_enhancement` confirms that's true, or
+    // Ctrl+/'s hold-latch below would set once on the first press and never
+    // see the release that's supposed to clear it.
+    #[cfg(windows)]
+    let reliable_key_release = true;
+    #[cfg(not(windows))]
+    let reliable_key_release =
+        crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
+    let mut enhancement_flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES;
+    if reliable_key_release {
+        enhancement_flags |= KeyboardEnhancementFlags::REPORT_EVENT_TYPES;
+    }
     // Kitty keyboard protocol, where the terminal supports it: without it,
     // Cmd+Enter never reaches the app at all. Ctrl+Enter is the fallback
     // everywhere else. Best-effort push, popped on exit.
     let _ = crossterm::execute!(
         std::io::stdout(),
-        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        PushKeyboardEnhancementFlags(enhancement_flags)
     );
     let mut input = spawn_input_thread();
 
     let mut conv = Conversation::default();
     let mut usage = Usage::default();
+    // Edge-triggered latch for Ctrl+/: set on the press that actually opens
+    // or closes command mode, cleared only by that same combo's release, so
+    // holding the key repeats nothing — a terminal's own key-repeat stream
+    // (Windows always, others only with REPORT_EVENT_TYPES) resends Press
+    // without a Release in between, and this latch swallows every one of
+    // those until the physical key actually comes up. Where the terminal
+    // never sends a release at all (`reliable_key_release` false), the latch
+    // never engages and every observed Press is treated as its own event,
+    // matching this terminal's only available signal.
+    let mut ctrl_slash_held = false;
     let mut approvals = Approvals::default();
     let mut editor = new_editor();
     let mut note: Option<String> = None;
@@ -283,26 +301,45 @@ async fn main() -> anyhow::Result<()> {
                         // calls ctrl+'_' — all three spellings accepted,
                         // because tmux strips the kitty protocol back to
                         // legacy bytes regardless of the outer terminal.
+                        //
+                        // The press/release split is the held-latch (see
+                        // `ctrl_slash_held` above): Repeat is neither, and is
+                        // ignored outright rather than falling through.
                         TermEvent::Key(key)
                             if matches!(
                                 key.code,
                                 KeyCode::Char('/') | KeyCode::Char('_') | KeyCode::Char('7')
                             ) && key.modifiers.contains(KeyModifiers::CONTROL) =>
                         {
-                            // Ctrl+/ closes the secondary view first if it's open —
-                            // command mode stays closed while the log is up (opening
-                            // it sets command to Closed), so toggle() would otherwise
-                            // open Root instead of closing what's actually showing.
-                            if view_state.secondary_open {
-                                view_state.secondary_open = false;
-                            } else {
-                                view_state.command.toggle();
+                            match key.kind {
+                                KeyEventKind::Press => {
+                                    if !ctrl_slash_held {
+                                        // Ctrl+/ closes the secondary view first if
+                                        // it's open — command mode stays closed while
+                                        // the log is up (opening it sets command to
+                                        // Closed), so toggle() would otherwise open
+                                        // Root instead of closing what's actually
+                                        // showing.
+                                        if view_state.secondary_open {
+                                            view_state.secondary_open = false;
+                                        } else {
+                                            view_state.command.toggle();
+                                        }
+                                    }
+                                    ctrl_slash_held = true;
+                                }
+                                KeyEventKind::Release => ctrl_slash_held = false,
+                                KeyEventKind::Repeat => {}
                             }
                         }
                         // The secondary view claims keys the same way command mode
                         // does while it's open: esc closes it, everything else here
-                        // scrolls its own position, never the conversation's.
-                        TermEvent::Key(key) if view_state.secondary_open => match key.code {
+                        // scrolls its own position, never the conversation's. Only
+                        // Press — see the command-mode arm above for why.
+                        TermEvent::Key(key)
+                            if view_state.secondary_open && key.kind == KeyEventKind::Press =>
+                        {
+                            match key.code {
                             KeyCode::Esc => view_state.secondary_open = false,
                             KeyCode::Up | KeyCode::Char('k') => {
                                 view_state.secondary_scroll += 1;
@@ -317,10 +354,17 @@ async fn main() -> anyhow::Result<()> {
                                     view_state.secondary_scroll.saturating_sub(10);
                             }
                             _ => {}
-                        },
+                            }
+                        }
                         // While command mode is open it claims every key:
                         // bound ones fire intents, the rest are swallowed.
-                        TermEvent::Key(key) if view_state.command.is_open() => {
+                        // Only Press: Release/Repeat only ever reach here on
+                        // a terminal that also reports them (Windows always,
+                        // others only with REPORT_EVENT_TYPES), and neither
+                        // is a fresh keystroke.
+                        TermEvent::Key(key)
+                            if view_state.command.is_open() && key.kind == KeyEventKind::Press =>
+                        {
                             match &mut view_state.command {
                                 CommandMode::Root => match key.code {
                                     KeyCode::Esc => view_state.command.escape(),
@@ -494,7 +538,9 @@ async fn main() -> anyhow::Result<()> {
                                 CommandMode::Closed => unreachable!("guarded by is_open"),
                             }
                         }
-                        TermEvent::Key(key) => match (key.code, key.modifiers) {
+                        // Only Press — see the command-mode arm above for why.
+                        TermEvent::Key(key) if key.kind == KeyEventKind::Press => {
+                            match (key.code, key.modifiers) {
                             (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
                             (KeyCode::Enter, m)
                                 if m.contains(KeyModifiers::SUPER)
@@ -549,7 +595,8 @@ async fn main() -> anyhow::Result<()> {
                                     .saturating_sub(geometry.inner.height as usize);
                             }
                             _ => forward_key(&mut editor, key),
-                        },
+                            }
+                        }
                         TermEvent::Mouse(mouse) => match mouse.kind {
                             MouseEventKind::ScrollUp if view_state.secondary_open => {
                                 view_state.secondary_scroll += WHEEL_LINES;
