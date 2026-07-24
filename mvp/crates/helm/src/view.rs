@@ -31,6 +31,11 @@ pub type BlockKey = (String, usize);
 pub struct ViewState {
     pub scroll_from_bottom: usize,
     pub expanded: HashSet<BlockKey>,
+    /// tool_use blocks this view auto-opened for a still-live approval —
+    /// tracked so the forced open only happens once (a manual collapse
+    /// while still pending is respected) and so settling can force it shut
+    /// again rather than leaving a stale manual toggle in charge.
+    auto_expanded_pending: HashSet<BlockKey>,
     /// Command mode — Ctrl+/ the one door in (command.rs).
     pub command: CommandMode,
     /// Wrapped rows per sealed block, keyed by (message, block, expanded).
@@ -271,6 +276,21 @@ fn expanded_body(block: &serde_json::Value) -> String {
     }
 }
 
+/// Whether a tool_use block's id is the `toolUseId` of a still-live
+/// (pending, not void) approval — the decision-relevant payload, so it's
+/// the one case a tool_use starts open rather than folded.
+fn has_live_approval(block: &serde_json::Value, approvals: &Approvals, now_ms: i64) -> bool {
+    let Some(tool_use_id) = block["id"].as_str() else {
+        return false;
+    };
+    approvals.live(now_ms).into_iter().any(|(_, ask)| {
+        ask.correlation
+            .as_ref()
+            .and_then(|c| c["toolUseId"].as_str())
+            == Some(tool_use_id)
+    })
+}
+
 fn role_line(role: &str) -> Line<'static> {
     let (label, color) = match role {
         "user" => ("you", Color::Green),
@@ -299,6 +319,15 @@ fn lay(
         rows.push(Row::plain(role_line(&message.role), None));
         for (index, block) in message.content.iter().enumerate() {
             let key: BlockKey = (message.id.0.clone(), index);
+            if block["type"].as_str() == Some("tool_use") {
+                if has_live_approval(block, approvals, now_ms) {
+                    if view.auto_expanded_pending.insert(key.clone()) {
+                        view.expanded.insert(key.clone());
+                    }
+                } else if view.auto_expanded_pending.remove(&key) {
+                    view.expanded.remove(&key);
+                }
+            }
             let open = view.expanded.contains(&key);
             let cache_key = (key.0.clone(), index, open);
             if let Some(cached) = view.layout_cache.get(&cache_key) {
