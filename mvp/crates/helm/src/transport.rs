@@ -16,6 +16,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use anyhow::Context;
 use base64::Engine;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
@@ -107,7 +108,8 @@ impl Session {
         // screen is helm's alone. The log survives in a file instead.
         let log_path =
             std::env::var("HELM_BRIDGE_LOG").unwrap_or_else(|_| "/tmp/helm-bridge.log".into());
-        let log = std::fs::File::create(&log_path)?;
+        let log = std::fs::File::create(&log_path)
+            .with_context(|| format!("failed to create bridge log at '{log_path}' (set HELM_BRIDGE_LOG to a writable path)"))?;
         cmd.stderr(Stdio::from(log));
 
         // SAFETY: dup2 only, between fork and exec — see bridge::attach's
@@ -121,7 +123,12 @@ impl Session {
             });
         }
 
-        let mut child = cmd.spawn()?;
+        let mut child = cmd.spawn().with_context(|| {
+            format!(
+                "failed to spawn bridge at '{bridge_path}' — set HELM_BRIDGE_PATH to its binary \
+                 (e.g. HELM_BRIDGE_PATH=./target/debug/bridge), or build it with `just build`"
+            )
+        })?;
         drop(child_end);
 
         let control_out = child.stdin.take().expect("piped stdin");
