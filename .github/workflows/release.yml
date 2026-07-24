@@ -1,29 +1,46 @@
 name: Release
 
-# One workflow, gated by event — same shape as claude-cli's ci.yml, collapsed
-# to one file since tower has no turbo/affected-package detection to do.
+# One workflow, gated by event — same shape as docker/compose's ci.yml.
+# Five independently releasable apps, each its own tag/release name:
+# towerd, bridge, helm, tower-svelte, tower-leptos (egui/frontend-rs is a
+# comparison build only, never shipped). A release is created with the tag
+# `<app>@<version>` (e.g. `towerd@1.2.3`, `helm@1.2.3-alpha.1`) — creating it
+# fires this workflow (`release: created`), which builds and publishes only
+# that one app, not the other four.
 #
-# - pull_request / push to main: build everything in mvp/ (binaries, both
-#   frontends) so a broken build is caught before it reaches main — nothing
-#   is published.
-# - push of a v* tag: build the same way, then publish a GitHub Release with
-#   every artifact attached.
-#
-# Per-platform tarballs of the three binaries (towerd, bridge, helm — helm
-# spawns bridge as a child via HELM_BRIDGE_PATH, so they ship together), and
-# the two frontend dist/ bundles as separate assets, since towerd picks
-# either one at runtime via TOWER_DIST. egui (frontend-rs) is a comparison
-# build, not a shipped artifact — deliberately left out.
+# - pull_request / push to main: build every app (nothing published) so a
+#   broken build is caught before it reaches main.
+# - a release is created: build and publish only the one app its tag names.
 on:
   push:
     branches: [main]
-    tags:
-      - 'v*'
   pull_request:
     branches: [main]
+  release:
+    types: [created]
 
 jobs:
-  binaries:
+  # Splits the release's tag (`<app>@<version>`) into its two halves. Empty
+  # on pull_request/push — nothing here reads its outputs on those triggers.
+  detect:
+    runs-on: ubuntu-24.04
+    outputs:
+      app: ${{ steps.tag.outputs.app }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+            echo "app=${TAG%%@*}" >> "$GITHUB_OUTPUT"
+            echo "version=${TAG#*@}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # --- towerd / bridge / helm: same build shape, three cargo binaries ------
+  binary-towerd:
+    needs: detect
+    if: github.event_name != 'release' || needs.detect.outputs.app == 'towerd'
     strategy:
       fail-fast: false
       matrix:
@@ -40,28 +57,93 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: mvp
-      - run: cargo build --release --workspace -p towerd -p bridge -p helm
+      - run: cargo build --release -p towerd
         working-directory: mvp
-
       - name: Package
         shell: bash
         run: |
           set -eu
-          out="tower-${{ matrix.platform }}"
-          mkdir "$out"
-          ext=""
-          if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
-          for bin in towerd bridge helm; do
-            cp "mvp/target/release/$bin$ext" "$out/"
-          done
-          tar czf "$out.tar.gz" "$out"
-
+          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          mkdir out
+          cp "mvp/target/release/towerd$ext" out/
+          tar czf "towerd-${{ matrix.platform }}.tar.gz" -C out .
       - uses: actions/upload-artifact@v4
         with:
-          name: tower-${{ matrix.platform }}
-          path: tower-${{ matrix.platform }}.tar.gz
+          name: tower-towerd-${{ matrix.platform }}
+          path: towerd-${{ matrix.platform }}.tar.gz
 
+  binary-bridge:
+    needs: detect
+    if: github.event_name != 'release' || needs.detect.outputs.app == 'bridge'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            platform: darwin-arm64
+          - runner: ubuntu-24.04
+            platform: linux-x64
+          - runner: windows-2022
+            platform: win32-x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mvp
+      - run: cargo build --release -p bridge
+        working-directory: mvp
+      - name: Package
+        shell: bash
+        run: |
+          set -eu
+          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          mkdir out
+          cp "mvp/target/release/bridge$ext" out/
+          tar czf "bridge-${{ matrix.platform }}.tar.gz" -C out .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tower-bridge-${{ matrix.platform }}
+          path: bridge-${{ matrix.platform }}.tar.gz
+
+  binary-helm:
+    needs: detect
+    if: github.event_name != 'release' || needs.detect.outputs.app == 'helm'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            platform: darwin-arm64
+          - runner: ubuntu-24.04
+            platform: linux-x64
+          - runner: windows-2022
+            platform: win32-x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mvp
+      - run: cargo build --release -p helm
+        working-directory: mvp
+      - name: Package
+        shell: bash
+        run: |
+          set -eu
+          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          mkdir out
+          cp "mvp/target/release/helm$ext" out/
+          tar czf "helm-${{ matrix.platform }}.tar.gz" -C out .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tower-helm-${{ matrix.platform }}
+          path: helm-${{ matrix.platform }}.tar.gz
+
+  # --- the two web frontends: platform-independent, one build each --------
   frontend-svelte:
+    needs: detect
+    if: github.event_name != 'release' || needs.detect.outputs.app == 'tower-svelte'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -75,16 +157,15 @@ jobs:
         working-directory: mvp/frontend
       - run: pnpm build
         working-directory: mvp/frontend
-
-      - name: Package
-        run: tar czf tower-frontend-svelte.tar.gz -C mvp/frontend/dist .
-
+      - run: tar czf tower-svelte.tar.gz -C mvp/frontend/dist .
       - uses: actions/upload-artifact@v4
         with:
-          name: tower-frontend-svelte
-          path: tower-frontend-svelte.tar.gz
+          name: tower-tower-svelte
+          path: tower-svelte.tar.gz
 
   frontend-leptos:
+    needs: detect
+    if: github.event_name != 'release' || needs.detect.outputs.app == 'tower-leptos'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -95,29 +176,31 @@ jobs:
       - uses: jetli/trunk-action@v0.5.0
       - run: trunk build --release
         working-directory: mvp/frontend-leptos
-
-      - name: Package
-        run: tar czf tower-frontend-leptos.tar.gz -C mvp/frontend-leptos/dist .
-
+      - run: tar czf tower-leptos.tar.gz -C mvp/frontend-leptos/dist .
       - uses: actions/upload-artifact@v4
         with:
-          name: tower-frontend-leptos
-          path: tower-frontend-leptos.tar.gz
+          name: tower-tower-leptos
+          path: tower-leptos.tar.gz
 
-  release:
-    needs: [binaries, frontend-svelte, frontend-leptos]
-    if: startsWith(github.ref, 'refs/tags/v')
+  # --- publish: one job, attaches whichever app's artifacts matched --------
+  publish:
+    needs: [detect, binary-towerd, binary-bridge, binary-helm, frontend-svelte, frontend-leptos]
+    if: always() && github.event_name == 'release'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          # No dash before the star: frontend artifacts have no platform
+          # suffix (tower-tower-svelte), binaries do (tower-towerd-darwin-arm64).
+          pattern: tower-${{ needs.detect.outputs.app }}*
           merge-multiple: true
 
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
           generate_release_notes: true
+          draft: true
+          overwrite_files: false
