@@ -879,79 +879,123 @@ async fn run_tool_round(
                     Err(e) => (e, true),
                 }
             }
-            // Every Bash call gates behind a human approval in v1 -
-            // `echo hello` included. Policy (auto-approve, blocklists) is
-            // future work; wait-forever is sane precisely because the ask
-            // is visible and the query cancellable.
+            // Bash checks the same permission matrix as everything else, under
+            // its own "exec" operation — but it has no cwd concept at all (no
+            // per-call override, unlike Exec), so the one location it can ever
+            // be checked against is the conversation's own $PWD. Deliberately
+            // unreachable in practice today (Bash is absent from
+            // static_tool_schemas, kept for exec.rs's own sake, not deleted) —
+            // wired for correctness if it's ever re-offered, not because it
+            // currently runs.
             "Bash" => {
-                let approval_id = uuid::Uuid::new_v4().to_string();
-                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
-                let correlation = json!({
-                    "conversationId": pubr.conv().0,
-                    "queryId": query,
-                    "turnId": turn_id,
-                    "toolUseId": id,
-                });
-                match crate::approval::gate(
-                    pubr.client(),
-                    pubr.attach(),
-                    &approval_id,
-                    &ask,
-                    &correlation,
-                    cancel,
-                )
-                .await
+                let here = cwd.to_path_buf();
+                match permission_verdict(permissions, cwd, &home, "exec", std::slice::from_ref(&here))
                 {
-                    crate::approval::Verdict::Approved => {
+                    crate::permissions::Verdict::Deny => {
+                        ("denied by permissions policy".to_string(), true)
+                    }
+                    crate::permissions::Verdict::Allow => {
                         let command = block["input"]["command"].as_str().unwrap_or("");
                         crate::exec::run_bash(command, cancel).await
                     }
-                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
-                    // The slot still gets its result: a committed tool_use
-                    // without one is an invalid conversation. The cancel
-                    // flag is set, so the caller's between-rounds check
-                    // closes the query cancelled right after these commit.
-                    crate::approval::Verdict::Cancelled => {
-                        ("cancelled by user before approval".to_string(), true)
-                    }
-                }
-            }
-            // Exec gates behind the same human approval as Bash — same gate,
-            // structured input instead of a shell string.
-            "Exec" => {
-                let approval_id = uuid::Uuid::new_v4().to_string();
-                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
-                let correlation = json!({
-                    "conversationId": pubr.conv().0,
-                    "queryId": query,
-                    "turnId": turn_id,
-                    "toolUseId": id,
-                });
-                match crate::approval::gate(
-                    pubr.client(),
-                    pubr.attach(),
-                    &approval_id,
-                    &ask,
-                    &correlation,
-                    cancel,
-                )
-                .await
-                {
-                    crate::approval::Verdict::Approved => {
-                        match crate::exec::parse_commands(&block["input"]) {
-                            Ok(commands) => {
-                                let results = crate::exec::run_commands(&commands, cancel).await;
-                                crate::exec::format_results(&commands, &results)
+                    crate::permissions::Verdict::Ask => {
+                        let approval_id = uuid::Uuid::new_v4().to_string();
+                        let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                        let correlation = json!({
+                            "conversationId": pubr.conv().0,
+                            "queryId": query,
+                            "turnId": turn_id,
+                            "toolUseId": id,
+                        });
+                        match crate::approval::gate(
+                            pubr.client(),
+                            pubr.attach(),
+                            &approval_id,
+                            &ask,
+                            &correlation,
+                            cancel,
+                        )
+                        .await
+                        {
+                            crate::approval::Verdict::Approved => {
+                                let command = block["input"]["command"].as_str().unwrap_or("");
+                                crate::exec::run_bash(command, cancel).await
                             }
-                            Err(e) => (format!("invalid Exec input: {e}"), true),
+                            crate::approval::Verdict::Denied { by } => {
+                                (format!("denied by {by}"), true)
+                            }
+                            // The slot still gets its result: a committed tool_use
+                            // without one is an invalid conversation. The cancel
+                            // flag is set, so the caller's between-rounds check
+                            // closes the query cancelled right after these commit.
+                            crate::approval::Verdict::Cancelled => {
+                                ("cancelled by user before approval".to_string(), true)
+                            }
                         }
                     }
-                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
-                    crate::approval::Verdict::Cancelled => {
-                        ("cancelled by user before approval".to_string(), true)
-                    }
                 }
             }
+            // Exec checks the same matrix under "exec" too — but a call can
+            // chain several commands (op: &&/||/|), each with its OWN cwd
+            // override, so the whole set of resolved cwds goes through
+            // together (Delete's array, same mechanism), folded to the
+            // strictest verdict across every command in the call, not just
+            // the first. Parsing happens before the check, once, so the
+            // Approved arm never has to re-parse what's already known good.
+            "Exec" => match crate::exec::parse_commands(&block["input"]) {
+                Ok(commands) => {
+                    let call_cwds: Vec<std::path::PathBuf> = commands
+                        .iter()
+                        .map(|c| match &c.cwd {
+                            Some(c) => resolve_against(cwd, c),
+                            None => cwd.to_path_buf(),
+                        })
+                        .collect();
+                    match permission_verdict(permissions, cwd, &home, "exec", &call_cwds) {
+                        crate::permissions::Verdict::Deny => {
+                            ("denied by permissions policy".to_string(), true)
+                        }
+                        crate::permissions::Verdict::Allow => {
+                            let results = crate::exec::run_commands(&commands, cancel).await;
+                            crate::exec::format_results(&commands, &results)
+                        }
+                        crate::permissions::Verdict::Ask => {
+                            let approval_id = uuid::Uuid::new_v4().to_string();
+                            let ask =
+                                json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                            let correlation = json!({
+                                "conversationId": pubr.conv().0,
+                                "queryId": query,
+                                "turnId": turn_id,
+                                "toolUseId": id,
+                            });
+                            match crate::approval::gate(
+                                pubr.client(),
+                                pubr.attach(),
+                                &approval_id,
+                                &ask,
+                                &correlation,
+                                cancel,
+                            )
+                            .await
+                            {
+                                crate::approval::Verdict::Approved => {
+                                    let results =
+                                        crate::exec::run_commands(&commands, cancel).await;
+                                    crate::exec::format_results(&commands, &results)
+                                }
+                                crate::approval::Verdict::Denied { by } => {
+                                    (format!("denied by {by}"), true)
+                                }
+                                crate::approval::Verdict::Cancelled => {
+                                    ("cancelled by user before approval".to_string(), true)
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => (format!("invalid Exec input: {e}"), true),
+            },
             // Read is read-only: no approval gate.
             "Read" => match crate::read::run_read(&block["input"]).await {
                 Ok((stream, any_error)) => (crate::stream::format_stream(&stream), any_error),

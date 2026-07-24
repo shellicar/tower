@@ -544,7 +544,7 @@ impl Host {
                         "refsDb": self.refs_path.to_string_lossy(),
                         "memoryDb": self.memory_path.to_string_lossy(),
                         "historyDb": self.history_path.to_string_lossy(),
-                        "permissions": &*self.permissions.read().unwrap(),
+                        "permissions": self.permissions.read().unwrap().resolved(),
                     }
                 })
             );

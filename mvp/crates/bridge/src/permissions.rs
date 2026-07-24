@@ -45,6 +45,16 @@ pub struct Rule {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionSet(pub Vec<Rule>);
 
+/// Every operation the running build actually checks a verdict for
+/// (`agent.rs`'s `permission_verdict` call sites) — not a type-level enum
+/// (an operation is deliberately an open label, any tool can introduce a
+/// new one), just the source of truth for what `resolved()` must never
+/// omit even when a rule never mentions it. `read` is NOT here: no code
+/// path ever checks it today (Read/Find/Match/... are unconditionally
+/// ungated), so showing a resolved verdict for it would claim an effect
+/// that doesn't exist.
+const KNOWN_OPERATIONS: &[&str] = &["write", "delete", "exec"];
+
 impl PermissionSet {
     /// Before any `permissions` line ever arrives: the strictest possible
     /// baseline, identical to bridge's behavior before this matrix existed
@@ -107,6 +117,32 @@ impl PermissionSet {
         // No rule matched at all (a list with no catch-all): unmatched
         // must resolve to the strictest option, never Allow.
         Verdict::Ask
+    }
+
+    /// What `settings` actually reports: every rule, expanded so each
+    /// operation that matters — `KNOWN_OPERATIONS`, plus any custom key a
+    /// rule happens to name (forward-compatible with an operation this
+    /// build doesn't know about yet) — shows its REAL resolved verdict,
+    /// not just whatever was literally typed. A rule saying nothing about
+    /// `exec` still has a real answer for it; the stored JSON alone never
+    /// says what it is, which is exactly the gap this closes.
+    pub fn resolved(&self) -> Vec<serde_json::Value> {
+        let mut ops: std::collections::BTreeSet<&str> = KNOWN_OPERATIONS.iter().copied().collect();
+        for rule in &self.0 {
+            ops.extend(rule.operations.keys().map(String::as_str));
+        }
+        self.0
+            .iter()
+            .map(|rule| {
+                let mut obj = serde_json::Map::new();
+                obj.insert("match".to_string(), serde_json::json!(rule.pattern));
+                for op in &ops {
+                    let verdict = rule.operations.get(*op).copied().or(rule.default).unwrap_or(Verdict::Ask);
+                    obj.insert((*op).to_string(), serde_json::to_value(verdict).unwrap());
+                }
+                serde_json::Value::Object(obj)
+            })
+            .collect()
     }
 
     /// The full set an action touches, folded to its strictest verdict —
@@ -206,6 +242,35 @@ mod tests {
             set.resolve_one(&elsewhere, "delete", &cwd(), &home()),
             Verdict::Deny
         );
+    }
+
+    #[test]
+    fn resolved_fills_in_every_known_operation_even_when_unmentioned() {
+        // Exactly the reported case: a config with no "exec" key anywhere.
+        let set = parse(
+            r#"[
+                { "match": "$PWD", "read": "allow", "write": "allow", "delete": "ask" },
+                { "match": "*", "read": "allow", "write": "ask", "delete": "deny" }
+            ]"#,
+        );
+        let resolved = set.resolved();
+        assert_eq!(resolved.len(), 2);
+        // exec was never written down, but it still has a real, resolved
+        // answer: the final Ask fallback, same as an actual Exec call gets.
+        assert_eq!(resolved[0]["exec"], "ask");
+        assert_eq!(resolved[1]["exec"], "ask");
+        // What WAS written down still comes through correctly.
+        assert_eq!(resolved[0]["write"], "allow");
+        assert_eq!(resolved[1]["delete"], "deny");
+    }
+
+    #[test]
+    fn resolved_respects_a_rules_own_default_for_an_unmentioned_operation() {
+        let set = parse(r#"[{ "match": "*", "default": "deny" }]"#);
+        let resolved = set.resolved();
+        assert_eq!(resolved[0]["write"], "deny");
+        assert_eq!(resolved[0]["delete"], "deny");
+        assert_eq!(resolved[0]["exec"], "deny");
     }
 
     #[test]
