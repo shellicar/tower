@@ -41,7 +41,8 @@ impl Auth {
         if std::env::var_os("ANTHROPIC_API_KEY").is_some() {
             return Ok(Auth::ApiKey);
         }
-        let home = std::env::var("HOME").map_err(|_| anyhow::anyhow!("HOME not set"))?;
+        let home = bridge::home::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("HOME (or USERPROFILE) not set"))?;
         let path = format!("{home}/.claude/.credentials.json");
         read_credentials(&path)?; // validate now, discard the secret
         Ok(Auth::OAuth { path })

@@ -823,7 +823,7 @@ async fn run_tool_round(
     cwd: &std::path::Path,
     permissions: &std::sync::RwLock<crate::permissions::PermissionSet>,
 ) -> Vec<Value> {
-    let home = std::env::var("HOME")
+    let home = bridge::home::home_dir()
         .map(std::path::PathBuf::from)
         .unwrap_or_default();
     // The gate: a tool_use for anything not in THIS turn's offered set is

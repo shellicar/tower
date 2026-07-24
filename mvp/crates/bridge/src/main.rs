@@ -69,11 +69,11 @@ const PULSE_INTERVAL_S: i64 = 30;
 /// ever resolved — anywhere else, it stays a literal tilde character.
 fn expand_tilde(path: &str) -> std::path::PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
+        if let Some(home) = bridge::home::home_dir() {
             return std::path::PathBuf::from(home).join(rest);
         }
     } else if path == "~"
-        && let Ok(home) = std::env::var("HOME")
+        && let Some(home) = bridge::home::home_dir()
     {
         return std::path::PathBuf::from(home);
     }
@@ -632,9 +632,9 @@ async fn main() -> anyhow::Result<()> {
     let memory_path = std::env::var("BRIDGE_MEMORY_DB")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {
-            std::env::var("HOME")
+            bridge::home::home_dir()
                 .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join(".claude")
                 .join("memory.db")
         });
@@ -646,9 +646,9 @@ async fn main() -> anyhow::Result<()> {
     let history_path = std::env::var("BRIDGE_HISTORY_DB")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {
-            std::env::var("HOME")
+            bridge::home::home_dir()
                 .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join(".claude")
                 .join("history.db")
         });
