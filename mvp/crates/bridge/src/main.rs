@@ -233,6 +233,9 @@ struct Host {
     instance: String,
     default_model: Arc<RwLock<String>>,
     auth: anthropic::Auth,
+    /// The shared, keepalive-configured HTTP client (anthropic.rs's
+    /// `build_http_client`) every conversation's messages-API calls share.
+    http: reqwest::Client,
     skills_root: Arc<RwLock<std::path::PathBuf>>,
     system: Arc<RwLock<Option<String>>>,
     context: Arc<RwLock<Option<String>>>,
@@ -270,6 +273,7 @@ impl Host {
             system: Arc::clone(&self.system),
             context: Arc::clone(&self.context),
             auth: self.auth.clone(),
+            http: self.http.clone(),
             skills_root: Arc::clone(&self.skills_root),
             refs: Arc::clone(&self.refs),
             memory: Arc::clone(&self.memory),
@@ -748,6 +752,7 @@ async fn main() -> anyhow::Result<()> {
         attach,
         served: Arc::new(RwLock::new(Vec::new())),
         auth,
+        http: anthropic::build_http_client(),
         skills_root,
         system: Arc::new(RwLock::new(None)),
         context: Arc::new(RwLock::new(None)),

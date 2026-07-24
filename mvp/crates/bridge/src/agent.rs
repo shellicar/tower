@@ -72,6 +72,10 @@ pub struct AgentConfig {
     /// conversations spawned after it.
     pub context: Arc<std::sync::RwLock<Option<String>>>,
     pub auth: crate::anthropic::Auth,
+    /// The shared, keepalive-configured HTTP client every turn's messages-API
+    /// call goes through (anthropic.rs's `build_http_client`) — built once at
+    /// startup, threaded the same way as every other shared resource here.
+    pub http: reqwest::Client,
     /// The skills directory, shared and mutable so a stdio `skills` control
     /// line can repoint it live. Re-scanned per say: the first say commits the
     /// full catalogue and records the delta baseline; later says commit a
@@ -470,6 +474,7 @@ async fn accept_say(
         model: config.model.read().unwrap().clone(),
         system: Arc::clone(&config.system),
         auth: config.auth.clone(),
+        http: config.http.clone(),
         skills,
         query: query.clone(),
         turn,
@@ -503,6 +508,7 @@ struct TurnContext {
     model: String,
     system: Arc<std::sync::RwLock<Option<String>>>,
     auth: crate::anthropic::Auth,
+    http: reqwest::Client,
     skills: Arc<Skills>,
     query: String,
     turn: String,
@@ -555,6 +561,7 @@ async fn run_query(
         model,
         system,
         auth,
+        http,
         skills,
         query,
         turn,
@@ -611,6 +618,7 @@ async fn run_query(
         let outcome = tokio::select! {
             outcome = anthropic::stream_turn(
                 client,
+                http,
                 conv,
                 auth,
                 model,
