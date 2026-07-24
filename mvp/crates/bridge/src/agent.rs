@@ -889,8 +889,13 @@ async fn run_tool_round(
             // currently runs.
             "Bash" => {
                 let here = cwd.to_path_buf();
-                match permission_verdict(permissions, cwd, &home, "exec", std::slice::from_ref(&here))
-                {
+                match permission_verdict(
+                    permissions,
+                    cwd,
+                    &home,
+                    "exec",
+                    std::slice::from_ref(&here),
+                ) {
                     crate::permissions::Verdict::Deny => {
                         ("denied by permissions policy".to_string(), true)
                     }
@@ -900,7 +905,8 @@ async fn run_tool_round(
                     }
                     crate::permissions::Verdict::Ask => {
                         let approval_id = uuid::Uuid::new_v4().to_string();
-                        let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                        let ask =
+                            json!({ "type": "tool_use", "name": name, "input": block["input"] });
                         let correlation = json!({
                             "conversationId": pubr.conv().0,
                             "queryId": query,
@@ -961,8 +967,7 @@ async fn run_tool_round(
                         }
                         crate::permissions::Verdict::Ask => {
                             let approval_id = uuid::Uuid::new_v4().to_string();
-                            let ask =
-                                json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                            let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
                             let correlation = json!({
                                 "conversationId": pubr.conv().0,
                                 "queryId": query,

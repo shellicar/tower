@@ -81,7 +81,8 @@ async fn pump(
 /// conversation, not a second path to know about. Best-effort: a logging
 /// failure must never be why a control line itself fails.
 fn log_stdio(direction: &str, value: &serde_json::Value) {
-    let log_path = std::env::var("HELM_BRIDGE_LOG").unwrap_or_else(|_| "/tmp/helm-bridge.log".into());
+    let log_path =
+        std::env::var("HELM_BRIDGE_LOG").unwrap_or_else(|_| "/tmp/helm-bridge.log".into());
     if let Ok(mut log) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

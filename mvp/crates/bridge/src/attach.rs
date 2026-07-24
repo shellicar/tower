@@ -38,6 +38,8 @@ pub type AttachHandle = Arc<Mutex<Sender>>;
 /// Windows. Both are plain integers once stringified into an env var.
 #[cfg(unix)]
 mod raw {
+    #[cfg(test)]
+    use std::os::fd::IntoRawFd;
     use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 
     pub type Raw = i32;
@@ -52,9 +54,19 @@ mod raw {
         // is open and uniquely ours to take ownership of here.
         unsafe { OwnedFd::from_raw_fd(value) }
     }
+
+    // Consumes without closing — the test-only stand-in for what fork+exec
+    // does to the parent's copy once a child has its own independent
+    // reference: the value survives, but nothing here still owns it.
+    #[cfg(test)]
+    pub fn into_raw(end: impl IntoRawFd) -> Raw {
+        end.into_raw_fd()
+    }
 }
 #[cfg(windows)]
 mod raw {
+    #[cfg(test)]
+    use std::os::windows::io::IntoRawHandle;
     use std::os::windows::io::{AsHandle, AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 
     pub type Raw = isize;
@@ -66,6 +78,11 @@ mod raw {
     pub fn owned(value: Raw) -> OwnedHandle {
         // SAFETY: see the Unix `owned` above — same guarantee, Windows handle.
         unsafe { OwnedHandle::from_raw_handle(value as RawHandle) }
+    }
+
+    #[cfg(test)]
+    pub fn into_raw(end: impl IntoRawHandle) -> Raw {
+        end.into_raw_handle() as Raw
     }
 }
 
@@ -307,15 +324,19 @@ mod tests {
     /// via `Sender`/`Recver`'s `TryFrom` into a fully working end.
     #[tokio::test]
     async fn a_pipe_end_survives_a_raw_value_round_trip() {
-        let (tx, mut rx) = interprocess::unnamed_pipe::tokio::pipe().expect("unnamed pipe");
-        let value = raw::of(&tx);
-        // Release our Rust-level ownership WITHOUT closing the fd/handle —
-        // standing in for what a real fork+exec does to the parent's copy
-        // once the child has its own independent reference.
-        std::mem::forget(tx);
+        // The plain (non-tokio) pipe for the sending end: it never registers
+        // with the async runtime's reactor, so reconstructing it as a tokio
+        // `Sender` below is the ONLY registration for this fd in this
+        // process — registering the same fd twice (which a tokio-wrapped
+        // sender here, then reconstructed again, would do) fails on Linux's
+        // epoll with EEXIST; the real spawn path never double-registers,
+        // since the second "owner" is a different process after fork+exec.
+        let (tx, rx) = interprocess::unnamed_pipe::pipe().expect("unnamed pipe");
+        let mut rx = Recver::try_from(raw::owned(raw::into_raw(rx)))
+            .expect("reconstruct recver from raw value");
 
-        let mut reconstructed =
-            Sender::try_from(raw::owned(value)).expect("reconstruct sender from raw value");
+        let mut reconstructed = Sender::try_from(raw::owned(raw::into_raw(tx)))
+            .expect("reconstruct sender from raw value");
         reconstructed
             .write_all(b"hello over the pipe\n")
             .await

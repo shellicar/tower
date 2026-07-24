@@ -515,10 +515,9 @@ pub fn draw(
         }
         CommandMode::ModelEdit(model) => (" model (enter sets · esc backs out) ", model),
         CommandMode::CwdEdit(cwd) => (" cwd (enter changes · esc backs out) ", cwd),
-        CommandMode::ConfigEdit(config) => (
-            " config (⌘↵/^↵ sends · ↵ newline · esc backs out) ",
-            config,
-        ),
+        CommandMode::ConfigEdit(config) => {
+            (" config (⌘↵/^↵ sends · ↵ newline · esc backs out) ", config)
+        }
         _ => ("", editor),
     };
 
