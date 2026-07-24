@@ -60,9 +60,27 @@ fn spawn_input_thread() -> tokio::sync::mpsc::UnboundedReceiver<TermEvent> {
     rx
 }
 
+/// `HELM_BRIDGE_PATH` wins outright. Otherwise, since cargo puts every
+/// workspace binary in the same `target/{debug,release}/`, a `bridge` next
+/// to helm's own executable is almost always the one meant — checked before
+/// falling back to bare `"bridge"` on `$PATH`, which only development's
+/// `just dev` (or an installed bridge) satisfies.
+fn resolve_bridge_path() -> String {
+    if let Ok(path) = std::env::var("HELM_BRIDGE_PATH") {
+        return path;
+    }
+    let sibling = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("bridge")));
+    match sibling {
+        Some(path) if path.is_file() => path.to_string_lossy().into_owned(),
+        _ => "bridge".into(),
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let bridge_path = std::env::var("HELM_BRIDGE_PATH").unwrap_or_else(|_| "bridge".into());
+    let bridge_path = resolve_bridge_path();
 
     // Args: `--adopt <conv-id>` resumes an existing conversation (history
     // replayed over the attach fd); `-c <batch>` is bridge's own startup-config
@@ -615,7 +633,10 @@ fn open_link(href: &str) -> anyhow::Result<()> {
     if !(href.starts_with("https://") || href.starts_with("http://")) {
         anyhow::bail!("not a web link: {href}");
     }
-    std::process::Command::new("open").arg(href).status()?;
+    std::process::Command::new("open")
+        .arg(href)
+        .status()
+        .map_err(|e| anyhow::anyhow!("failed to run 'open' to launch {href}: {e}"))?;
     Ok(())
 }
 
