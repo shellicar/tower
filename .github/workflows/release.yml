@@ -1,15 +1,26 @@
 name: Release
 
-# Tag push (v*) builds everything in mvp/ and publishes a GitHub Release:
-# per-platform tarballs of the three binaries (towerd, bridge, helm — helm
+# One workflow, gated by event — same shape as claude-cli's ci.yml, collapsed
+# to one file since tower has no turbo/affected-package detection to do.
+#
+# - pull_request / push to main: build everything in mvp/ (binaries, both
+#   frontends) so a broken build is caught before it reaches main — nothing
+#   is published.
+# - push of a v* tag: build the same way, then publish a GitHub Release with
+#   every artifact attached.
+#
+# Per-platform tarballs of the three binaries (towerd, bridge, helm — helm
 # spawns bridge as a child via HELM_BRIDGE_PATH, so they ship together), and
 # the two frontend dist/ bundles as separate assets, since towerd picks
 # either one at runtime via TOWER_DIST. egui (frontend-rs) is a comparison
 # build, not a shipped artifact — deliberately left out.
 on:
   push:
+    branches: [main]
     tags:
       - 'v*'
+  pull_request:
+    branches: [main]
 
 jobs:
   binaries:
@@ -95,6 +106,7 @@ jobs:
 
   release:
     needs: [binaries, frontend-svelte, frontend-leptos]
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
