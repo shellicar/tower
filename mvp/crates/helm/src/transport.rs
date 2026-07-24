@@ -125,8 +125,7 @@ impl Session {
 
         let mut child = cmd.spawn().with_context(|| {
             format!(
-                "failed to spawn bridge at '{bridge_path}' — set HELM_BRIDGE_PATH to its binary \
-                 (e.g. HELM_BRIDGE_PATH=./target/debug/bridge), or build it with `just build`"
+                "failed to spawn bridge at '{bridge_path}' — set HELM_BRIDGE_PATH to its binary"
             )
         })?;
         drop(child_end);
