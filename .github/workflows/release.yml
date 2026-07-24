@@ -20,6 +20,36 @@ on:
     types: [created]
 
 jobs:
+  # Whole-workspace correctness: test, lint, and format-check every crate
+  # (mirrors `just test`/`just check`), plus the Svelte frontend's own
+  # type-check and test scripts. The build jobs below only prove things
+  # compile; this is the one that proves they're right.
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mvp
+      - run: cargo test --workspace
+        working-directory: mvp
+      - run: cargo clippy --workspace
+        working-directory: mvp
+      - run: cargo fmt --check
+        working-directory: mvp
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: mvp/frontend
+      - run: pnpm check
+        working-directory: mvp/frontend
+      - run: pnpm test
+        working-directory: mvp/frontend
+
   # Splits the release's tag (`<app>@<version>`) into its two halves. Empty
   # on pull_request/push — nothing here reads its outputs on those triggers.
   detect:
@@ -204,3 +234,29 @@ jobs:
           generate_release_notes: true
           draft: true
           overwrite_files: false
+
+  # One stable check name for a branch ruleset to require. The real jobs
+  # above carry per-matrix names (binary-towerd (macos-14, darwin-arm64),
+  # etc.) that a ruleset can't pin to a fixed list. Passes when every needed
+  # job succeeded or was skipped (a release-only job skipping on a plain PR
+  # is expected); fails only if one actually failed or was cancelled.
+  gate:
+    needs:
+      [
+        checks,
+        detect,
+        binary-towerd,
+        binary-bridge,
+        binary-helm,
+        frontend-svelte,
+        frontend-leptos,
+        publish,
+      ]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every needed job to have succeeded or skipped
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "A needed job failed or was cancelled"
+          exit 1
