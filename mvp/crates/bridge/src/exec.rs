@@ -523,8 +523,7 @@ async fn run_pipeline(
 }
 
 /// Feed one child's stdout directly into the next child's stdin as an OS
-/// pipe — no buffering through this process. Unix-only; the file is already
-/// unix-specific throughout (process groups, signals).
+/// pipe — no buffering through this process.
 #[cfg(unix)]
 fn child_stdout_to_stdio(out: tokio::process::ChildStdout) -> std::process::Stdio {
     use std::os::unix::io::{FromRawFd, IntoRawFd};
@@ -533,6 +532,16 @@ fn child_stdout_to_stdio(out: tokio::process::ChildStdout) -> std::process::Stdi
         .expect("child stdout has no fd")
         .into_raw_fd();
     let file = unsafe { std::fs::File::from_raw_fd(fd) };
+    std::process::Stdio::from(file)
+}
+#[cfg(windows)]
+fn child_stdout_to_stdio(out: tokio::process::ChildStdout) -> std::process::Stdio {
+    use std::os::windows::io::{FromRawHandle, IntoRawHandle};
+    let handle = out
+        .into_owned_handle()
+        .expect("child stdout has no handle")
+        .into_raw_handle();
+    let file = unsafe { std::fs::File::from_raw_handle(handle) };
     std::process::Stdio::from(file)
 }
 
