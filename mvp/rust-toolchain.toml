@@ -4,3 +4,5 @@
 channel = "1.96.1"
 # frontend-leptos and frontend-rs both compile to wasm via trunk.
 targets = ["wasm32-unknown-unknown"]
+# just check / CI's checks job both run clippy and fmt.
+components = ["clippy", "rustfmt"]
