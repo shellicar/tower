@@ -24,25 +24,45 @@ jobs:
   # (mirrors `just test`/`just check`), plus the Svelte frontend's own
   # type-check and test scripts. The build jobs below only prove things
   # compile; this is the one that proves they're right.
+  #
+  # On a PR, scoped to affected crates only (scripts/affected-crates.mts —
+  # exact, dep-info-based, not a directory-prefix guess). On push to main,
+  # always the full workspace: the backstop a delta-scoped check always
+  # needs, since the scoping is best-effort against anything the dep-info
+  # pass didn't see (a build script side effect, say).
   checks:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: mvp
-      - run: cargo test --workspace
-        working-directory: mvp
-      - run: cargo clippy --workspace
-        working-directory: mvp
-      - run: cargo fmt --check
-        working-directory: mvp
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+      - name: Determine build scope
+        id: scope
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            PACKAGES=$(node scripts/affected-crates.mts "origin/${{ github.base_ref }}" --format=cargo-args --tier=affected)
+            echo "packages=${PACKAGES:---workspace}" >> "$GITHUB_OUTPUT"
+          else
+            echo "packages=--workspace" >> "$GITHUB_OUTPUT"
+          fi
+        working-directory: mvp
+      - run: cargo test ${{ steps.scope.outputs.packages }}
+        working-directory: mvp
+      - run: cargo clippy ${{ steps.scope.outputs.packages }}
+        working-directory: mvp
+      - run: cargo fmt --check ${{ steps.scope.outputs.packages }}
+        working-directory: mvp
       - run: pnpm install --frozen-lockfile
         working-directory: mvp/frontend
       - run: pnpm check

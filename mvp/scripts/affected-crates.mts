@@ -7,9 +7,11 @@
 // paths, same as the `fixture!` macro in crates/wire/tests/scenarios.rs),
 // then walks the crate dependency graph from `cargo metadata`.
 //
-// Usage: node scripts/affected-crates.mts <baseRef> [--json]
+// Usage: node scripts/affected-crates.mts <baseRef> [--tier=modified|affected] [--format=json|cargo-args]
 // Run from mvp/. <baseRef> is anything `git diff --name-only <baseRef>` accepts.
-// Prints { modified, affected } as JSON to stdout; nothing on stderr on success.
+// Default output is { modified, affected } as JSON. --format=cargo-args with a
+// --tier prints `-p name -p name2 ...` (or nothing, on an empty tier) — ready
+// to splice into a cargo invocation: `cargo build $(... --format=cargo-args --tier=affected)`.
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -85,12 +87,22 @@ function collectDepInfoByTarget(): Map<string, Set<string>> {
 }
 
 function main(): void {
-  const [baseRef, ...rest] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const baseRef = args.find((a) => !a.startsWith('--'));
   if (!baseRef) {
-    process.stderr.write('usage: affected-crates.mts <baseRef>\n');
+    process.stderr.write('usage: affected-crates.mts <baseRef> [--tier=modified|affected] [--format=json|cargo-args]\n');
     process.exit(1);
   }
-  void rest;
+  const tierArg = args.find((a) => a.startsWith('--tier='))?.slice('--tier='.length);
+  const formatArg = args.find((a) => a.startsWith('--format='))?.slice('--format='.length) ?? 'json';
+  if (tierArg !== undefined && tierArg !== 'modified' && tierArg !== 'affected') {
+    process.stderr.write(`--tier must be "modified" or "affected", got ${tierArg}\n`);
+    process.exit(1);
+  }
+  if (formatArg !== 'json' && formatArg !== 'cargo-args') {
+    process.stderr.write(`--format must be "json" or "cargo-args", got ${formatArg}\n`);
+    process.exit(1);
+  }
 
   run('cargo', ['check', '--workspace', '--tests'], workspaceRoot);
 
@@ -179,16 +191,15 @@ function main(): void {
     }
   }
 
-  process.stdout.write(
-    JSON.stringify(
-      {
-        modified: [...modified].sort(),
-        affected: [...affected].sort(),
-      },
-      null,
-      2,
-    ) + '\n',
-  );
+  const result = { modified: [...modified].sort(), affected: [...affected].sort() };
+
+  if (formatArg === 'cargo-args') {
+    const names = result[tierArg ?? 'affected'];
+    process.stdout.write(names.map((n) => `-p ${n}`).join(' '));
+    return;
+  }
+
+  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 }
 
 main();

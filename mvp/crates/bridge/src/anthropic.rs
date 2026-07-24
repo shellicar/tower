@@ -40,7 +40,6 @@ pub fn build_http_client() -> reqwest::Client {
         .expect("reqwest client")
 }
 
-
 /// The OAuth token endpoint and client id claude-sdk-cli itself uses
 /// (packages/claude-sdk/src/private/Client/Auth/consts.ts) — refreshing a
 /// Claude Code credential means speaking the same grant to the same client.
