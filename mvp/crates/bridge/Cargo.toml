@@ -18,6 +18,7 @@ async-nats.workspace = true
 base64.workspace = true
 futures.workspace = true
 image.workspace = true
+interprocess.workspace = true
 libc.workspace = true
 regex.workspace = true
 reqwest.workspace = true

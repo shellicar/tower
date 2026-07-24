@@ -17,7 +17,7 @@ wire = { path = "../wire" }
 anyhow.workspace = true
 base64.workspace = true
 crossterm.workspace = true
-libc.workspace = true
+interprocess.workspace = true
 pulldown-cmark.workspace = true
 ratatui.workspace = true
 serde.workspace = true

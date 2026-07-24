@@ -246,9 +246,9 @@ struct Host {
     refs_path: std::path::PathBuf,
     memory_path: std::path::PathBuf,
     history_path: std::path::PathBuf,
-    // The local TUI's direct duplex, if this instance was spawned with one
-    // (BRIDGE_ATTACH_FD). None for every tower-spawned instance today; NATS
-    // stays the only channel regardless of this field's value.
+    // The local TUI's direct channel, if this instance was spawned with one
+    // (BRIDGE_ATTACH_FD_DOWN/_UP). None for every tower-spawned instance
+    // today; NATS stays the only channel regardless of this field's value.
     attach: Option<bridge::attach::AttachHandle>,
     /// Conversations this instance serves — what a chdir republishes
     /// `attached` for (the cwd is causal; agent-spec scenario a4).
@@ -657,16 +657,16 @@ async fn main() -> anyhow::Result<()> {
 
     let client = async_nats::connect(&nats_url).await?; // fail-fast
 
-    // The attach fd is set only by a local TUI's spawn, never by tower.
+    // The attach pipes are set only by a local TUI's spawn, never by tower.
     // Presence alone is worth a startup line — this is the one place bridge
-    // ever says it has a second, non-NATS interface live. Duplex: the write
-    // half tees events and replies; the read half serves the client's
-    // requests, proxied onto NATS here so the client dials no broker.
-    let attach = bridge::attach::attach_stream().map(|stream| {
-        let (read_half, write_half) = stream.into_split();
-        let handle = std::sync::Arc::new(tokio::sync::Mutex::new(write_half));
+    // ever says it has a second, non-NATS interface live. Two one-way pipes,
+    // not a duplex socket: the down sender tees events and replies; the up
+    // recver serves the client's requests, proxied onto NATS here so the
+    // client dials no broker.
+    let attach = bridge::attach::attach_stream().map(|(down_tx, up_rx)| {
+        let handle = std::sync::Arc::new(tokio::sync::Mutex::new(down_tx));
         tokio::spawn(bridge::attach::serve_requests(
-            read_half,
+            up_rx,
             std::sync::Arc::clone(&handle),
             client.clone(),
             attach_bucket.clone(),
@@ -676,7 +676,7 @@ async fn main() -> anyhow::Result<()> {
     eprintln!(
         "bridge: attach channel {}",
         if attach.is_some() {
-            "present (BRIDGE_ATTACH_FD)"
+            "present (BRIDGE_ATTACH_FD_DOWN/_UP)"
         } else {
             "absent"
         }
