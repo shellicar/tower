@@ -108,6 +108,15 @@ impl Session {
         cmd.env(bridge::attach::ATTACH_FD_UP, &pipes.up_value);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
+        // Belt and suspenders: bridge is meant to notice its own stdin close
+        // and exit itself, but on Windows an orphaned bridge.exe has been
+        // observed to sit around indefinitely after helm exits (e.g. via
+        // Ctrl+C) instead of ever seeing that EOF. `kill_on_drop` makes helm
+        // itself responsible for bridge's lifetime: whenever this `Child`
+        // is dropped - clean exit, Ctrl+C, or a panic mid-unwind - the OS is
+        // told to end the process directly, with no dependence on bridge
+        // ever observing anything.
+        cmd.kill_on_drop(true);
         // bridge's stderr must never reach helm's terminal - the alternate
         // screen is helm's alone. The log survives in a file instead.
         // `/tmp` is a Unix-only default: a hardcoded `/tmp/...` resolves on
