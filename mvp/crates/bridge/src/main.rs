@@ -56,6 +56,7 @@ mod refs;
 mod skills;
 mod slice;
 mod stream;
+mod worldstate;
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -297,6 +298,11 @@ struct Host {
     /// `skills_root`. Strict-default until a line sets it: every gated
     /// operation asks, identical to bridge's behavior before this existed.
     permissions: Arc<RwLock<permissions::PermissionSet>>,
+    /// The world's cross-instance liveness fold (worldstate.rs), built from
+    /// `agent.v1.{world}.telemetry.>` by a background subscriber — what
+    /// `service` consults to answer `already_attached` honestly beyond this
+    /// instance's own `served` map.
+    world_state: Arc<RwLock<worldstate::WorldState>>,
 }
 
 impl Host {
@@ -669,28 +675,29 @@ impl Host {
 /// reacts — the request states no intent beyond "ensure this conversation is
 /// served here".
 ///
-/// - Already in `served` — checked here as a fast path (skip a replay we
-///   already know is pointless), and re-asserted atomically inside
-///   `serve_conversation` (the only correctness guarantee; this earlier
-///   check alone would race a concurrent claim during the replay below) —
-///   `rejected: already_attached`.
+/// - Already in `served` (this instance) — checked here as a fast path (skip
+///   a replay we already know is pointless), and re-asserted atomically
+///   inside `serve_conversation` (the only local-correctness guarantee; this
+///   earlier check alone would race a concurrent claim during the replay
+///   below) — `rejected: already_attached`.
+/// - Attached elsewhere in the world and that instance's pulse is fresh
+///   (`worldstate::WorldState`, folded from `agent.v1.{world}.telemetry.>`
+///   by a background subscriber every instance runs) — `rejected:
+///   already_attached`. This is a live fold, not the record itself: a
+///   freshly-booted instance knows nothing of the world's other
+///   attachments until each next publishes again (at most one pulse
+///   interval away), and the fold can lag the wire by one message in
+///   flight. The spec's own posture covers this (nats-spec: "correctness
+///   under concurrent servicing is carried by the conversation record's
+///   premise discipline, not by exclusivity here") — this check is a
+///   best-effort economy against wasted double-servicing, not the
+///   correctness boundary.
+/// - Attached elsewhere but that instance's pulse has gone stranded — not
+///   treated as attached; `service` may take the conversation over, per the
+///   spec's "takeover" case.
 /// - No committed history → spawn fresh, exactly as the stdio `spawn` line.
-/// - History, no live attachment locally → fold the record and re-attach,
-///   exactly as the stdio `adopt` line.
-///
-/// **Known v1 gap, not the spec's semantics:** `already_attached` here means
-/// "attached to *this instance*", checked against its own local `served`
-/// map. The spec's `service` (agent-spec line 107) means "the conversation's
-/// record shows a live attachment" — anywhere in the world, by any instance
-/// sharing the queue group. There is no cross-instance liveness read in v1
-/// (no fold of `agent.v1.{world}.telemetry.attached` across instances), so a
-/// `service` request that happens to land on an instance that is *not* the
-/// one already serving the conversation will not see that attachment, and
-/// will spawn a second servicer beside the live one — exactly the double-
-/// servicer failure the spec exists to prevent, un-prevented when several
-/// instances share a world. Safe today only because a v1 deployment runs one
-/// instance per world; sharing a queue group across several needs this fixed
-/// first.
+/// - History, no live attachment (locally or elsewhere) → fold the record
+///   and re-attach, exactly as the stdio `adopt` line.
 ///
 /// The reply confirms the premise, never the outcome: acceptance means the
 /// servicing was undertaken, not that it will succeed — the outcome is the
@@ -703,6 +710,15 @@ async fn handle_service(
 ) -> Vec<u8> {
     let conv = conversation_id.0;
     if host.served.read().unwrap().contains_key(&conv) {
+        return wire::encode_rejected("already_attached");
+    }
+    if host
+        .world_state
+        .read()
+        .unwrap()
+        .attached_elsewhere(&conv, &host.instance, std::time::Instant::now())
+        .is_some()
+    {
         return wire::encode_rejected("already_attached");
     }
     let stream_name = std::env::var("BRIDGE_STREAM").unwrap_or_else(|_| "conv-approval".into());
@@ -972,6 +988,56 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // The world's cross-instance liveness fold (worldstate.rs): plain NATS
+    // (telemetry, never JetStream-gated), broadcast — every instance sees
+    // every other's `ready`/`pulse`/`attached`/`detached`, which is what lets
+    // `service` answer `already_attached` for a conversation this instance
+    // never touched. Started before `ready` so this instance's own facts feed
+    // it too, harmlessly (attached_elsewhere excludes `own_instance`
+    // deliberately, so self-facts never self-reject).
+    let world_state = Arc::new(RwLock::new(worldstate::WorldState::new()));
+    {
+        let world_state = Arc::clone(&world_state);
+        let mut telemetry = client
+            .subscribe(format!("agent.v1.{world}.telemetry.>"))
+            .await
+            .with_context(|| "agent telemetry subscribe failed")?;
+        tokio::spawn(async move {
+            while let Some(msg) = telemetry.next().await {
+                let now = std::time::Instant::now();
+                let Some(wire::WireEvent::Agent(wire::AgentEvent { kind, .. })) =
+                    wire::parse_wire(&msg.subject, &msg.payload)
+                else {
+                    continue;
+                };
+                let wire::AgentKind::Telemetry(t) = kind else {
+                    continue;
+                };
+                let mut world_state = world_state.write().unwrap();
+                match t {
+                    wire::AgentTelemetry::Ready(r) => {
+                        world_state.on_ready(&r.instance_id.0, now);
+                    }
+                    wire::AgentTelemetry::Pulse(p) => {
+                        world_state.on_pulse(&p.instance_id.0, p.interval_s, now);
+                    }
+                    wire::AgentTelemetry::Attached(a) => {
+                        world_state.on_attached(
+                            &a.instance_id.0,
+                            &a.conversation_id.0,
+                            a.interval_s,
+                            now,
+                        );
+                    }
+                    wire::AgentTelemetry::Detached(d) => {
+                        world_state.on_detached(&d.conversation_id.0);
+                    }
+                }
+            }
+            eprintln!("bridge: agent telemetry subscription ended");
+        });
+    }
+
     // Host: the shared config and live cells every control line reads. One
     // grammar, two delivery points — the -c batch, then live stdin.
     let default_model = Arc::new(RwLock::new(default_model));
@@ -997,6 +1063,7 @@ async fn main() -> anyhow::Result<()> {
         attach_bucket,
         thinking_budget,
         permissions: Arc::new(RwLock::new(permissions::PermissionSet::strict_default())),
+        world_state,
     });
 
     // The world's own requests (agent-spec): one queue group per world, so
