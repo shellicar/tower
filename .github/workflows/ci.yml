@@ -1,4 +1,4 @@
-name: Release
+name: CI
 
 # One workflow, gated by event — same shape as docker/compose's ci.yml.
 # Five independently releasable apps, each its own tag/release name:
