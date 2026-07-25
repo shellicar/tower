@@ -9,7 +9,7 @@ Backend Rust (`towerd`), frontend Svelte, coupling = NATS concern specs + `tower
 crates/
   wire/     # spec types + pure folds. No I/O, no tokio.
   towerd/   # binary: ingest → views → web.
-frontend/   # Svelte SPA. Not a crate. Talks WS per tower-ws-spec.md.
+frontend-svelte/   # Svelte SPA. Not a crate. Talks WS per tower-ws-spec.md.
 ```
 
 ## Components and channels

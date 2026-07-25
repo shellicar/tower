@@ -113,7 +113,7 @@ Five concerns now, same contract, ported to Leptos signals instead of
 1. `cargo add leptos` (check current version — v0.9 is in alpha per the repo
    clone at `~/repos/leptos-rs/leptos`, decide 0.8 stable vs 0.9 alpha
    deliberately, don't default silently).
-2. Scaffold `mvp/frontend-leptos` alongside `frontend` and `frontend-rs`,
+2. Scaffold `mvp/frontend-leptos` alongside `frontend-svelte` and `frontend-rs`,
    `trunk`-based like `frontend-rs` (check whether Leptos's own CSR-only
    tooling differs from trunk before assuming reuse).
 3. Port `Transport` first, test it decodes real `ServerMsg` frames against the

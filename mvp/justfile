@@ -27,4 +27,4 @@ dev:
 # Build the webapp towerd serves. dist/ is gitignored, so a fresh clone
 # runs this once (or uses `just dev` and never needs it).
 frontend:
-    cd frontend && pnpm install && pnpm build
+    cd frontend-svelte && pnpm install && pnpm build

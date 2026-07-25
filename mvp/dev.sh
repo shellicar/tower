@@ -19,9 +19,9 @@ export WEB_PORT="${WEB_PORT:-5174}"
 command -v trunk >/dev/null || { echo "dev.sh needs trunk (frontend-leptos's dev server): cargo install trunk" >&2; exit 1; }
 
 # Build/install first so the runs below start together, not serially compiling.
+# frontend-leptos is now part of this workspace, so --workspace covers it too.
 cargo build --workspace
-cargo build --manifest-path frontend-leptos/Cargo.toml
-pnpm --dir frontend install
+pnpm --dir frontend-svelte install
 
 pids=()
 run() {
@@ -36,7 +36,7 @@ trap 'kill 0' EXIT INT TERM
 run towerd cargo run -q -p towerd
 ( cd frontend-leptos && run leptos trunk serve ) &
 pids+=($!)
-run svelte pnpm --dir frontend dev
+run svelte pnpm --dir frontend-svelte dev
 
 echo "mvp up: leptos http://localhost:8082 · svelte http://localhost:$WEB_PORT · towerd http://$TOWER_BIND (db $TOWER_DB) · Ctrl-C stops everything"
 wait

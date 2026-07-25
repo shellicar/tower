@@ -63,7 +63,7 @@ fn load_draft(conv: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Persisted on every keystroke — mvp/frontend debounces this (a synchronous
+/// Persisted on every keystroke — mvp/frontend-svelte debounces this (a synchronous
 /// write per keystroke is main-thread I/O the typing loop doesn't need); this
 /// build accepts that cost for now rather than reproduce the debounce timer.
 fn save_draft(conv: &str, value: &str) {

@@ -66,11 +66,11 @@ jobs:
       - run: cargo fmt --check ${{ steps.scope.outputs.fmt_packages }}
         working-directory: mvp
       - run: pnpm install --frozen-lockfile
-        working-directory: mvp/frontend
+        working-directory: mvp/frontend-svelte
       - run: pnpm check
-        working-directory: mvp/frontend
+        working-directory: mvp/frontend-svelte
       - run: pnpm test
-        working-directory: mvp/frontend
+        working-directory: mvp/frontend-svelte
 
   # Splits the release's tag (`<app>@<version>`) into its two halves. Empty
   # on pull_request/push — nothing here reads its outputs on those triggers.
@@ -206,10 +206,10 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-        working-directory: mvp/frontend
+        working-directory: mvp/frontend-svelte
       - run: pnpm build
-        working-directory: mvp/frontend
-      - run: tar czf tower-svelte.tar.gz -C mvp/frontend/dist .
+        working-directory: mvp/frontend-svelte
+      - run: tar czf tower-svelte.tar.gz -C mvp/frontend-svelte/dist .
       - uses: actions/upload-artifact@v4
         with:
           name: tower-tower-svelte
