@@ -53,15 +53,17 @@ jobs:
             git fetch --no-tags origin "${{ github.base_ref }}"
             PACKAGES=$(node scripts/affected-crates.mts "origin/${{ github.base_ref }}" --format=cargo-args --tier=affected)
             echo "packages=${PACKAGES:---workspace}" >> "$GITHUB_OUTPUT"
+            echo "fmt_packages=$PACKAGES" >> "$GITHUB_OUTPUT"
           else
             echo "packages=--workspace" >> "$GITHUB_OUTPUT"
+            echo "fmt_packages=" >> "$GITHUB_OUTPUT"
           fi
         working-directory: mvp
       - run: cargo test ${{ steps.scope.outputs.packages }}
         working-directory: mvp
       - run: cargo clippy ${{ steps.scope.outputs.packages }}
         working-directory: mvp
-      - run: cargo fmt --check ${{ steps.scope.outputs.packages }}
+      - run: cargo fmt --check ${{ steps.scope.outputs.fmt_packages }}
         working-directory: mvp
       - run: pnpm install --frozen-lockfile
         working-directory: mvp/frontend
