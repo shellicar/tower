@@ -97,12 +97,13 @@ pub struct AgentConfig {
     pub attach: Option<bridge::attach::AttachHandle>,
     /// This conversation's own working directory — a live cell, shared with
     /// main.rs's `Host::served` map under this conversation's id, so a
-    /// `chdir` control line (one conversation) or the instance-wide `cwd`
-    /// line (every served conversation, restoring the pre-per-agent-cwd
-    /// behaviour) can move it while the conversation runs. Read fresh per
-    /// say, same discipline as `model`: a move lands on the next query, not
-    /// mid-turn. What "$PWD" resolves to in `permissions` for this
-    /// conversation specifically.
+    /// `chdir` control line (this conversation, and only this conversation)
+    /// can move it while the conversation runs. The instance-wide `cwd`
+    /// line never reaches here: it only sets the default a future spawn/
+    /// adopt with no `cwd` of its own takes. Read fresh per say, same
+    /// discipline as `model`: a move lands on the next query, not mid-turn.
+    /// What "$PWD" resolves to in `permissions` for this conversation
+    /// specifically.
     pub cwd: Arc<std::sync::RwLock<std::path::PathBuf>>,
     /// The path-scoped permission matrix (permissions.rs), shared and live-
     /// repointable by a `permissions` control line.
@@ -489,9 +490,10 @@ async fn accept_say(
         history_store: crate::history::HistoryStore::clone(&config.history),
         thinking_budget: config.thinking_budget,
         attach: config.attach.clone(),
-        // Read fresh per say: a chdir (this conversation's or the
-        // instance-wide line) reaches even a running conversation, here, on
-        // its next say — same discipline as `model`.
+        // Read fresh per say: a `chdir` of this specific conversation reaches
+        // it here, on its next say — same discipline as `model`. The
+        // instance-wide `cwd` line never reaches a running conversation at
+        // all; it only sets a future spawn/adopt's default.
         cwd: config.cwd.read().unwrap().clone(),
         permissions: Arc::clone(&config.permissions),
     };
