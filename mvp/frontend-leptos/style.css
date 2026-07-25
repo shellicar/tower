@@ -306,6 +306,11 @@ html, body {
 .conversation-footer { flex-shrink: 0; padding: 8px 0 12px; border-top: 1px solid #262626; background: #111; }
 
 .status-line { display: flex; align-items: center; gap: 8px; color: #737373; margin: 0 0 6px; }
+/* Truncates from the LEFT: the tail of a path (the leaf directory) is the
+   informative end, so the ellipsis belongs at the front, not the back.
+   `direction: rtl` + `text-align: left` is the standard trick — the browser
+   still measures/truncates in one pass, no JS width math needed. */
+.status-line .cwd { direction: rtl; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 32ch; }
 .badge { border: 1px solid #404040; border-radius: 2px; padding: 0 5px; color: #737373; }
 .badge.live { border-color: #3730a3; color: #a5b4fc; }
 .status-line .cancel { border: 1px solid #7f1d1d; color: #fca5a5; padding: 0 6px; }
