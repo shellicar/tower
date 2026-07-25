@@ -24,6 +24,11 @@ ws-types = { path = "../crates/ws-types" }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
+# wasm32 is single-threaded; on_cleanup requires Send + Sync (leptos's shared
+# reactive_graph crate also targets multi-threaded ssr) — SendWrapper is the
+# accepted way to hand it a !Send Closure without an actual thread ever
+# touching it.
+send_wrapper = "0.6"
 # gloo-net's WebSocket: an async Stream/Sink split, not ewebsock's try_recv
 # channel — the natural fit for Leptos's push-based reactive graph rather than
 # egui's per-frame pull.
@@ -44,6 +49,10 @@ web-sys = { version = "0.3", features = [
   "Location",
   "Storage",
   "Window",
+  "DomRect",
+  "DomRectReadOnly",
+  "ResizeObserver",
+  "ResizeObserverEntry",
   "console",
 ] }
 console_error_panic_hook = "0.1"

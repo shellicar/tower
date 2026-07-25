@@ -1535,6 +1535,7 @@ dependencies = [
  "gloo-net",
  "js-sys",
  "leptos",
+ "send_wrapper",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
