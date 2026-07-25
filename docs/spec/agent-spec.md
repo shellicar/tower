@@ -130,6 +130,22 @@ here, and the conversation's own record — which is why a feasibility problem
 (a directory too unreconciled to move) is not a rejection reason: it is an
 outcome, shown by the fact that never changes, never a reply.
 
+**The premise for `service` in a shared world.** "The conversation's record"
+above is the change stream for history, plus — whenever the answering
+instance is not already the one attached locally — the telemetry fold
+(`attached` + `pulse`) for whether some other instance holds a live
+attachment. A fresh pulse there is `already_attached`; a stranded one is not
+(the spec's liveness fold applies exactly as it does to any other consumer,
+including the default silence threshold when no interval has been declared
+yet), and `service` may take the conversation over. This fold is inherently
+eventual — built from broadcast telemetry, not the record itself, so a
+freshly-booted instance knows nothing of the world's other attachments until
+each next publishes again — which is why it is a servicer's economy against
+wasted double-servicing, not a substitute for the record's own premise
+discipline (nats-spec, System principles: "a successor checks the
+operation's premise against the stream"), which remains the correctness
+boundary two servicers ultimately race on.
+
 A note with teeth, from nats-spec's Authority: connection is authority, and
 `service` makes a connected sender able to start work in a world. The
 operational plane's strict-credentials posture is what stands between broker

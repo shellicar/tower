@@ -3,24 +3,42 @@
 //! whether they're still alive. A pure fold over explicit facts and an
 //! injected `now`, so it is tested without a clock or a broker — the only
 //! fake anywhere near this is `std::time::Instant`, supplied by the caller.
+//! Behaviour and its limits are agent-spec's own (service's cross-instance
+//! premise-check note); this module is the implementation, not the place
+//! that decides the semantics.
 //!
 //! Two facts, kept apart exactly as the spec keeps them apart: `attachments`
-//! is decided state (who last claimed a conversation); `instances`' liveness
-//! is inferred from pulse silence, never declared. Default silence
-//! threshold: 60s, applied until a real `intervalS` promise arrives ("no
-//! declared interval yet is not the same as alive"). Stranded: ~3x an
-//! instance's own declared interval.
+//! is decided state (who last claimed a conversation, released only by a
+//! `detached` from that same instance — a stale `detached` from a
+//! since-superseded owner must never erase a newer owner's claim); an
+//! instance's liveness is inferred from pulse silence, never declared. No
+//! declared interval yet is genuinely not the same as alive: an instance
+//! seen only via `ready` gets the spec's flat default silence threshold
+//! (60s) directly, never multiplied — the ~3x-declared-interval rule is for
+//! an instance that has actually promised a cadence.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-const DEFAULT_INTERVAL_S: i64 = 60;
+const DEFAULT_SILENCE_S: u64 = 60;
 const STRANDED_MULTIPLE: u64 = 3;
 
 #[derive(Debug, Clone, Copy)]
 struct InstancePulse {
     last_seen: Instant,
-    interval_s: i64,
+    /// `None` until a `pulse` (or an `attached` carrying `intervalS`)
+    /// actually declares a cadence — distinct from "declared 0", and from
+    /// "definitely alive".
+    interval_s: Option<i64>,
+}
+
+impl InstancePulse {
+    fn silence_threshold(&self) -> Duration {
+        match self.interval_s {
+            Some(i) => Duration::from_secs(i.max(0) as u64 * STRANDED_MULTIPLE),
+            None => Duration::from_secs(DEFAULT_SILENCE_S),
+        }
+    }
 }
 
 /// The world's servicing map, folded from `agent.v1.{world}.telemetry.>`
@@ -36,17 +54,15 @@ impl WorldState {
         Self::default()
     }
 
-    /// `ready` restates liveness with no interval yet — seed the default
-    /// threshold so a boot-then-silence instance still gets a verdict.
+    /// `ready` restates liveness with no interval yet.
     pub fn on_ready(&mut self, instance_id: &str, now: Instant) {
-        let entry = self
-            .instances
+        self.instances
             .entry(instance_id.to_string())
             .or_insert(InstancePulse {
                 last_seen: now,
-                interval_s: DEFAULT_INTERVAL_S,
-            });
-        entry.last_seen = now;
+                interval_s: None,
+            })
+            .last_seen = now;
     }
 
     pub fn on_pulse(&mut self, instance_id: &str, interval_s: i64, now: Instant) {
@@ -54,7 +70,7 @@ impl WorldState {
             instance_id.to_string(),
             InstancePulse {
                 last_seen: now,
-                interval_s,
+                interval_s: Some(interval_s),
             },
         );
     }
@@ -77,27 +93,29 @@ impl WorldState {
             .entry(instance_id.to_string())
             .or_insert(InstancePulse {
                 last_seen: now,
-                interval_s: interval_s.unwrap_or(DEFAULT_INTERVAL_S),
+                interval_s,
             });
         entry.last_seen = now;
-        if let Some(i) = interval_s {
-            entry.interval_s = i;
+        if interval_s.is_some() {
+            entry.interval_s = interval_s;
         }
     }
 
-    /// `detached` is a decided fact: release ownership outright, whoever the
-    /// fold currently thinks holds it (tolerance — an instance this fold
-    /// never saw `ready` for can still detach).
-    pub fn on_detached(&mut self, conversation_id: &str) {
-        self.attachments.remove(conversation_id);
+    /// `detached` is a decided fact, but only for the instance that sent it:
+    /// remove the claim only if the fold's current owner is that same
+    /// instance. Plain NATS carries no cross-publisher ordering, so a
+    /// takeover's new `attached` can be folded before the old owner's late
+    /// `detached` arrives; releasing unconditionally would let that stale
+    /// detach erase the new owner's live claim.
+    pub fn on_detached(&mut self, instance_id: &str, conversation_id: &str) {
+        if self.attachments.get(conversation_id).map(String::as_str) == Some(instance_id) {
+            self.attachments.remove(conversation_id);
+        }
     }
 
     fn is_alive(&self, instance_id: &str, now: Instant) -> bool {
         match self.instances.get(instance_id) {
-            Some(p) => {
-                let threshold = Duration::from_secs(p.interval_s.max(0) as u64 * STRANDED_MULTIPLE);
-                now.duration_since(p.last_seen) < threshold
-            }
+            Some(p) => now.duration_since(p.last_seen) < p.silence_threshold(),
             None => false,
         }
     }
@@ -185,27 +203,51 @@ mod tests {
     }
 
     #[test]
-    fn detached_releases_ownership_immediately() {
+    fn detached_by_its_own_owner_releases_ownership_immediately() {
         let mut world = WorldState::new();
         let now = Instant::now();
         world.on_pulse("inst-b", 30, now);
         world.on_attached("inst-b", "conv-1", None, now);
-        world.on_detached("conv-1");
+        world.on_detached("inst-b", "conv-1");
         assert_eq!(world.attached_elsewhere("conv-1", "inst-a", now), None);
     }
 
+    /// The regression this module must never reintroduce: a takeover's new
+    /// `attached` lands, then the *old* owner's late `detached` arrives for
+    /// the same conversation — plain NATS gives no cross-publisher ordering
+    /// guarantee, so this is a real, not hypothetical, interleaving. The
+    /// stale detach must not erase the new owner's live claim.
     #[test]
-    fn an_attachment_with_no_interval_yet_uses_the_default_threshold() {
+    fn a_stale_detach_from_a_superseded_owner_does_not_erase_the_new_owners_claim() {
+        let mut world = WorldState::new();
+        let t0 = Instant::now();
+        world.on_pulse("inst-b", 30, t0);
+        world.on_attached("inst-b", "conv-1", None, t0);
+        // Takeover: inst-c attaches after inst-b's pulse goes stranded.
+        let takeover = t0 + Duration::from_secs(91);
+        world.on_pulse("inst-c", 30, takeover);
+        world.on_attached("inst-c", "conv-1", None, takeover);
+        // inst-b's own detached, published before the takeover but delivered
+        // after it — a stale fact arriving late.
+        world.on_detached("inst-b", "conv-1");
+        assert_eq!(
+            world.attached_elsewhere("conv-1", "inst-a", takeover),
+            Some("inst-c")
+        );
+    }
+
+    #[test]
+    fn an_instance_known_only_via_ready_uses_the_flat_default_threshold_not_a_multiple_of_it() {
         let mut world = WorldState::new();
         let t0 = Instant::now();
         world.on_ready("inst-b", t0);
         world.on_attached("inst-b", "conv-1", None, t0);
-        let just_under = t0 + Duration::from_secs(179); // < 3 * 60s default
+        let just_under = t0 + Duration::from_secs(59); // < 60s default, no 3x
         assert_eq!(
             world.attached_elsewhere("conv-1", "inst-a", just_under),
             Some("inst-b")
         );
-        let over = t0 + Duration::from_secs(181);
+        let over = t0 + Duration::from_secs(61); // > 60s default
         assert_eq!(world.attached_elsewhere("conv-1", "inst-a", over), None);
     }
 }

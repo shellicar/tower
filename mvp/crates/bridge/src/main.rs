@@ -670,19 +670,13 @@ impl Host {
     }
 }
 
-/// The world's `service` request (agent-spec): one verb for spawn, resume,
-/// and takeover. The servicer reads the conversation's own record and
-/// reacts — the request states no intent beyond "ensure this conversation is
-/// served here".
-///
-/// - Already in `served` (this instance), or attached elsewhere in the
-///   world with a fresh pulse (`worldstate::WorldState`, folded from
-///   `agent.v1.{world}.telemetry.>`) — `rejected: already_attached`.
-/// - Attached elsewhere but stranded — not treated as attached; `service`
-///   takes the conversation over, per the spec's "takeover" case.
-/// - No committed history → spawn fresh, exactly as the stdio `spawn` line.
-/// - History, no live attachment (locally or elsewhere) → fold the record
-///   and re-attach, exactly as the stdio `adopt` line.
+/// The world's `service` request (agent-spec: Requests, and the "premise
+/// for `service`" note). Premise-checks `served` (this instance) and, via
+/// `worldstate::WorldState`, whether another instance holds a live
+/// attachment, then reacts: already attached (locally or elsewhere, pulse
+/// fresh) → `rejected: already_attached`; no committed history → spawn
+/// fresh, exactly as the stdio `spawn` line; history and no live attachment
+/// → fold the record and re-attach, exactly as the stdio `adopt` line.
 ///
 /// The reply confirms the premise, never the outcome: acceptance means the
 /// servicing was undertaken, not that it will succeed — the outcome is the
@@ -1015,7 +1009,7 @@ async fn main() -> anyhow::Result<()> {
                         );
                     }
                     wire::AgentTelemetry::Detached(d) => {
-                        world_state.on_detached(&d.conversation_id.0);
+                        world_state.on_detached(&d.instance_id.0, &d.conversation_id.0);
                     }
                 }
             }
