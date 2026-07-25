@@ -123,8 +123,8 @@ pub enum AgentRequest {
 /// (leaf, bytes) → request. The subject leaf spells the operation
 /// (`agent.v1.{world}.requests.service` → `"service"`); the body carries no
 /// type. Unparseable bytes, or a `service` missing its required
-/// `conversationId`, are `Other` — a servicer must answer everything
-/// addressed to it.
+/// `conversationId` (including an empty string — present but not a usable
+/// id), are `Other` — a servicer must answer everything addressed to it.
 pub fn parse_agent_request(leaf: &str, bytes: &[u8]) -> AgentRequest {
     let type_name = leaf.to_string();
     let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
@@ -132,7 +132,11 @@ pub fn parse_agent_request(leaf: &str, bytes: &[u8]) -> AgentRequest {
     };
     match leaf {
         "service" => {
-            let Some(conversation_id) = value.get("conversationId").and_then(Value::as_str) else {
+            let Some(conversation_id) = value
+                .get("conversationId")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+            else {
                 return AgentRequest::Other { type_name };
             };
             AgentRequest::Service {
@@ -221,6 +225,15 @@ mod tests {
         assert!(matches!(
             parse_agent_request("service", bytes),
             AgentRequest::Other { .. }
+        ));
+    }
+
+    #[test]
+    fn service_request_with_empty_conversation_id_is_not_serviced() {
+        let bytes = br#"{"ts":"2026-07-07T21:00:00+10:00","conversationId":""}"#;
+        assert!(!matches!(
+            parse_agent_request("service", bytes),
+            AgentRequest::Service { .. }
         ));
     }
 

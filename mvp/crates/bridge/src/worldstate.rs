@@ -1,21 +1,24 @@
-//! Cross-instance liveness fold (agent-spec, "Liveness is a fold, never
-//! declared"): who else in this world is attached to which conversation, and
-//! whether they're still alive. A pure fold over explicit facts and an
-//! injected `now`, so it is tested without a clock or a broker — the only
-//! fake anywhere near this is `std::time::Instant`, supplied by the caller.
-//! Behaviour and its limits are agent-spec's own (service's cross-instance
-//! premise-check note); this module is the implementation, not the place
-//! that decides the semantics.
+//! Cross-instance attachment fold: who else in this world claims which
+//! conversation. A pure fold over explicit facts, tested without a clock or
+//! a broker.
 //!
-//! Two facts, kept apart exactly as the spec keeps them apart: `attachments`
-//! is decided state (who last claimed a conversation, released only by a
-//! `detached` from that same instance — a stale `detached` from a
-//! since-superseded owner must never erase a newer owner's claim); an
-//! instance's liveness is inferred from pulse silence, never declared. No
-//! declared interval yet is genuinely not the same as alive: an instance
-//! seen only via `ready` gets the spec's flat default silence threshold
-//! (60s) directly, never multiplied — the ~3x-declared-interval rule is for
-//! an instance that has actually promised a cadence.
+//! Design ruling (superseding this module's earlier premise-check use):
+//! attachment is singular and supersession is unconditional — a new
+//! `attached` displaces whichever one stood before it, any world, any
+//! instance, no stale precondition, liveness irrelevant (agent-spec, "The
+//! premise for `service` in a shared world"). So `service` no longer
+//! consults liveness to decide whether to take a conversation over; the
+//! pulse-liveness machinery below is unused for that reason, kept as
+//! groundwork for the deferred pass named in that spec note (what a
+//! superseded instance itself does — stand down, publish its own
+//! `detached` — which is a separate PR).
+//!
+//! What does still matter, unconditionally: `attachments` is decided state
+//! (who last claimed a conversation), released only by a `detached` from
+//! that same instance — a stale `detached` from a since-superseded owner
+//! must never erase a newer owner's claim (the one correctness fix this
+//! module keeps earning its place for).
+#![allow(dead_code)] // groundwork for the deferred stand-down/detached-on-displacement pass
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};

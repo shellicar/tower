@@ -298,10 +298,12 @@ struct Host {
     /// `skills_root`. Strict-default until a line sets it: every gated
     /// operation asks, identical to bridge's behavior before this existed.
     permissions: Arc<RwLock<permissions::PermissionSet>>,
-    /// The world's cross-instance liveness fold (worldstate.rs), built from
-    /// `agent.v1.{world}.telemetry.>` by a background subscriber — what
-    /// `service` consults to answer `already_attached` honestly beyond this
-    /// instance's own `served` map.
+    /// The world's cross-instance attachment fold (worldstate.rs), built
+    /// from `agent.v1.{world}.telemetry.>` by a background subscriber.
+    /// Unconsulted by `service` since supersession is unconditional
+    /// (agent-spec, "The premise for `service` in a shared world"); kept for
+    /// the deferred stand-down/detached-on-displacement pass.
+    #[allow(dead_code)]
     world_state: Arc<RwLock<worldstate::WorldState>>,
 }
 
@@ -671,12 +673,14 @@ impl Host {
 }
 
 /// The world's `service` request (agent-spec: Requests, and the "premise
-/// for `service`" note). Premise-checks `served` (this instance) and, via
-/// `worldstate::WorldState`, whether another instance holds a live
-/// attachment, then reacts: already attached (locally or elsewhere, pulse
-/// fresh) → `rejected: already_attached`; no committed history → spawn
-/// fresh, exactly as the stdio `spawn` line; history and no live attachment
-/// → fold the record and re-attach, exactly as the stdio `adopt` line.
+/// for `service`" note). Attachment is singular and supersession is
+/// unconditional (design ruling): already attached to *this* instance →
+/// `rejected: already_attached` (the request is redundant — nothing to do);
+/// otherwise — no history, history with no attachment, or attached to any
+/// other instance, live or stranded — proceed and take over. Liveness
+/// elsewhere is irrelevant to this premise: asking a second instance to
+/// serve IS the deliberate migration path, so there is no cross-instance
+/// check here to gate on.
 ///
 /// The reply confirms the premise, never the outcome: acceptance means the
 /// servicing was undertaken, not that it will succeed — the outcome is the
@@ -689,15 +693,6 @@ async fn handle_service(
 ) -> Vec<u8> {
     let conv = conversation_id.0;
     if host.served.read().unwrap().contains_key(&conv) {
-        return wire::encode_rejected("already_attached");
-    }
-    if host
-        .world_state
-        .read()
-        .unwrap()
-        .attached_elsewhere(&conv, &host.instance, std::time::Instant::now())
-        .is_some()
-    {
         return wire::encode_rejected("already_attached");
     }
     let stream_name = std::env::var("BRIDGE_STREAM").unwrap_or_else(|_| "conv-approval".into());
