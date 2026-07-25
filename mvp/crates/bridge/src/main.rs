@@ -675,26 +675,11 @@ impl Host {
 /// reacts — the request states no intent beyond "ensure this conversation is
 /// served here".
 ///
-/// - Already in `served` (this instance) — checked here as a fast path (skip
-///   a replay we already know is pointless), and re-asserted atomically
-///   inside `serve_conversation` (the only local-correctness guarantee; this
-///   earlier check alone would race a concurrent claim during the replay
-///   below) — `rejected: already_attached`.
-/// - Attached elsewhere in the world and that instance's pulse is fresh
-///   (`worldstate::WorldState`, folded from `agent.v1.{world}.telemetry.>`
-///   by a background subscriber every instance runs) — `rejected:
-///   already_attached`. This is a live fold, not the record itself: a
-///   freshly-booted instance knows nothing of the world's other
-///   attachments until each next publishes again (at most one pulse
-///   interval away), and the fold can lag the wire by one message in
-///   flight. The spec's own posture covers this (nats-spec: "correctness
-///   under concurrent servicing is carried by the conversation record's
-///   premise discipline, not by exclusivity here") — this check is a
-///   best-effort economy against wasted double-servicing, not the
-///   correctness boundary.
-/// - Attached elsewhere but that instance's pulse has gone stranded — not
-///   treated as attached; `service` may take the conversation over, per the
-///   spec's "takeover" case.
+/// - Already in `served` (this instance), or attached elsewhere in the
+///   world with a fresh pulse (`worldstate::WorldState`, folded from
+///   `agent.v1.{world}.telemetry.>`) — `rejected: already_attached`.
+/// - Attached elsewhere but stranded — not treated as attached; `service`
+///   takes the conversation over, per the spec's "takeover" case.
 /// - No committed history → spawn fresh, exactly as the stdio `spawn` line.
 /// - History, no live attachment (locally or elsewhere) → fold the record
 ///   and re-attach, exactly as the stdio `adopt` line.
