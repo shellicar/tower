@@ -77,7 +77,7 @@ pub fn exec_schema() -> Value {
                             },
                             "cwd": {
                                 "type": "string",
-                                "description": "Working directory for this command. Defaults to the bridge's own cwd."
+                                "description": "Working directory for this command. Defaults to the conversation's own cwd."
                             },
                             "env": {
                                 "type": "object",

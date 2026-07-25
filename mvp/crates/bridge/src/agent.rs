@@ -95,11 +95,15 @@ pub struct AgentConfig {
     /// None for every tower-spawned instance — NATS carries every event
     /// regardless; this is purely an additional local mirror.
     pub attach: Option<bridge::attach::AttachHandle>,
-    /// This conversation's own working directory — captured once at spawn,
-    /// independent of bridge's shared instance-wide cwd thereafter (main.rs's
-    /// `Host::config`). What "$PWD" resolves to in `permissions` for this
+    /// This conversation's own working directory — a live cell, shared with
+    /// main.rs's `Host::served` map under this conversation's id, so a
+    /// `chdir` control line (one conversation) or the instance-wide `cwd`
+    /// line (every served conversation, restoring the pre-per-agent-cwd
+    /// behaviour) can move it while the conversation runs. Read fresh per
+    /// say, same discipline as `model`: a move lands on the next query, not
+    /// mid-turn. What "$PWD" resolves to in `permissions` for this
     /// conversation specifically.
-    pub cwd: std::path::PathBuf,
+    pub cwd: Arc<std::sync::RwLock<std::path::PathBuf>>,
     /// The path-scoped permission matrix (permissions.rs), shared and live-
     /// repointable by a `permissions` control line.
     pub permissions: Arc<std::sync::RwLock<crate::permissions::PermissionSet>>,
@@ -485,7 +489,10 @@ async fn accept_say(
         history_store: crate::history::HistoryStore::clone(&config.history),
         thinking_budget: config.thinking_budget,
         attach: config.attach.clone(),
-        cwd: config.cwd.clone(),
+        // Read fresh per say: a chdir (this conversation's or the
+        // instance-wide line) reaches even a running conversation, here, on
+        // its next say — same discipline as `model`.
+        cwd: config.cwd.read().unwrap().clone(),
         permissions: Arc::clone(&config.permissions),
     };
     let done = done_tx.clone();
@@ -957,7 +964,7 @@ async fn run_tool_round(
             // the first. Parsing happens before the check, once, so the
             // Approved arm never has to re-parse what's already known good.
             "Exec" => match crate::exec::parse_commands(&block["input"]) {
-                Ok(commands) => {
+                Ok(mut commands) => {
                     let call_cwds: Vec<std::path::PathBuf> = commands
                         .iter()
                         .map(|c| match &c.cwd {
@@ -965,6 +972,16 @@ async fn run_tool_round(
                             None => cwd.to_path_buf(),
                         })
                         .collect();
+                    // Bind every command's actual cwd to its resolved,
+                    // verified value — never left to fall back on the
+                    // bridge PROCESS's own directory (exec.rs's `cmd`
+                    // otherwise inherits it when a command carries no cwd of
+                    // its own), which is not this conversation's cwd once a
+                    // conversation can be spawned or moved independently of
+                    // the instance default.
+                    for (c, resolved) in commands.iter_mut().zip(&call_cwds) {
+                        c.cwd = Some(resolved.to_string_lossy().into_owned());
+                    }
                     match permission_verdict(permissions, cwd, &home, "exec", &call_cwds) {
                         crate::permissions::Verdict::Deny => {
                             ("denied by permissions policy".to_string(), true)
