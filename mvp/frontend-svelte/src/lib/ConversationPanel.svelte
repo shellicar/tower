@@ -363,7 +363,7 @@
     {/each}
     <p class="mb-1.5 flex items-center gap-2 text-neutral-500">
       {#if row}<span>{row.lastKind} · {age(now, row.lastEvent)} ago</span>{/if}
-      {#if liveCwd}<span class="truncate-left min-w-0" title={liveCwd}>{liveCwd}</span>{/if}
+      {#if liveCwd}<span class="truncate-left min-w-0" title={liveCwd}><span>{liveCwd}</span></span>{/if}
       {#if oc.queryState === 'unknown'}
         <span class="rounded border border-neutral-700 px-1.5 text-neutral-500" title="no evidence yet whether a query is running">state unknown</span>
       {:else if oc.queryState === 'live'}
