@@ -21,9 +21,11 @@ on:
 
 jobs:
   # Whole-workspace correctness: test, lint, and format-check every crate
-  # (mirrors `just test`/`just check`), plus the Svelte frontend's own
-  # type-check and test scripts. The build jobs below only prove things
-  # compile; this is the one that proves they're right.
+  # (mirrors `just test`/`just check`), the Svelte frontend's own type-check
+  # and test scripts, and that every changes.jsonl is valid and its
+  # package's CHANGELOG.md isn't stale (mirrors `just changes-check`). The
+  # build jobs below only prove things compile; this is the one that proves
+  # they're right.
   #
   # On a PR, scoped to affected crates only (scripts/affected-crates.mts —
   # exact, dep-info-based, not a directory-prefix guess). On push to main,
@@ -71,6 +73,11 @@ jobs:
         working-directory: mvp/frontend-svelte
       - run: pnpm test
         working-directory: mvp/frontend-svelte
+      - run: node scripts/validate-changes.mts
+      - name: Check changelog drift
+        run: |
+          node scripts/generate-all-changelogs.mts
+          git diff --exit-code -- '*/CHANGELOG.md'
 
   # Splits the release's tag (`<app>@<version>`) into its two halves. Empty
   # on pull_request/push — nothing here reads its outputs on those triggers.
