@@ -499,6 +499,51 @@ mod tests {
         assert_eq!(rail.live_cwd("unknown"), None);
     }
 
+    fn attach(rail: &mut Rail, world: &str, ts: i64, cwd: &str) {
+        rail.apply(&ServerMsg::Agent(WsAgent {
+            kind: "attached".into(),
+            world: world.into(),
+            instance_id: "i1".into(),
+            ts,
+            conv: Some("a".into()),
+            cwd: Some(cwd.into()),
+            interval_s: None,
+            host: None,
+        }));
+    }
+
+    #[test]
+    fn live_cwd_hides_the_cwd_of_a_stranded_attachment() {
+        // Attached at t=0, read long after: silence far past the stranded
+        // threshold. Liveness is a fold, never declared (agent-spec) — a dead
+        // agent's cwd is not where the conversation is being served, yet
+        // live_cwd has no `now` to fold against.
+        let mut rail = Rail::default();
+        attach(&mut rail, "w1", 0, "/gone/path");
+
+        let actual = rail.live_cwd("a");
+
+        assert_eq!(actual, None);
+    }
+
+    #[test]
+    fn live_cwd_tie_does_not_depend_on_hash_iteration_order() {
+        // No tie rule exists in the ws-spec. Here a pulse tie falls through
+        // to HashMap iteration order, which varies per map instance — the
+        // same wire facts can render either cwd, and can disagree with the
+        // svelte client. Identical inputs must give one answer.
+        let winners: HashSet<String> = (0..64)
+            .map(|_| {
+                let mut rail = Rail::default();
+                attach(&mut rail, "w1", 100_000, "/first");
+                attach(&mut rail, "w2", 100_000, "/second");
+                rail.live_cwd("a").unwrap().to_string()
+            })
+            .collect();
+
+        assert_eq!(winners.len(), 1);
+    }
+
     #[test]
     fn attached_without_a_row_is_a_potential_conversation() {
         let mut rail = Rail::default();
