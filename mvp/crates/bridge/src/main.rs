@@ -300,10 +300,7 @@ struct Host {
 /// `skills`'s tolerant repoint, a conversation's cwd gates every
 /// path-touching tool for its whole life, so a typo caught now is cheaper
 /// than one caught by a confusing permission denial later.
-fn resolve_cwd(
-    raw: Option<&str>,
-    default: &std::path::Path,
-) -> Result<std::path::PathBuf, String> {
+fn resolve_cwd(raw: Option<&str>, default: &std::path::Path) -> Result<std::path::PathBuf, String> {
     match raw {
         Some(raw) => validate_dir(&expand_tilde(raw)),
         None => Ok(default.to_path_buf()),
@@ -316,7 +313,12 @@ fn resolve_cwd(
 /// required, checked by the caller before either ever runs).
 fn validate_dir(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
     std::fs::canonicalize(path)
-        .map_err(|e| format!("cwd {} does not exist or is unreadable: {e}", path.display()))
+        .map_err(|e| {
+            format!(
+                "cwd {} does not exist or is unreadable: {e}",
+                path.display()
+            )
+        })
         .and_then(|p| {
             if p.is_dir() {
                 Ok(p)
@@ -612,7 +614,10 @@ impl Host {
                         }),
                     )
                     .await;
-                    println!("{}", serde_json::json!({ "conversationId": conv, "cwd": now }));
+                    println!(
+                        "{}",
+                        serde_json::json!({ "conversationId": conv, "cwd": now })
+                    );
                 }
                 Err(ChdirError::NotFound) => {
                     println!(
@@ -902,9 +907,7 @@ async fn main() -> anyhow::Result<()> {
         history_path: history_path_for_settings,
         attach,
         served: Arc::new(RwLock::new(HashMap::new())),
-        default_cwd: Arc::new(RwLock::new(
-            std::env::current_dir().unwrap_or_default(),
-        )),
+        default_cwd: Arc::new(RwLock::new(std::env::current_dir().unwrap_or_default())),
         auth,
         http: anthropic::build_http_client(),
         skills_root,
@@ -1049,7 +1052,8 @@ mod tests {
     fn chdir_to_an_invalid_path_leaves_the_cell_untouched() {
         let dir_a = scratch_dir();
         let served = served_with("a", dir_a.clone());
-        let missing = std::env::temp_dir().join(format!("bridge-cwd-missing-{}", uuid::Uuid::new_v4()));
+        let missing =
+            std::env::temp_dir().join(format!("bridge-cwd-missing-{}", uuid::Uuid::new_v4()));
 
         let err = apply_chdir(&served, "a", missing.to_str().unwrap()).unwrap_err();
         assert!(matches!(err, ChdirError::Invalid(_)));
