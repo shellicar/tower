@@ -27,6 +27,11 @@ struct Attachment {
     world: String,
     instance_id: String,
     cwd: Option<String>,
+    /// The wire's own `attachedTs` — part of the interim tie-break
+    /// (`last_pulse`, then this, then the world/instance key) until
+    /// supersession (docs/spec/agent-spec.md) makes ties impossible by
+    /// keying attachments on conv alone.
+    attached_ts: Millis,
 }
 
 #[derive(Debug, Clone)]
@@ -104,6 +109,7 @@ impl Rail {
                                 world: a.world.clone(),
                                 instance_id: a.instance_id.clone(),
                                 cwd: a.cwd.clone(),
+                                attached_ts: a.attached_ts,
                             },
                         )
                     })
@@ -171,6 +177,7 @@ impl Rail {
                             world: fact.world.clone(),
                             instance_id: fact.instance_id.clone(),
                             cwd: fact.cwd.clone(),
+                            attached_ts: fact.ts,
                         },
                     );
                 }
@@ -215,22 +222,32 @@ impl Rail {
             .get(&format!("{}/{}", a.world, a.instance_id))
     }
 
-    /// The freshest live attachment's cwd for a conversation — "where is
+    /// The freshest LIVE attachment's cwd for a conversation — "where is
     /// this conversation being served", for the open panel's status line.
-    /// Not gated on rowlessness like `attached_only`: an ordinary
-    /// conversation with a row can still have a live attachment. `None`
-    /// when nothing is attached, or the attachment carries no cwd.
-    pub fn live_cwd(&self, conv: &str) -> Option<&str> {
+    /// Gated on liveness (folded against `now`, agent-spec: a fold, never
+    /// declared): a stranded agent is not serving anything, so its cwd must
+    /// not render as if it were. Not gated on rowlessness like
+    /// `attached_only`: an ordinary conversation with a row can still have a
+    /// live attachment. `None` when nothing is attached and alive, or the
+    /// attachment carries no cwd.
+    ///
+    /// Interim tie-break (no spec rule exists yet): `last_pulse`, then
+    /// `attached_ts`, then the world/instance key — total order, so identical
+    /// wire facts always resolve the same winner (unlike a bare
+    /// `HashMap`-iteration tie, proved nondeterministic). This selection
+    /// dissolves once supersession (docs/spec/agent-spec.md) makes a
+    /// conversation's attachment singular by construction.
+    pub fn live_cwd(&self, conv: &str, now: Millis) -> Option<&str> {
         self.attachments
             .values()
             .filter(|a| a.conv == conv)
-            .max_by_key(|a| {
-                self.instances
-                    .get(&format!("{}/{}", a.world, a.instance_id))
-                    .map(|i| i.last_pulse)
-                    .unwrap_or(0)
+            .filter_map(|a| {
+                let inst = self.instances.get(&format!("{}/{}", a.world, a.instance_id))?;
+                let alive = liveness_verdict(now, inst.last_pulse, inst.interval_s) == Liveness::Alive;
+                alive.then_some((a, inst.last_pulse))
             })
-            .and_then(|a| a.cwd.as_deref())
+            .max_by_key(|(a, pulse)| (*pulse, a.attached_ts, format!("{}/{}", a.world, a.instance_id)))
+            .and_then(|(a, _)| a.cwd.as_deref())
     }
 
     /// Potential conversations: attached, no row yet — served, silent. They
@@ -495,8 +512,8 @@ mod tests {
             interval_s: None,
             host: None,
         }));
-        assert_eq!(rail.live_cwd("a"), Some("/new/path"));
-        assert_eq!(rail.live_cwd("unknown"), None);
+        assert_eq!(rail.live_cwd("a", 200_000), Some("/new/path"));
+        assert_eq!(rail.live_cwd("unknown", 200_000), None);
     }
 
     fn attach(rail: &mut Rail, world: &str, ts: i64, cwd: &str) {
@@ -521,7 +538,7 @@ mod tests {
         let mut rail = Rail::default();
         attach(&mut rail, "w1", 0, "/gone/path");
 
-        let actual = rail.live_cwd("a");
+        let actual = rail.live_cwd("a", 1_000_000);
 
         assert_eq!(actual, None);
     }
@@ -537,7 +554,7 @@ mod tests {
                 let mut rail = Rail::default();
                 attach(&mut rail, "w1", 100_000, "/first");
                 attach(&mut rail, "w2", 100_000, "/second");
-                rail.live_cwd("a").unwrap().to_string()
+                rail.live_cwd("a", 100_000).unwrap().to_string()
             })
             .collect();
 

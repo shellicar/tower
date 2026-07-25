@@ -190,19 +190,28 @@ export class Rail {
     return a ? (this.#instances.get(`${a.world}/${a.instanceId}`) ?? null) : null;
   }
 
-  /** The freshest live attachment's cwd for a conversation — "where is this
-   *  conversation being served", for the open panel's status line. Not
-   *  gated on rowlessness like `attachedOnly`: an ordinary conversation with
-   *  a row can still have a live attachment. undefined when nothing is
-   *  attached, or the attachment carries no cwd. */
+  /** The freshest LIVE attachment's cwd for a conversation — "where is this
+   *  conversation being served", for the open panel's status line. Gated on
+   *  liveness (folded against the rail's own clock, agent-spec: a fold,
+   *  never declared): a stranded agent is not serving anything, so its cwd
+   *  must not render as if it were. Not gated on rowlessness like
+   *  `attachedOnly`: an ordinary conversation with a row can still have a
+   *  live attachment. undefined when nothing is attached and alive, or the
+   *  attachment carries no cwd.
+   *
+   *  Interim tie-break (no spec rule exists yet): later-arrived wins on an
+   *  equal pulse (`>=`, not `>`) — the freshest wire fact, not first-come.
+   *  This selection dissolves once supersession (docs/spec/agent-spec.md)
+   *  makes a conversation's attachment singular by construction. */
   liveCwd(conv: string): string | undefined {
     let best: AgentAttachment | undefined;
     let bestPulse = -1;
     for (const a of this.#attachments.values()) {
       if (a.conv !== conv) continue;
-      const pulse = this.#instances.get(`${a.world}/${a.instanceId}`)?.lastPulse ?? 0;
-      if (pulse > bestPulse) {
-        bestPulse = pulse;
+      const inst = this.#instances.get(`${a.world}/${a.instanceId}`);
+      if (!inst || livenessVerdict(this.#now, inst.lastPulse, inst.intervalS) !== 'alive') continue;
+      if (inst.lastPulse >= bestPulse) {
+        bestPulse = inst.lastPulse;
         best = a;
       }
     }

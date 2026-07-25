@@ -654,8 +654,12 @@ pub fn ConversationView(
                         // attachment's cwd, if any. Absent is real (no live
                         // attachment, or the agent never reported one): render
                         // nothing, never a placeholder.
-                        conv.with_value(|c| rail.with(|r| r.live_cwd(c).map(str::to_owned)))
-                            .map(|cwd| { let title = cwd.clone(); view! { <span class="cwd" title=title>{cwd}</span> } })
+                        let n = now.get();
+                        conv.with_value(|c| rail.with(|r| r.live_cwd(c, n).map(str::to_owned)))
+                            .map(|cwd| {
+                                let title = cwd.clone();
+                                view! { <span class="cwd" title=title><span>{cwd}</span></span> }
+                            })
                     }}
                     {move || {
                         let state = oc.with(|s| s.query_state);
