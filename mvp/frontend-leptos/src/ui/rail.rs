@@ -20,7 +20,7 @@ fn view_key(tab_name: &str) -> String {
 }
 
 /// Persists the active tab's filters/grouping — local only, keyed by tab
-/// name (mirrors mvp/frontend's `View.saveView`, called here rather than in
+/// name (mirrors mvp/frontend-svelte's `View.saveView`, called here rather than in
 /// the concern since it's UI-triggered browser persistence, the same split
 /// `conversation.rs`'s draft save uses).
 fn save_view(tab_name: &str, view: &View) {
@@ -68,7 +68,7 @@ pub fn load_view(tab_name: &str) -> crate::concerns::view::ViewConfig {
     }
 }
 
-/// Staleness heat: fresh green, cooling yellow, cold grey — mvp/frontend's
+/// Staleness heat: fresh green, cooling yellow, cold grey — mvp/frontend-svelte's
 /// `heat()` thresholds (1h, 6h), read here so the rail matches it exactly.
 fn heat_class(now: Millis, ts: Millis) -> &'static str {
     let d = now - ts;

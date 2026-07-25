@@ -272,7 +272,7 @@ impl Conversations {
     }
 
     /// Reconcile the wire-open set against a wanted list — the view
-    /// concern's tab switch, ported from mvp/frontend's `Conversations.setOpen`.
+    /// concern's tab switch, ported from mvp/frontend-svelte's `Conversations.setOpen`.
     /// Opens what's missing, closes what's no longer wanted; `next_id` mints
     /// one id per message, same as every other action here.
     pub fn set_open(

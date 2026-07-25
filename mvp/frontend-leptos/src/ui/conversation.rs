@@ -3,7 +3,7 @@
 //! Rust gives for free, docs/mvp/frontend-architecture.md). Owns its own
 //! local UI state (the composer draft, attachment chips, the scroll anchor,
 //! the title editor) — a component's state, per the architecture doc, never
-//! a concern's. Tracks mvp/frontend's ConversationPanel.svelte feature for
+//! a concern's. Tracks mvp/frontend-svelte's ConversationPanel.svelte feature for
 //! feature, including usage/pricing and attachments — the slice grew past
 //! docs/mvp/frontend-leptos-plan.md's original frontend-rs-only scope once
 //! the plan's question 2 (full Svelte parity) was answered. Tabs live in
@@ -44,7 +44,7 @@ use crate::ui::{short, truncate};
 use crate::uploads;
 
 /// Fallback row height (px) for a message never yet measured — ported from
-/// mvp/frontend's VirtualList.svelte `estimate` default. Deliberately flat,
+/// mvp/frontend-svelte's VirtualList.svelte `estimate` default. Deliberately flat,
 /// same inherited minor defect (under-reports totalHeight, short scrollbar);
 /// parity means inheriting this, not fixing it here.
 const ROW_ESTIMATE_PX: f64 = 96.0;
@@ -166,7 +166,7 @@ fn media_label(v: &Value) -> String {
 
 /// The conversation's cost surface: towerd ships the token facts, priced
 /// here ($ and context %) — the client owns that policy, same split as
-/// mvp/frontend's `ConversationPanel.svelte`. Model leads the line: it's a
+/// mvp/frontend-svelte's `ConversationPanel.svelte`. Model leads the line: it's a
 /// per-conversation fact (a spawn may name its own, docs/mvp/bridge-stdio-
 /// spec.md), read off THIS conversation's own usage snapshot — never a
 /// host-wide default — same footing claude-sdk-cli gives it front and
@@ -226,7 +226,7 @@ pub fn ConversationView(
         }
         at_bottom.set(true);
     };
-    // Windowing state, ported from mvp/frontend's VirtualList.svelte: a
+    // Windowing state, ported from mvp/frontend-svelte's VirtualList.svelte: a
     // per-message-id height cache (unmeasured rows fall back to
     // `ROW_ESTIMATE_PX`), plus the scroller's own scroll position and
     // viewport height, both needed to derive which messages are actually

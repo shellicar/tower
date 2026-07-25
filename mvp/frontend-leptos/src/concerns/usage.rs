@@ -1,5 +1,5 @@
 //! concerns/usage — the per-conversation usage snapshot store, ported from
-//! mvp/frontend's usage.svelte.ts. It folds one wire slice — the `usage`
+//! mvp/frontend-svelte's usage.svelte.ts. It folds one wire slice — the `usage`
 //! frame — into an owned map, keyed by conversation. The frame is an
 //! ABSOLUTE snapshot (towerd owns the accumulation, precisely because a
 //! turn's usage streams cumulatively on the wire), so a fold is a

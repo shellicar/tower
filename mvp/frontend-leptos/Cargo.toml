@@ -1,6 +1,6 @@
 # The Leptos frontend: the third build in the side-by-side (docs/mvp/
-# frontend-leptos-plan.md). Same architecture as mvp/frontend (Svelte) and
-# mvp/frontend-rs (egui), so the comparison isolates what a DOM-based Rust
+# frontend-leptos-plan.md). Same architecture as mvp/frontend-svelte (Svelte)
+# and mvp/frontend-rs (egui), so the comparison isolates what a DOM-based Rust
 # renderer buys over both. A member of the mvp workspace (not detached
 # anymore — rust-cache and scripts/affected-crates.mts's dep-info scoping
 # neutralise the original "keep native builds fast" reason to separate it,

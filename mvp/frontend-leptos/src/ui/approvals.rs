@@ -1,5 +1,5 @@
 //! The dedicated approvals view: every outstanding ask fleet-wide, oldest
-//! first, mirrors mvp/frontend's ApprovalsView.svelte. Toggled from the
+//! first, mirrors mvp/frontend-svelte's ApprovalsView.svelte. Toggled from the
 //! rail's ⚠ badge (docs/mvp/tower-ws-spec.md's approvals model — pending is
 //! unconditional, void is the client's own derivation). Reads `approvals`
 //! and `rail` (for the conversation label only); owns no state of its own.
@@ -15,7 +15,7 @@ use crate::ui::{short, truncate};
 /// The decision-relevant payload: file paths render as themselves (the 90%
 /// case — DeleteFile/DeleteDirectory take a top-level `files` array; the
 /// typed-content shape carries `content.type: "files"`); anything else
-/// truncates. Mirrors mvp/frontend's `payload()`.
+/// truncates. Mirrors mvp/frontend-svelte's `payload()`.
 fn payload(input: Option<&Value>) -> String {
     let Some(input) = input else {
         return String::new();

@@ -196,7 +196,7 @@ pub enum ServerMsg {
     Error { id: String, reason: String },
 }
 
-/// One tab: a name and its open set. mvp/frontend's `Tab` also carries a
+/// One tab: a name and its open set. mvp/frontend-svelte's `Tab` also carries a
 /// `ViewConfig` (filters/grouping) — not on the wire yet, out of scope for
 /// this pass (docs/mvp/frontend-leptos-plan.md's scope note applies here too).
 #[derive(Debug, Clone, Serialize, Deserialize)]

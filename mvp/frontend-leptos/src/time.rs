@@ -61,7 +61,7 @@ pub fn age(now: Millis, ts: Millis) -> String {
     }
 }
 
-/// A message's wall-clock time, 24h local — mvp/frontend's
+/// A message's wall-clock time, 24h local — mvp/frontend-svelte's
 /// `toLocaleTimeString(undefined, { hour12: false })`.
 #[cfg(target_arch = "wasm32")]
 pub fn format_time(ts: Millis) -> String {

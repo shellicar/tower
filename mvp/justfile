@@ -14,7 +14,7 @@ check:
     cargo fmt --check
 
 # Run towerd (env NATS_URL, TOWER_BIND, TOWER_DB all default to the local
-# deployment). Serves the webapp from frontend/dist — see `just frontend`.
+# deployment). Serves the webapp from frontend-svelte/dist — see `just frontend`.
 run:
     cargo run -p towerd
 

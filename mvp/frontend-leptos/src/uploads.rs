@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 /// Uploads one file. `on_done` fires with the won ref on success (it rides
 /// the next say — the caller already knows which conversation, so only the
 /// ref comes back); `on_error` carries a human-readable reason for the
-/// composer's upload-note line (mvp/frontend's `uploadNote`); `on_settled`
+/// composer's upload-note line (mvp/frontend-svelte's `uploadNote`); `on_settled`
 /// always fires last, success or failure, so the caller can drop its
 /// "uploading…" count without duplicating the outcome match.
 #[cfg(target_arch = "wasm32")]

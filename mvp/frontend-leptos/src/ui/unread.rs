@@ -1,5 +1,5 @@
 //! The dedicated unread/stale-conversations view: every conversation nobody
-//! on the fleet has looked at, oldest-touched first, mirrors mvp/frontend's
+//! on the fleet has looked at, oldest-touched first, mirrors mvp/frontend-svelte's
 //! UnreadView.svelte. Toggled from the rail's ● badge, same footing as
 //! `ApprovalsView`'s ⚠. Reads `rail` only (it owns the stale set and the row
 //! titles); owns no state of its own. Opening a conversation from here isn't

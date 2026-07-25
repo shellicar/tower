@@ -1,5 +1,5 @@
 //! concerns/view — the view concern (docs/mvp/frontend-architecture.md),
-//! ported from mvp/frontend's view.svelte.ts. It owns the shell's tabs and
+//! ported from mvp/frontend-svelte's view.svelte.ts. It owns the shell's tabs and
 //! each tab's open set.
 //!
 //! Promoted onto the wire (settled with the SC 19 Jul, building on the 12 Jul
@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use ws_types::{ClientMsg, ServerMsg, WsTab};
 
 /// The rail's view configuration — per tab, local only. Mirrors
-/// mvp/frontend's `ViewConfig`.
+/// mvp/frontend-svelte's `ViewConfig`.
 #[derive(Debug, Clone, Default)]
 pub struct ViewConfig {
     /// key -> selected values; OR within a key, AND across keys.
@@ -70,7 +70,7 @@ pub struct View {
     pub active: usize,
     /// Whether the fleet-wide approvals panel is showing — local-only, same
     /// footing as `active` (a fact about this viewer, not the shared
-    /// workspace). Mirrors mvp/frontend's `view.approvalsOpen`.
+    /// workspace). Mirrors mvp/frontend-svelte's `view.approvalsOpen`.
     pub approvals_open: bool,
     /// Whether the fleet-wide unread/stale-conversations panel is showing —
     /// same footing as `approvals_open`.
@@ -99,7 +99,7 @@ impl View {
     /// rather than replace it with an empty set, so a fresh fleet still
     /// shows one usable tab instead of none.
     /// `load_config` supplies a `ViewConfig` for a tab name this browser has
-    /// never held (mvp/frontend's `readViewConfig(name)` — a previously
+    /// never held (mvp/frontend-svelte's `readViewConfig(name)` — a previously
     /// saved local config, or the default when there is none). Held config
     /// from tabs already in memory always wins; the loader only fires for a
     /// name genuinely new to this fold.

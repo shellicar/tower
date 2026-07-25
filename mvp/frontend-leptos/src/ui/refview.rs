@@ -1,4 +1,4 @@
-//! A `$ref` node — mirrors mvp/frontend's RefView.svelte. The protocol
+//! A `$ref` node — mirrors mvp/frontend-svelte's RefView.svelte. The protocol
 //! supplies facts only (id, size, hint); materialising it is entirely this
 //! client's policy: nothing fetches until asked ("load · 513 KB"), text
 //! renders inline, images become a data URL. `/ref/{id}` is this client's

@@ -222,7 +222,7 @@ impl Rail {
 
     /// Potential conversations: attached, no row yet — served, silent. They
     /// vanish with the attachment; the first committed message births a row.
-    /// Carries the cwd (mvp/frontend's `RowList` shows it under the id) and
+    /// Carries the cwd (mvp/frontend-svelte's `RowList` shows it under the id) and
     /// the liveness verdict, so the rail can render the same dot it uses for
     /// ordinary rows.
     pub fn attached_only(&self, now: Millis) -> Vec<PotentialConv<'_>> {

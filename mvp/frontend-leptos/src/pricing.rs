@@ -2,7 +2,7 @@
 //! derivations towerd deliberately does not ship ($ and %). towerd ships
 //! facts (token totals incl. the 5m/1h cache-creation split, the latest
 //! turn's context size and model); the price table and the window are the
-//! client's, ported verbatim (numbers and behaviour) from mvp/frontend's
+//! client's, ported verbatim (numbers and behaviour) from mvp/frontend-svelte's
 //! core/pricing.ts so the two frontends show the same dollar figure for the
 //! same conversation.
 //!

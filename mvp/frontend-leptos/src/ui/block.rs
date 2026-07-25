@@ -1,4 +1,4 @@
-//! One content block, rendered per type — mirrors mvp/frontend's
+//! One content block, rendered per type — mirrors mvp/frontend-svelte's
 //! BlockView.svelte: text stands open, everything else (thinking, tool
 //! traffic, unknown blocks) collapses to a summary line via `<details>`, the
 //! primary render lever for per-message collapsing (docs/mvp/tower-v1-design.md,
