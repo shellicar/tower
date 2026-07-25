@@ -190,6 +190,25 @@ export class Rail {
     return a ? (this.#instances.get(`${a.world}/${a.instanceId}`) ?? null) : null;
   }
 
+  /** The freshest live attachment's cwd for a conversation — "where is this
+   *  conversation being served", for the open panel's status line. Not
+   *  gated on rowlessness like `attachedOnly`: an ordinary conversation with
+   *  a row can still have a live attachment. undefined when nothing is
+   *  attached, or the attachment carries no cwd. */
+  liveCwd(conv: string): string | undefined {
+    let best: AgentAttachment | undefined;
+    let bestPulse = -1;
+    for (const a of this.#attachments.values()) {
+      if (a.conv !== conv) continue;
+      const pulse = this.#instances.get(`${a.world}/${a.instanceId}`)?.lastPulse ?? 0;
+      if (pulse > bestPulse) {
+        bestPulse = pulse;
+        best = a;
+      }
+    }
+    return best?.cwd;
+  }
+
   /** Potential conversations: attached, no row yet — served, silent. Transient
    *  by design; they vanish with the attachment, and the first committed
    *  message births an ordinary row. Carries the liveness verdict, so a

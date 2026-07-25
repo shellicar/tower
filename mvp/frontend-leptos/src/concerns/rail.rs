@@ -215,6 +215,24 @@ impl Rail {
             .get(&format!("{}/{}", a.world, a.instance_id))
     }
 
+    /// The freshest live attachment's cwd for a conversation — "where is
+    /// this conversation being served", for the open panel's status line.
+    /// Not gated on rowlessness like `attached_only`: an ordinary
+    /// conversation with a row can still have a live attachment. `None`
+    /// when nothing is attached, or the attachment carries no cwd.
+    pub fn live_cwd(&self, conv: &str) -> Option<&str> {
+        self.attachments
+            .values()
+            .filter(|a| a.conv == conv)
+            .max_by_key(|a| {
+                self.instances
+                    .get(&format!("{}/{}", a.world, a.instance_id))
+                    .map(|i| i.last_pulse)
+                    .unwrap_or(0)
+            })
+            .and_then(|a| a.cwd.as_deref())
+    }
+
     /// Potential conversations: attached, no row yet — served, silent. They
     /// vanish with the attachment; the first committed message births a row.
     /// Carries the cwd (mvp/frontend-svelte's `RowList` shows it under the id) and
@@ -452,6 +470,33 @@ mod tests {
             rail.verdict("a", 100_000 + 61_000),
             Some(Liveness::Stranded)
         );
+    }
+
+    #[test]
+    fn live_cwd_reads_from_the_freshest_attachment() {
+        let mut rail = Rail::default();
+        rail.apply(&ServerMsg::Agent(WsAgent {
+            kind: "attached".into(),
+            world: "w1".into(),
+            instance_id: "i1".into(),
+            ts: 100_000,
+            conv: Some("a".into()),
+            cwd: Some("/old/path".into()),
+            interval_s: None,
+            host: None,
+        }));
+        rail.apply(&ServerMsg::Agent(WsAgent {
+            kind: "attached".into(),
+            world: "w2".into(),
+            instance_id: "i2".into(),
+            ts: 200_000,
+            conv: Some("a".into()),
+            cwd: Some("/new/path".into()),
+            interval_s: None,
+            host: None,
+        }));
+        assert_eq!(rail.live_cwd("a"), Some("/new/path"));
+        assert_eq!(rail.live_cwd("unknown"), None);
     }
 
     #[test]
