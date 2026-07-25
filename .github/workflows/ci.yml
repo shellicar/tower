@@ -223,7 +223,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: mvp/frontend-leptos
+          workspaces: mvp
       - run: rustup target add wasm32-unknown-unknown
       - uses: jetli/trunk-action@v0.5.0
       - run: trunk build --release

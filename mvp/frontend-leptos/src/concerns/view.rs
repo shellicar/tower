@@ -47,13 +47,20 @@ pub struct Tab {
 
 impl From<&Tab> for WsTab {
     fn from(t: &Tab) -> Self {
-        WsTab { name: t.name.clone(), convs: t.convs.clone() }
+        WsTab {
+            name: t.name.clone(),
+            convs: t.convs.clone(),
+        }
     }
 }
 
 impl From<WsTab> for Tab {
     fn from(t: WsTab) -> Self {
-        Tab { name: t.name, convs: t.convs, view: ViewConfig::default() }
+        Tab {
+            name: t.name,
+            convs: t.convs,
+            view: ViewConfig::default(),
+        }
     }
 }
 
@@ -73,7 +80,11 @@ pub struct View {
 impl Default for View {
     fn default() -> Self {
         View {
-            tabs: vec![Tab { name: "main".to_owned(), convs: Vec::new(), view: ViewConfig::default() }],
+            tabs: vec![Tab {
+                name: "main".to_owned(),
+                convs: Vec::new(),
+                view: ViewConfig::default(),
+            }],
             active: 0,
             approvals_open: false,
             unread_open: false,
@@ -105,7 +116,10 @@ impl View {
                 .iter()
                 .cloned()
                 .map(|t| Tab {
-                    view: held.get(&t.name).cloned().unwrap_or_else(|| load_config(&t.name)),
+                    view: held
+                        .get(&t.name)
+                        .cloned()
+                        .unwrap_or_else(|| load_config(&t.name)),
                     ..Tab::from(t)
                 })
                 .collect();
@@ -318,7 +332,10 @@ mod tests {
         let mut v = View::default();
         v.apply(
             &ServerMsg::Layout {
-                tabs: vec![WsTab { name: "shared".into(), convs: vec!["x".into()] }],
+                tabs: vec![WsTab {
+                    name: "shared".into(),
+                    convs: vec!["x".into()],
+                }],
             },
             |_| ViewConfig::default(),
         );
@@ -328,7 +345,9 @@ mod tests {
 
         // An empty snapshot (nothing set yet, fresh fleet) doesn't wipe the
         // local default down to zero tabs.
-        v.apply(&ServerMsg::Layout { tabs: vec![] }, |_| ViewConfig::default());
+        v.apply(&ServerMsg::Layout { tabs: vec![] }, |_| {
+            ViewConfig::default()
+        });
         assert_eq!(v.tabs.len(), 1);
     }
 }

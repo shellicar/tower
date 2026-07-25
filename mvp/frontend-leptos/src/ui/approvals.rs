@@ -17,17 +17,27 @@ use crate::ui::{short, truncate};
 /// typed-content shape carries `content.type: "files"`); anything else
 /// truncates. Mirrors mvp/frontend's `payload()`.
 fn payload(input: Option<&Value>) -> String {
-    let Some(input) = input else { return String::new() };
+    let Some(input) = input else {
+        return String::new();
+    };
     if let Some(files) = input.get("files").and_then(Value::as_array)
         && files.iter().all(|f| f.is_string())
     {
-        return files.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
+        return files
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
     }
     if let Some(content) = input.get("content")
         && content.get("type").and_then(Value::as_str) == Some("files")
         && let Some(values) = content.get("values").and_then(Value::as_array)
     {
-        return values.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
+        return values
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
     }
     truncate(&serde_json::to_string(input).unwrap_or_default(), 120)
 }

@@ -52,10 +52,19 @@ pub fn load_view(tab_name: &str) -> crate::concerns::view::ViewConfig {
         return ViewConfig::default();
     };
     ViewConfig {
-        filters: serde_json::from_value(v.get("filters").cloned().unwrap_or_default()).unwrap_or_default(),
-        group_key: v.get("groupKey").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned(),
-        always_show: serde_json::from_value(v.get("alwaysShow").cloned().unwrap_or_default()).unwrap_or_default(),
-        hide_untagged: v.get("hideUntagged").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        filters: serde_json::from_value(v.get("filters").cloned().unwrap_or_default())
+            .unwrap_or_default(),
+        group_key: v
+            .get("groupKey")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        always_show: serde_json::from_value(v.get("alwaysShow").cloned().unwrap_or_default())
+            .unwrap_or_default(),
+        hide_untagged: v
+            .get("hideUntagged")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
     }
 }
 
@@ -80,11 +89,16 @@ struct Section {
 }
 
 fn tag_of(row: &WsRow, key: &str) -> String {
-    row.tags.get(key).cloned().unwrap_or_else(|| "(untagged)".to_owned())
+    row.tags
+        .get(key)
+        .cloned()
+        .unwrap_or_else(|| "(untagged)".to_owned())
 }
 
 fn matches(row: &WsRow, filters: &HashMap<String, Vec<String>>) -> bool {
-    filters.iter().all(|(k, vs)| vs.is_empty() || vs.contains(&tag_of(row, k)))
+    filters
+        .iter()
+        .all(|(k, vs)| vs.is_empty() || vs.contains(&tag_of(row, k)))
 }
 
 #[component]
@@ -109,7 +123,13 @@ pub fn RailView(
 
     let tab_name = move || view.with(|v| v.tab().name.clone());
 
-    let keys = move || rail.with(|r| { let mut ks: Vec<String> = r.tag_keys().keys().cloned().collect(); ks.sort(); ks });
+    let keys = move || {
+        rail.with(|r| {
+            let mut ks: Vec<String> = r.tag_keys().keys().cloned().collect();
+            ks.sort();
+            ks
+        })
+    };
     view! {
         <aside class="rail">
             <header class="rail-header">

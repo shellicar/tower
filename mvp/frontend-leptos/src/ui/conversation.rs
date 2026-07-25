@@ -27,9 +27,9 @@ use std::collections::HashMap;
 use leptos::ev;
 use leptos::html;
 use leptos::prelude::*;
+use send_wrapper::SendWrapper;
 use serde_json::Value;
 use wasm_bindgen::JsCast;
-use send_wrapper::SendWrapper;
 use wasm_bindgen::closure::Closure;
 use ws_types::WsMessage;
 
@@ -112,7 +112,9 @@ fn message_offsets(messages: &[WsMessage], heights: &HashMap<String, f64>) -> Ve
 fn total_height(messages: &[WsMessage], offsets: &[f64], heights: &HashMap<String, f64>) -> f64 {
     match messages.last() {
         None => 0.0,
-        Some(last) => offsets[messages.len() - 1] + heights.get(&last.id).copied().unwrap_or(ROW_ESTIMATE_PX),
+        Some(last) => {
+            offsets[messages.len() - 1] + heights.get(&last.id).copied().unwrap_or(ROW_ESTIMATE_PX)
+        }
     }
 }
 
@@ -123,14 +125,23 @@ fn find_start(offsets: &[f64], target: f64) -> usize {
     let mut hi = offsets.len();
     while lo < hi {
         let mid = (lo + hi) / 2;
-        if offsets[mid] <= target { lo = mid + 1 } else { hi = mid }
+        if offsets[mid] <= target {
+            lo = mid + 1
+        } else {
+            hi = mid
+        }
     }
     lo.saturating_sub(1)
 }
 
 /// The `[start, end)` window of message indices to actually mount, given the
 /// current scroll position — everything else is represented by a spacer.
-fn visible_range(offsets: &[f64], messages_len: usize, scroll_top: f64, viewport_height: f64) -> (usize, usize) {
+fn visible_range(
+    offsets: &[f64],
+    messages_len: usize,
+    scroll_top: f64,
+    viewport_height: f64,
+) -> (usize, usize) {
     if messages_len == 0 {
         return (0, 0);
     }
@@ -285,7 +296,11 @@ pub fn ConversationView(
     let send_current = Callback::new(move |()| {
         let text = draft.get_untracked();
         let allowed = oc.with(|s| {
-            s.can_send(text.trim().is_empty(), !s.pending_attachments.is_empty(), uploading.get_untracked() > 0)
+            s.can_send(
+                text.trim().is_empty(),
+                !s.pending_attachments.is_empty(),
+                uploading.get_untracked() > 0,
+            )
         });
         if !allowed {
             return;

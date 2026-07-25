@@ -32,9 +32,21 @@ enum Loaded {
 }
 
 #[component]
-pub fn RefView(r: Value, label: &'static str, #[prop(default = false)] image: bool) -> impl IntoView {
-    let ref_id = r.get("$ref").and_then(Value::as_str).unwrap_or_default().to_owned();
-    let hint = r.get("hint").and_then(Value::as_str).unwrap_or_default().to_owned();
+pub fn RefView(
+    r: Value,
+    label: &'static str,
+    #[prop(default = false)] image: bool,
+) -> impl IntoView {
+    let ref_id = r
+        .get("$ref")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let hint = r
+        .get("hint")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
     let size = r.get("size").and_then(Value::as_i64).unwrap_or(0);
 
     let loaded = RwSignal::new(Loaded::None);

@@ -66,7 +66,12 @@ pub fn age(now: Millis, ts: Millis) -> String {
 #[cfg(target_arch = "wasm32")]
 pub fn format_time(ts: Millis) -> String {
     let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ts as f64));
-    format!("{:02}:{:02}:{:02}", date.get_hours(), date.get_minutes(), date.get_seconds())
+    format!(
+        "{:02}:{:02}:{:02}",
+        date.get_hours(),
+        date.get_minutes(),
+        date.get_seconds()
+    )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -84,7 +89,10 @@ mod tests {
         assert_eq!(liveness_verdict(1_000_000, 999_500, None), Liveness::Alive);
         // Silent past the default 60s with no promise ever declared: stranded
         // — not alive forever, the gap this default closes.
-        assert_eq!(liveness_verdict(1_000_000, 900_000, None), Liveness::Stranded);
+        assert_eq!(
+            liveness_verdict(1_000_000, 900_000, None),
+            Liveness::Stranded
+        );
     }
 
     #[test]

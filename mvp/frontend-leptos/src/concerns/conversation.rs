@@ -655,10 +655,7 @@ mod tests {
             ClientMsg::Say { attachments, .. } => assert_eq!(attachments.len(), 1),
             _ => panic!("expected a say"),
         }
-        assert_eq!(
-            c.get("a").unwrap().with(|s| s.pending_attachments.len()),
-            1
-        ); // still pending
+        assert_eq!(c.get("a").unwrap().with(|s| s.pending_attachments.len()), 1); // still pending
         c.apply(&ServerMsg::SayResult {
             id: "req1".into(),
             outcome: "accepted".into(),

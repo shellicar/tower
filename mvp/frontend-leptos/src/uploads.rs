@@ -125,10 +125,15 @@ mod tests {
 
     #[test]
     fn a_media_type_maps_to_image_or_document() {
-        let img = attachment_ref(br#"{"id":"o1","bucket":"attach","mediaType":"image/png","size":10}"#).unwrap();
+        let img =
+            attachment_ref(br#"{"id":"o1","bucket":"attach","mediaType":"image/png","size":10}"#)
+                .unwrap();
         assert_eq!(img["type"], "image");
         assert_eq!(img["source"]["bucket"], "attach");
-        let doc = attachment_ref(br#"{"id":"o2","bucket":"attach","mediaType":"application/pdf","size":10}"#).unwrap();
+        let doc = attachment_ref(
+            br#"{"id":"o2","bucket":"attach","mediaType":"application/pdf","size":10}"#,
+        )
+        .unwrap();
         assert_eq!(doc["type"], "document");
     }
 
