@@ -496,8 +496,16 @@ async fn main() -> anyhow::Result<()> {
                                     (KeyCode::Enter, _) => {
                                         let path = drain(overlay).trim().to_string();
                                         if !path.is_empty() {
+                                            // chdir, not the instance-wide cwd line: this
+                                            // moves helm's own live conversation, not just
+                                            // the default a future spawn would take.
                                             let reply = session
-                                                .control(&serde_json::json!({ "cwd": path }))
+                                                .control(&serde_json::json!({
+                                                    "chdir": {
+                                                        "conversationId": conv_id.0,
+                                                        "cwd": path,
+                                                    }
+                                                }))
                                                 .await?;
                                             note = match reply["cwd"].as_str() {
                                                 Some(cwd) => Some(format!("cwd → {cwd}")),

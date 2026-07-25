@@ -80,34 +80,35 @@ mod tests {
 
     #[test]
     fn resolve_cwd_of_none_falls_back_to_the_given_default() {
-        let default = scratch_dir();
-        assert_eq!(resolve_cwd(None, &default).unwrap(), default);
-        std::fs::remove_dir(&default).unwrap();
+        let expected = scratch_dir();
+        let actual = resolve_cwd(None, &expected).unwrap();
+        assert_eq!(actual, expected);
+        std::fs::remove_dir(&expected).unwrap();
     }
 
     #[test]
     fn resolve_cwd_of_an_existing_directory_canonicalizes_it_ignoring_the_default() {
-        let dir = scratch_dir();
+        let expected = scratch_dir();
         let unused_default = std::path::PathBuf::from("/does/not/matter");
-        assert_eq!(
-            resolve_cwd(Some(dir.to_str().unwrap()), &unused_default).unwrap(),
-            dir
-        );
-        std::fs::remove_dir(&dir).unwrap();
+        let actual = resolve_cwd(Some(expected.to_str().unwrap()), &unused_default).unwrap();
+        assert_eq!(actual, expected);
+        std::fs::remove_dir(&expected).unwrap();
     }
 
     #[test]
     fn resolve_cwd_of_a_missing_path_errors() {
         let missing =
             std::env::temp_dir().join(format!("bridge-cwd-missing-{}", uuid::Uuid::new_v4()));
-        assert!(resolve_cwd(Some(missing.to_str().unwrap()), &std::env::temp_dir()).is_err());
+        let actual = resolve_cwd(Some(missing.to_str().unwrap()), &std::env::temp_dir());
+        assert!(actual.is_err());
     }
 
     #[test]
     fn resolve_cwd_of_a_file_not_a_directory_errors() {
         let file = std::env::temp_dir().join(format!("bridge-cwd-file-{}", uuid::Uuid::new_v4()));
         std::fs::write(&file, b"not a directory").unwrap();
-        assert!(resolve_cwd(Some(file.to_str().unwrap()), &std::env::temp_dir()).is_err());
+        let actual = resolve_cwd(Some(file.to_str().unwrap()), &std::env::temp_dir());
+        assert!(actual.is_err());
         std::fs::remove_file(&file).unwrap();
     }
 
@@ -120,44 +121,83 @@ mod tests {
     #[test]
     fn chdir_of_an_unserved_conversation_is_not_found() {
         let served = served_with("a", std::env::temp_dir());
-        assert_eq!(
-            apply_chdir(&served, "unknown", "/anywhere").unwrap_err(),
-            ChdirError::NotFound
-        );
+        let expected = ChdirError::NotFound;
+        let actual = apply_chdir(&served, "unknown", "/anywhere").unwrap_err();
+        assert_eq!(actual, expected);
     }
 
-    #[test]
-    fn chdir_moves_only_the_named_conversations_cell() {
+    /// Two conversations served together, one moved by `chdir` — the fixture
+    /// shared by the tests below, each proving one fact about the outcome.
+    fn served_pair() -> (ServedCwds, std::path::PathBuf, std::path::PathBuf) {
         let dir_a = scratch_dir();
         let dir_b = scratch_dir();
-        let dir_new = scratch_dir();
         let served = served_with("a", dir_a.clone());
         served
             .write()
             .unwrap()
             .insert("b".to_string(), Arc::new(RwLock::new(dir_b.clone())));
+        (served, dir_a, dir_b)
+    }
 
-        let resolved = apply_chdir(&served, "a", dir_new.to_str().unwrap()).unwrap();
-        assert_eq!(resolved, dir_new);
-        assert_eq!(*served.read().unwrap()["a"].read().unwrap(), dir_new);
-        assert_eq!(*served.read().unwrap()["b"].read().unwrap(), dir_b);
-
-        for dir in [dir_a, dir_b, dir_new] {
+    #[test]
+    fn chdir_returns_the_new_resolved_path() {
+        let (served, dir_a, dir_b) = served_pair();
+        let expected = scratch_dir();
+        let actual = apply_chdir(&served, "a", expected.to_str().unwrap()).unwrap();
+        assert_eq!(actual, expected);
+        for dir in [dir_a, dir_b, expected] {
             std::fs::remove_dir(&dir).unwrap();
         }
     }
 
     #[test]
-    fn chdir_to_an_invalid_path_leaves_the_cell_untouched() {
+    fn chdir_moves_the_named_conversations_cell() {
+        let (served, dir_a, dir_b) = served_pair();
+        let expected = scratch_dir();
+        apply_chdir(&served, "a", expected.to_str().unwrap()).unwrap();
+        let actual = served.read().unwrap()["a"].read().unwrap().clone();
+        assert_eq!(actual, expected);
+        for dir in [dir_a, dir_b, expected] {
+            std::fs::remove_dir(&dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn chdir_leaves_every_other_conversations_cell_untouched() {
+        let (served, dir_a, expected) = served_pair();
+        let new_dir = scratch_dir();
+        apply_chdir(&served, "a", new_dir.to_str().unwrap()).unwrap();
+        let actual = served.read().unwrap()["b"].read().unwrap().clone();
+        assert_eq!(actual, expected);
+        for dir in [dir_a, expected, new_dir] {
+            std::fs::remove_dir(&dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn chdir_to_an_invalid_path_errors() {
         let dir_a = scratch_dir();
         let served = served_with("a", dir_a.clone());
         let missing =
             std::env::temp_dir().join(format!("bridge-cwd-missing-{}", uuid::Uuid::new_v4()));
 
-        let err = apply_chdir(&served, "a", missing.to_str().unwrap()).unwrap_err();
-        assert!(matches!(err, ChdirError::Invalid(_)));
-        assert_eq!(*served.read().unwrap()["a"].read().unwrap(), dir_a);
+        let actual = apply_chdir(&served, "a", missing.to_str().unwrap()).unwrap_err();
+        assert!(matches!(actual, ChdirError::Invalid(_)));
 
         std::fs::remove_dir(&dir_a).unwrap();
+    }
+
+    #[test]
+    fn chdir_to_an_invalid_path_leaves_the_cell_untouched() {
+        let expected = scratch_dir();
+        let served = served_with("a", expected.clone());
+        let missing =
+            std::env::temp_dir().join(format!("bridge-cwd-missing-{}", uuid::Uuid::new_v4()));
+
+        let _ = apply_chdir(&served, "a", missing.to_str().unwrap());
+        let actual = served.read().unwrap()["a"].read().unwrap().clone();
+        assert_eq!(actual, expected);
+
+        std::fs::remove_dir(&expected).unwrap();
     }
 }
