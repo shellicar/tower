@@ -30,3 +30,20 @@ dev:
 frontend:
     cd frontend-svelte && pnpm install && pnpm build
     cd frontend-leptos && trunk build
+
+# Validate every changes.jsonl against the schema derived from changes.config.json.
+changes-validate:
+    node ../scripts/validate-changes.mts
+
+# Regenerate every package's CHANGELOG.md from its changes.jsonl.
+changes-changelog:
+    node ../scripts/generate-all-changelogs.mts
+
+# Regenerate schema/shellicar-changes.schema.json from changes.config.json.
+changes-schema:
+    node ../scripts/generate-changes-schema.mts
+
+# CI check: fail if the changelogs are out of date with their changes.jsonl.
+changes-check: changes-validate
+    node ../scripts/generate-all-changelogs.mts
+    cd .. && git diff --exit-code -- '*/CHANGELOG.md'
