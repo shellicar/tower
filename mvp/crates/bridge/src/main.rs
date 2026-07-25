@@ -3,9 +3,9 @@
 //! centric by design). v0 control is stdio, deliberately not a wire concern:
 //! creation stays local until practice teaches the spawn request's shape.
 //!
-//!   $ echo '{"spawn": {}}' | bridge
+//!   $ echo '{"spawn": {"cwd": "/path/to/project"}}' | bridge
 //!   {"conversationId":"…"}
-//!   $ echo '{"adopt": {"conversationId": "…"}}' | bridge
+//!   $ echo '{"adopt": {"conversationId": "…", "cwd": "/path/to/project"}}' | bridge
 //!   {"conversationId":"…","adoptedMessages":12}
 //!   $ echo '{"skills": {"dir": "/path/to/skills"}}' | bridge
 //!   {"skillsDir":"/path/to/skills"}
@@ -34,6 +34,7 @@
 mod agent;
 mod anthropic;
 mod approval;
+mod cwd;
 mod decisions;
 mod delete;
 mod editfile;
@@ -56,6 +57,7 @@ mod skills;
 mod slice;
 mod stream;
 
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use anyhow::Context;
@@ -63,12 +65,14 @@ use futures::StreamExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use wire::now_iso;
 
+use cwd::{ChdirError, ServedCwds, apply_chdir, resolve_cwd, validate_dir};
+
 const PULSE_INTERVAL_S: i64 = 30;
 
 /// Expand a leading `~` or `~/...` to `$HOME`. A control line is JSON over
 /// stdio, never a shell, so this is the only place a `~`-prefixed path is
 /// ever resolved — anywhere else, it stays a literal tilde character.
-fn expand_tilde(path: &str) -> std::path::PathBuf {
+pub(crate) fn expand_tilde(path: &str) -> std::path::PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = bridge::home::home_dir() {
             return std::path::PathBuf::from(home).join(rest);
@@ -189,6 +193,7 @@ async fn serve_conversation(
     client: &async_nats::Client,
     world: &str,
     instance: &str,
+    served: &ServedCwds,
     config: agent::AgentConfig,
     conversation: decisions::Conversation,
 ) -> Option<String> {
@@ -207,19 +212,22 @@ async fn serve_conversation(
     // migrated-in conversation unaddressable except by its own servicer.
     // Read before the move: `conversation` is owned by the spawned task.
     let tip = conversation.tip().map(str::to_owned);
+    // Read before the move: `config` is owned by the spawned task. Registers
+    // this conversation's cwd cell so `chdir` can look it up later.
+    let cwd_cell = Arc::clone(&config.cwd);
+    let cwd = cwd_cell.read().unwrap().to_string_lossy().to_string();
+    served.write().unwrap().insert(conv.clone(), cwd_cell);
     tokio::spawn(agent::run(client.clone(), requests, config, conversation));
     // The attachment is what makes the conversation exist for observers
     // before its first message. cwd is causal (an input to how the
-    // conversation unfolds), published when known.
-    let mut attached = serde_json::json!({
+    // conversation unfolds).
+    let attached = serde_json::json!({
         "ts": now_iso(),
         "instanceId": instance,
         "conversationId": conv,
         "tip": tip,
+        "cwd": cwd,
     });
-    if let Ok(cwd) = std::env::current_dir() {
-        attached["cwd"] = serde_json::json!(cwd.to_string_lossy());
-    }
     publish_agent(client, world, "attached", attached).await;
     Some(conv)
 }
@@ -254,9 +262,11 @@ struct Host {
     // (BRIDGE_ATTACH_FD_DOWN/_UP). None for every tower-spawned instance
     // today; NATS stays the only channel regardless of this field's value.
     attach: Option<bridge::attach::AttachHandle>,
-    /// Conversations this instance serves — what a chdir republishes
-    /// `attached` for (the cwd is causal; agent-spec scenario a4).
-    served: Arc<RwLock<Vec<String>>>,
+    /// Every conversation's live cwd cell (cwd.rs), keyed by id.
+    served: ServedCwds,
+    /// The instance's own default cwd (cwd.rs's `resolve_cwd`), seeded from
+    /// the process's directory at boot; the `cwd` control line writes here.
+    default_cwd: Arc<RwLock<std::path::PathBuf>>,
     /// The path-scoped permission matrix (permissions.rs): one scoped blob,
     /// live-repointable by a `permissions` control line, same discipline as
     /// `skills_root`. Strict-default until a line sets it: every gated
@@ -265,8 +275,14 @@ struct Host {
 }
 
 impl Host {
-    /// Build the config for a new or adopted conversation from the live cells.
-    fn config(&self, conv: &str, model: Arc<RwLock<String>>) -> agent::AgentConfig {
+    /// Build the config for a new or adopted conversation from the live
+    /// cells.
+    fn config(
+        &self,
+        conv: &str,
+        model: Arc<RwLock<String>>,
+        cwd: Arc<RwLock<std::path::PathBuf>>,
+    ) -> agent::AgentConfig {
         agent::AgentConfig {
             conv: wire::ConversationId(conv.to_string()),
             model,
@@ -280,11 +296,7 @@ impl Host {
             history: Arc::clone(&self.history),
             thinking_budget: self.thinking_budget,
             attach: self.attach.clone(),
-            // Captured once, now, from bridge's current default — an
-            // instance fact at the moment of spawn, never yanked around by
-            // a later `cwd` control line the way `attached`'s cwd is. Each
-            // conversation's "$PWD" means this, permanently.
-            cwd: std::env::current_dir().unwrap_or_default(),
+            cwd,
             permissions: Arc::clone(&self.permissions),
         }
     }
@@ -299,11 +311,23 @@ impl Host {
                 Some(m) => Arc::new(RwLock::new(m.to_string())),
                 None => Arc::clone(&self.default_model),
             };
-            let config = self.config(&conv, model);
+            let default_cwd = self.default_cwd.read().unwrap().clone();
+            let cwd = match resolve_cwd(
+                spawn.get("cwd").and_then(serde_json::Value::as_str),
+                &default_cwd,
+            ) {
+                Ok(p) => p,
+                Err(e) => {
+                    println!("{}", serde_json::json!({ "error": e }));
+                    return;
+                }
+            };
+            let config = self.config(&conv, model, Arc::new(RwLock::new(cwd)));
             let Some(conv) = serve_conversation(
                 &self.client,
                 &self.world,
                 &self.instance,
+                &self.served,
                 config,
                 decisions::Conversation::default(),
             )
@@ -311,7 +335,6 @@ impl Host {
             else {
                 return;
             };
-            self.served.write().unwrap().push(conv.clone());
             println!("{}", serde_json::json!({ "conversationId": conv }));
         } else if let Some(adopt) = value.get("adopt") {
             let Some(conv) = adopt
@@ -337,11 +360,27 @@ impl Host {
                     }
                 };
             let adopted = messages.len();
-            let config = self.config(&conv, Arc::clone(&self.default_model));
+            let default_cwd = self.default_cwd.read().unwrap().clone();
+            let cwd = match resolve_cwd(
+                adopt.get("cwd").and_then(serde_json::Value::as_str),
+                &default_cwd,
+            ) {
+                Ok(p) => p,
+                Err(e) => {
+                    println!("{}", serde_json::json!({ "error": e }));
+                    return;
+                }
+            };
+            let config = self.config(
+                &conv,
+                Arc::clone(&self.default_model),
+                Arc::new(RwLock::new(cwd)),
+            );
             let Some(conv) = serve_conversation(
                 &self.client,
                 &self.world,
                 &self.instance,
+                &self.served,
                 config,
                 decisions::Conversation::adopt(messages),
             )
@@ -349,7 +388,6 @@ impl Host {
             else {
                 return;
             };
-            self.served.write().unwrap().push(conv.clone());
             println!(
                 "{}",
                 serde_json::json!({ "conversationId": conv, "adoptedMessages": adopted })
@@ -431,44 +469,68 @@ impl Host {
             eprintln!("bridge: default model set ({text})");
             println!("{}", serde_json::json!({ "model": text }));
         } else if let Some(cwd) = value.get("cwd") {
-            // Where this instance lives — an instance fact, changeable any
-            // time, never a conversation attribute. The chdir republishes
-            // `attached` with the new cwd for every served conversation:
-            // cwd is causal (an input to how a conversation unfolds), and
-            // observers learn it from the attachment (agent-spec, a4).
+            // The instance's own default cwd (cwd.rs); use `chdir` to move
+            // a conversation that's already running.
             let Some(path) = cwd.as_str() else {
                 println!("{}", serde_json::json!({ "error": "cwd needs a string" }));
                 return;
             };
-            let path = expand_tilde(path);
-            match std::env::set_current_dir(&path) {
-                Ok(()) => {
-                    let now = std::env::current_dir()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_else(|_| path.to_string_lossy().to_string());
-                    eprintln!("bridge: cwd → {now}");
-                    let served: Vec<String> = self.served.read().unwrap().clone();
-                    for conv in served {
-                        publish_agent(
-                            &self.client,
-                            &self.world,
-                            "attached",
-                            serde_json::json!({
-                                "ts": now_iso(),
-                                "instanceId": self.instance,
-                                "conversationId": conv,
-                                "cwd": now,
-                            }),
-                        )
-                        .await;
-                    }
+            match validate_dir(&expand_tilde(path)) {
+                Ok(resolved) => {
+                    let now = resolved.to_string_lossy().to_string();
+                    *self.default_cwd.write().unwrap() = resolved;
+                    eprintln!("bridge: default cwd → {now}");
                     println!("{}", serde_json::json!({ "cwd": now }));
                 }
                 Err(e) => {
+                    println!("{}", serde_json::json!({ "error": e }));
+                }
+            }
+        } else if let Some(chdir) = value.get("chdir") {
+            // Move one conversation's cwd (agent-spec's `chdir` request).
+            let Some(conv) = chdir
+                .get("conversationId")
+                .and_then(serde_json::Value::as_str)
+            else {
+                println!(
+                    "{}",
+                    serde_json::json!({ "error": "chdir needs conversationId" })
+                );
+                return;
+            };
+            let Some(path) = chdir.get("cwd").and_then(serde_json::Value::as_str) else {
+                println!("{}", serde_json::json!({ "error": "chdir needs cwd" }));
+                return;
+            };
+            match apply_chdir(&self.served, conv, path) {
+                Ok(resolved) => {
+                    let now = resolved.to_string_lossy().to_string();
+                    eprintln!("bridge[{conv}]: cwd → {now}");
+                    publish_agent(
+                        &self.client,
+                        &self.world,
+                        "attached",
+                        serde_json::json!({
+                            "ts": now_iso(),
+                            "instanceId": self.instance,
+                            "conversationId": conv,
+                            "cwd": now,
+                        }),
+                    )
+                    .await;
                     println!(
                         "{}",
-                        serde_json::json!({ "error": format!("chdir failed: {e}") })
+                        serde_json::json!({ "conversationId": conv, "cwd": now })
                     );
+                }
+                Err(ChdirError::NotFound) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("not serving conversation {conv}") })
+                    );
+                }
+                Err(ChdirError::Invalid(e)) => {
+                    println!("{}", serde_json::json!({ "error": e }));
                 }
             }
         } else if let Some(context) = value.get("context") {
@@ -536,9 +598,7 @@ impl Host {
                     "settings": {
                         "world": self.world,
                         "instance": self.instance,
-                        "cwd": std::env::current_dir()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .unwrap_or_default(),
+                        "cwd": self.default_cwd.read().unwrap().to_string_lossy(),
                         "model": self.default_model.read().unwrap().clone(),
                         "thinkingBudget": self.thinking_budget,
                         "attachBucket": self.attach_bucket,
@@ -750,7 +810,8 @@ async fn main() -> anyhow::Result<()> {
         memory_path: memory_path_for_settings,
         history_path: history_path_for_settings,
         attach,
-        served: Arc::new(RwLock::new(Vec::new())),
+        served: Arc::new(RwLock::new(HashMap::new())),
+        default_cwd: Arc::new(RwLock::new(std::env::current_dir().unwrap_or_default())),
         auth,
         http: anthropic::build_http_client(),
         skills_root,
@@ -794,7 +855,7 @@ async fn main() -> anyhow::Result<()> {
         tool_names.join(", ")
     );
     eprintln!(
-        "bridge: ready (model {}); spawn with {{\"spawn\":{{}}}}",
+        "bridge: ready (model {}); spawn with {{\"spawn\":{{}}}} (optionally {{\"cwd\":\"...\"}})",
         host.default_model.read().unwrap()
     );
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
