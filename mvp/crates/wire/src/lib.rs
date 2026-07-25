@@ -10,7 +10,9 @@ pub mod ingest;
 pub mod say;
 pub mod ts;
 
-pub use agent::{AgentTelemetry, Attached, Detached, Pulse, Ready};
+pub use agent::{
+    AgentRequest, AgentTelemetry, Attached, Detached, Pulse, Ready, parse_agent_request,
+};
 pub use approval::{
     AnswerOutcome, ApprovalLifecycle, encode_answer, encode_heartbeat, encode_raised,
     encode_settled, parse_answer, parse_answer_reply,

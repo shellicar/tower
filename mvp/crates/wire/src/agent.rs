@@ -1,19 +1,21 @@
-//! The agent concern's telemetry types (docs/spec/agent-spec.md, "Message
-//! schemas — normative"). Servicing facts — who serves which conversation,
-//! and whether they are alive — keyed by world on the wire. Same discipline as
-//! `conv`: v2-style leaf subjects, so no `type` field in the body; `ingest`
-//! selects the struct from the subject leaf and deserialises it.
+//! The agent concern's types (docs/spec/agent-spec.md, "Message schemas —
+//! normative"). Servicing facts — who serves which conversation, and whether
+//! they are alive — keyed by world on the wire. Same discipline as `conv`: v2-
+//! style leaf subjects, so no `type` field in the body; `ingest` selects the
+//! struct from the subject leaf and deserialises it.
 //!
-//! Only the telemetry (event) side lives here: `ready`, `pulse`, `attached`,
-//! `detached` are what a reader ingests. The requests (`service`, `drain`,
-//! `chdir`) are the sender's direction and never reach ingest (streams capture
-//! event subjects only) — their encoders land when a sender needs them.
+//! Telemetry (event) types are what a reader ingests: `ready`, `pulse`,
+//! `attached`, `detached`. Requests (`service`, `drain`, `chdir`) are the
+//! sender's direction and never reach ingest (streams capture event subjects
+//! only); their servicer-side parse and reply encoders live below, same shape
+//! as `say.rs`'s conversation-request half.
 //!
 //! The liveness fold itself (alive / released / stranded) is *not* here: it is
 //! time-dependent (stranded = pulse silent past ~3× its interval), so it needs
 //! a clock and belongs to the stateful reader, not this pure crate.
 
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::ids::{ConversationId, InstanceId};
 
@@ -95,6 +97,58 @@ impl AgentTelemetry {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The servicer direction: what an agent instance reads off
+// `agent.v1.{world}.requests.>` and how it answers. Same tolerance as
+// `say.rs`'s `ConvRequest`: an unrecognised leaf is `Other`, answered
+// `unsupported`, never dropped — compliance is answering. Reply encoding
+// (`encode_accepted`/`encode_rejected`) is shared with `say.rs` — the reply
+// shape `{accepted:true}` / `{rejected:true,reason}` is the same across
+// concerns, so it is not duplicated here.
+
+/// A request as the world's servicer sees it. `from` is provenance, verbatim.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentRequest {
+    Service {
+        conversation_id: ConversationId,
+        cwd: Option<String>,
+        model: Option<String>,
+        from: Option<Value>,
+    },
+    /// Anything else (`drain`, `chdir`, an unknown leaf) — answered
+    /// `unsupported`, carrying the leaf for logs.
+    Other { type_name: String },
+}
+
+/// (leaf, bytes) → request. The subject leaf spells the operation
+/// (`agent.v1.{world}.requests.service` → `"service"`); the body carries no
+/// type. Unparseable bytes, or a `service` missing its required
+/// `conversationId`, are `Other` — a servicer must answer everything
+/// addressed to it.
+pub fn parse_agent_request(leaf: &str, bytes: &[u8]) -> AgentRequest {
+    let type_name = leaf.to_string();
+    let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
+        return AgentRequest::Other { type_name };
+    };
+    match leaf {
+        "service" => {
+            let Some(conversation_id) = value.get("conversationId").and_then(Value::as_str) else {
+                return AgentRequest::Other { type_name };
+            };
+            AgentRequest::Service {
+                conversation_id: ConversationId(conversation_id.to_string()),
+                cwd: value.get("cwd").and_then(Value::as_str).map(str::to_string),
+                model: value
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                from: value.get("from").cloned(),
+            }
+        }
+        _ => AgentRequest::Other { type_name },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +181,58 @@ mod tests {
         let v = json!({ "ts": "2026-07-07T21:00:00+10:00", "instanceId": "inst-1a2f", "intervalS": 30 });
         let p: Pulse = serde_json::from_value(v).unwrap();
         assert_eq!(p.interval_s, 30);
+    }
+
+    #[test]
+    fn service_request_parses_its_environment_fields() {
+        let bytes = br#"{"ts":"2026-07-07T21:00:00+10:00","from":{"kind":"orchestrator"},"conversationId":"conv-abc","cwd":"~/repos/tower","model":"claude-sonnet-5"}"#;
+        let AgentRequest::Service {
+            conversation_id,
+            cwd,
+            model,
+            from,
+        } = parse_agent_request("service", bytes)
+        else {
+            panic!("expected service");
+        };
+        assert_eq!(conversation_id, ConversationId("conv-abc".into()));
+        assert_eq!(cwd.as_deref(), Some("~/repos/tower"));
+        assert_eq!(model.as_deref(), Some("claude-sonnet-5"));
+        assert_eq!(from, Some(json!({ "kind": "orchestrator" })));
+    }
+
+    #[test]
+    fn service_request_without_environment_fields_parses_bare() {
+        let bytes = br#"{"ts":"2026-07-07T21:00:00+10:00","conversationId":"conv-abc"}"#;
+        assert!(matches!(
+            parse_agent_request("service", bytes),
+            AgentRequest::Service {
+                cwd: None,
+                model: None,
+                from: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn service_request_missing_conversation_id_is_unsupported() {
+        let bytes = br#"{"ts":"2026-07-07T21:00:00+10:00"}"#;
+        assert!(matches!(
+            parse_agent_request("service", bytes),
+            AgentRequest::Other { .. }
+        ));
+    }
+
+    #[test]
+    fn unknown_leaf_and_garbage_bytes_are_unsupported() {
+        assert!(matches!(
+            parse_agent_request("drain", br#"{"ts":"2026-07-07T21:00:00+10:00"}"#),
+            AgentRequest::Other { .. }
+        ));
+        assert!(matches!(
+            parse_agent_request("service", b"not json"),
+            AgentRequest::Other { .. }
+        ));
     }
 }
