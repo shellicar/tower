@@ -14,7 +14,7 @@ async fn main() -> anyhow::Result<()> {
     // Env vars override; the defaults are the local single-machine deployment,
     // so a bare `just run` works.
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
-    let bind = std::env::var("TOWER_BIND").unwrap_or_else(|_| "127.0.0.1:8080".into());
+    let bind = std::env::var("TOWER_BIND").unwrap_or_else(|_| "127.0.0.1:8081".into());
     let db_path = std::env::var("TOWER_DB").unwrap_or_else(|_| "tower.db".into());
     // Which stream captures which subjects is deployment configuration; the
     // defaults match the three-way retention split (migrate-stream-retention.sh):
@@ -113,7 +113,15 @@ async fn main() -> anyhow::Result<()> {
         },
     };
 
-    // Web: axum serves frontend dist/ + /ws + /ref/{id} + /attachment.
+    // Web: axum serves frontend dist/ + /ws + /ref/{id} + /attachment. Two
+    // listeners, one per built frontend, sharing every other bit of state —
+    // only the dist differs (see CLAUDE.md, frontend-leptos-plan.md).
+    let bind_leptos =
+        std::env::var("TOWER_BIND_LEPTOS").unwrap_or_else(|_| "127.0.0.1:8083".into());
+    let dist = std::env::var("TOWER_DIST").unwrap_or_else(|_| "frontend-svelte/dist".into());
+    let dist_leptos =
+        std::env::var("TOWER_DIST_LEPTOS").unwrap_or_else(|_| "frontend-leptos/dist".into());
+
     let state = web::AppState {
         views: ViewsHandle {
             queries: queries_tx,
@@ -121,15 +129,23 @@ async fn main() -> anyhow::Result<()> {
         },
         broker: NatsBroker { client },
         clock: SystemClock,
-        dist: std::env::var("TOWER_DIST")
-            .unwrap_or_else(|_| "frontend-leptos/dist".into())
-            .into(),
+        dist: dist.into(),
         attach,
         attach_bucket,
     };
+    let mut state_leptos = state.clone();
+    state_leptos.dist = dist_leptos.into();
+
     let app = web::router(state);
+    let app_leptos = web::router(state_leptos);
+
     let listener = tokio::net::TcpListener::bind(&bind).await?;
-    eprintln!("towerd listening on {bind}");
-    axum::serve(listener, app).await?;
+    let listener_leptos = tokio::net::TcpListener::bind(&bind_leptos).await?;
+    eprintln!("towerd listening on {bind} (svelte) and {bind_leptos} (leptos)");
+
+    tokio::try_join!(
+        axum::serve(listener, app),
+        axum::serve(listener_leptos, app_leptos),
+    )?;
     Ok(())
 }

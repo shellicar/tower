@@ -127,8 +127,9 @@ just dev       # towerd + vite together — the v2 stack, beside a v1 tower:
 ```
 
 Toolchain pinned by `rust-toolchain.toml`. `just` is the verbs file; scripts
-only for what cargo can't do. Config env vars: `NATS_URL`, `TOWER_BIND`,
-`TOWER_DB`, `TOWER_STREAM` (towerd); `WEB_PORT` (vite); `BRIDGE_WORLD`,
+only for what cargo can't do. Config env vars: `NATS_URL`, `TOWER_BIND`, `TOWER_BIND_LEPTOS`,
+`TOWER_DIST`, `TOWER_DIST_LEPTOS`, `TOWER_DB`, `TOWER_STREAM` (towerd);
+`WEB_PORT` (vite); `BRIDGE_WORLD`,
 `BRIDGE_MODEL`, `BRIDGE_SKILLS` (bridge — skills default to
 `~/.claude/skills`, re-scanned per say: the first say commits the full
 catalogue, later says a delta naming skills whose SKILL.md changed; the
