@@ -27,9 +27,9 @@ jobs:
   #
   # On a PR, scoped to affected crates only (scripts/affected-crates.mts —
   # exact, dep-info-based, not a directory-prefix guess). On push to main,
-  # always the full workspace: the backstop a delta-scoped check always
-  # needs, since the scoping is best-effort against anything the dep-info
-  # pass didn't see (a build script side effect, say).
+  # always the full workspace instead: the scoped run only sees what the
+  # dep-info pass sees, so main still needs one real run against everything
+  # to catch what that missed (a build script side effect, say).
   checks:
     runs-on: ubuntu-24.04
     steps:
