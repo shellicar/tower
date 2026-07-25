@@ -34,6 +34,7 @@
 mod agent;
 mod anthropic;
 mod approval;
+mod cwd;
 mod decisions;
 mod delete;
 mod editfile;
@@ -64,18 +65,14 @@ use futures::StreamExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use wire::now_iso;
 
-const PULSE_INTERVAL_S: i64 = 30;
+use cwd::{ChdirError, ServedCwds, apply_chdir, resolve_cwd, validate_dir};
 
-/// Every conversation this instance serves, keyed to its own live cwd cell
-/// (shared with its `AgentConfig.cwd`) — what `chdir` writes into to move
-/// one conversation's directory. Never touched by the instance-wide `cwd`
-/// line, which is the bridge process's own directory, nothing more.
-type ServedCwds = Arc<RwLock<HashMap<String, Arc<RwLock<std::path::PathBuf>>>>>;
+const PULSE_INTERVAL_S: i64 = 30;
 
 /// Expand a leading `~` or `~/...` to `$HOME`. A control line is JSON over
 /// stdio, never a shell, so this is the only place a `~`-prefixed path is
 /// ever resolved — anywhere else, it stays a literal tilde character.
-fn expand_tilde(path: &str) -> std::path::PathBuf {
+pub(crate) fn expand_tilde(path: &str) -> std::path::PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = bridge::home::home_dir() {
             return std::path::PathBuf::from(home).join(rest);
@@ -216,17 +213,14 @@ async fn serve_conversation(
     // Read before the move: `conversation` is owned by the spawned task.
     let tip = conversation.tip().map(str::to_owned);
     // Read before the move: `config` is owned by the spawned task. Registers
-    // this conversation's live cwd cell under its id so a `chdir` line (this
-    // conversation) or the instance-wide `cwd` line (every served
-    // conversation) can reach it later.
+    // this conversation's cwd cell so `chdir` can look it up later.
     let cwd_cell = Arc::clone(&config.cwd);
     let cwd = cwd_cell.read().unwrap().to_string_lossy().to_string();
     served.write().unwrap().insert(conv.clone(), cwd_cell);
     tokio::spawn(agent::run(client.clone(), requests, config, conversation));
     // The attachment is what makes the conversation exist for observers
     // before its first message. cwd is causal (an input to how the
-    // conversation unfolds), and is always known now (resolved at spawn/adopt
-    // time, never dependent on the instance's current directory).
+    // conversation unfolds).
     let attached = serde_json::json!({
         "ts": now_iso(),
         "instanceId": instance,
@@ -268,19 +262,10 @@ struct Host {
     // (BRIDGE_ATTACH_FD_DOWN/_UP). None for every tower-spawned instance
     // today; NATS stays the only channel regardless of this field's value.
     attach: Option<bridge::attach::AttachHandle>,
-    /// Every conversation this instance serves, each keyed to its own live
-    /// cwd cell (shared with its `AgentConfig.cwd`) — what `chdir` looks up
-    /// to move ONE conversation's directory and republish its `attached`
-    /// (the cwd is causal; agent-spec scenario a4). The instance-wide `cwd`
-    /// line never reaches in here: it moves the process's own default,
-    /// nothing already being served.
+    /// Every conversation's live cwd cell (cwd.rs), keyed by id.
     served: ServedCwds,
-    /// The instance's own default cwd — an in-memory value, seeded from the
-    /// process's directory at boot but never read back from the OS again:
-    /// what a spawn/adopt with no `cwd` of its own takes. The instance-wide
-    /// `cwd` line writes here, and only here — it never calls
-    /// `set_current_dir`, so the bridge process's real working directory is
-    /// simply never touched by any control line.
+    /// The instance's own default cwd (cwd.rs's `resolve_cwd`), seeded from
+    /// the process's directory at boot; the `cwd` control line writes here.
     default_cwd: Arc<RwLock<std::path::PathBuf>>,
     /// The path-scoped permission matrix (permissions.rs): one scoped blob,
     /// live-repointable by a `permissions` control line, same discipline as
@@ -289,81 +274,9 @@ struct Host {
     permissions: Arc<RwLock<permissions::PermissionSet>>,
 }
 
-/// Resolve a spawn/adopt/chdir's own `cwd` field against expand_tilde and
-/// the filesystem: `None` (or an absent field) falls back to `default` —
-/// the instance's own default cwd cell, an in-memory value, NEVER the
-/// bridge process's actual OS directory. Nothing in bridge ever calls
-/// `set_current_dir`: cwd is purely a per-conversation value now, and
-/// mutating the real process directory would be observable, global, racy
-/// state no purely in-memory design needs. A named path that does not
-/// exist or is not a directory is an error, not a silent fallback — unlike
-/// `skills`'s tolerant repoint, a conversation's cwd gates every
-/// path-touching tool for its whole life, so a typo caught now is cheaper
-/// than one caught by a confusing permission denial later.
-fn resolve_cwd(raw: Option<&str>, default: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    match raw {
-        Some(raw) => validate_dir(&expand_tilde(raw)),
-        None => Ok(default.to_path_buf()),
-    }
-}
-
-/// The actual filesystem check behind a named cwd: canonicalize, then
-/// confirm it's a directory. Shared by `resolve_cwd`'s named-path arm and
-/// `apply_chdir`, which has no default to fall back to (its `cwd` is
-/// required, checked by the caller before either ever runs).
-fn validate_dir(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    std::fs::canonicalize(path)
-        .map_err(|e| {
-            format!(
-                "cwd {} does not exist or is unreadable: {e}",
-                path.display()
-            )
-        })
-        .and_then(|p| {
-            if p.is_dir() {
-                Ok(p)
-            } else {
-                Err(format!("cwd {} is not a directory", p.display()))
-            }
-        })
-}
-
-/// Why a `chdir` line didn't move anything: distinct from a spawn/adopt's
-/// own cwd error only in that "no such conversation" is possible here (a
-/// spawn/adopt has no conversation yet to fail to find).
-#[derive(Debug, PartialEq, Eq)]
-enum ChdirError {
-    NotFound,
-    Invalid(String),
-}
-
-/// Move ONE served conversation's cwd cell — pure over `served`, no NATS:
-/// publishing `attached` on success is the caller's job once this returns
-/// Ok. Never mutates the cell on an invalid path; an unknown conversation id
-/// is `NotFound` regardless of whether the path itself would have resolved.
-fn apply_chdir(
-    served: &ServedCwds,
-    conv: &str,
-    raw_cwd: &str,
-) -> Result<std::path::PathBuf, ChdirError> {
-    let cell = served
-        .read()
-        .unwrap()
-        .get(conv)
-        .map(Arc::clone)
-        .ok_or(ChdirError::NotFound)?;
-    let resolved = validate_dir(&expand_tilde(raw_cwd)).map_err(ChdirError::Invalid)?;
-    *cell.write().unwrap() = resolved.clone();
-    Ok(resolved)
-}
-
 impl Host {
     /// Build the config for a new or adopted conversation from the live
-    /// cells. `cwd` is this conversation's own working directory — captured
-    /// once here, independent of bridge's shared instance-wide cwd
-    /// thereafter (a later `cwd` control line moves the instance's default
-    /// for conversations not yet spawned; it never yanks a running
-    /// conversation's directory around, the way `attached`'s cwd used to).
+    /// cells.
     fn config(
         &self,
         conv: &str,
@@ -398,9 +311,6 @@ impl Host {
                 Some(m) => Arc::new(RwLock::new(m.to_string())),
                 None => Arc::clone(&self.default_model),
             };
-            // This conversation's own cwd (agent-spec's `service` carries
-            // one per conversation) — absent, it falls back to the instance's
-            // current directory, same as before this existed.
             let default_cwd = self.default_cwd.read().unwrap().clone();
             let cwd = match resolve_cwd(
                 spawn.get("cwd").and_then(serde_json::Value::as_str),
@@ -559,12 +469,8 @@ impl Host {
             eprintln!("bridge: default model set ({text})");
             println!("{}", serde_json::json!({ "model": text }));
         } else if let Some(cwd) = value.get("cwd") {
-            // The instance's own default cwd — an in-memory cell, nothing
-            // more: what a spawn/adopt with no `cwd` of its own resolves
-            // against next. Never the bridge process's actual OS directory
-            // (no `set_current_dir` here, ever) and never reaches into a
-            // conversation already being served; that is `chdir`'s job,
-            // scoped to one conversationId, never this one's.
+            // The instance's own default cwd (cwd.rs); use `chdir` to move
+            // a conversation that's already running.
             let Some(path) = cwd.as_str() else {
                 println!("{}", serde_json::json!({ "error": "cwd needs a string" }));
                 return;
@@ -581,9 +487,7 @@ impl Host {
                 }
             }
         } else if let Some(chdir) = value.get("chdir") {
-            // Move ONE conversation's cwd (agent-spec's `chdir` request,
-            // scoped to a conversationId) without touching the instance
-            // default or any other conversation this instance serves.
+            // Move one conversation's cwd (agent-spec's `chdir` request).
             let Some(conv) = chdir
                 .get("conversationId")
                 .and_then(serde_json::Value::as_str)
@@ -966,101 +870,7 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChdirError, ServedCwds, apply_chdir, expand_tilde, resolve_cwd};
-    use std::collections::HashMap;
-    use std::sync::{Arc, RwLock};
-
-    fn scratch_dir() -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("bridge-cwd-test-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&dir).unwrap();
-        // Canonical, matching what resolve_cwd itself returns (macOS's
-        // /tmp is a symlink into /private/tmp) — otherwise every equality
-        // assertion below would compare a symlinked path to its target.
-        std::fs::canonicalize(&dir).unwrap()
-    }
-
-    #[test]
-    fn resolve_cwd_of_none_falls_back_to_the_given_default() {
-        let default = scratch_dir();
-        assert_eq!(resolve_cwd(None, &default).unwrap(), default);
-        std::fs::remove_dir(&default).unwrap();
-    }
-
-    #[test]
-    fn resolve_cwd_of_an_existing_directory_canonicalizes_it_ignoring_the_default() {
-        let dir = scratch_dir();
-        let unused_default = std::path::PathBuf::from("/does/not/matter");
-        assert_eq!(
-            resolve_cwd(Some(dir.to_str().unwrap()), &unused_default).unwrap(),
-            dir
-        );
-        std::fs::remove_dir(&dir).unwrap();
-    }
-
-    #[test]
-    fn resolve_cwd_of_a_missing_path_errors() {
-        let missing =
-            std::env::temp_dir().join(format!("bridge-cwd-missing-{}", uuid::Uuid::new_v4()));
-        assert!(resolve_cwd(Some(missing.to_str().unwrap()), &std::env::temp_dir()).is_err());
-    }
-
-    #[test]
-    fn resolve_cwd_of_a_file_not_a_directory_errors() {
-        let file = std::env::temp_dir().join(format!("bridge-cwd-file-{}", uuid::Uuid::new_v4()));
-        std::fs::write(&file, b"not a directory").unwrap();
-        assert!(resolve_cwd(Some(file.to_str().unwrap()), &std::env::temp_dir()).is_err());
-        std::fs::remove_file(&file).unwrap();
-    }
-
-    fn served_with(conv: &str, cwd: std::path::PathBuf) -> ServedCwds {
-        let mut map = HashMap::new();
-        map.insert(conv.to_string(), Arc::new(RwLock::new(cwd)));
-        Arc::new(RwLock::new(map))
-    }
-
-    #[test]
-    fn chdir_of_an_unserved_conversation_is_not_found() {
-        let served = served_with("a", std::env::temp_dir());
-        assert_eq!(
-            apply_chdir(&served, "unknown", "/anywhere").unwrap_err(),
-            ChdirError::NotFound
-        );
-    }
-
-    #[test]
-    fn chdir_moves_only_the_named_conversations_cell() {
-        let dir_a = scratch_dir();
-        let dir_b = scratch_dir();
-        let dir_new = scratch_dir();
-        let served = served_with("a", dir_a.clone());
-        served
-            .write()
-            .unwrap()
-            .insert("b".to_string(), Arc::new(RwLock::new(dir_b.clone())));
-
-        let resolved = apply_chdir(&served, "a", dir_new.to_str().unwrap()).unwrap();
-        assert_eq!(resolved, dir_new);
-        assert_eq!(*served.read().unwrap()["a"].read().unwrap(), dir_new);
-        assert_eq!(*served.read().unwrap()["b"].read().unwrap(), dir_b);
-
-        for dir in [dir_a, dir_b, dir_new] {
-            std::fs::remove_dir(&dir).unwrap();
-        }
-    }
-
-    #[test]
-    fn chdir_to_an_invalid_path_leaves_the_cell_untouched() {
-        let dir_a = scratch_dir();
-        let served = served_with("a", dir_a.clone());
-        let missing =
-            std::env::temp_dir().join(format!("bridge-cwd-missing-{}", uuid::Uuid::new_v4()));
-
-        let err = apply_chdir(&served, "a", missing.to_str().unwrap()).unwrap_err();
-        assert!(matches!(err, ChdirError::Invalid(_)));
-        assert_eq!(*served.read().unwrap()["a"].read().unwrap(), dir_a);
-
-        std::fs::remove_dir(&dir_a).unwrap();
-    }
+    use super::expand_tilde;
 
     #[test]
     fn expands_a_leading_tilde_slash_to_home() {

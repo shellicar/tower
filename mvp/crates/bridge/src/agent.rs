@@ -95,15 +95,9 @@ pub struct AgentConfig {
     /// None for every tower-spawned instance — NATS carries every event
     /// regardless; this is purely an additional local mirror.
     pub attach: Option<bridge::attach::AttachHandle>,
-    /// This conversation's own working directory — a live cell, shared with
-    /// main.rs's `Host::served` map under this conversation's id, so a
-    /// `chdir` control line (this conversation, and only this conversation)
-    /// can move it while the conversation runs. The instance-wide `cwd`
-    /// line never reaches here: it only sets the default a future spawn/
-    /// adopt with no `cwd` of its own takes. Read fresh per say, same
-    /// discipline as `model`: a move lands on the next query, not mid-turn.
-    /// What "$PWD" resolves to in `permissions` for this conversation
-    /// specifically.
+    /// This conversation's own working directory (cwd.rs), a live cell so
+    /// `chdir` can move it while the conversation runs. Read fresh per
+    /// say, same discipline as `model`.
     pub cwd: Arc<std::sync::RwLock<std::path::PathBuf>>,
     /// The path-scoped permission matrix (permissions.rs), shared and live-
     /// repointable by a `permissions` control line.
@@ -490,10 +484,7 @@ async fn accept_say(
         history_store: crate::history::HistoryStore::clone(&config.history),
         thinking_budget: config.thinking_budget,
         attach: config.attach.clone(),
-        // Read fresh per say: a `chdir` of this specific conversation reaches
-        // it here, on its next say — same discipline as `model`. The
-        // instance-wide `cwd` line never reaches a running conversation at
-        // all; it only sets a future spawn/adopt's default.
+        // Read fresh per say, same discipline as `model`.
         cwd: config.cwd.read().unwrap().clone(),
         permissions: Arc::clone(&config.permissions),
     };
@@ -974,13 +965,9 @@ async fn run_tool_round(
                             None => cwd.to_path_buf(),
                         })
                         .collect();
-                    // Bind every command's actual cwd to its resolved,
-                    // verified value — never left to fall back on the
-                    // bridge PROCESS's own directory (exec.rs's `cmd`
-                    // otherwise inherits it when a command carries no cwd of
-                    // its own), which is not this conversation's cwd once a
-                    // conversation can be spawned or moved independently of
-                    // the instance default.
+                    // Bind every command's cwd to its resolved value:
+                    // unset, exec.rs leaves the child to inherit the bridge
+                    // process's own directory, not this conversation's.
                     for (c, resolved) in commands.iter_mut().zip(&call_cwds) {
                         c.cwd = Some(resolved.to_string_lossy().into_owned());
                     }
