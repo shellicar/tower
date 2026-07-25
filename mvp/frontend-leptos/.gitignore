@@ -1,2 +1,5 @@
 /target
 /dist
+# Machine-local browser wiring for the wasm tests (points chromedriver at a
+# pinned Chrome-for-Testing binary); CI runners pair their own.
+/webdriver.json

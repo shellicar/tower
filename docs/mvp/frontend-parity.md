@@ -70,7 +70,7 @@ side by side. Derived from code, not from any prior claim about what's missing.
 
 ### Conversation panel render
 
-- [ ] **No virtual list / windowing in Leptos.** `ui/conversation.rs`'s `.messages` div renders every message in
+- [x] **No virtual list / windowing in Leptos.** `ui/conversation.rs`'s `.messages` div renders every message in
   `oc.messages` on every render (`.into_iter().map(...).collect_view()`), unwindowed. Svelte's `ConversationPanel.svelte`
   renders through `VirtualList.svelte` (windowed, spacer-before/after, per-id height cache). This is the memory-flagged
   drift (virtual list landed in Svelte only, 21 Jul, `947c41a`). Porting task: port `VirtualList.svelte`'s technique to

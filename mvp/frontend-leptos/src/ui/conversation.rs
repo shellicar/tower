@@ -22,11 +22,16 @@
 //! is Leptos's answer to exactly this: a `Copy` handle every closure can
 //! capture independently, cloning the string out only where one is needed.
 
+use std::collections::HashMap;
+
 use leptos::ev;
 use leptos::html;
 use leptos::prelude::*;
 use serde_json::Value;
 use wasm_bindgen::JsCast;
+use send_wrapper::SendWrapper;
+use wasm_bindgen::closure::Closure;
+use ws_types::WsMessage;
 
 use crate::concerns::approvals::{Approvals, ask_input, ask_label};
 use crate::concerns::conversation::{ConversationState, QueryState};
@@ -37,6 +42,15 @@ use crate::time::{Millis, age, format_time};
 use crate::ui::block::render_block;
 use crate::ui::{short, truncate};
 use crate::uploads;
+
+/// Fallback row height (px) for a message never yet measured — ported from
+/// mvp/frontend's VirtualList.svelte `estimate` default. Deliberately flat,
+/// same inherited minor defect (under-reports totalHeight, short scrollbar);
+/// parity means inheriting this, not fixing it here.
+const ROW_ESTIMATE_PX: f64 = 96.0;
+/// Extra px windowed beyond the viewport on each side, so a small scroll
+/// doesn't pop rows in at the edge — same value as VirtualList.svelte.
+const OVERSCAN_PX: f64 = 600.0;
 
 fn draft_key(conv: &str) -> String {
     format!("tower.draft.{conv}")
@@ -79,6 +93,55 @@ fn size_label(v: &Value) -> String {
     } else {
         format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
     }
+}
+
+/// Prefix offset (px) of each message's top edge, given the current height
+/// cache — unmeasured rows count as `ROW_ESTIMATE_PX`. Ported from
+/// VirtualList.svelte's `offsets` derivation: O(n) is fine, CLAUDE.md's
+/// workload facts cap n at a few thousand.
+fn message_offsets(messages: &[WsMessage], heights: &HashMap<String, f64>) -> Vec<f64> {
+    let mut y = 0.0;
+    let mut out = Vec::with_capacity(messages.len());
+    for m in messages {
+        out.push(y);
+        y += heights.get(&m.id).copied().unwrap_or(ROW_ESTIMATE_PX);
+    }
+    out
+}
+
+fn total_height(messages: &[WsMessage], offsets: &[f64], heights: &HashMap<String, f64>) -> f64 {
+    match messages.last() {
+        None => 0.0,
+        Some(last) => offsets[messages.len() - 1] + heights.get(&last.id).copied().unwrap_or(ROW_ESTIMATE_PX),
+    }
+}
+
+/// First index whose offset is <= target — offsets is ascending (binary search,
+/// ported verbatim from VirtualList.svelte's `findStart`).
+fn find_start(offsets: &[f64], target: f64) -> usize {
+    let mut lo = 0usize;
+    let mut hi = offsets.len();
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if offsets[mid] <= target { lo = mid + 1 } else { hi = mid }
+    }
+    lo.saturating_sub(1)
+}
+
+/// The `[start, end)` window of message indices to actually mount, given the
+/// current scroll position — everything else is represented by a spacer.
+fn visible_range(offsets: &[f64], messages_len: usize, scroll_top: f64, viewport_height: f64) -> (usize, usize) {
+    if messages_len == 0 {
+        return (0, 0);
+    }
+    let top = (scroll_top - OVERSCAN_PX).max(0.0);
+    let bottom = scroll_top + viewport_height + OVERSCAN_PX;
+    let start = find_start(offsets, top);
+    let mut end = start;
+    while end < messages_len && offsets[end] < bottom {
+        end += 1;
+    }
+    (start, end.min(messages_len))
 }
 
 fn media_label(v: &Value) -> String {
@@ -152,6 +215,50 @@ pub fn ConversationView(
         }
         at_bottom.set(true);
     };
+    // Windowing state, ported from mvp/frontend's VirtualList.svelte: a
+    // per-message-id height cache (unmeasured rows fall back to
+    // `ROW_ESTIMATE_PX`), plus the scroller's own scroll position and
+    // viewport height, both needed to derive which messages are actually
+    // mounted. Component-local, same footing as `at_bottom`/`draft` above.
+    let heights = RwSignal::new(HashMap::<String, f64>::new());
+    let scroll_top = RwSignal::new(0.0_f64);
+    let viewport_height = RwSignal::new(0.0_f64);
+    // Tracks the scroller's own size (not a row's) so the window grows/
+    // shrinks with the panel — mirrors VirtualList.svelte's viewportHeight
+    // effect, which reads the same ResizeObserver entry already needed for
+    // width there; this build has no prediction phase, so only height.
+    Effect::new(move |_| {
+        let Some(el) = messages_ref.get() else { return };
+        viewport_height.set(el.client_height() as f64);
+        let closure = Closure::<dyn FnMut(js_sys::Array)>::new(move |entries: js_sys::Array| {
+            if let Some(entry) = entries.get(0).dyn_ref::<web_sys::ResizeObserverEntry>() {
+                viewport_height.set(entry.content_rect().height());
+            }
+        });
+        let Ok(ro) = web_sys::ResizeObserver::new(closure.as_ref().unchecked_ref()) else {
+            return;
+        };
+        ro.observe(&el);
+        // wasm32 is single-threaded; `on_cleanup` demands Send + Sync only
+        // because reactive_graph is shared with leptos's multi-threaded ssr
+        // target — SendWrapper is the accepted way to hand it a !Send
+        // Closure that a real thread will never actually touch.
+        let guard = SendWrapper::new((ro, closure));
+        on_cleanup(move || {
+            let (ro, _closure) = guard.take();
+            ro.disconnect();
+        });
+    });
+    let message_offsets_signal = Memo::new(move |_| {
+        let full = oc.with(|s| s.messages.clone());
+        let h = heights.get();
+        message_offsets(&full, &h)
+    });
+    let visible_range_signal = Memo::new(move |_| {
+        let len = oc.with(|s| s.messages.len());
+        let offs = message_offsets_signal.get();
+        visible_range(&offs, len, scroll_top.get(), viewport_height.get())
+    });
     // Local upload state — a component's own, per the architecture doc; the
     // concern only ever holds the ref once it's won (`on_attach`).
     let uploading = RwSignal::new(0u32);
@@ -307,50 +414,130 @@ pub fn ConversationView(
                 node_ref=messages_ref
                 on:scroll=move |_| {
                     if let Some(el) = messages_ref.get() {
+                        let top = el.scroll_top() as f64;
                         let gap = el.scroll_height() - el.scroll_top() - el.client_height();
                         at_bottom.set(gap < 32);
+                        scroll_top.set(top);
                     }
                 }
             >
-                {move || {
-                    let messages = oc.with(|s| s.messages.clone());
-                    (!messages.is_empty()).then(|| {
-                        messages
-                            .into_iter()
-                            .map(|m| {
-                                let cls = match m.role.as_str() {
-                                    "user" => "user",
-                                    "assistant" => "assistant",
-                                    _ => "other",
-                                };
-                                // Absent `from` is real: a tool_result carries no sender
-                                // (a mechanical delivery, not an utterance — nothing is
-                                // fabricated to fill the slot).
-                                let who = match &m.from {
-                                    Some(from) => from
-                                        .get("userId")
-                                        .and_then(Value::as_str)
-                                        .or_else(|| from.get("kind").and_then(Value::as_str))
-                                        .unwrap_or(&m.role)
-                                        .to_owned(),
-                                    None => "tool".to_owned(),
-                                };
-                                let time = format_time(m.ts);
-                                let blocks: Vec<AnyView> =
-                                    m.content.iter().map(render_block).collect();
-                                view! {
-                                    <div class=format!("message {cls}")>
-                                        <div class="who">
-                                            <span class="who-name">{who}</span>
-                                            <span class="who-time">{time}</span>
-                                        </div>
-                                        {blocks}
-                                    </div>
+                // Windowed: only messages within `visible_range_signal` (plus
+                // overscan) are actually mounted, spacers stand in for the
+                // rest — the technique from VirtualList.svelte, ported (keyed
+                // `<For>`, height cache, spacer-before/after). Each row's own
+                // ResizeObserver (below) is the authority on its real height;
+                // the estimate only has to get the scrollbar roughly right
+                // before a row has ever been mounted (memory 666f3737: any
+                // DOM-free prediction diverges from the engine at some wrap
+                // boundary — never remove the observer on the argument the
+                // estimate is accurate, and this build doesn't even attempt
+                // prediction, so the observer is the ONLY source of truth).
+                <div style=move || format!("height: {}px", message_offsets_signal.get().get(visible_range_signal.get().0).copied().unwrap_or(0.0))></div>
+                <For
+                    each=move || {
+                        let (start, end) = visible_range_signal.get();
+                        oc.with(|s| s.messages[start..end].to_vec())
+                    }
+                    key=|m| m.id.clone()
+                    let(m)
+                >
+                    {
+                        let cls = match m.role.as_str() {
+                            "user" => "user",
+                            "assistant" => "assistant",
+                            _ => "other",
+                        };
+                        // Absent `from` is real: a tool_result carries no sender
+                        // (a mechanical delivery, not an utterance — nothing is
+                        // fabricated to fill the slot).
+                        let who = match &m.from {
+                            Some(from) => from
+                                .get("userId")
+                                .and_then(Value::as_str)
+                                .or_else(|| from.get("kind").and_then(Value::as_str))
+                                .unwrap_or(&m.role)
+                                .to_owned(),
+                            None => "tool".to_owned(),
+                        };
+                        let time = format_time(m.ts);
+                        let blocks: Vec<AnyView> = m.content.iter().map(render_block).collect();
+                        let row_id = m.id.clone();
+                        let row_ref = NodeRef::<html::Div>::new();
+                        // Measures once mounted (mirrors VirtualList.svelte's
+                        // `measureAction`: an initial `getBoundingClientRect`
+                        // read seeds the cache, then a `ResizeObserver` keeps
+                        // it correct on reflow — font load, image decode,
+                        // wrap-boundary drift the estimate could never predict).
+                        Effect::new(move |_| {
+                            let Some(el) = row_ref.get() else { return };
+                            let h = el.get_bounding_client_rect().height();
+                            if h > 0.0 {
+                                heights.update(|hm| {
+                                    if hm.get(&row_id) != Some(&h) {
+                                        hm.insert(row_id.clone(), h);
+                                    }
+                                });
+                            }
+                            let row_id2 = row_id.clone();
+                            let closure = Closure::<dyn FnMut(js_sys::Array)>::new(move |entries: js_sys::Array| {
+                                if let Some(entry) = entries.get(0).dyn_ref::<web_sys::ResizeObserverEntry>() {
+                                    // Border box, to match the mount seed's
+                                    // `get_bounding_client_rect` read below —
+                                    // `content_rect` excludes padding/border
+                                    // and disagreed with the seed by the
+                                    // row's own vertical padding, flapping
+                                    // the cache on every mount (VirtualList.
+                                    // svelte:150 prefers borderBoxSize for
+                                    // the same reason; falls back to
+                                    // content_rect only if unsupported).
+                                    let h = entry
+                                        .border_box_size()
+                                        .get(0)
+                                        .dyn_into::<web_sys::ResizeObserverSize>()
+                                        .map(|s| s.block_size())
+                                        .unwrap_or_else(|_| entry.content_rect().height());
+                                    if h > 0.0 {
+                                        heights.update(|hm| {
+                                            if hm.get(&row_id2) != Some(&h) {
+                                                hm.insert(row_id2.clone(), h);
+                                            }
+                                        });
+                                    }
                                 }
-                            })
-                            .collect_view()
-                    })
-                }}
+                            });
+                            let Ok(ro) = web_sys::ResizeObserver::new(closure.as_ref().unchecked_ref()) else {
+                                return;
+                            };
+                            ro.observe(&el);
+                            let guard = SendWrapper::new((ro, closure));
+                            on_cleanup(move || {
+                                let (ro, _closure) = guard.take();
+                                ro.disconnect();
+                            });
+                        });
+                        view! {
+                            <div class=format!("message {cls}") node_ref=row_ref>
+                                <div class="who">
+                                    <span class="who-name">{who}</span>
+                                    <span class="who-time">{time}</span>
+                                </div>
+                                {blocks}
+                            </div>
+                        }
+                    }
+                </For>
+                <div style=move || {
+                    let (_, end) = visible_range_signal.get();
+                    let offs = message_offsets_signal.get();
+                    let full = oc.with(|s| s.messages.clone());
+                    let total = total_height(&full, &offs, &heights.get());
+                    let mounted_bottom = if end == 0 {
+                        0.0
+                    } else {
+                        offs[end - 1] + heights.get().get(&full[end - 1].id).copied().unwrap_or(ROW_ESTIMATE_PX)
+                    };
+                    format!("height: {}px", (total - mounted_bottom).max(0.0))
+                }></div>
                 {move || {
                     let pending = oc.with(|s| s.pending_say.clone());
                     pending.map(|pending| view! { <p class="pending-say">{pending}</p> })
