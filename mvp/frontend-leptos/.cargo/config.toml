@@ -1,2 +1,8 @@
 [target.wasm32-unknown-unknown]
 runner = "wasm-bindgen-test-runner"
+
+# With several webdrivers on PATH the runner's pick is unspecified (it chose
+# Safari over an installed chromedriver); a bare binary name pins Chrome
+# while leaving resolution to PATH — no machine paths, works in CI as-is.
+[env]
+CHROMEDRIVER = "chromedriver"
