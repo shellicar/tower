@@ -104,7 +104,7 @@ postal label is not.
 
 | Request | Fields | Reply | Notes |
 |---|---|---|---|
-| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts: no history → start fresh; history and no attachment → fold and re-attach; already attached to *this* instance → `rejected: already_attached`; attached to any other instance → take over unconditionally (below). Known reasons today: `already_attached`, `at_capacity`, `unsupported` |
+| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts: no history → start fresh; history and no attachment → fold and re-attach; already attached to *this* instance → `rejected: already_attached`; attached to any other instance → take over unconditionally (below). Known reasons today: `already_attached`, `at_capacity`, `invalid` (a recognised request whose body doesn't carry what it needs, e.g. a missing or empty `conversationId`), `replay_failed`, `invalid_cwd`, `subscribe_failed`, `unsupported` |
 | `drain` | — | `accepted` \| `rejected` + `reason` | stop taking work and detach cleanly: a `detached` per conversation, then silence. Distinguishes a decided shutdown from a crash |
 | `chdir` | `conversationId`, `cwd` | `accepted` \| `rejected` + `reason` | move the working directory of a live attachment — Tower changing where a conversation is served without a Ctrl-C. Accept confirms the premise (this world serves the conversation), not the outcome: the move is observed, not promised — the agent re-publishes `attached` with the new `cwd` when it lands, folded last-write-wins. The agent reconciles the directory and may decline to move; a move that never lands shows as an unchanged `cwd`, an observed outcome like any other. Known reasons today: `not_found` (this world is not serving that conversation), `unsupported` |
 
@@ -219,7 +219,8 @@ export const agentRequest = {
 };
 
 // Replies (transport truth, never outcome). Known reasons today:
-// already_attached, at_capacity, not_found, unsupported.
+// already_attached, at_capacity, invalid, not_found, replay_failed,
+// invalid_cwd, subscribe_failed, unsupported.
 export const agentRequestReply = z.union([
   z.looseObject({ accepted: z.literal(true) }),
   z.looseObject({ rejected: z.literal(true), reason: z.string() }),

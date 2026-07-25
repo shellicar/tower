@@ -774,6 +774,10 @@ async fn serve_agent_requests(client: async_nats::Client, host: Arc<Host>) {
                 model,
                 ..
             } => handle_service(&host, conversation_id, cwd, model).await,
+            wire::AgentRequest::Invalid { type_name } => {
+                eprintln!("bridge: invalid agent request {type_name}");
+                wire::encode_rejected("invalid")
+            }
             wire::AgentRequest::Other { type_name } => {
                 eprintln!("bridge: unsupported agent request {type_name}");
                 wire::encode_rejected("unsupported")

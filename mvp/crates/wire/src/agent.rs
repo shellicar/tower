@@ -115,16 +115,23 @@ pub enum AgentRequest {
         model: Option<String>,
         from: Option<Value>,
     },
-    /// Anything else (`drain`, `chdir`, an unknown leaf) — answered
-    /// `unsupported`, carrying the leaf for logs.
+    /// A known leaf whose body doesn't carry what that verb requires (e.g.
+    /// `service` missing `conversationId`, or carrying an empty one —
+    /// present but not a usable id) — answered `rejected: invalid`, distinct
+    /// from `unsupported`: the verb is known, the shape isn't.
+    Invalid { type_name: String },
+    /// An unrecognised leaf, or bytes that don't parse as JSON at all —
+    /// answered `unsupported`, carrying the leaf for logs.
     Other { type_name: String },
 }
 
 /// (leaf, bytes) → request. The subject leaf spells the operation
 /// (`agent.v1.{world}.requests.service` → `"service"`); the body carries no
-/// type. Unparseable bytes, or a `service` missing its required
-/// `conversationId` (including an empty string — present but not a usable
-/// id), are `Other` — a servicer must answer everything addressed to it.
+/// type. Unparseable bytes, or an unrecognised leaf, are `Other`
+/// (`unsupported`); a recognised leaf whose body lacks what it requires —
+/// `service` missing `conversationId`, or carrying an empty one — is
+/// `Invalid` (`invalid`). A servicer must answer everything addressed to it
+/// either way.
 pub fn parse_agent_request(leaf: &str, bytes: &[u8]) -> AgentRequest {
     let type_name = leaf.to_string();
     let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
@@ -137,7 +144,7 @@ pub fn parse_agent_request(leaf: &str, bytes: &[u8]) -> AgentRequest {
                 .and_then(Value::as_str)
                 .filter(|id| !id.is_empty())
             else {
-                return AgentRequest::Other { type_name };
+                return AgentRequest::Invalid { type_name };
             };
             AgentRequest::Service {
                 conversation_id: ConversationId(conversation_id.to_string()),
@@ -220,11 +227,11 @@ mod tests {
     }
 
     #[test]
-    fn service_request_missing_conversation_id_is_unsupported() {
+    fn service_request_missing_conversation_id_is_invalid() {
         let bytes = br#"{"ts":"2026-07-07T21:00:00+10:00"}"#;
         assert!(matches!(
             parse_agent_request("service", bytes),
-            AgentRequest::Other { .. }
+            AgentRequest::Invalid { .. }
         ));
     }
 
