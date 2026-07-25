@@ -55,6 +55,7 @@ web-sys = { version = "0.3", features = [
   "DomRectReadOnly",
   "ResizeObserver",
   "ResizeObserverEntry",
+  "ResizeObserverSize",
   "console",
 ] }
 console_error_panic_hook = "0.1"

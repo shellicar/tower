@@ -1,12 +1,13 @@
 //! The row-height cache in ui/conversation.rs is fed from two places: the
 //! mount-time seed reads `getBoundingClientRect().height` (border box), the
-//! per-row ResizeObserver update reads `entry.contentRect.height` (content
-//! box). This test performs those exact two reads on a row styled like
-//! `.message` (style.css: `padding: 6px 0 6px 8px; border-left: 2px`) and
-//! asserts they agree — the invariant the cache depends on. The Svelte
-//! original keeps it by preferring `borderBoxSize` in its observer
-//! (VirtualList.svelte:150); the port broke it, so every mounted row's
-//! cached height flaps by the vertical padding and offsets under-count.
+//! per-row ResizeObserver update reads `entry.borderBoxSize[0].blockSize`,
+//! falling back to `entry.contentRect.height` only if unsupported. This test
+//! performs those exact two reads on a row styled like `.message` (style.css:
+//! `padding: 6px 0 6px 8px; border-left: 2px`) and asserts they agree — the
+//! invariant the cache depends on. The Svelte original keeps it the same way
+//! (VirtualList.svelte:150, preferring `borderBoxSize`); preferring
+//! `contentRect` instead disagrees with the seed by the row's vertical
+//! padding, flapping the cached height on every mount.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -40,8 +41,15 @@ async fn the_observer_update_matches_the_mount_seed_for_a_padded_row() {
                 .get(0)
                 .dyn_into::<web_sys::ResizeObserverEntry>()
                 .unwrap();
-            // conversation.rs observer update: entry.content_rect().height()
-            let h = entry.content_rect().height();
+            // conversation.rs observer update: border box, matching the
+            // mount seed below, falling back to contentRect (content box)
+            // only if borderBoxSize is unsupported.
+            let h = entry
+                .border_box_size()
+                .get(0)
+                .dyn_into::<web_sys::ResizeObserverSize>()
+                .map(|s| s.block_size())
+                .unwrap_or_else(|_| entry.content_rect().height());
             resolve
                 .call1(&JsValue::UNDEFINED, &JsValue::from_f64(h))
                 .unwrap();

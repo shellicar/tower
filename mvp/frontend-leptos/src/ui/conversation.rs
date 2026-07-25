@@ -481,7 +481,21 @@ pub fn ConversationView(
                             let row_id2 = row_id.clone();
                             let closure = Closure::<dyn FnMut(js_sys::Array)>::new(move |entries: js_sys::Array| {
                                 if let Some(entry) = entries.get(0).dyn_ref::<web_sys::ResizeObserverEntry>() {
-                                    let h = entry.content_rect().height();
+                                    // Border box, to match the mount seed's
+                                    // `get_bounding_client_rect` read below —
+                                    // `content_rect` excludes padding/border
+                                    // and disagreed with the seed by the
+                                    // row's own vertical padding, flapping
+                                    // the cache on every mount (VirtualList.
+                                    // svelte:150 prefers borderBoxSize for
+                                    // the same reason; falls back to
+                                    // content_rect only if unsupported).
+                                    let h = entry
+                                        .border_box_size()
+                                        .get(0)
+                                        .dyn_into::<web_sys::ResizeObserverSize>()
+                                        .map(|s| s.block_size())
+                                        .unwrap_or_else(|_| entry.content_rect().height());
                                     if h > 0.0 {
                                         heights.update(|hm| {
                                             if hm.get(&row_id2) != Some(&h) {
