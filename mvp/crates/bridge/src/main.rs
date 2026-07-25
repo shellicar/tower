@@ -178,17 +178,33 @@ async fn publish_agent(
     }
 }
 
-/// Serve a conversation: subscribe (the fact before the claim - a
-/// conversation that cannot hear requests is not spawned in any meaningful
-/// sense, so the claim and the reply both wait for this fact), spawn the
-/// agent loop on the seeded tree, and publish `attached` so observers see
-/// the conversation exist before its first message. Shared by spawn (a fresh
-/// tree) and adopt (a replayed record), and by the future warden before a
-/// third caller copies the wiring.
-///
-/// Returns the conversation id on success (the caller writes the stdout
-/// reply); None means the subscription could not be made - the error line is
-/// already written, so the caller moves on.
+/// What `serve_conversation` decided to do about a claim. The caller owns
+/// how each variant surfaces — a stdout reply for a stdio control line, a
+/// `rejected` reply for a NATS request — `serve_conversation` never writes to
+/// stdout: stdout is the stdio control protocol's reply channel, and a NATS
+/// caller sharing this function must never see an unsolicited line land
+/// there.
+enum ServeOutcome {
+    /// Claimed, subscribed, spawned, `attached` published.
+    Attached(String),
+    /// Another caller already holds this conversation id in `served`. The
+    /// check-and-claim below is one atomic critical section (no `.await`
+    /// inside it), so this is race-proof against two callers — stdio and
+    /// NATS alike — racing the same id concurrently.
+    AlreadyAttached,
+    /// The claim was taken but the subscribe failed; released before
+    /// returning so a retry is not permanently locked out.
+    SubscribeFailed,
+}
+
+/// Serve a conversation: claim the id in `served` (the fact before the
+/// claim, since a conversation that cannot hear requests is not spawned in
+/// any meaningful sense, so the claim and the reply both wait for the
+/// subscription), spawn the agent loop on the seeded tree, and publish
+/// `attached` so observers see the conversation exist before its first
+/// message. Shared by spawn (a fresh tree), adopt (a replayed record), and
+/// `service` (either), and by the future warden before a fourth caller
+/// copies the wiring.
 async fn serve_conversation(
     client: &async_nats::Client,
     world: &str,
@@ -196,27 +212,36 @@ async fn serve_conversation(
     served: &ServedCwds,
     config: agent::AgentConfig,
     conversation: decisions::Conversation,
-) -> Option<String> {
+) -> ServeOutcome {
     let conv = config.conv.0.clone();
-    let requests = match agent::subscribe(client, &config.conv).await {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("bridge: subscribe failed for {conv}: {e}");
-            println!("{}", serde_json::json!({ "error": "subscribe failed" }));
-            return None;
-        }
-    };
     // tip: where the conversation stands right now, so an observer other
     // than this servicer (towerd, a client, another agent) can learn it
     // without replaying the change stream first — the gap that made a
     // migrated-in conversation unaddressable except by its own servicer.
     // Read before the move: `conversation` is owned by the spawned task.
     let tip = conversation.tip().map(str::to_owned);
-    // Read before the move: `config` is owned by the spawned task. Registers
-    // this conversation's cwd cell so `chdir` can look it up later.
+    // Read before the move: `config` is owned by the spawned task.
     let cwd_cell = Arc::clone(&config.cwd);
+    // The claim: check-and-insert in one lock acquisition, with no `.await`
+    // between the check and the insert, so no second caller can observe the
+    // slot empty and also claim it — `served`'s insert-if-absent IS the
+    // claim, not a side effect of a later, separately-timed step.
+    {
+        let mut map = served.write().unwrap();
+        if map.contains_key(&conv) {
+            return ServeOutcome::AlreadyAttached;
+        }
+        map.insert(conv.clone(), Arc::clone(&cwd_cell));
+    }
+    let requests = match agent::subscribe(client, &config.conv).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("bridge: subscribe failed for {conv}: {e}");
+            served.write().unwrap().remove(&conv);
+            return ServeOutcome::SubscribeFailed;
+        }
+    };
     let cwd = cwd_cell.read().unwrap().to_string_lossy().to_string();
-    served.write().unwrap().insert(conv.clone(), cwd_cell);
     tokio::spawn(agent::run(client.clone(), requests, config, conversation));
     // The attachment is what makes the conversation exist for observers
     // before its first message. cwd is causal (an input to how the
@@ -229,7 +254,7 @@ async fn serve_conversation(
         "cwd": cwd,
     });
     publish_agent(client, world, "attached", attached).await;
-    Some(conv)
+    ServeOutcome::Attached(conv)
 }
 
 /// The host's shared config and live cells. Every control line — from `-c` or
@@ -323,7 +348,7 @@ impl Host {
                 }
             };
             let config = self.config(&conv, model, Arc::new(RwLock::new(cwd)));
-            let Some(conv) = serve_conversation(
+            match serve_conversation(
                 &self.client,
                 &self.world,
                 &self.instance,
@@ -332,10 +357,20 @@ impl Host {
                 decisions::Conversation::default(),
             )
             .await
-            else {
-                return;
-            };
-            println!("{}", serde_json::json!({ "conversationId": conv }));
+            {
+                ServeOutcome::Attached(conv) => {
+                    println!("{}", serde_json::json!({ "conversationId": conv }));
+                }
+                ServeOutcome::AlreadyAttached => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("already serving {conv}") })
+                    );
+                }
+                ServeOutcome::SubscribeFailed => {
+                    println!("{}", serde_json::json!({ "error": "subscribe failed" }));
+                }
+            }
         } else if let Some(adopt) = value.get("adopt") {
             let Some(conv) = adopt
                 .get("conversationId")
@@ -376,7 +411,7 @@ impl Host {
                 Arc::clone(&self.default_model),
                 Arc::new(RwLock::new(cwd)),
             );
-            let Some(conv) = serve_conversation(
+            match serve_conversation(
                 &self.client,
                 &self.world,
                 &self.instance,
@@ -385,13 +420,23 @@ impl Host {
                 decisions::Conversation::adopt(messages),
             )
             .await
-            else {
-                return;
-            };
-            println!(
-                "{}",
-                serde_json::json!({ "conversationId": conv, "adoptedMessages": adopted })
-            );
+            {
+                ServeOutcome::Attached(conv) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "conversationId": conv, "adoptedMessages": adopted })
+                    );
+                }
+                ServeOutcome::AlreadyAttached => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("already serving {conv}") })
+                    );
+                }
+                ServeOutcome::SubscribeFailed => {
+                    println!("{}", serde_json::json!({ "error": "subscribe failed" }));
+                }
+            }
         } else if let Some(skills) = value.get("skills") {
             // Repoint the skills directory live. The change reaches every
             // running conversation on its next say (as a delta) and new spawns
@@ -624,10 +669,28 @@ impl Host {
 /// reacts — the request states no intent beyond "ensure this conversation is
 /// served here".
 ///
-/// - Already in `served` (this instance) → `rejected: already_attached`.
+/// - Already in `served` — checked here as a fast path (skip a replay we
+///   already know is pointless), and re-asserted atomically inside
+///   `serve_conversation` (the only correctness guarantee; this earlier
+///   check alone would race a concurrent claim during the replay below) —
+///   `rejected: already_attached`.
 /// - No committed history → spawn fresh, exactly as the stdio `spawn` line.
-/// - History, no live attachment (implied: not in `served`, checked above)
-///   → fold the record and re-attach, exactly as the stdio `adopt` line.
+/// - History, no live attachment locally → fold the record and re-attach,
+///   exactly as the stdio `adopt` line.
+///
+/// **Known v1 gap, not the spec's semantics:** `already_attached` here means
+/// "attached to *this instance*", checked against its own local `served`
+/// map. The spec's `service` (agent-spec line 107) means "the conversation's
+/// record shows a live attachment" — anywhere in the world, by any instance
+/// sharing the queue group. There is no cross-instance liveness read in v1
+/// (no fold of `agent.v1.{world}.telemetry.attached` across instances), so a
+/// `service` request that happens to land on an instance that is *not* the
+/// one already serving the conversation will not see that attachment, and
+/// will spawn a second servicer beside the live one — exactly the double-
+/// servicer failure the spec exists to prevent, un-prevented when several
+/// instances share a world. Safe today only because a v1 deployment runs one
+/// instance per world; sharing a queue group across several needs this fixed
+/// first.
 ///
 /// The reply confirms the premise, never the outcome: acceptance means the
 /// servicing was undertaken, not that it will succeed — the outcome is the
@@ -679,8 +742,9 @@ async fn handle_service(
     )
     .await
     {
-        Some(_) => wire::encode_accepted(None),
-        None => wire::encode_rejected("subscribe_failed"),
+        ServeOutcome::Attached(_) => wire::encode_accepted(None),
+        ServeOutcome::AlreadyAttached => wire::encode_rejected("already_attached"),
+        ServeOutcome::SubscribeFailed => wire::encode_rejected("subscribe_failed"),
     }
 }
 
