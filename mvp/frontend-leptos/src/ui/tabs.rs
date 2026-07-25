@@ -1,5 +1,5 @@
 //! The tab bar: reads the `view` concern only. Renaming uses the browser's
-//! native `prompt()`, same as mvp/frontend's `RowList`/`App.svelte` — a tab
+//! native `prompt()`, same as mvp/frontend-svelte's `RowList`/`App.svelte` — a tab
 //! name is a rare, deliberate edit, not worth an inline editor the way a
 //! conversation's title is (clicked far more often, from the rail). Closing
 //! confirms first, same as `App.svelte`'s `confirm(\`Close tab "${t.name}"?\`)`

@@ -3,7 +3,7 @@
 //! Rust gives for free, docs/mvp/frontend-architecture.md). Owns its own
 //! local UI state (the composer draft, attachment chips, the scroll anchor,
 //! the title editor) — a component's state, per the architecture doc, never
-//! a concern's. Tracks mvp/frontend's ConversationPanel.svelte feature for
+//! a concern's. Tracks mvp/frontend-svelte's ConversationPanel.svelte feature for
 //! feature, including usage/pricing and attachments — the slice grew past
 //! docs/mvp/frontend-leptos-plan.md's original frontend-rs-only scope once
 //! the plan's question 2 (full Svelte parity) was answered. Tabs live in
@@ -27,9 +27,9 @@ use std::collections::HashMap;
 use leptos::ev;
 use leptos::html;
 use leptos::prelude::*;
+use send_wrapper::SendWrapper;
 use serde_json::Value;
 use wasm_bindgen::JsCast;
-use send_wrapper::SendWrapper;
 use wasm_bindgen::closure::Closure;
 use ws_types::WsMessage;
 
@@ -44,7 +44,7 @@ use crate::ui::{short, truncate};
 use crate::uploads;
 
 /// Fallback row height (px) for a message never yet measured — ported from
-/// mvp/frontend's VirtualList.svelte `estimate` default. Deliberately flat,
+/// mvp/frontend-svelte's VirtualList.svelte `estimate` default. Deliberately flat,
 /// same inherited minor defect (under-reports totalHeight, short scrollbar);
 /// parity means inheriting this, not fixing it here.
 const ROW_ESTIMATE_PX: f64 = 96.0;
@@ -63,7 +63,7 @@ fn load_draft(conv: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Persisted on every keystroke — mvp/frontend debounces this (a synchronous
+/// Persisted on every keystroke — mvp/frontend-svelte debounces this (a synchronous
 /// write per keystroke is main-thread I/O the typing loop doesn't need); this
 /// build accepts that cost for now rather than reproduce the debounce timer.
 fn save_draft(conv: &str, value: &str) {
@@ -112,7 +112,9 @@ fn message_offsets(messages: &[WsMessage], heights: &HashMap<String, f64>) -> Ve
 fn total_height(messages: &[WsMessage], offsets: &[f64], heights: &HashMap<String, f64>) -> f64 {
     match messages.last() {
         None => 0.0,
-        Some(last) => offsets[messages.len() - 1] + heights.get(&last.id).copied().unwrap_or(ROW_ESTIMATE_PX),
+        Some(last) => {
+            offsets[messages.len() - 1] + heights.get(&last.id).copied().unwrap_or(ROW_ESTIMATE_PX)
+        }
     }
 }
 
@@ -123,14 +125,23 @@ fn find_start(offsets: &[f64], target: f64) -> usize {
     let mut hi = offsets.len();
     while lo < hi {
         let mid = (lo + hi) / 2;
-        if offsets[mid] <= target { lo = mid + 1 } else { hi = mid }
+        if offsets[mid] <= target {
+            lo = mid + 1
+        } else {
+            hi = mid
+        }
     }
     lo.saturating_sub(1)
 }
 
 /// The `[start, end)` window of message indices to actually mount, given the
 /// current scroll position — everything else is represented by a spacer.
-fn visible_range(offsets: &[f64], messages_len: usize, scroll_top: f64, viewport_height: f64) -> (usize, usize) {
+fn visible_range(
+    offsets: &[f64],
+    messages_len: usize,
+    scroll_top: f64,
+    viewport_height: f64,
+) -> (usize, usize) {
     if messages_len == 0 {
         return (0, 0);
     }
@@ -155,7 +166,7 @@ fn media_label(v: &Value) -> String {
 
 /// The conversation's cost surface: towerd ships the token facts, priced
 /// here ($ and context %) — the client owns that policy, same split as
-/// mvp/frontend's `ConversationPanel.svelte`. Model leads the line: it's a
+/// mvp/frontend-svelte's `ConversationPanel.svelte`. Model leads the line: it's a
 /// per-conversation fact (a spawn may name its own, docs/mvp/bridge-stdio-
 /// spec.md), read off THIS conversation's own usage snapshot — never a
 /// host-wide default — same footing claude-sdk-cli gives it front and
@@ -215,7 +226,7 @@ pub fn ConversationView(
         }
         at_bottom.set(true);
     };
-    // Windowing state, ported from mvp/frontend's VirtualList.svelte: a
+    // Windowing state, ported from mvp/frontend-svelte's VirtualList.svelte: a
     // per-message-id height cache (unmeasured rows fall back to
     // `ROW_ESTIMATE_PX`), plus the scroller's own scroll position and
     // viewport height, both needed to derive which messages are actually
@@ -285,7 +296,11 @@ pub fn ConversationView(
     let send_current = Callback::new(move |()| {
         let text = draft.get_untracked();
         let allowed = oc.with(|s| {
-            s.can_send(text.trim().is_empty(), !s.pending_attachments.is_empty(), uploading.get_untracked() > 0)
+            s.can_send(
+                text.trim().is_empty(),
+                !s.pending_attachments.is_empty(),
+                uploading.get_untracked() > 0,
+            )
         });
         if !allowed {
             return;

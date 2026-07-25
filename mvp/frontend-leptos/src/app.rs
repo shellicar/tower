@@ -23,8 +23,8 @@ use leptos::prelude::*;
 use ws_types::ClientMsg;
 
 use crate::concerns::approvals::Approvals;
-use crate::concerns::conversation::Conversations;
 use crate::concerns::conversation::ConversationState;
+use crate::concerns::conversation::Conversations;
 use crate::concerns::rail::Rail;
 use crate::concerns::usage::Usage;
 use crate::concerns::view::View;
@@ -104,10 +104,7 @@ pub fn App(ws_url: String) -> impl IntoView {
     // The re-render ticker — a per-concern cadence detail (Decision 1). Both
     // liveness and approval-void verdicts read `now`; 1s covers both without
     // a bespoke ticker per verdict.
-    set_interval(
-        move || now.set(now_ms()),
-        std::time::Duration::from_secs(1),
-    );
+    set_interval(move || now.set(now_ms()), std::time::Duration::from_secs(1));
 
     let send = move |msg: ClientMsg| transport.with_value(|t| t.send(&msg));
     let next_id = move || ids.try_update_value(|c| c.next()).expect("id counter");
@@ -199,9 +196,8 @@ pub fn App(ws_url: String) -> impl IntoView {
             send(msg);
         }
     };
-    let on_answer = Callback::new(move |(id, approved): (String, bool)| {
-        answer_approval(id, approved)
-    });
+    let on_answer =
+        Callback::new(move |(id, approved): (String, bool)| answer_approval(id, approved));
 
     let dismiss_approval = Callback::new(move |approval_id: String| {
         let id = next_id();

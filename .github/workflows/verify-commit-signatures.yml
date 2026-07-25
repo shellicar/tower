@@ -1,0 +1,55 @@
+name: Verify Commit Signatures
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify-signatures:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify commit signatures
+        shell: sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FAILED=0
+          REPO="${{ github.repository }}"
+
+          for COMMIT in $(gh pr view "${{ github.event.pull_request.number }}" --repo "$REPO" --json commits --jq '.commits[].oid'); do
+            VERIFIED=$(gh api "repos/$REPO/commits/$COMMIT" --jq '.commit.verification.verified')
+            REASON=$(gh api "repos/$REPO/commits/$COMMIT" --jq '.commit.verification.reason')
+            COMMITTER=$(gh api "repos/$REPO/commits/$COMMIT" --jq '.commit.committer.email')
+            MESSAGE=$(gh api "repos/$REPO/commits/$COMMIT" --jq '.commit.message' | head -1)
+            SHORT=$(echo "$COMMIT" | cut -c1-7)
+
+            echo "---"
+            echo "Commit: $SHORT $MESSAGE"
+            echo "  Committer: $COMMITTER"
+            echo "  Verified:  $VERIFIED"
+            echo "  Reason:    $REASON"
+
+            if [ "$VERIFIED" != "true" ]; then
+              echo "  FAIL: Commit is not verified (reason: $REASON)"
+              FAILED=1
+            else
+              echo "  OK"
+            fi
+          done
+
+          echo ""
+          if [ "$FAILED" -eq 1 ]; then
+            echo "VERIFICATION FAILED: One or more commits are not verified."
+            echo "All commits must be GPG-signed and verified by GitHub."
+            exit 1
+          else
+            echo "All commits verified."
+          fi

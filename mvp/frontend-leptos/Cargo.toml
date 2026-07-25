@@ -1,16 +1,16 @@
 # The Leptos frontend: the third build in the side-by-side (docs/mvp/
-# frontend-leptos-plan.md). Same architecture as mvp/frontend (Svelte) and
-# mvp/frontend-rs (egui), so the comparison isolates what a DOM-based Rust
-# renderer buys over both. A detached workspace of its own, trunk-built, kept
-# out of the mvp workspace so `just build` stays native and fast; the shared
-# WS contract arrives as a path dependency on ws-types, the one definition
-# every side uses (drift impossible).
-[workspace]
-
+# frontend-leptos-plan.md). Same architecture as mvp/frontend-svelte (Svelte)
+# and mvp/frontend-rs (egui), so the comparison isolates what a DOM-based Rust
+# renderer buys over both. A member of the mvp workspace (not detached
+# anymore — rust-cache and scripts/affected-crates.mts's dep-info scoping
+# neutralise the original "keep native builds fast" reason to separate it,
+# and CI never ran its tests/clippy/fmt while it was); the shared WS contract
+# arrives as a path dependency on ws-types, the one definition every side uses
+# (drift impossible).
 [package]
 name = "tower-frontend-leptos"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 # leptos 0.8 (stable) over the 0.9 alpha in the vetted clone — deliberate:

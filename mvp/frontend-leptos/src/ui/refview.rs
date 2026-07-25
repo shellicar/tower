@@ -1,4 +1,4 @@
-//! A `$ref` node — mirrors mvp/frontend's RefView.svelte. The protocol
+//! A `$ref` node — mirrors mvp/frontend-svelte's RefView.svelte. The protocol
 //! supplies facts only (id, size, hint); materialising it is entirely this
 //! client's policy: nothing fetches until asked ("load · 513 KB"), text
 //! renders inline, images become a data URL. `/ref/{id}` is this client's
@@ -32,9 +32,21 @@ enum Loaded {
 }
 
 #[component]
-pub fn RefView(r: Value, label: &'static str, #[prop(default = false)] image: bool) -> impl IntoView {
-    let ref_id = r.get("$ref").and_then(Value::as_str).unwrap_or_default().to_owned();
-    let hint = r.get("hint").and_then(Value::as_str).unwrap_or_default().to_owned();
+pub fn RefView(
+    r: Value,
+    label: &'static str,
+    #[prop(default = false)] image: bool,
+) -> impl IntoView {
+    let ref_id = r
+        .get("$ref")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let hint = r
+        .get("hint")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
     let size = r.get("size").and_then(Value::as_i64).unwrap_or(0);
 
     let loaded = RwSignal::new(Loaded::None);

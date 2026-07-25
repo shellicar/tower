@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Tower v1 MVP in `mvp/`: `towerd` (Rust) + `frontend/` (Svelte) rendering the
+Tower v1 MVP in `mvp/`: `towerd` (Rust) + `frontend-svelte/` (Svelte) rendering the
 fleet's conversations by staleness — open one, read it, say into it — plus
 `bridge`, the v0 agent host that serves conversations (spawn over stdio, the
 messages API over SSE, the Skill tool), and `helm`, the single-conversation
@@ -14,7 +14,7 @@ Rust/Leptos against the wire alone (`docs/mvp/tower-ws-spec.md`), isolating
 what a Rust renderer buys over Svelte. It is not a lagging prototype: the two
 track ONE feature set. A change to what a conversation panel shows or does
 (a new usage-line field, an attachment affordance, a status badge) lands in
-both `frontend/` and `frontend-leptos/` in the same piece of work — whichever
+both `frontend-svelte/` and `frontend-leptos/` in the same piece of work — whichever
 you build first, port it to the other before calling the work done. Wire
 shape and bridge/towerd behaviour are shared already (both read the same
 WS contract); only the two renderings can drift, and drift is the bug.
@@ -143,7 +143,7 @@ replies flow down (`{subject,payload}` / `{id,payload}`), requests and
 uploads flow up (`{id,subject,payload}` / `{id,upload}`) and bridge proxies
 them onto NATS — helm is genuinely NATS-less; the broker is bridge's concern
 alone. Bridge's lifetime is its stdin: helm dies, bridge exits. Internal shape mirrors
-`frontend/src/lib/concerns/` — transport owns the wire, conversation /
+`frontend-svelte/src/lib/concerns/` — transport owns the wire, conversation /
 usage / approvals / editor are self-contained folds, fixture-tested; ratatui
 owns present/platform, `view.rs` wraps in-house so every visual row maps to
 its block (that's what makes click hit-testing exact).

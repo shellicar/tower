@@ -2,7 +2,7 @@
 //! derivations towerd deliberately does not ship ($ and %). towerd ships
 //! facts (token totals incl. the 5m/1h cache-creation split, the latest
 //! turn's context size and model); the price table and the window are the
-//! client's, ported verbatim (numbers and behaviour) from mvp/frontend's
+//! client's, ported verbatim (numbers and behaviour) from mvp/frontend-svelte's
 //! core/pricing.ts so the two frontends show the same dollar figure for the
 //! same conversation.
 //!
@@ -33,44 +33,108 @@ const fn r(
     output: f64,
     context_window: i64,
 ) -> ModelRates {
-    ModelRates { input, cache_write_5m, cache_write_1h, cache_read, output, context_window }
+    ModelRates {
+        input,
+        cache_write_5m,
+        cache_write_1h,
+        cache_read,
+        output,
+        context_window,
+    }
 }
 
-static FABLE: &[(&str, ModelRates)] =
-    &[("claude-fable-5", r(10.0 / M, 12.5 / M, 20.0 / M, 1.0 / M, 50.0 / M, 1_000_000))];
+static FABLE: &[(&str, ModelRates)] = &[(
+    "claude-fable-5",
+    r(10.0 / M, 12.5 / M, 20.0 / M, 1.0 / M, 50.0 / M, 1_000_000),
+)];
 
 static OPUS: &[(&str, ModelRates)] = &[
-    ("claude-opus-3", r(15.0 / M, 18.75 / M, 30.0 / M, 1.5 / M, 75.0 / M, 200_000)),
-    ("claude-opus-4", r(15.0 / M, 18.75 / M, 30.0 / M, 1.5 / M, 75.0 / M, 200_000)),
-    ("claude-opus-4-1", r(15.0 / M, 18.75 / M, 30.0 / M, 1.5 / M, 75.0 / M, 200_000)),
-    ("claude-opus-4-5", r(5.0 / M, 6.25 / M, 10.0 / M, 0.5 / M, 25.0 / M, 200_000)),
-    ("claude-opus-4-6", r(5.0 / M, 6.25 / M, 10.0 / M, 0.5 / M, 25.0 / M, 1_000_000)),
-    ("claude-opus-4-7", r(5.0 / M, 6.25 / M, 10.0 / M, 0.5 / M, 25.0 / M, 1_000_000)),
-    ("claude-opus-4-8", r(5.0 / M, 6.25 / M, 10.0 / M, 0.5 / M, 25.0 / M, 1_000_000)),
+    (
+        "claude-opus-3",
+        r(15.0 / M, 18.75 / M, 30.0 / M, 1.5 / M, 75.0 / M, 200_000),
+    ),
+    (
+        "claude-opus-4",
+        r(15.0 / M, 18.75 / M, 30.0 / M, 1.5 / M, 75.0 / M, 200_000),
+    ),
+    (
+        "claude-opus-4-1",
+        r(15.0 / M, 18.75 / M, 30.0 / M, 1.5 / M, 75.0 / M, 200_000),
+    ),
+    (
+        "claude-opus-4-5",
+        r(5.0 / M, 6.25 / M, 10.0 / M, 0.5 / M, 25.0 / M, 200_000),
+    ),
+    (
+        "claude-opus-4-6",
+        r(5.0 / M, 6.25 / M, 10.0 / M, 0.5 / M, 25.0 / M, 1_000_000),
+    ),
+    (
+        "claude-opus-4-7",
+        r(5.0 / M, 6.25 / M, 10.0 / M, 0.5 / M, 25.0 / M, 1_000_000),
+    ),
+    (
+        "claude-opus-4-8",
+        r(5.0 / M, 6.25 / M, 10.0 / M, 0.5 / M, 25.0 / M, 1_000_000),
+    ),
 ];
 
 static SONNET: &[(&str, ModelRates)] = &[
-    ("claude-sonnet-3-7", r(3.0 / M, 3.75 / M, 6.0 / M, 0.3 / M, 15.0 / M, 200_000)),
-    ("claude-sonnet-4", r(3.0 / M, 3.75 / M, 6.0 / M, 0.3 / M, 15.0 / M, 1_000_000)),
-    ("claude-sonnet-4-5", r(3.0 / M, 3.75 / M, 6.0 / M, 0.3 / M, 15.0 / M, 1_000_000)),
-    ("claude-sonnet-4-6", r(3.0 / M, 3.75 / M, 6.0 / M, 0.3 / M, 15.0 / M, 1_000_000)),
-    ("claude-sonnet-5", r(3.0 / M, 3.75 / M, 6.0 / M, 0.3 / M, 15.0 / M, 1_000_000)),
+    (
+        "claude-sonnet-3-7",
+        r(3.0 / M, 3.75 / M, 6.0 / M, 0.3 / M, 15.0 / M, 200_000),
+    ),
+    (
+        "claude-sonnet-4",
+        r(3.0 / M, 3.75 / M, 6.0 / M, 0.3 / M, 15.0 / M, 1_000_000),
+    ),
+    (
+        "claude-sonnet-4-5",
+        r(3.0 / M, 3.75 / M, 6.0 / M, 0.3 / M, 15.0 / M, 1_000_000),
+    ),
+    (
+        "claude-sonnet-4-6",
+        r(3.0 / M, 3.75 / M, 6.0 / M, 0.3 / M, 15.0 / M, 1_000_000),
+    ),
+    (
+        "claude-sonnet-5",
+        r(3.0 / M, 3.75 / M, 6.0 / M, 0.3 / M, 15.0 / M, 1_000_000),
+    ),
 ];
 
 static HAIKU: &[(&str, ModelRates)] = &[
-    ("claude-haiku-3", r(0.25 / M, 0.3 / M, 0.5 / M, 0.03 / M, 1.25 / M, 200_000)),
-    ("claude-haiku-3-5", r(0.8 / M, 1.0 / M, 1.6 / M, 0.08 / M, 4.0 / M, 200_000)),
-    ("claude-haiku-4-5", r(1.0 / M, 1.25 / M, 2.0 / M, 0.1 / M, 5.0 / M, 200_000)),
+    (
+        "claude-haiku-3",
+        r(0.25 / M, 0.3 / M, 0.5 / M, 0.03 / M, 1.25 / M, 200_000),
+    ),
+    (
+        "claude-haiku-3-5",
+        r(0.8 / M, 1.0 / M, 1.6 / M, 0.08 / M, 4.0 / M, 200_000),
+    ),
+    (
+        "claude-haiku-4-5",
+        r(1.0 / M, 1.25 / M, 2.0 / M, 0.1 / M, 5.0 / M, 200_000),
+    ),
 ];
 
 /// Each family in release order, newest at the tail — position encodes
 /// recency. An unknown model in a known family resolves to the tail.
-static FAMILIES: &[(&str, &[(&str, ModelRates)])] =
-    &[("fable", FABLE), ("opus", OPUS), ("sonnet", SONNET), ("haiku", HAIKU)];
+static FAMILIES: &[(&str, &[(&str, ModelRates)])] = &[
+    ("fable", FABLE),
+    ("opus", OPUS),
+    ("sonnet", SONNET),
+    ("haiku", HAIKU),
+];
 
 /// No rates (cost reads 0, not NaN) and the common window.
-const UNKNOWN: ModelRates =
-    ModelRates { input: 0.0, cache_write_5m: 0.0, cache_write_1h: 0.0, cache_read: 0.0, output: 0.0, context_window: 200_000 };
+const UNKNOWN: ModelRates = ModelRates {
+    input: 0.0,
+    cache_write_5m: 0.0,
+    cache_write_1h: 0.0,
+    cache_read: 0.0,
+    output: 0.0,
+    context_window: 200_000,
+};
 
 fn strip_date_suffix(model: &str) -> &str {
     // `-YYYYMMDD` at the end, 8 ascii digits.
@@ -134,7 +198,12 @@ pub fn price_usage(u: &WsUsage) -> PricedUsage {
     } else {
         0.0
     };
-    PricedUsage { cost_usd, context_used: u.context_tokens, context_max, context_pct }
+    PricedUsage {
+        cost_usd,
+        context_used: u.context_tokens,
+        context_max,
+        context_pct,
+    }
 }
 
 /// Split a model id into a display name and version — ported from
@@ -150,7 +219,11 @@ pub fn price_usage(u: &WsUsage) -> PricedUsage {
 /// shared default.
 pub fn parse_model_name(model: &str) -> (String, Option<String>) {
     let parts: Vec<&str> = model.split('-').collect();
-    let Some(family) = parts.iter().skip(1).find(|p| !p.starts_with(|c: char| c.is_ascii_digit())) else {
+    let Some(family) = parts
+        .iter()
+        .skip(1)
+        .find(|p| !p.starts_with(|c: char| c.is_ascii_digit()))
+    else {
         return (model.to_owned(), None);
     };
     let mut chars = family.chars();
@@ -284,10 +357,19 @@ mod tests {
 
     #[test]
     fn parses_family_and_version() {
-        assert_eq!(parse_model_name("claude-sonnet-4-6"), ("Sonnet".to_owned(), Some("4.6".to_owned())));
+        assert_eq!(
+            parse_model_name("claude-sonnet-4-6"),
+            ("Sonnet".to_owned(), Some("4.6".to_owned()))
+        );
         assert_eq!(parse_model_name("claude-opus"), ("Opus".to_owned(), None));
-        assert_eq!(parse_model_name("claude-mrmagoo-4"), ("Mrmagoo".to_owned(), Some("4".to_owned())));
-        assert_eq!(parse_model_name("claude-mrmagoo"), ("Mrmagoo".to_owned(), None));
+        assert_eq!(
+            parse_model_name("claude-mrmagoo-4"),
+            ("Mrmagoo".to_owned(), Some("4".to_owned()))
+        );
+        assert_eq!(
+            parse_model_name("claude-mrmagoo"),
+            ("Mrmagoo".to_owned(), None)
+        );
     }
 
     #[test]

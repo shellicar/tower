@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 /// Uploads one file. `on_done` fires with the won ref on success (it rides
 /// the next say — the caller already knows which conversation, so only the
 /// ref comes back); `on_error` carries a human-readable reason for the
-/// composer's upload-note line (mvp/frontend's `uploadNote`); `on_settled`
+/// composer's upload-note line (mvp/frontend-svelte's `uploadNote`); `on_settled`
 /// always fires last, success or failure, so the caller can drop its
 /// "uploading…" count without duplicating the outcome match.
 #[cfg(target_arch = "wasm32")]
@@ -125,10 +125,15 @@ mod tests {
 
     #[test]
     fn a_media_type_maps_to_image_or_document() {
-        let img = attachment_ref(br#"{"id":"o1","bucket":"attach","mediaType":"image/png","size":10}"#).unwrap();
+        let img =
+            attachment_ref(br#"{"id":"o1","bucket":"attach","mediaType":"image/png","size":10}"#)
+                .unwrap();
         assert_eq!(img["type"], "image");
         assert_eq!(img["source"]["bucket"], "attach");
-        let doc = attachment_ref(br#"{"id":"o2","bucket":"attach","mediaType":"application/pdf","size":10}"#).unwrap();
+        let doc = attachment_ref(
+            br#"{"id":"o2","bucket":"attach","mediaType":"application/pdf","size":10}"#,
+        )
+        .unwrap();
         assert_eq!(doc["type"], "document");
     }
 

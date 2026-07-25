@@ -1,6 +1,6 @@
 # Frontend parity — Svelte vs Leptos
 
-Living gap list between `mvp/frontend` (Svelte) and `mvp/frontend-leptos`
+Living gap list between `mvp/frontend-svelte` (Svelte) and `mvp/frontend-leptos`
 (Rust/Leptos). CLAUDE.md's rule is that the two track one feature set; this
 doc is how that rule gets enforced when it's violated — each gap here is
 precise enough to hand to a session as a porting task on its own. Cross items
@@ -50,7 +50,7 @@ side by side. Derived from code, not from any prior claim about what's missing.
 
 ### WS contract — wire-type coverage (both sides, informational)
 
-- Both `mvp/frontend/src/lib/types.ts` and `mvp/crates/ws-types/src/lib.rs` are in sync with each other and
+- Both `mvp/frontend-svelte/src/lib/types.ts` and `mvp/crates/ws-types/src/lib.rs` are in sync with each other and
   cover the full frame set actually in use: `layout`/`set_layout`/`layout_set`, `dismiss_approval`/
   `dismiss_attachment`/`attachment_dismissed`, `stale_conversations`/`stale_conversation` are present in both —
   no wire-type drift between the two frontends. **Not a gap.**
@@ -110,7 +110,7 @@ side by side. Derived from code, not from any prior claim about what's missing.
   for-this-conv count as an effect dependency.
 
 - [ ] **Composer draft persistence: Leptos writes localStorage on every keystroke, Svelte debounces.** `ui/conversation.rs`'s
-  `save_draft` is called unconditionally from the `on:input` handler's own comment: "mvp/frontend debounces this...
+  `save_draft` is called unconditionally from the `on:input` handler's own comment: "mvp/frontend-svelte debounces this...
   this build accepts that cost for now rather than reproduce the debounce timer." Svelte's `ConversationPanel.svelte`
   debounces (300ms trailing, 2s max-wait). Low priority — the Leptos comment already names this as a deliberate,
   accepted gap, not an oversight — but it's real main-thread I/O per keystroke and belongs on the list since the
@@ -133,7 +133,7 @@ side by side. Derived from code, not from any prior claim about what's missing.
   unchanged: blocks on NATS still name their bucket; the stamping party moved from client to towerd.
   Original finding kept below for the record.
 
-  ~~**`mvp/frontend/src/lib/core/uploads.ts`'s `uploadAttachment` never reads or carries `bucket`.**~~ It builds the
+  ~~**`mvp/frontend-svelte/src/lib/core/uploads.ts`'s `uploadAttachment` never reads or carries `bucket`.**~~ It builds the
   `AttachmentRef` sent in a `say` from only `{ id, mediaType, size }` off the `POST /attachment` response, and
   `types.ts`'s `AttachmentRef.source` type doesn't even have a `bucket` field to hold one. `docs/mvp/tower-ws-spec.md`'s
   normative zod schema requires it, not optionally: `say.attachments[].source` is

@@ -1,4 +1,4 @@
-//! One content block, rendered per type — mirrors mvp/frontend's
+//! One content block, rendered per type — mirrors mvp/frontend-svelte's
 //! BlockView.svelte: text stands open, everything else (thinking, tool
 //! traffic, unknown blocks) collapses to a summary line via `<details>`, the
 //! primary render lever for per-message collapsing (docs/mvp/tower-v1-design.md,
@@ -28,7 +28,10 @@ fn size_label(source: &Value) -> String {
 }
 
 fn short(v: &Value, max: usize) -> String {
-    let s = v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string());
+    let s = v
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| v.to_string());
     truncate(&s, max)
 }
 
@@ -74,9 +77,16 @@ pub fn render_block(block: &Value) -> AnyView {
             .into_any()
         }
         Some("tool_result") => {
-            let is_error = block.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+            let is_error = block
+                .get("is_error")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             let content = block.get("content").cloned().unwrap_or(Value::Null);
-            let label = if is_error { "↩ result (error)" } else { "↩ result" };
+            let label = if is_error {
+                "↩ result (error)"
+            } else {
+                "↩ result"
+            };
             if is_ref(&content) {
                 return view! { <RefView r=content label=label /> }.into_any();
             }
@@ -98,8 +108,16 @@ pub fn render_block(block: &Value) -> AnyView {
             if is_ref(&source) {
                 view! { <RefView r=source label="🖼 image" image=true /> }.into_any()
             } else if let Some(obj) = object_source(&source) {
-                let media = obj.get("mediaType").and_then(Value::as_str).unwrap_or("image").to_owned();
-                let id = obj.get("id").and_then(Value::as_str).unwrap_or_default().to_owned();
+                let media = obj
+                    .get("mediaType")
+                    .and_then(Value::as_str)
+                    .unwrap_or("image")
+                    .to_owned();
+                let id = obj
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
                 let summary = format!("📎 {media} {} (attachment)", size_label(obj));
                 let failed = RwSignal::new(false);
                 view! {
@@ -129,8 +147,16 @@ pub fn render_block(block: &Value) -> AnyView {
             if is_ref(&source) {
                 view! { <RefView r=source label="📄 document" /> }.into_any()
             } else if let Some(obj) = object_source(&source) {
-                let media = obj.get("mediaType").and_then(Value::as_str).unwrap_or("document").to_owned();
-                let id = obj.get("id").and_then(Value::as_str).unwrap_or_default().to_owned();
+                let media = obj
+                    .get("mediaType")
+                    .and_then(Value::as_str)
+                    .unwrap_or("document")
+                    .to_owned();
+                let id = obj
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
                 let label = format!("📎 {media} {} (attachment)", size_label(obj));
                 view! {
                     <a class="dim" href=format!("/attachment/{id}") target="_blank" rel="noreferrer">{label}</a>

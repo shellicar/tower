@@ -272,7 +272,7 @@ impl Conversations {
     }
 
     /// Reconcile the wire-open set against a wanted list — the view
-    /// concern's tab switch, ported from mvp/frontend's `Conversations.setOpen`.
+    /// concern's tab switch, ported from mvp/frontend-svelte's `Conversations.setOpen`.
     /// Opens what's missing, closes what's no longer wanted; `next_id` mints
     /// one id per message, same as every other action here.
     pub fn set_open(
@@ -655,10 +655,7 @@ mod tests {
             ClientMsg::Say { attachments, .. } => assert_eq!(attachments.len(), 1),
             _ => panic!("expected a say"),
         }
-        assert_eq!(
-            c.get("a").unwrap().with(|s| s.pending_attachments.len()),
-            1
-        ); // still pending
+        assert_eq!(c.get("a").unwrap().with(|s| s.pending_attachments.len()), 1); // still pending
         c.apply(&ServerMsg::SayResult {
             id: "req1".into(),
             outcome: "accepted".into(),

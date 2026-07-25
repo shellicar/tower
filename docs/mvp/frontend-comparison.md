@@ -1,7 +1,7 @@
 # Svelte vs Rust-WASM: what the language bought
 
 The frontend was built twice against one architecture (docs/mvp/frontend-architecture.md):
-the refactored Svelte app (`mvp/frontend`, the control) and a Rust-WASM twin
+the refactored Svelte app (`mvp/frontend-svelte`, the control) and a Rust-WASM twin
 (`mvp/frontend-rs`). Holding the architecture constant was the point: it isolates what
 the *language* buys from what the *design* buys. This is the read on the four axes the
 architecture doc named, plus two findings that only surfaced in the building.

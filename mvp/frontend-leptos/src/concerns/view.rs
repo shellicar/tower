@@ -1,5 +1,5 @@
 //! concerns/view — the view concern (docs/mvp/frontend-architecture.md),
-//! ported from mvp/frontend's view.svelte.ts. It owns the shell's tabs and
+//! ported from mvp/frontend-svelte's view.svelte.ts. It owns the shell's tabs and
 //! each tab's open set.
 //!
 //! Promoted onto the wire (settled with the SC 19 Jul, building on the 12 Jul
@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use ws_types::{ClientMsg, ServerMsg, WsTab};
 
 /// The rail's view configuration — per tab, local only. Mirrors
-/// mvp/frontend's `ViewConfig`.
+/// mvp/frontend-svelte's `ViewConfig`.
 #[derive(Debug, Clone, Default)]
 pub struct ViewConfig {
     /// key -> selected values; OR within a key, AND across keys.
@@ -47,13 +47,20 @@ pub struct Tab {
 
 impl From<&Tab> for WsTab {
     fn from(t: &Tab) -> Self {
-        WsTab { name: t.name.clone(), convs: t.convs.clone() }
+        WsTab {
+            name: t.name.clone(),
+            convs: t.convs.clone(),
+        }
     }
 }
 
 impl From<WsTab> for Tab {
     fn from(t: WsTab) -> Self {
-        Tab { name: t.name, convs: t.convs, view: ViewConfig::default() }
+        Tab {
+            name: t.name,
+            convs: t.convs,
+            view: ViewConfig::default(),
+        }
     }
 }
 
@@ -63,7 +70,7 @@ pub struct View {
     pub active: usize,
     /// Whether the fleet-wide approvals panel is showing — local-only, same
     /// footing as `active` (a fact about this viewer, not the shared
-    /// workspace). Mirrors mvp/frontend's `view.approvalsOpen`.
+    /// workspace). Mirrors mvp/frontend-svelte's `view.approvalsOpen`.
     pub approvals_open: bool,
     /// Whether the fleet-wide unread/stale-conversations panel is showing —
     /// same footing as `approvals_open`.
@@ -73,7 +80,11 @@ pub struct View {
 impl Default for View {
     fn default() -> Self {
         View {
-            tabs: vec![Tab { name: "main".to_owned(), convs: Vec::new(), view: ViewConfig::default() }],
+            tabs: vec![Tab {
+                name: "main".to_owned(),
+                convs: Vec::new(),
+                view: ViewConfig::default(),
+            }],
             active: 0,
             approvals_open: false,
             unread_open: false,
@@ -88,7 +99,7 @@ impl View {
     /// rather than replace it with an empty set, so a fresh fleet still
     /// shows one usable tab instead of none.
     /// `load_config` supplies a `ViewConfig` for a tab name this browser has
-    /// never held (mvp/frontend's `readViewConfig(name)` — a previously
+    /// never held (mvp/frontend-svelte's `readViewConfig(name)` — a previously
     /// saved local config, or the default when there is none). Held config
     /// from tabs already in memory always wins; the loader only fires for a
     /// name genuinely new to this fold.
@@ -105,7 +116,10 @@ impl View {
                 .iter()
                 .cloned()
                 .map(|t| Tab {
-                    view: held.get(&t.name).cloned().unwrap_or_else(|| load_config(&t.name)),
+                    view: held
+                        .get(&t.name)
+                        .cloned()
+                        .unwrap_or_else(|| load_config(&t.name)),
                     ..Tab::from(t)
                 })
                 .collect();
@@ -318,7 +332,10 @@ mod tests {
         let mut v = View::default();
         v.apply(
             &ServerMsg::Layout {
-                tabs: vec![WsTab { name: "shared".into(), convs: vec!["x".into()] }],
+                tabs: vec![WsTab {
+                    name: "shared".into(),
+                    convs: vec!["x".into()],
+                }],
             },
             |_| ViewConfig::default(),
         );
@@ -328,7 +345,9 @@ mod tests {
 
         // An empty snapshot (nothing set yet, fresh fleet) doesn't wipe the
         // local default down to zero tabs.
-        v.apply(&ServerMsg::Layout { tabs: vec![] }, |_| ViewConfig::default());
+        v.apply(&ServerMsg::Layout { tabs: vec![] }, |_| {
+            ViewConfig::default()
+        });
         assert_eq!(v.tabs.len(), 1);
     }
 }

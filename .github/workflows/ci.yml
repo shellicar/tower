@@ -1,4 +1,4 @@
-name: Release
+name: CI
 
 # One workflow, gated by event — same shape as docker/compose's ci.yml.
 # Five independently releasable apps, each its own tag/release name:
@@ -27,9 +27,9 @@ jobs:
   #
   # On a PR, scoped to affected crates only (scripts/affected-crates.mts —
   # exact, dep-info-based, not a directory-prefix guess). On push to main,
-  # always the full workspace: the backstop a delta-scoped check always
-  # needs, since the scoping is best-effort against anything the dep-info
-  # pass didn't see (a build script side effect, say).
+  # always the full workspace instead: the scoped run only sees what the
+  # dep-info pass sees, so main still needs one real run against everything
+  # to catch what that missed (a build script side effect, say).
   checks:
     runs-on: ubuntu-24.04
     steps:
@@ -66,11 +66,11 @@ jobs:
       - run: cargo fmt --check ${{ steps.scope.outputs.fmt_packages }}
         working-directory: mvp
       - run: pnpm install --frozen-lockfile
-        working-directory: mvp/frontend
+        working-directory: mvp/frontend-svelte
       - run: pnpm check
-        working-directory: mvp/frontend
+        working-directory: mvp/frontend-svelte
       - run: pnpm test
-        working-directory: mvp/frontend
+        working-directory: mvp/frontend-svelte
 
   # Splits the release's tag (`<app>@<version>`) into its two halves. Empty
   # on pull_request/push — nothing here reads its outputs on those triggers.
@@ -206,10 +206,10 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-        working-directory: mvp/frontend
+        working-directory: mvp/frontend-svelte
       - run: pnpm build
-        working-directory: mvp/frontend
-      - run: tar czf tower-svelte.tar.gz -C mvp/frontend/dist .
+        working-directory: mvp/frontend-svelte
+      - run: tar czf tower-svelte.tar.gz -C mvp/frontend-svelte/dist .
       - uses: actions/upload-artifact@v4
         with:
           name: tower-tower-svelte
@@ -223,7 +223,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: mvp/frontend-leptos
+          workspaces: mvp
       - run: rustup target add wasm32-unknown-unknown
       - uses: jetli/trunk-action@v0.5.0
       - run: trunk build --release

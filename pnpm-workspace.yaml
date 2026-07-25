@@ -1,5 +1,5 @@
 packages:
-  - mvp/frontend
+  - mvp/frontend-svelte
 
 ignoreScripts: false
 minimumReleaseAge: 1440

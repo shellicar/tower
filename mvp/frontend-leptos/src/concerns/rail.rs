@@ -119,8 +119,13 @@ impl Rail {
             // A human dismissed it (tower's own annotation, never a claim
             // the agent detached) — drop it from the potential-conversation
             // list, same as a real `detached` would.
-            ServerMsg::AttachmentDismissed { world, instance_id, conv } => {
-                self.attachments.remove(&format!("{world}/{instance_id}/{conv}"));
+            ServerMsg::AttachmentDismissed {
+                world,
+                instance_id,
+                conv,
+            } => {
+                self.attachments
+                    .remove(&format!("{world}/{instance_id}/{conv}"));
             }
             ServerMsg::StaleConversations { conversations } => {
                 self.stale = conversations.iter().map(|u| u.conv.clone()).collect();
@@ -217,7 +222,7 @@ impl Rail {
 
     /// Potential conversations: attached, no row yet — served, silent. They
     /// vanish with the attachment; the first committed message births a row.
-    /// Carries the cwd (mvp/frontend's `RowList` shows it under the id) and
+    /// Carries the cwd (mvp/frontend-svelte's `RowList` shows it under the id) and
     /// the liveness verdict, so the rail can render the same dot it uses for
     /// ordinary rows.
     pub fn attached_only(&self, now: Millis) -> Vec<PotentialConv<'_>> {
@@ -281,7 +286,11 @@ impl Rail {
     /// None if the conversation has no row yet (nothing to rename).
     pub fn set_title(&mut self, conv: &str, title: String, id: String) -> Option<ClientMsg> {
         let row = self.rows.get_mut(conv)?;
-        row.title = if title.is_empty() { None } else { Some(title.clone()) };
+        row.title = if title.is_empty() {
+            None
+        } else {
+            Some(title.clone())
+        };
         Some(ClientMsg::SetTitle {
             id,
             conv: conv.to_owned(),
@@ -424,7 +433,10 @@ mod tests {
             host: None,
         }));
         assert_eq!(rail.verdict("a", 100_000), Some(Liveness::Alive));
-        assert_eq!(rail.verdict("a", 100_000 + 46_000), Some(Liveness::Stranded));
+        assert_eq!(
+            rail.verdict("a", 100_000 + 46_000),
+            Some(Liveness::Stranded)
+        );
     }
 
     #[test]

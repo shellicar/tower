@@ -102,7 +102,10 @@ mod wasm {
         /// itself with exponential backoff (`schedule_reconnect`) instead of
         /// finishing, so a dropped connection recovers on its own rather than
         /// leaving a dead tab until manual reload.
-        pub fn connect(ws_url: &str, on_message: impl Fn(ServerMsg) + 'static) -> Result<Self, String> {
+        pub fn connect(
+            ws_url: &str,
+            on_message: impl Fn(ServerMsg) + 'static,
+        ) -> Result<Self, String> {
             let ws = WebSocket::open(ws_url).map_err(|e| e.to_string())?;
             let (write, read) = ws.split();
             let status = RwSignal::new(Status::Connecting);
@@ -110,7 +113,14 @@ mod wasm {
             let on_message: OnMessage = Rc::new(on_message);
             let retry_ms = Rc::new(Cell::new(INITIAL_RETRY_MS));
 
-            spawn_read_loop(ws_url.to_string(), status, sink.clone(), on_message, read, retry_ms);
+            spawn_read_loop(
+                ws_url.to_string(),
+                status,
+                sink.clone(),
+                on_message,
+                read,
+                retry_ms,
+            );
 
             Ok(Self { status, sink })
         }
@@ -172,7 +182,13 @@ mod wasm {
     /// capped at 10s (mirrors core/transport.svelte.ts's
     /// `setTimeout(() => this.connect(), retryMs)` followed by
     /// `retryMs = min(retryMs * 2, 10_000)`).
-    fn schedule_reconnect(ws_url: String, status: RwSignal<Status>, sink: Sink, on_message: OnMessage, retry_ms: Rc<Cell<u32>>) {
+    fn schedule_reconnect(
+        ws_url: String,
+        status: RwSignal<Status>,
+        sink: Sink,
+        on_message: OnMessage,
+        retry_ms: Rc<Cell<u32>>,
+    ) {
         let delay_ms = retry_ms.get();
         retry_ms.set((delay_ms * 2).min(MAX_RETRY_MS));
         set_timeout(
@@ -184,7 +200,13 @@ mod wasm {
     /// One reconnect attempt. A synchronous open failure (the socket
     /// constructor itself rejecting, distinct from a later close) is treated
     /// the same as a dropped connection: log it and back off again.
-    fn attempt_reconnect(ws_url: String, status: RwSignal<Status>, sink: Sink, on_message: OnMessage, retry_ms: Rc<Cell<u32>>) {
+    fn attempt_reconnect(
+        ws_url: String,
+        status: RwSignal<Status>,
+        sink: Sink,
+        on_message: OnMessage,
+        retry_ms: Rc<Cell<u32>>,
+    ) {
         status.set(Status::Connecting);
         match WebSocket::open(&ws_url) {
             Ok(ws) => {
