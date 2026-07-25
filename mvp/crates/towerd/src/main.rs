@@ -143,11 +143,9 @@ async fn main() -> anyhow::Result<()> {
     let listener_leptos = tokio::net::TcpListener::bind(&bind_leptos).await?;
     eprintln!("towerd listening on {bind} (svelte) and {bind_leptos} (leptos)");
 
-    let (svelte, leptos) = tokio::join!(
+    tokio::try_join!(
         axum::serve(listener, app),
         axum::serve(listener_leptos, app_leptos),
-    );
-    svelte?;
-    leptos?;
+    )?;
     Ok(())
 }
