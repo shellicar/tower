@@ -104,7 +104,7 @@ postal label is not.
 
 | Request | Fields | Reply | Notes |
 |---|---|---|---|
-| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts: no history → start fresh; history and no live attachment → fold and re-attach; already attached → `rejected: already_attached`. Known reasons today: `already_attached`, `at_capacity`, `unsupported` |
+| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts: no history → start fresh; history and no attachment → fold and re-attach; already attached to *this* instance → `rejected: already_attached`; attached to any other instance → take over unconditionally (below). Any named environment value the world cannot establish rejects the request (`invalid_cwd`, for `cwd`); an omitted value falls to the world's own defaults — stated once for the open set, not per field (nats-spec, "Operations fulfil in full or not at all"). Known reasons today: `already_attached`, `at_capacity`, `invalid` (a recognised request whose body doesn't carry what it needs, e.g. a missing or empty `conversationId`), `invalid_cwd`, `failed` (the world could not undertake the operation; the specific cause rides `detail`), `unsupported` |
 | `drain` | — | `accepted` \| `rejected` + `reason` | stop taking work and detach cleanly: a `detached` per conversation, then silence. Distinguishes a decided shutdown from a crash |
 | `chdir` | `conversationId`, `cwd` | `accepted` \| `rejected` + `reason` | move the working directory of a live attachment — Tower changing where a conversation is served without a Ctrl-C. Accept confirms the premise (this world serves the conversation), not the outcome: the move is observed, not promised — the agent re-publishes `attached` with the new `cwd` when it lands, folded last-write-wins. The agent reconciles the directory and may decline to move; a move that never lands shows as an unchanged `cwd`, an observed outcome like any other. Known reasons today: `not_found` (this world is not serving that conversation), `unsupported` |
 
@@ -129,6 +129,23 @@ undertaken. Outcomes are observable where everything else is: `attached`
 here, and the conversation's own record — which is why a feasibility problem
 (a directory too unreconciled to move) is not a rejection reason: it is an
 outcome, shown by the fact that never changes, never a reply.
+
+**The premise for `service` in a shared world.** Attachment is singular and
+supersession is unconditional: a new `attached` for a conversation displaces
+whichever one stood before it — any world, any instance — with no stale
+precondition and no negotiation. Failover and migration are the same
+ordinary operation: asking a second instance to serve a conversation already
+attached elsewhere IS the deliberate way to move it, not an error case to
+guard against. So the premise a servicer checks is narrower than liveness:
+attached to *this* instance already → `rejected: already_attached` (the
+request is redundant — nothing to do); attached to any other instance →
+accept and take over, regardless of whether that instance's pulse reads live
+or stranded. A cross-instance liveness fold (`attached` + `pulse`) is not,
+and must not be, part of this premise — liveness elsewhere is irrelevant to
+whether `service` proceeds. What happens to the superseded instance's own
+standing (does it stand down, publish its own `detached`, keep believing it
+serves the conversation until its next reconciling pulse) is deliberately
+not decided here — a separate pass.
 
 A note with teeth, from nats-spec's Authority: connection is authority, and
 `service` makes a connected sender able to start work in a world. The
@@ -202,10 +219,13 @@ export const agentRequest = {
 };
 
 // Replies (transport truth, never outcome). Known reasons today:
-// already_attached, at_capacity, not_found, unsupported.
+// already_attached, at_capacity, invalid, invalid_cwd, not_found, failed,
+// unsupported. `detail` is optional free-text diagnostics for a human —
+// `reason` is the machine-facing token a caller branches on, `detail` names
+// the step and underlying error; never the other way around.
 export const agentRequestReply = z.union([
   z.looseObject({ accepted: z.literal(true) }),
-  z.looseObject({ rejected: z.literal(true), reason: z.string() }),
+  z.looseObject({ rejected: z.literal(true), reason: z.string(), detail: z.string().optional() }),
 ]);
 ```
 

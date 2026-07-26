@@ -10,7 +10,9 @@ pub mod ingest;
 pub mod say;
 pub mod ts;
 
-pub use agent::{AgentTelemetry, Attached, Detached, Pulse, Ready};
+pub use agent::{
+    AgentRequest, AgentTelemetry, Attached, Detached, Pulse, Ready, parse_agent_request,
+};
 pub use approval::{
     AnswerOutcome, ApprovalLifecycle, encode_answer, encode_heartbeat, encode_raised,
     encode_settled, parse_answer, parse_answer_reply,
@@ -25,6 +27,7 @@ pub use ingest::{
 };
 pub use say::{
     CancelOutcome, ConvRequest, SayCommand, SayOutcome, encode_accepted, encode_cancel,
-    encode_rejected, encode_say, parse_cancel_reply, parse_request, parse_say_reply,
+    encode_rejected, encode_rejected_detailed, encode_say, parse_cancel_reply, parse_request,
+    parse_say_reply,
 };
 pub use ts::{format_ts, now_iso, parse_ts};

@@ -267,6 +267,43 @@ carries the scenario that forced it.
   behind them (what to trim, when, by what thresholds) stays the agent's own.
   The record carries effects, never reasons.
 
+- **Operations fulfil in full or not at all.** An accepted request is
+  undertaken exactly as asked — never trimmed, substituted, or degraded to
+  something the servicer could do instead. Acceptance and fulfilment are
+  separate layers: acceptance confirms the premise held and the undertaking
+  began; some operations cannot know at accept time whether they will
+  succeed, and that is fine, because the outcome — success or failure alike
+  — lands visibly on the record. What is never permitted is the middle:
+  partial or different fulfilment presented as success.
+
+  For named parameters this means: absence delegates, presence binds. An
+  omitted value falls to the servicer's own defaults; a named value the
+  servicer cannot honour rejects the request.
+
+  Worked example, because the wrong reading is the natural one: `service`
+  carries `cwd?`. Optional does NOT mean "best effort with a fallback" — it
+  means the requester chooses between delegating ("serve this, directory at
+  your discretion": omit it) and requiring ("serve this in exactly this
+  directory": name it). A named `cwd` the world cannot establish rejects
+  (`invalid_cwd`); it never falls back to the default. Why: the default
+  exists for the requester who didn't care, not as a substitute for the
+  requester who did. A fallback here would be the forbidden middle — an
+  agent working in the wrong directory while the requester holds an
+  `accepted` that says otherwise, the failure hidden precisely from the
+  party that specified the requirement.
+
+  Second worked example, the other side of the same rule: degradation
+  belongs to the client, not the spec. A requester that would accept the
+  default directory sends the request again without `cwd` — the same
+  outcome a server-side fallback would produce, but as a decision the
+  requester made, visible as two requests on the record. The honest
+  rejection is what makes an informed retry possible; the servicer never
+  improvises one.
+
+  A standing principle, not stone: it governs until a concern surfaces a
+  case it fits badly, and then it is revisited here — never silently
+  excepted.
+
 ## Planes
 
 Three planes, borrowed from networking (where the separation is rigorous;

@@ -56,6 +56,7 @@ mod refs;
 mod skills;
 mod slice;
 mod stream;
+mod worldstate;
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -178,17 +179,36 @@ async fn publish_agent(
     }
 }
 
-/// Serve a conversation: subscribe (the fact before the claim - a
-/// conversation that cannot hear requests is not spawned in any meaningful
-/// sense, so the claim and the reply both wait for this fact), spawn the
-/// agent loop on the seeded tree, and publish `attached` so observers see
-/// the conversation exist before its first message. Shared by spawn (a fresh
-/// tree) and adopt (a replayed record), and by the future warden before a
-/// third caller copies the wiring.
-///
-/// Returns the conversation id on success (the caller writes the stdout
-/// reply); None means the subscription could not be made - the error line is
-/// already written, so the caller moves on.
+/// What `serve_conversation` decided to do about a claim. The caller owns
+/// how each variant surfaces — a stdout reply for a stdio control line, a
+/// `rejected` reply for a NATS request — `serve_conversation` never writes to
+/// stdout: stdout is the stdio control protocol's reply channel, and a NATS
+/// caller sharing this function must never see an unsolicited line land
+/// there.
+enum ServeOutcome {
+    /// Claimed, subscribed, spawned, `attached` published.
+    Attached(String),
+    /// Another caller already holds this conversation id in `served`. The
+    /// check-and-claim below is one atomic critical section (no `.await`
+    /// inside it), so this is race-proof against two callers — stdio and
+    /// NATS alike — racing the same id concurrently.
+    AlreadyAttached,
+    /// The claim was taken but the subscribe failed; released before
+    /// returning so a retry is not permanently locked out. Carries the
+    /// underlying error for the caller's diagnostics (a NATS reply's
+    /// `detail`; a stdio reply's `error` string) — the reason token itself
+    /// stays the coarse, machine-facing `failed`.
+    SubscribeFailed(String),
+}
+
+/// Serve a conversation: claim the id in `served` (the fact before the
+/// claim, since a conversation that cannot hear requests is not spawned in
+/// any meaningful sense, so the claim and the reply both wait for the
+/// subscription), spawn the agent loop on the seeded tree, and publish
+/// `attached` so observers see the conversation exist before its first
+/// message. Shared by spawn (a fresh tree), adopt (a replayed record), and
+/// `service` (either), and by the future warden before a fourth caller
+/// copies the wiring.
 async fn serve_conversation(
     client: &async_nats::Client,
     world: &str,
@@ -196,27 +216,36 @@ async fn serve_conversation(
     served: &ServedCwds,
     config: agent::AgentConfig,
     conversation: decisions::Conversation,
-) -> Option<String> {
+) -> ServeOutcome {
     let conv = config.conv.0.clone();
-    let requests = match agent::subscribe(client, &config.conv).await {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("bridge: subscribe failed for {conv}: {e}");
-            println!("{}", serde_json::json!({ "error": "subscribe failed" }));
-            return None;
-        }
-    };
     // tip: where the conversation stands right now, so an observer other
     // than this servicer (towerd, a client, another agent) can learn it
     // without replaying the change stream first — the gap that made a
     // migrated-in conversation unaddressable except by its own servicer.
     // Read before the move: `conversation` is owned by the spawned task.
     let tip = conversation.tip().map(str::to_owned);
-    // Read before the move: `config` is owned by the spawned task. Registers
-    // this conversation's cwd cell so `chdir` can look it up later.
+    // Read before the move: `config` is owned by the spawned task.
     let cwd_cell = Arc::clone(&config.cwd);
+    // The claim: check-and-insert in one lock acquisition, with no `.await`
+    // between the check and the insert, so no second caller can observe the
+    // slot empty and also claim it — `served`'s insert-if-absent IS the
+    // claim, not a side effect of a later, separately-timed step.
+    {
+        let mut map = served.write().unwrap();
+        if map.contains_key(&conv) {
+            return ServeOutcome::AlreadyAttached;
+        }
+        map.insert(conv.clone(), Arc::clone(&cwd_cell));
+    }
+    let requests = match agent::subscribe(client, &config.conv).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("bridge: subscribe failed for {conv}: {e}");
+            served.write().unwrap().remove(&conv);
+            return ServeOutcome::SubscribeFailed(e.to_string());
+        }
+    };
     let cwd = cwd_cell.read().unwrap().to_string_lossy().to_string();
-    served.write().unwrap().insert(conv.clone(), cwd_cell);
     tokio::spawn(agent::run(client.clone(), requests, config, conversation));
     // The attachment is what makes the conversation exist for observers
     // before its first message. cwd is causal (an input to how the
@@ -229,7 +258,7 @@ async fn serve_conversation(
         "cwd": cwd,
     });
     publish_agent(client, world, "attached", attached).await;
-    Some(conv)
+    ServeOutcome::Attached(conv)
 }
 
 /// The host's shared config and live cells. Every control line — from `-c` or
@@ -323,7 +352,7 @@ impl Host {
                 }
             };
             let config = self.config(&conv, model, Arc::new(RwLock::new(cwd)));
-            let Some(conv) = serve_conversation(
+            match serve_conversation(
                 &self.client,
                 &self.world,
                 &self.instance,
@@ -332,10 +361,23 @@ impl Host {
                 decisions::Conversation::default(),
             )
             .await
-            else {
-                return;
-            };
-            println!("{}", serde_json::json!({ "conversationId": conv }));
+            {
+                ServeOutcome::Attached(conv) => {
+                    println!("{}", serde_json::json!({ "conversationId": conv }));
+                }
+                ServeOutcome::AlreadyAttached => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("already serving {conv}") })
+                    );
+                }
+                ServeOutcome::SubscribeFailed(detail) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("subscribe failed: {detail}") })
+                    );
+                }
+            }
         } else if let Some(adopt) = value.get("adopt") {
             let Some(conv) = adopt
                 .get("conversationId")
@@ -376,7 +418,7 @@ impl Host {
                 Arc::clone(&self.default_model),
                 Arc::new(RwLock::new(cwd)),
             );
-            let Some(conv) = serve_conversation(
+            match serve_conversation(
                 &self.client,
                 &self.world,
                 &self.instance,
@@ -385,13 +427,26 @@ impl Host {
                 decisions::Conversation::adopt(messages),
             )
             .await
-            else {
-                return;
-            };
-            println!(
-                "{}",
-                serde_json::json!({ "conversationId": conv, "adoptedMessages": adopted })
-            );
+            {
+                ServeOutcome::Attached(conv) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "conversationId": conv, "adoptedMessages": adopted })
+                    );
+                }
+                ServeOutcome::AlreadyAttached => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("already serving {conv}") })
+                    );
+                }
+                ServeOutcome::SubscribeFailed(detail) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("subscribe failed: {detail}") })
+                    );
+                }
+            }
         } else if let Some(skills) = value.get("skills") {
             // Repoint the skills directory live. The change reaches every
             // running conversation on its next say (as a delta) and new spawns
@@ -619,6 +674,127 @@ impl Host {
     }
 }
 
+/// The world's `service` request (agent-spec: Requests, and the "premise
+/// for `service`" note). Attachment is singular and supersession is
+/// unconditional (design ruling): already attached to *this* instance →
+/// `rejected: already_attached` (the request is redundant — nothing to do);
+/// otherwise — no history, history with no attachment, or attached to any
+/// other instance, live or stranded — proceed and take over. Liveness
+/// elsewhere is irrelevant to this premise: asking a second instance to
+/// serve IS the deliberate migration path, so there is no cross-instance
+/// check here to gate on.
+///
+/// The reply confirms the premise, never the outcome: acceptance means the
+/// servicing was undertaken, not that it will succeed — the outcome is the
+/// `attached` telemetry `serve_conversation` publishes.
+async fn handle_service(
+    host: &Host,
+    conversation_id: wire::ConversationId,
+    cwd: Option<String>,
+    model: Option<String>,
+) -> Vec<u8> {
+    let conv = conversation_id.0;
+    if host.served.read().unwrap().contains_key(&conv) {
+        return wire::encode_rejected("already_attached");
+    }
+    let stream_name = std::env::var("BRIDGE_STREAM").unwrap_or_else(|_| "conv-approval".into());
+    let messages = match replay_conversation(&host.client, &stream_name, &conv, &host.attach).await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            let detail = format!("replay failed: {e:#}");
+            eprintln!("bridge: service replay failed for {conv}: {e:#}");
+            return wire::encode_rejected_detailed("failed", &detail);
+        }
+    };
+    let default_cwd = host.default_cwd.read().unwrap().clone();
+    let resolved_cwd = match resolve_cwd(cwd.as_deref(), &default_cwd) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("bridge: service cwd invalid for {conv}: {e}");
+            return wire::encode_rejected("invalid_cwd");
+        }
+    };
+    let model_cell = match model {
+        Some(m) => Arc::new(RwLock::new(m)),
+        None => Arc::clone(&host.default_model),
+    };
+    let config = host.config(&conv, model_cell, Arc::new(RwLock::new(resolved_cwd)));
+    let conversation = if messages.is_empty() {
+        decisions::Conversation::default()
+    } else {
+        decisions::Conversation::adopt(messages)
+    };
+    match serve_conversation(
+        &host.client,
+        &host.world,
+        &host.instance,
+        &host.served,
+        config,
+        conversation,
+    )
+    .await
+    {
+        ServeOutcome::Attached(_) => wire::encode_accepted(None),
+        ServeOutcome::AlreadyAttached => wire::encode_rejected("already_attached"),
+        ServeOutcome::SubscribeFailed(detail) => {
+            wire::encode_rejected_detailed("failed", &format!("subscribe failed: {detail}"))
+        }
+    }
+}
+
+/// Serve `agent.v1.{world}.requests.>` for this instance's life — the world-
+/// level counterpart of `agent::run`'s per-conversation `.requests.>` loop.
+/// Every request owes a reply; an unrecognised leaf (`drain`, `chdir`,
+/// anything unknown) is honest `unsupported` rather than silence —
+/// compliance is answering, not implementing.
+async fn serve_agent_requests(client: async_nats::Client, host: Arc<Host>) {
+    let subject = format!("agent.v1.{}.requests.>", host.world);
+    let mut requests = match client
+        .queue_subscribe(subject.clone(), "servicers".to_string())
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("bridge: agent requests subscribe failed ({subject}): {e}");
+            return;
+        }
+    };
+    let prefix = format!("agent.v1.{}.requests.", host.world);
+    eprintln!("bridge: serving {subject}");
+    while let Some(msg) = requests.next().await {
+        let Some(reply_to) = msg.reply.clone() else {
+            continue;
+        };
+        let leaf = msg.subject.strip_prefix(prefix.as_str()).unwrap_or("");
+        eprintln!(
+            "{} bridge: ← agent request {leaf} ({} B)",
+            now_iso(),
+            msg.payload.len()
+        );
+        let response = match wire::parse_agent_request(leaf, &msg.payload) {
+            wire::AgentRequest::Service {
+                conversation_id,
+                cwd,
+                model,
+                ..
+            } => handle_service(&host, conversation_id, cwd, model).await,
+            wire::AgentRequest::Invalid { type_name } => {
+                eprintln!("bridge: invalid agent request {type_name}");
+                wire::encode_rejected("invalid")
+            }
+            wire::AgentRequest::Other { type_name } => {
+                eprintln!("bridge: unsupported agent request {type_name}");
+                wire::encode_rejected("unsupported")
+            }
+        };
+        if let Err(e) = client.publish(reply_to, response.into()).await {
+            eprintln!("bridge: agent request reply publish failed: {e}");
+        }
+    }
+    eprintln!("bridge: agent requests subscription ended");
+}
+
 /// Parse one control line and hand it to the host. Shared by the -c batch and
 /// the live stdin loop, so both surfaces answer identically.
 async fn handle_line(host: &Host, line: &str) {
@@ -794,11 +970,10 @@ async fn main() -> anyhow::Result<()> {
             }
         });
     }
-
     // Host: the shared config and live cells every control line reads. One
     // grammar, two delivery points — the -c batch, then live stdin.
     let default_model = Arc::new(RwLock::new(default_model));
-    let host = Host {
+    let host = Arc::new(Host {
         client: client.clone(),
         world,
         instance,
@@ -820,7 +995,20 @@ async fn main() -> anyhow::Result<()> {
         attach_bucket,
         thinking_budget,
         permissions: Arc::new(RwLock::new(permissions::PermissionSet::strict_default())),
-    };
+    });
+
+    // The world's own requests (agent-spec): one queue group per world, so
+    // exactly one instance answers even with several sharing it. Plain NATS,
+    // never JetStream — a `.requests` subject is never stream-captured
+    // (nats-spec, Storage: a stream over it would race the servicer's own
+    // reply as a second responder).
+    {
+        let host = Arc::clone(&host);
+        let client = client.clone();
+        tokio::spawn(async move {
+            serve_agent_requests(client, host).await;
+        });
+    }
 
     // -c: a batch of control lines run before stdin takes over. Each writes its
     // response to stdout, so a launcher reads back a spawn's conversationId.
