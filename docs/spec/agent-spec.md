@@ -4,8 +4,10 @@ The agent concern: who is serving conversations, and where. Structure per
 `nats-spec.md`; namespace `agent`. Every message here is *about* one world —
 the environment conversations are served from — never about a conversation's
 content: kill the process, restart it, and not one conversation wire fact
-changes. This is the conversation spec's Environment rule seen from the other
-side — the attachment-telemetry home that section reserved.
+changes. Attachment — which instance is serving which conversation — is a
+conversation fact, not a world fact, and its wire shape lives on the
+conversation's own tree (`conversation-spec.md`, Attachment); this spec
+states the model an instance conducts itself by.
 
 ## The entity
 
@@ -33,8 +35,13 @@ economics (racing servicers waste work), a deployment's choice.
 
 | Subject | Traffic | Carries |
 |---|---|---|
-| `agent.v1.{world}.telemetry.>` | events | servicing facts: ready, pulse, attachments |
+| `agent.v1.{world}.telemetry.>` | events | servicing facts: ready, pulse |
 | `agent.v1.{world}.requests.>` | requests | operations on the world's servicing |
+
+Attachment claims are not here — a conversation's attachment is about the
+conversation, not the world, and lives on its own tree
+(`conversation-spec.md`, Attachment). This section covers only what is
+genuinely about the world: is a process up, and is it still promising to be.
 
 The subject spells the type, as in the conversation spec: `telemetry.pulse`,
 `requests.service`.
@@ -43,8 +50,6 @@ The subject spells the type, as in the conversation spec: `telemetry.pulse`,
 |---|---|
 | `ready` | `agent.v1.{world}.telemetry.ready` |
 | `pulse` | `agent.v1.{world}.telemetry.pulse` |
-| `attached` | `agent.v1.{world}.telemetry.attached` |
-| `detached` | `agent.v1.{world}.telemetry.detached` |
 | `service` | `agent.v1.{world}.requests.service` |
 | `drain` | `agent.v1.{world}.requests.drain` |
 | `chdir` | `agent.v1.{world}.requests.chdir` |
@@ -59,8 +64,6 @@ map: who serves what, and whether they are alive.
 |---|---|---|
 | `ready` | `instanceId`, `host` | a process now serves this world; published once on boot, after its subscriptions are up |
 | `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement the master spec forbids |
-| `attached` | `instanceId`, `conversationId`, `cwd`, `tip`?, `intervalS`? | this instance is serving this conversation. What makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's current tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for a conversation with nothing in it yet) — so an observer knows where the conversation stands without replaying its own change stream first; this is what lets a party other than the servicer address a `say` at a conversation it never spawned, migrated or otherwise, without asking it to publish its history first. Optional, like `intervalS`: backward compatible with producers that don't yet carry it — its absence is not a claim the conversation is empty, only that this attach didn't state it. May carry `intervalS` (optional, backward compatible with producers that don't yet) so a fresh attachment can have a liveness basis immediately; when absent, the fold below has a default so the gap doesn't read as permanently alive |
-| `detached` | `instanceId`, `conversationId` | released, deliberately — Ctrl-C, drain, done. A decided fact; a crash publishes nothing |
 
 **Liveness is a fold, never declared.** An instance is presumed gone after
 about three of its own declared intervals of silence — judged against its own
@@ -71,19 +74,11 @@ default silence threshold (60s is this spec's suggested default — deployments
 may choose their own) until a real promise arrives. Found in the field 19 Jul
 2026: without this, an instance that attaches and dies before ever pulsing
 reads as alive forever, because "no promise" and "definitely alive" collapsed
-into the same fold outcome. A conversation's state derives:
+into the same fold outcome.
 
-- **alive** — attached by an instance whose pulse is fresh;
-- **released** — cleanly detached;
-- **stranded** — attached, and the instance's pulse has gone silent.
-
-The decided/emergent line is deliberate: `detached` is a fact someone
-published; stranded is inferred from a broken promise. Consumers render them
-differently because they are different.
-
-Environment facts ride these events as fields — published when known, never
-fabricated, ignored when unrecognised. Two kinds, kept apart by what they
-denote (nats-spec, Naming):
+Environment facts ride `attached` as fields — published when known, never
+fabricated, ignored when unrecognised (full shape: `conversation-spec.md`,
+Attachment). Two kinds, kept apart by what they denote (nats-spec, Naming):
 
 - **About the thing** — `cwd`, and the world's provenance (which host created
   it). Durable and causal: cwd is an input to how the conversation unfolds,
@@ -100,11 +95,79 @@ consistently and carries nothing about it. Provenance and host are fields, so
 a relabel or a migration breaks no reference — the house is the identity, the
 postal label is not.
 
+## Attachment
+
+**Attachment is singular.** `attached` claims "this conversation is served
+here, by me, now" — always one claim, never a set. A new `attached`
+unconditionally supersedes whatever attachment stood before it, in any world,
+from any instance: the superseded attachment stops contributing to every
+derivation — liveness, cwd, existence — the instant the new one lands. There
+is no stale precondition on `attached` and nothing to negotiate: publishing
+it never asks permission, and supersession does the rest. Failover (the old
+instance went silent, a new one adopts) and migration (the old instance is
+fine, something decided to move the conversation) are the same ordinary
+operation seen from different causes — the wire carries one operation
+either way.
+
+Fencing and leases are deliberately not here. A spec can state what a
+compliant instance does; it cannot make a malfunctioning one behave by
+designing around it, and trying to buys only complexity — a lease adds a
+negotiation the model has no use for, since there is never a legitimate case
+for two instances serving one conversation at once (that is a deployment's
+race, not a wire state). A re-attacher that should not have re-attached is
+visible in the record — a second `attached` with no `detached` from the
+first, or a `detached` arriving after it was already superseded — not
+prevented by machinery.
+
+**An instanceId's claim lifecycle is linear: attach, serve, detach.** There
+is no bare re-assert. A re-publish of `attached` carrying new information (a
+changed `cwd` after `chdir` lands) is legitimate — it is the same instance
+restating what it already holds, not reclaiming something it lost. What
+never happens under this model is one instance publishing `attached` again
+for a conversation it never stopped serving and nothing displaced it from:
+new-process-equals-new-`instanceId` (this spec, The entity) means the only
+process that could re-assert a claim it still holds is the same still-running
+process, which has no reason to, and a *restarted* process is a new instance
+by definition — so a bare re-assert is never legitimate traffic, only a
+zombie's.
+
+A compliant instance watches the attachment leaf (`conversation-spec.md`,
+Attachment) for every conversation it serves. On seeing itself displaced —
+another instanceId's `attached` for a conversation it holds — it stops
+serving that conversation and publishes `detached`. This folds as nothing:
+the supersession already ended its claim, and a `detached` changes the fold
+only when its instanceId still matches the *standing* attachment (an
+instance detaching after it has already been superseded is stating a fact
+about its own past claim, not retracting the current one). It exists anyway,
+as the observable act of compliance — the difference between a crash and a
+violation is otherwise undecidable. An instance also publishes `detached`
+per conversation it serves on clean exit (Ctrl-C, drain), same as today.
+
+**Crash vs violation is derivable, never declared.** No `detached` plus dead
+pulses from the instance that held the claim reads as a crash — it went
+silent and never got the chance to release. No `detached` plus *live*
+pulses from an instance that has been superseded and is still publishing as
+though it serves the conversation reads as a violation — it saw the
+displacement (or should have) and kept going anyway. Neither is a state the
+wire declares; both are what a consumer reads off the same facts (`attached`,
+`detached`, `pulse`) it already folds.
+
+A conversation's servicing state derives from these facts exactly as before,
+now read off the conversation's own tree rather than the world's:
+
+- **alive** — attached by an instance whose pulse is fresh;
+- **released** — cleanly detached (by the instanceId that held the claim);
+- **stranded** — attached, and the holding instance's pulse has gone silent.
+
+The decided/emergent line is deliberate: `detached` is a fact someone
+published; stranded is inferred from a broken promise. Consumers render them
+differently because they are different.
+
 ## Requests
 
 | Request | Fields | Reply | Notes |
 |---|---|---|---|
-| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts: no history → start fresh; history and no live attachment → fold and re-attach; already attached → `rejected: already_attached`. Known reasons today: `already_attached`, `at_capacity`, `unsupported` |
+| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts, and the premise check is instance-local, never a liveness read on anyone else: already attached **to this instance** → `rejected: already_attached` (the request is redundant, nothing to do); attached to any *other* instance, whether that instance is live or stranded → accept and take over unconditionally — asking a second world or instance to serve a conversation already served elsewhere *is* the deliberate migration path, and whether the incumbent is still alive is irrelevant to the premise; no history → start fresh; history and no live attachment → fold and re-attach. Known reasons today: `already_attached`, `at_capacity`, `unsupported` |
 | `drain` | — | `accepted` \| `rejected` + `reason` | stop taking work and detach cleanly: a `detached` per conversation, then silence. Distinguishes a decided shutdown from a crash |
 | `chdir` | `conversationId`, `cwd` | `accepted` \| `rejected` + `reason` | move the working directory of a live attachment — Tower changing where a conversation is served without a Ctrl-C. Accept confirms the premise (this world serves the conversation), not the outcome: the move is observed, not promised — the agent re-publishes `attached` with the new `cwd` when it lands, folded last-write-wins. The agent reconciles the directory and may decline to move; a move that never lands shows as an unchanged `cwd`, an observed outcome like any other. Known reasons today: `not_found` (this world is not serving that conversation), `unsupported` |
 
@@ -152,7 +215,8 @@ access and arbitrary work placement; deployments grade accordingly. World
 - Publication order per subject, and per subscription across one wildcard;
   nothing across classes.
 - Liveness, existence, strandedness are folds — computed from `ready`,
-  `pulse`, `attached`, `detached`; never carried as declared state. Names
+  `pulse` (this tree) and `attached`, `detached` (conversation-spec.md,
+  Attachment); never carried as declared state. Names
   are free to generate, never free to remember: what a folding consumer
   retains of dead worlds and instances is its own retention policy, exactly
   as a stream's capture is its deployment's.
@@ -185,12 +249,11 @@ const sender = z.looseObject({
 // the id); ephemeral reach-handles (pid, port, tmux coords) are not named —
 // they ride as open fields under looseObject (nats-spec, Naming).
 
-// agent.v1.{world}.telemetry.>
+// agent.v1.{world}.telemetry.> — attachment claims are not here; their
+// schema lives on the conversation's own tree (conversation-spec.md, Attachment).
 export const agentTelemetry = {
   'ready': z.looseObject({ ts, instanceId: z.string(), host: z.string().optional() }),
   'pulse': z.looseObject({ ts, instanceId: z.string(), intervalS: z.number().int().positive() }),
-  'attached': z.looseObject({ ts, instanceId: z.string(), conversationId: z.string(), cwd: z.string().optional(), tip: z.string().nullable().optional(), intervalS: z.number().int().positive().optional() }),
-  'detached': z.looseObject({ ts, instanceId: z.string(), conversationId: z.string() }),
 };
 
 // agent.v1.{world}.requests.> — a leaf not listed is still answered:
