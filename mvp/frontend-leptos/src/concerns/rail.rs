@@ -242,11 +242,20 @@ impl Rail {
             .values()
             .filter(|a| a.conv == conv)
             .filter_map(|a| {
-                let inst = self.instances.get(&format!("{}/{}", a.world, a.instance_id))?;
-                let alive = liveness_verdict(now, inst.last_pulse, inst.interval_s) == Liveness::Alive;
+                let inst = self
+                    .instances
+                    .get(&format!("{}/{}", a.world, a.instance_id))?;
+                let alive =
+                    liveness_verdict(now, inst.last_pulse, inst.interval_s) == Liveness::Alive;
                 alive.then_some((a, inst.last_pulse))
             })
-            .max_by_key(|(a, pulse)| (*pulse, a.attached_ts, format!("{}/{}", a.world, a.instance_id)))
+            .max_by_key(|(a, pulse)| {
+                (
+                    *pulse,
+                    a.attached_ts,
+                    format!("{}/{}", a.world, a.instance_id),
+                )
+            })
             .and_then(|(a, _)| a.cwd.as_deref())
     }
 
