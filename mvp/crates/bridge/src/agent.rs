@@ -14,7 +14,6 @@
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, watch};
 
-use futures::StreamExt;
 use wire::{ConvRequest, ConversationId, encode_accepted, encode_rejected, now_iso, parse_request};
 
 use std::collections::HashMap;
@@ -23,6 +22,7 @@ use std::sync::Arc;
 use crate::anthropic;
 use crate::decisions::{CancelDecision, Conversation, Message, QueryEnd, SayDecision};
 use crate::skills::Skills;
+use bridge::broker::{Broker, BrokerSubscription};
 
 /// Every tool schema offered on every turn, except `Skill` (gated on a
 /// non-empty catalogue — conversation-specific, not static). The one source
@@ -108,11 +108,11 @@ pub struct AgentConfig {
 /// publishing `attached` and before reporting the spawn: a conversation
 /// that cannot hear requests is not spawned in any meaningful sense, so
 /// the claim and the reply both wait for this fact.
-pub async fn subscribe(
-    client: &async_nats::Client,
+pub async fn subscribe<B: Broker>(
+    broker: &B,
     conv: &ConversationId,
-) -> Result<async_nats::Subscriber, async_nats::SubscribeError> {
-    client
+) -> Result<B::Subscription, String> {
+    broker
         .subscribe(format!("conv.v2.{}.requests.>", conv.0))
         .await
 }
@@ -120,30 +120,30 @@ pub async fn subscribe(
 /// A publisher bound to one conversation: every event carries the same
 /// client and id, so the call sites spell only the leaf and the body. This
 /// is the shell's one door onto the wire for a served conversation.
-struct Publisher {
-    client: async_nats::Client,
+struct Publisher<B: Broker> {
+    broker: B,
     conv: ConversationId,
     history: crate::history::HistoryStore,
     attach: Option<bridge::attach::AttachHandle>,
 }
 
-impl Publisher {
+impl<B: Broker> Publisher<B> {
     fn new(
-        client: &async_nats::Client,
+        broker: &B,
         conv: &ConversationId,
         history: &crate::history::HistoryStore,
         attach: Option<bridge::attach::AttachHandle>,
     ) -> Self {
         Self {
-            client: client.clone(),
+            broker: broker.clone(),
             conv: conv.clone(),
             history: crate::history::HistoryStore::clone(history),
             attach,
         }
     }
 
-    fn client(&self) -> &async_nats::Client {
-        &self.client
+    fn broker(&self) -> &B {
+        &self.broker
     }
 
     fn conv(&self) -> &ConversationId {
@@ -170,7 +170,7 @@ impl Publisher {
         // hundreds of KB; a tower-only instance must not pay for a mirror it
         // doesn't have).
         bridge::attach::tee(&self.attach, &subject, &bytes).await;
-        if let Err(e) = self.client.publish(subject, bytes.into()).await {
+        if let Err(e) = self.broker.publish(subject, bytes).await {
             eprintln!("bridge[{}]: publish failed: {e}", self.conv.0);
         }
     }
@@ -232,9 +232,10 @@ impl Publisher {
 /// `conversation` is the servicer's starting tree: `Conversation::default()`
 /// for a spawn, an adopted record for a revival - the loop is identical
 /// either way, because the record constitutes the conversation.
-pub async fn run(
-    client: async_nats::Client,
-    requests: async_nats::Subscriber,
+pub async fn run<B: Broker>(
+    client: Option<async_nats::Client>,
+    broker: B,
+    requests: B::Subscription,
     config: AgentConfig,
     conversation: Conversation,
 ) {
@@ -289,7 +290,8 @@ pub async fn run(
                             // is empty) — honest and distinct from `stale`.
                             SayDecision::Empty => encode_rejected("empty"),
                             SayDecision::Accept => match accept_say(
-                                &client,
+                                client.as_ref(),
+                                &broker,
                                 &config,
                                 &mut conversation,
                                 &mut skill_hashes,
@@ -339,7 +341,7 @@ pub async fn run(
                         encode_rejected("unsupported")
                     }
                 };
-                if let Err(e) = client.publish(reply_to, response.into()).await {
+                if let Err(e) = broker.publish(reply_to, response).await {
                     eprintln!("bridge[{}]: reply publish failed: {e}", config.conv.0);
                 }
             }
@@ -358,8 +360,9 @@ pub async fn run(
 /// before then leaves the record untouched - the cancel revoked the say, not
 /// just the turn.
 #[allow(clippy::too_many_arguments)]
-async fn accept_say(
-    client: &async_nats::Client,
+async fn accept_say<B: Broker>(
+    client: Option<&async_nats::Client>,
+    broker: &B,
     config: &AgentConfig,
     conversation: &mut Conversation,
     skill_hashes: &mut Option<HashMap<String, u64>>,
@@ -374,15 +377,25 @@ async fn accept_say(
     // (wrong bucket, dropped upload, unreachable store), so the say rejects
     // outright rather than let the model see a placeholder in place of what
     // the sender actually attached.
-    if let Err(detail) = crate::objects::validate_fresh(client, &attachments).await {
-        // The wire's reason is a short canonical token, same footing as
-        // `stale`/`empty`/`already_complete`; the detail (which bucket, which
-        // id, which error) is diagnostic and belongs in the log, not the reply.
-        eprintln!(
-            "bridge[{}]: attachment validation failed: {detail}",
-            config.conv.0
-        );
-        return Err("attachment_unavailable".to_string());
+    // `client` is None only under a fake broker in tests, which never send
+    // real attachments; production always spawns with Some, so the
+    // attachment path is exercised exactly as before.
+    match (client, attachments.is_empty()) {
+        (_, true) => {}
+        (Some(client), false) => {
+            if let Err(detail) = crate::objects::validate_fresh(client, &attachments).await {
+                // The wire's reason is a short canonical token, same footing
+                // as `stale`/`empty`/`already_complete`; the detail (which
+                // bucket, which id, which error) is diagnostic and belongs in
+                // the log, not the reply.
+                eprintln!(
+                    "bridge[{}]: attachment validation failed: {detail}",
+                    config.conv.0
+                );
+                return Err("attachment_unavailable".to_string());
+            }
+        }
+        (None, false) => return Err("attachment_unavailable".to_string()),
     }
     let query = uuid::Uuid::new_v4().to_string();
     let turn = uuid::Uuid::new_v4().to_string();
@@ -466,7 +479,8 @@ async fn accept_say(
     history.push(json!({ "role": "user", "content": user.content }));
 
     let ctx = TurnContext {
-        client: client.clone(),
+        client: client.cloned(),
+        broker: broker.clone(),
         conv: config.conv.clone(),
         // Read fresh per query: a stdio `model` line reaches even a running
         // conversation, here, on its next say.
@@ -495,15 +509,20 @@ async fn accept_say(
         // render at this edge (objects.rs) — inside the task, never ahead of
         // the say's reply: on a long image-laden history it takes seconds, and
         // the sender's request deadline must not pay for it.
-        crate::objects::resolve_history(&ctx.client, &mut history).await;
+        if let Some(client) = &ctx.client {
+            crate::objects::resolve_history(client, &mut history).await;
+        }
         let end = run_query(ctx, history, rx).await;
         let _ = done.send((q, end)).await;
     });
     Ok((query, tx))
 }
 
-struct TurnContext {
-    client: async_nats::Client,
+struct TurnContext<B: Broker> {
+    /// `None` only under a fake broker in tests, which never drive a query
+    /// far enough to reach the model call; production always sets Some.
+    client: Option<async_nats::Client>,
+    broker: B,
     conv: ConversationId,
     model: String,
     system: Arc<std::sync::RwLock<Option<String>>>,
@@ -550,13 +569,14 @@ pub(crate) async fn cancelled(rx: &mut watch::Receiver<bool>) {
 /// between rounds (the finished turn's commits are on the wire and stand;
 /// only the remaining work is cancelled). Failure is `turn_aborted` + the
 /// aborted closure: honesty over silence.
-async fn run_query(
-    ctx: TurnContext,
+async fn run_query<B: Broker>(
+    ctx: TurnContext<B>,
     mut history: Vec<Value>,
     mut cancel: watch::Receiver<bool>,
 ) -> QueryEnd {
     let TurnContext {
         client,
+        broker,
         conv,
         model,
         system,
@@ -575,7 +595,7 @@ async fn run_query(
         cwd,
         permissions,
     } = &ctx;
-    let pubr = Publisher::new(client, conv, history_store, attach.clone());
+    let pubr = Publisher::new(broker, conv, history_store, attach.clone());
 
     // Skill only when a catalogue exists; every other tool is always this
     // same list (static_tool_schemas) — the one source main.rs's startup log
@@ -617,7 +637,7 @@ async fn run_query(
         let system = system.read().unwrap().clone();
         let outcome = tokio::select! {
             outcome = anthropic::stream_turn(
-                client,
+                client.as_ref().expect("nats client required to run a turn"),
                 http,
                 conv,
                 auth,
@@ -817,8 +837,8 @@ fn permission_verdict(
 /// committed tool_use without its result is an invalid conversation the
 /// caller must still be able to close.
 #[allow(clippy::too_many_arguments)]
-async fn run_tool_round(
-    pubr: &Publisher,
+async fn run_tool_round<B: Broker>(
+    pubr: &Publisher<B>,
     skills: &Skills,
     refs: &crate::refs::RefStore,
     memory: &crate::memory::MemoryStore,
@@ -922,7 +942,7 @@ async fn run_tool_round(
                             "toolUseId": id,
                         });
                         match crate::approval::gate(
-                            pubr.client(),
+                            pubr.broker(),
                             pubr.attach(),
                             &approval_id,
                             &ask,
@@ -989,7 +1009,7 @@ async fn run_tool_round(
                                 "toolUseId": id,
                             });
                             match crate::approval::gate(
-                                pubr.client(),
+                                pubr.broker(),
                                 pubr.attach(),
                                 &approval_id,
                                 &ask,
@@ -1080,7 +1100,7 @@ async fn run_tool_round(
                             "toolUseId": id,
                         });
                         match crate::approval::gate(
-                            pubr.client(),
+                            pubr.broker(),
                             pubr.attach(),
                             &approval_id,
                             &ask,
@@ -1128,7 +1148,7 @@ async fn run_tool_round(
                             "toolUseId": id,
                         });
                         match crate::approval::gate(
-                            pubr.client(),
+                            pubr.broker(),
                             pubr.attach(),
                             &approval_id,
                             &ask,
@@ -1176,7 +1196,7 @@ async fn run_tool_round(
                             "toolUseId": id,
                         });
                         match crate::approval::gate(
-                            pubr.client(),
+                            pubr.broker(),
                             pubr.attach(),
                             &approval_id,
                             &ask,
@@ -1226,7 +1246,7 @@ async fn run_tool_round(
                             "toolUseId": id,
                         });
                         match crate::approval::gate(
-                            pubr.client(),
+                            pubr.broker(),
                             pubr.attach(),
                             &approval_id,
                             &ask,
@@ -1259,7 +1279,7 @@ async fn run_tool_round(
                     "toolUseId": id,
                 });
                 match crate::approval::gate(
-                    pubr.client(),
+                    pubr.broker(),
                     pubr.attach(),
                     &approval_id,
                     &ask,
@@ -1287,7 +1307,7 @@ async fn run_tool_round(
                     "toolUseId": id,
                 });
                 match crate::approval::gate(
-                    pubr.client(),
+                    pubr.broker(),
                     pubr.attach(),
                     &approval_id,
                     &ask,
@@ -1328,4 +1348,121 @@ async fn run_tool_round(
         }));
     }
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bridge::broker::BrokerMessage;
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    /// The only fake is the Broker: records every publish, in order, and
+    /// hands the request loop a scripted subscription.
+    #[derive(Clone, Default)]
+    struct FakeBroker {
+        published: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
+    }
+
+    #[derive(Default)]
+    struct FakeSubscription {
+        queued: VecDeque<BrokerMessage>,
+    }
+
+    impl BrokerSubscription for FakeSubscription {
+        async fn next(&mut self) -> Option<BrokerMessage> {
+            self.queued.pop_front()
+        }
+    }
+
+    impl Broker for FakeBroker {
+        type Subscription = FakeSubscription;
+
+        async fn publish(&self, subject: String, payload: Vec<u8>) -> Result<(), String> {
+            self.published.lock().unwrap().push((subject, payload));
+            Ok(())
+        }
+
+        async fn subscribe(&self, _subject: String) -> Result<Self::Subscription, String> {
+            Ok(FakeSubscription::default())
+        }
+
+        async fn replay(
+            &self,
+            _stream: String,
+            _filter_subject: String,
+        ) -> Result<Vec<BrokerMessage>, String> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn config(conv: &str) -> AgentConfig {
+        AgentConfig {
+            conv: ConversationId(conv.to_string()),
+            model: Arc::new(std::sync::RwLock::new("claude-sonnet-5".to_string())),
+            system: Arc::new(std::sync::RwLock::new(None)),
+            context: Arc::new(std::sync::RwLock::new(None)),
+            auth: crate::anthropic::Auth::ApiKey,
+            http: reqwest::Client::new(),
+            skills_root: Arc::new(std::sync::RwLock::new(std::path::PathBuf::new())),
+            refs: crate::refs::open(&std::env::temp_dir().join(format!(
+                "bridge-agent-test-refs-{}.db",
+                uuid::Uuid::new_v4()
+            )))
+            .unwrap(),
+            memory: crate::memory::open(&std::env::temp_dir().join(format!(
+                "bridge-agent-test-memory-{}.db",
+                uuid::Uuid::new_v4()
+            )))
+            .unwrap(),
+            history: crate::history::open(&std::env::temp_dir().join(format!(
+                "bridge-agent-test-history-{}.db",
+                uuid::Uuid::new_v4()
+            )))
+            .unwrap(),
+            thinking_budget: None,
+            attach: None,
+            cwd: Arc::new(std::sync::RwLock::new(std::env::temp_dir())),
+            permissions: Arc::new(std::sync::RwLock::new(
+                crate::permissions::PermissionSet::strict_default(),
+            )),
+        }
+    }
+
+    /// The request loop's reply shape for a cancel naming a query this
+    /// servicer never started: `rejected: not_found`, published to the
+    /// request's own reply subject — proven through the broker seam, not
+    /// just decisions.rs's pure `on_cancel`.
+    #[tokio::test]
+    async fn a_cancel_of_an_unknown_query_replies_rejected_not_found() {
+        let broker = FakeBroker::default();
+        let mut queued = VecDeque::new();
+        queued.push_back(BrokerMessage {
+            subject: "conv.v2.conv-t.requests.cancel".to_string(),
+            payload: serde_json::json!({ "id": "q-unknown", "from": { "kind": "human" } })
+                .to_string()
+                .into_bytes(),
+            reply: Some("reply-1".to_string()),
+        });
+        let requests = FakeSubscription { queued };
+
+        run(
+            None,
+            broker.clone(),
+            requests,
+            config("conv-t"),
+            Conversation::default(),
+        )
+        .await;
+
+        let published = broker.published.lock().unwrap().clone();
+        let (subject, payload) = published
+            .iter()
+            .find(|(s, _)| s == "reply-1")
+            .expect("a reply was published to the request's own reply subject");
+        assert_eq!(subject, "reply-1");
+        let value: serde_json::Value = serde_json::from_slice(payload).unwrap();
+        assert_eq!(value["rejected"], true);
+        assert_eq!(value["reason"], "not_found");
+    }
 }

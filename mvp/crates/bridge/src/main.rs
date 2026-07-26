@@ -61,10 +61,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use anyhow::Context;
-use futures::StreamExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use wire::now_iso;
 
+use bridge::broker::{Broker, BrokerMessage, NatsBroker};
 use cwd::{ChdirError, ServedCwds, apply_chdir, resolve_cwd, validate_dir};
 
 const PULSE_INTERVAL_S: i64 = 30;
@@ -92,39 +92,15 @@ pub(crate) fn expand_tilde(path: &str) -> std::path::PathBuf {
 /// remains in the record, but replay only ever hands the servicer the
 /// current state). Telemetry, deltas and tip movements stay observation,
 /// not replayed.
-async fn replay_conversation(
-    client: &async_nats::Client,
-    stream_name: &str,
-    conv: &str,
-    attach: &Option<bridge::attach::AttachHandle>,
-) -> anyhow::Result<Vec<decisions::Message>> {
-    let js = async_nats::jetstream::new(client.clone());
-    let stream = js.get_stream(stream_name).await.map_err(|e| {
-        anyhow::anyhow!("capture stream {stream_name:?} unavailable: {e} (adopt needs the capture)")
-    })?;
-    let consumer = stream
-        .create_consumer(async_nats::jetstream::consumer::pull::Config {
-            filter_subject: format!("conv.v2.{conv}.changes.>"),
-            deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
-            ..Default::default()
-        })
-        .await?;
-    // num_pending at creation is the full backlog: read exactly that many.
-    let pending = consumer.cached_info().num_pending as usize;
-    let mut messages = Vec::with_capacity(pending);
-    if pending == 0 {
-        return Ok(messages);
-    }
+/// Fold a replayed backlog into the tree's committed messages: parse each
+/// frame, apply every revision as last-write-wins per id. Pure — no
+/// network, no tee — so a seeded batch of literal `BrokerMessage`s proves
+/// the fold without a broker at all.
+fn fold_replay(raw: &[BrokerMessage]) -> Vec<decisions::Message> {
+    let mut messages = Vec::with_capacity(raw.len());
     let mut revisions: std::collections::HashMap<String, Vec<serde_json::Value>> =
         std::collections::HashMap::new();
-    let mut batch = consumer.fetch().max_messages(pending).messages().await?;
-    while let Some(msg) = batch.next().await {
-        let msg = msg.map_err(|e| anyhow::anyhow!("replay read failed: {e}"))?;
-        // History reaches an attached client as the same envelopes the live
-        // tee sends — the record replayed, not a second history protocol.
-        // The client's fold rebuilds the conversation exactly as the
-        // servicer's own replay below does (last-write-wins per id).
-        bridge::attach::tee(attach, &msg.subject, &msg.payload).await;
+    for msg in raw {
         // Tolerance: frames that don't parse as a conv change are skipped
         // (the filter admits query/tip_moved too now; only message and
         // revision matter here).
@@ -157,15 +133,37 @@ async fn replay_conversation(
             message.content = content;
         }
     }
-    Ok(messages)
+    messages
 }
 
-async fn publish_agent(
-    client: &async_nats::Client,
-    world: &str,
-    leaf: &str,
-    payload: serde_json::Value,
-) {
+/// Replay a conversation's committed messages from the capture stream, in
+/// stream order (= commit order), with every revision folded in —
+/// conversation-spec: "the state of a message is its latest revision"
+/// (last-write-wins per id; every prior revision, like every message,
+/// remains in the record, but replay only ever hands the servicer the
+/// current state). Telemetry, deltas and tip movements stay observation,
+/// not replayed.
+async fn replay_conversation<B: Broker>(
+    broker: &B,
+    stream_name: &str,
+    conv: &str,
+    attach: &Option<bridge::attach::AttachHandle>,
+) -> anyhow::Result<Vec<decisions::Message>> {
+    let raw = broker
+        .replay(stream_name.to_string(), format!("conv.v2.{conv}.changes.>"))
+        .await
+        .map_err(|e| anyhow::anyhow!("{e} (adopt needs the capture)"))?;
+    // History reaches an attached client as the same envelopes the live tee
+    // sends — the record replayed, not a second history protocol. The
+    // client's fold rebuilds the conversation exactly as fold_replay below
+    // does (last-write-wins per id).
+    for msg in &raw {
+        bridge::attach::tee(attach, &msg.subject, &msg.payload).await;
+    }
+    Ok(fold_replay(&raw))
+}
+
+async fn publish_agent<B: Broker>(broker: &B, world: &str, leaf: &str, payload: serde_json::Value) {
     let subject = format!("agent.v1.{world}.telemetry.{leaf}");
     let bytes = serde_json::to_vec(&payload).expect("json! of plain values cannot fail");
     // The pulse fires every PULSE_INTERVAL_S; logging it is pure noise. The
@@ -173,7 +171,7 @@ async fn publish_agent(
     if leaf != "pulse" {
         eprintln!("{} bridge: → {subject} ({} B)", now_iso(), bytes.len());
     }
-    if let Err(e) = client.publish(subject, bytes.into()).await {
+    if let Err(e) = broker.publish(subject, bytes).await {
         eprintln!("bridge: agent telemetry publish failed: {e}");
     }
 }
@@ -189,8 +187,9 @@ async fn publish_agent(
 /// Returns the conversation id on success (the caller writes the stdout
 /// reply); None means the subscription could not be made - the error line is
 /// already written, so the caller moves on.
-async fn serve_conversation(
-    client: &async_nats::Client,
+async fn serve_conversation<B: Broker>(
+    client: Option<async_nats::Client>,
+    broker: &B,
     world: &str,
     instance: &str,
     served: &ServedCwds,
@@ -198,7 +197,7 @@ async fn serve_conversation(
     conversation: decisions::Conversation,
 ) -> Option<String> {
     let conv = config.conv.0.clone();
-    let requests = match agent::subscribe(client, &config.conv).await {
+    let requests = match agent::subscribe(broker, &config.conv).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("bridge: subscribe failed for {conv}: {e}");
@@ -217,7 +216,13 @@ async fn serve_conversation(
     let cwd_cell = Arc::clone(&config.cwd);
     let cwd = cwd_cell.read().unwrap().to_string_lossy().to_string();
     served.write().unwrap().insert(conv.clone(), cwd_cell);
-    tokio::spawn(agent::run(client.clone(), requests, config, conversation));
+    tokio::spawn(agent::run(
+        client,
+        broker.clone(),
+        requests,
+        config,
+        conversation,
+    ));
     // The attachment is what makes the conversation exist for observers
     // before its first message. cwd is causal (an input to how the
     // conversation unfolds).
@@ -228,7 +233,7 @@ async fn serve_conversation(
         "tip": tip,
         "cwd": cwd,
     });
-    publish_agent(client, world, "attached", attached).await;
+    publish_agent(broker, world, "attached", attached).await;
     Some(conv)
 }
 
@@ -237,6 +242,7 @@ async fn serve_conversation(
 /// or `context` line repoints without a restart.
 struct Host {
     client: async_nats::Client,
+    broker: NatsBroker,
     world: String,
     instance: String,
     default_model: Arc<RwLock<String>>,
@@ -324,7 +330,8 @@ impl Host {
             };
             let config = self.config(&conv, model, Arc::new(RwLock::new(cwd)));
             let Some(conv) = serve_conversation(
-                &self.client,
+                Some(self.client.clone()),
+                &self.broker,
                 &self.world,
                 &self.instance,
                 &self.served,
@@ -351,7 +358,7 @@ impl Host {
             let stream_name =
                 std::env::var("BRIDGE_STREAM").unwrap_or_else(|_| "conv-approval".into());
             let messages =
-                match replay_conversation(&self.client, &stream_name, &conv, &self.attach).await {
+                match replay_conversation(&self.broker, &stream_name, &conv, &self.attach).await {
                     Ok(m) => m,
                     Err(e) => {
                         eprintln!("bridge: adopt failed for {conv}: {e:#}");
@@ -377,7 +384,8 @@ impl Host {
                 Arc::new(RwLock::new(cwd)),
             );
             let Some(conv) = serve_conversation(
-                &self.client,
+                Some(self.client.clone()),
+                &self.broker,
                 &self.world,
                 &self.instance,
                 &self.served,
@@ -507,7 +515,7 @@ impl Host {
                     let now = resolved.to_string_lossy().to_string();
                     eprintln!("bridge[{conv}]: cwd → {now}");
                     publish_agent(
-                        &self.client,
+                        &self.broker,
                         &self.world,
                         "attached",
                         serde_json::json!({
@@ -574,7 +582,7 @@ impl Host {
             });
             let bytes = serde_json::to_vec(&payload).expect("json of plain values cannot fail");
             eprintln!("bridge: → {subject} ({} B)", bytes.len());
-            match self.client.publish(subject, bytes.into()).await {
+            match self.broker.publish(subject, bytes).await {
                 Ok(()) => println!(
                     "{}",
                     serde_json::json!({ "conversationId": conv, "revisedMessage": message_id })
@@ -725,6 +733,9 @@ async fn main() -> anyhow::Result<()> {
             "could not reach NATS at {nats_url} — is it running? (docker compose up -d, or set NATS_URL)"
         )
     })?; // fail-fast
+    let broker = NatsBroker {
+        client: client.clone(),
+    };
 
     // The attach pipes are set only by a local TUI's spawn, never by tower.
     // Presence alone is worth a startup line — this is the one place bridge
@@ -755,7 +766,7 @@ async fn main() -> anyhow::Result<()> {
     // will hear from me again within PULSE_INTERVAL_S seconds". One pulse per
     // instance, never per conversation.
     publish_agent(
-        &client,
+        &broker,
         &world,
         "ready",
         // version/gitHash/buildTime ride the wire alongside instanceId — the
@@ -772,7 +783,7 @@ async fn main() -> anyhow::Result<()> {
     )
     .await;
     {
-        let client = client.clone();
+        let broker = broker.clone();
         let world = world.clone();
         let instance = instance.clone();
         tokio::spawn(async move {
@@ -781,7 +792,7 @@ async fn main() -> anyhow::Result<()> {
             loop {
                 tick.tick().await;
                 publish_agent(
-                    &client,
+                    &broker,
                     &world,
                     "pulse",
                     serde_json::json!({
@@ -800,6 +811,7 @@ async fn main() -> anyhow::Result<()> {
     let default_model = Arc::new(RwLock::new(default_model));
     let host = Host {
         client: client.clone(),
+        broker,
         world,
         instance,
         default_model,
@@ -870,7 +882,209 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::expand_tilde;
+    use super::{ServedCwds, agent, decisions, expand_tilde, fold_replay, serve_conversation};
+    use bridge::broker::{Broker, BrokerMessage, BrokerSubscription};
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex, RwLock};
+
+    /// The only fake in these tests is the Broker (CLAUDE.md's house rule).
+    /// Records every subscribe/publish call, in order, so a test can assert
+    /// on the ordering between them — the thing a live NATS client can never
+    /// prove deterministically.
+    #[derive(Clone, Default)]
+    struct FakeBroker {
+        calls: Arc<Mutex<Vec<String>>>,
+        subscribe_fails: bool,
+        replay_data: Arc<Mutex<Vec<BrokerMessage>>>,
+    }
+
+    #[derive(Default)]
+    struct FakeSubscription {
+        queued: VecDeque<BrokerMessage>,
+    }
+
+    impl BrokerSubscription for FakeSubscription {
+        async fn next(&mut self) -> Option<BrokerMessage> {
+            self.queued.pop_front()
+        }
+    }
+
+    impl Broker for FakeBroker {
+        type Subscription = FakeSubscription;
+
+        async fn publish(&self, subject: String, _payload: Vec<u8>) -> Result<(), String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("publish:{subject}"));
+            Ok(())
+        }
+
+        async fn subscribe(&self, subject: String) -> Result<Self::Subscription, String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("subscribe:{subject}"));
+            if self.subscribe_fails {
+                Err("boom".to_string())
+            } else {
+                Ok(FakeSubscription::default())
+            }
+        }
+
+        async fn replay(
+            &self,
+            _stream: String,
+            _filter_subject: String,
+        ) -> Result<Vec<BrokerMessage>, String> {
+            Ok(self.replay_data.lock().unwrap().clone())
+        }
+    }
+
+    fn served() -> ServedCwds {
+        Arc::new(RwLock::new(std::collections::HashMap::new()))
+    }
+
+    fn config(conv: &str) -> agent::AgentConfig {
+        agent::AgentConfig {
+            conv: wire::ConversationId(conv.to_string()),
+            model: Arc::new(RwLock::new("claude-sonnet-5".to_string())),
+            system: Arc::new(RwLock::new(None)),
+            context: Arc::new(RwLock::new(None)),
+            auth: crate::anthropic::Auth::ApiKey,
+            http: reqwest::Client::new(),
+            skills_root: Arc::new(RwLock::new(std::path::PathBuf::new())),
+            refs: crate::refs::open(
+                &std::env::temp_dir().join(format!("bridge-test-refs-{}.db", uuid::Uuid::new_v4())),
+            )
+            .unwrap(),
+            memory: crate::memory::open(
+                &std::env::temp_dir()
+                    .join(format!("bridge-test-memory-{}.db", uuid::Uuid::new_v4())),
+            )
+            .unwrap(),
+            history: crate::history::open(
+                &std::env::temp_dir()
+                    .join(format!("bridge-test-history-{}.db", uuid::Uuid::new_v4())),
+            )
+            .unwrap(),
+            thinking_budget: None,
+            attach: None,
+            cwd: Arc::new(RwLock::new(std::env::temp_dir())),
+            permissions: Arc::new(RwLock::new(
+                crate::permissions::PermissionSet::strict_default(),
+            )),
+        }
+    }
+
+    /// The fact the module doc names directly: a conversation that cannot
+    /// hear requests is not spawned in any meaningful sense, so the
+    /// subscribe must land before the `attached` publish that tells
+    /// observers it exists.
+    #[tokio::test]
+    async fn subscription_is_made_before_attached_is_published() {
+        let broker = FakeBroker::default();
+        let conv = serve_conversation(
+            None,
+            &broker,
+            "local",
+            "instance-1",
+            &served(),
+            config("conv-a"),
+            decisions::Conversation::default(),
+        )
+        .await;
+        assert!(conv.is_some());
+
+        let calls = broker.calls.lock().unwrap().clone();
+        let subscribe_at = calls
+            .iter()
+            .position(|c| c.starts_with("subscribe:"))
+            .unwrap();
+        let attached_at = calls
+            .iter()
+            .position(|c| c == "publish:agent.v1.local.telemetry.attached")
+            .unwrap();
+        assert!(subscribe_at < attached_at, "{calls:?}");
+    }
+
+    /// A subscribe failure must release the claim: no `attached` publish, no
+    /// conversation id returned, and the conversation never enters `served`.
+    #[tokio::test]
+    async fn a_subscribe_failure_releases_the_claim() {
+        let broker = FakeBroker {
+            subscribe_fails: true,
+            ..Default::default()
+        };
+        let served_cwds = served();
+        let conv = serve_conversation(
+            None,
+            &broker,
+            "local",
+            "instance-1",
+            &served_cwds,
+            config("conv-b"),
+            decisions::Conversation::default(),
+        )
+        .await;
+
+        assert!(conv.is_none());
+        assert!(served_cwds.read().unwrap().is_empty());
+        let calls = broker.calls.lock().unwrap().clone();
+        assert!(
+            !calls.iter().any(|c| c.starts_with("publish:")),
+            "no attached publish on a failed subscribe: {calls:?}"
+        );
+    }
+
+    /// The pure fold: a message and a later revision for the same id, in
+    /// stream order, replayed to the tree's own last-write-wins state — no
+    /// broker involved, a literal batch of frames proves it.
+    #[test]
+    fn fold_replay_applies_a_later_revision_over_its_message() {
+        let seed_and_revise = vec![
+            BrokerMessage {
+                subject: "conv.v2.c1.changes.message".to_string(),
+                payload: serde_json::json!({
+                    "ts": "2026-07-26T00:00:00+00:00",
+                    "id": "m1", "queryId": "q1", "turnId": "t1",
+                    "role": "user", "content": [{ "type": "text", "text": "original" }],
+                })
+                .to_string()
+                .into_bytes(),
+                reply: None,
+            },
+            BrokerMessage {
+                subject: "conv.v2.c1.changes.revision".to_string(),
+                payload: serde_json::json!({
+                    "ts": "2026-07-26T00:00:01+00:00",
+                    "messageId": "m1",
+                    "content": [{ "type": "text", "text": "corrected" }],
+                })
+                .to_string()
+                .into_bytes(),
+                reply: None,
+            },
+        ];
+
+        let messages = fold_replay(&seed_and_revise);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].id, "m1");
+        assert_eq!(
+            messages[0].content,
+            vec![serde_json::json!({ "type": "text", "text": "corrected" })]
+        );
+    }
+
+    #[test]
+    fn fold_replay_skips_frames_that_do_not_parse_as_a_conv_change() {
+        let unrelated = vec![BrokerMessage {
+            subject: "conv.v2.c1.telemetry.turn.started".to_string(),
+            payload: b"{}".to_vec(),
+            reply: None,
+        }];
+        assert!(fold_replay(&unrelated).is_empty());
+    }
 
     #[test]
     fn expands_a_leading_tilde_slash_to_home() {
