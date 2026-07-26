@@ -113,7 +113,7 @@ There is never a legitimate case for two instances serving one conversation at o
 
 A re-attacher that should not have re-attached is visible in the record instead — a second `attached` with no `detached` from the first, or a `detached` arriving after it was already superseded. Nothing prevents it by machinery; the record just shows it.
 
-**The rule, stated once.** An instance must not claim a conversation it hasn't released. In the record, that violation looks like: `attached`, `attached` from the same instance, no `detached` between. Nothing else qualifies it; nothing else excuses it.
+**The rule, stated once.** An instance must not claim a conversation while its own claim on it is open. In the record, that violation looks like: `attached`, `attached` from the same instance, no `detached` between. Nothing else qualifies it; nothing else excuses it.
 
 After a `detached` closes the standing claim, a new `attached` is an ordinary new claim. It may come from any instance — including the one that just released it. A closed claim leaves nothing behind to reopen, so the wire doesn't care who claims next.
 
@@ -190,6 +190,8 @@ this repo's testing rule.
 - Standing attachment in this world, holder alive (per this world's own liveness fold) → `rejected: already_attached`. The goal already holds, and every instance in the world gives this same answer, so a redundant or retried request never causes a takeover.
 - Standing attachment in this world, holder stranded → accept and take over. A dead holder never blocks pickup; the attachment is never a lease.
 - No standing attachment → no history: spawn fresh. History: adopt.
+
+`service` means "I want this serviced" — it never moves a conversation between two live instances in the same world. That would need the holder to abandon it first (an operation not designed here), or it would be a different operation on its own leaf. A live-to-live handover inside one world is out of `service`'s scope by design, not an oversight.
 
 Two things follow from this, worth saying plainly rather than leaving a reader to derive them. Only a live instance can ever answer a `service` request — queue-group delivery finds whichever instance in the world is up right now — so the liveness question is never about the instance answering, only ever about a different instance that might be holding a stale attachment. And the liveness read at the stranded threshold is safe whichever way it lands: read as alive, the request just comes back `already_attached` and the sender retries later; read as stranded, the request takes over, and unconditional supersession is what makes that landing safe too.
 
