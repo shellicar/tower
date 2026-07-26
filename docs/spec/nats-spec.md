@@ -267,6 +267,32 @@ carries the scenario that forced it.
   behind them (what to trim, when, by what thresholds) stays the agent's own.
   The record carries effects, never reasons.
 
+- **Derivations are functions of folded facts' fields, never of delivery
+  accidents.** Arrival order carries no meaning — not across classes, not
+  across subjects a fold happens to iterate in some order. A derivation
+  that reads one is reading noise and calling it signal.
+
+  If a reduction needs an arbitrary tie-break to stay deterministic, that
+  is not a gap to fill with a rule. It's a sign the modelling is wrong. Ask
+  whether the competing facts can legitimately coexist at all, before
+  reaching for a rank between them.
+
+  *Where it came from:* the attachment case (agent-spec.md, Attachment;
+  conversation-spec.md, Attachment). A conversation's servicing state used
+  to be read off however many `attached` facts a fold happened to hold at
+  once, across worlds with no shared clock. Which instance "won" depended
+  on HashMap iteration order, and two implementations disagreed.
+
+  Every candidate fix debated was a tie-break rule — latest timestamp,
+  lexicographic instance id. Each answered a question the model should
+  never have posed. The actual fix deleted the tie: attachment is
+  singular, a new claim unconditionally supersedes the standing one, and
+  one subject per conversation makes the wire's own per-subject
+  publication order the total order. There is no set left to rank within.
+
+  The lesson: when a fold seems to need an arbitrary-but-deterministic
+  rule, fix the state space it's folding over — not the rule.
+
 ## Planes
 
 Three planes, borrowed from networking (where the separation is rigorous;
@@ -294,10 +320,11 @@ vertical columns, and every message lands in exactly one cell:
 operational  │ changes     │ lifecycle    │ (spawn/config  │
              │ requests    │ requests     │  requests …)   │
              │ deltas      │              │                │
+             │ attachment  │              │                │
              ├─────────────┼──────────────┼────────────────┤
-observability│ telemetry   │ telemetry    │ lifecycle,     │
-             │ (turns,     │ (pulse)      │ attached,      │
-             │  tools,     │              │ ready …        │
+observability│ telemetry   │ telemetry    │ ready,         │
+             │ (turns,     │ (pulse)      │ pulse …        │
+             │  tools,     │              │                │
              │  usage)     │              │                │
              └─────────────┴──────────────┴────────────────┘
 
@@ -306,6 +333,11 @@ control plane: a participant, not a row —
   acts on the operational row (spawns, configures, delivers),
   and its own traffic lives in the agent column like anyone else's.
 ```
+
+`conv`'s `attachment` sits in the operational row, not observability. It is
+a decided claim with consequences (agent-spec.md, Attachment) — not
+something a layer merely functions without. Removing it changes who is
+being served, which fails the Telemetry section's own severability test.
 
 The control plane is not a third row — it is a **participant**. It reads the
 observability row across every column, acts on the operational row (spawns,
@@ -349,18 +381,21 @@ itself raises the argument.
 Until then, one discipline with teeth: environment must not leak in through a
 side door. The tap-era `label` carried `location` — cwd and tmux coordinates
 riding conversation announcements — and the temptation recurs whenever a fold
-wants it (a session switcher scoped to cwd, auto-resume by directory). The
-rule: cwd-association is attachment telemetry — keyed by the process,
-severable — or a client's local store; never conversation state.
+wants it (a session switcher scoped to cwd, auto-resume by directory).
 
-Deployment conventions may ride telemetry fields — cwd, pid, tmux coordinates
-on attachment events, feeding a "click to go to the CLI" — and the spec
-neither defines nor forbids them; add-only already makes them lawful (unknown
-fields are ignored). This is recorded precisely as the reason environment
-stays *out* of the spec: nothing has to be decided now, and nothing useful is
-blocked in the meantime — a convention is a private prototype on the
-observability plane, costing no one anything, replaceable the day the real
-design lands.
+The rule: cwd-association is an attachment fact, keyed by the process and
+severable (conversation-spec.md, Attachment), or a client's local store.
+Never conversation state.
+
+Deployment conventions may ride fields on the attachment claim — cwd, pid,
+tmux coordinates, feeding a "click to go to the CLI". The spec neither
+defines nor forbids them; add-only already makes them lawful (unknown
+fields are ignored).
+
+This is exactly why environment stays *out* of the spec: nothing has to be
+decided now, and nothing useful is blocked in the meantime. A convention is
+a private prototype riding a claim nobody else depends on — costing no one
+anything, replaceable the day the real design lands.
 
 ## Telemetry
 

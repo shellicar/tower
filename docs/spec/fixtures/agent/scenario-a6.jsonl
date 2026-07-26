@@ -1,0 +1,5 @@
+{"subject":"conv.v2.conv-abc.attachment.attached","message":{"ts":"2026-07-26T19:00:00+10:00","instanceId":"inst-1a2f","world":"mac","cwd":"~/repos/tower"}}
+{"subject":"conv.v2.conv-abc.attachment.attached","message":{"ts":"2026-07-26T19:01:00+10:00","instanceId":"inst-9c4d","world":"vm","cwd":"~/repos/tower"}}
+{"subject":"conv.v2.conv-abc.attachment.detached","message":{"ts":"2026-07-26T19:02:00+10:00","instanceId":"inst-9c4d","world":"vm"}}
+{"subject":"conv.v2.conv-abc.attachment.attached","message":{"ts":"2026-07-26T19:03:00+10:00","instanceId":"inst-1a2f","world":"mac","cwd":"~/repos/tower"}}
+{"subject":"conv.v2.conv-abc.attachment.detached","message":{"ts":"2026-07-26T19:04:00+10:00","instanceId":"inst-1a2f","world":"mac"}}

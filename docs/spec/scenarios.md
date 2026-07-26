@@ -259,6 +259,7 @@ presence, not on literal timestamps — silence is represented the way approval
 | a3 — stranded | `fixtures/agent/scenario-a3.jsonl` |
 | a4 — chdir | `fixtures/agent/scenario-a4.jsonl` |
 | a5 — resume, then already-attached | `fixtures/agent/scenario-a5.jsonl` |
+| a6 — the record a non-conformant publisher leaves | `fixtures/agent/scenario-a6.jsonl` |
 
 ### a1 — world up, fresh conversation
 
@@ -308,3 +309,24 @@ The one `service` verb across two calls against the same conversation.
   `rejected: already_attached`.
 - Asserts: the verb dispatches on the record's state, not on the request; the
   reply confirms the premise (servable / already served), never an outcome.
+
+### a6 — the record a non-conformant publisher leaves
+
+On the new attachment leaf (conversation-spec, Attachment). inst-1's own
+publish sequence: `attached`, `attached`, `detached`. A second `attached`
+with no intervening `detached` — the violation shape, verbatim (agent-spec,
+Attachment, example e).
+
+A compliant instance knows its own state and owns its own publish order
+across reconnects. Its `detached` goes out before any re-attach, so no
+delivery interleaving between compliant participants can produce this
+record. This fixture is what a broken publisher leaves behind — not a race
+the model has to survive.
+
+- Exercises: a non-conformant instance's record folded by the plain
+  standing-instance gate — no claim ids, no timestamp gates, no special
+  handling.
+- Asserts: the fold applies the gate as written — the final `detached`
+  matches the standing `instanceId` and clears the claim; and the violation
+  is visible in the record itself (attached-attached-detached from one
+  instance), derivable by any reader, never declared.

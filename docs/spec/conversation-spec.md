@@ -59,8 +59,22 @@ was kept.
 |---|---|---|
 | `conv.v2.{conversationId}.telemetry.>` | events | observation: turns, tools, usage — never authority |
 | `conv.v2.{conversationId}.changes.>` | events | the committal change stream: messages, revisions, tip movements, query closures |
+| `conv.v2.{conversationId}.attachment.>` | events | who is serving this conversation, now — see Attachment |
 | `conv.v2.{conversationId}.deltas` | events | the in-progress message, chunk by chunk |
 | `conv.v2.{conversationId}.requests.>` | requests | inbound: address the conversation |
+
+**`attachment` is its own leaf family, not a fifth `changes` kind.** It is
+named as functionality: the claim *does* something (it says who serves this
+conversation), the same way `changes` and `requests` are named for what
+they do.
+
+It's deliberately not folded under `changes`. Agent ephemera — a process
+attaching, detaching, migrating — is not history, and must never touch the
+history/staleness stream `changes` drives.
+
+It's deliberately not called `telemetry` either. This is a claim with
+consequences (agent-spec.md, Attachment), not observation a consumer may
+discard.
 
 **The subject spells the type** (nats-spec, Namespacing): a message's type is
 the subject tokens after the class — underscores become token boundaries — so
@@ -80,6 +94,9 @@ axis, so the type stays in the body there as a `type` field. The full map:
 | `revision` | `conv.v2.{id}.changes.revision` |
 | `tip_moved` | `conv.v2.{id}.changes.tip.moved` |
 | `query` | `conv.v2.{id}.changes.query` |
+| `attached` | `conv.v2.{id}.attachment.attached` |
+| `moved` | `conv.v2.{id}.attachment.moved` |
+| `detached` | `conv.v2.{id}.attachment.detached` |
 | `delta`, `block` | `conv.v2.{id}.deltas` — flat, deliberately |
 | `say` | `conv.v2.{id}.requests.say` |
 | `cancel` | `conv.v2.{id}.requests.cancel` |
@@ -152,6 +169,26 @@ exactly that argument):
 | `revision` | `messageId`, `content` | **revision** — the content under a stable id changed: a trim, a resize, or the words themselves rewritten. Carries the resulting content, never the why — the record carries effects, never reasons |
 | `tip_moved` | `to` (a message id) | **tip movement** — the tip pointer moved: rewind, fast-forward. The reflog, as events |
 | `query` | `queryId`, `reason` | **query closure** — the query will grow no further; the record now contains everything it will ever contain. `reason` is the system's own vocabulary, an open set under add-only: `completed` (closed by `end_turn`), `cancelled` (a `cancel` was accepted), `aborted` (the attempt failed and the servicer gave the query up). Committal like every change: published after the closing fact is in the record, never speculatively |
+
+**Envelope provenance: `instanceId` rides beside `from`, never inside it.**
+Every change event carries the publishing instance's id as envelope
+metadata — the same standing as `ts`, not a content field.
+
+`from` is who said it, forwarded verbatim from the sender. `instanceId` is
+which agent instance published the change, always the servicer's own,
+never forwarded. The two answer different questions and must not collapse
+into one.
+
+Required of every compliant publisher. The schema marks it `.optional()`
+only for producers that predate this rule — add-only tolerance, not
+licence: a new publisher carries it.
+
+A zombie instance publishing after it was superseded (agent-spec.md,
+Attachment) still carries a legitimate `from` — a human really did say
+it — but a wrong `instanceId`. For a producer that carries the field, this
+is what makes the two-agents case reconstructible from the record instead
+of merely suspected. A producer that omits it leaves that reconstruction
+undone, same as any other fact never stated.
 
 The folds:
 
@@ -246,6 +283,60 @@ A delta is how a message looks *while it is happening*; the committed message
 is what happened. Locally-entered input commits too: a message typed at the
 terminal appears on the change stream the same as one that arrived over
 `requests` — half a chat is not a chat.
+
+## Attachment — `attachment`
+
+Who is serving this conversation, now. This is the wire shape of the claim
+agent-spec.md's Attachment section conducts itself by — read that section
+first for the model (singular, unconditionally superseding, no fencing).
+This section only covers the shape on this tree.
+
+| Event | Fields | Notes |
+|---|---|---|
+| `attached` | `instanceId`, `world`?, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now. Supersedes whatever attachment stood before it, unconditionally, exactly once per claim (agent-spec.md, Attachment). This is what makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for an empty conversation) — so an observer knows where the conversation stands without replaying the change stream first. `world` is required of every compliant publisher (below); `cwd` and `intervalS` are optional for backward compatibility, and their absence is not a claim the value is empty — only that this attach didn't state it |
+| `moved` | `instanceId`, `world`?, `cwd` | a fact about the standing attachment, not a new claim: the working directory changed under it (the wire outcome of a `chdir` request, agent-spec.md, Requests). Valid only from the instance identity — `(world, instanceId)`, or bare `instanceId` if either side omits `world` — the fold currently holds as standing. Folds last-write-wins onto the held attachment's `cwd` |
+| `detached` | `instanceId`, `world`? | released — Ctrl-C, drain, done, or a displaced instance's observable act of standing down (agent-spec.md, Attachment). Changes the fold only when its identity matches the *standing* attachment's, same rule as `moved`. A crash publishes nothing |
+
+**`world` is required of every compliant publisher.** Same tolerance as
+envelope `instanceId` (this spec, The change stream): the schema marks it
+`.optional()` only for producers that predate this rule — add-only
+tolerance, not licence. Reason: instance identity is the pair
+`(world, instanceId)` (agent-spec.md, The entity), so both the liveness
+join and the standing-instance gate compare the pair. An `attached` without
+`world` names only half an identity.
+
+**Two mechanisms, two guarantees — keep them apart.** One subject per
+conversation gives every `attached` claim a total order: whichever
+`attached` published last on this subject is standing. That holds from any
+world, any instance, with no cross-world timestamp comparison needed
+(nats-spec, What consumers may assume). This is why attachment could not
+stay on the world's tree — two worlds' clocks are not one order.
+
+That ordering only settles who is standing. It doesn't make `moved` and
+`detached` safe to fold — that's the standing-instance gate's job (the
+Event table above). Each carries its own identity, the `(world,
+instanceId)` pair; a fold applies it only when that pair matches the one
+currently held. If either side omits `world`, the gate falls back to bare
+`instanceId`: degraded, not broken.
+
+A `moved` or `detached` from any other instance is a stale fact about a
+superseded claim. It's harmless because the gate discards it — not because
+the subject ordered it correctly.
+
+**`world` and `instanceId` are provenance fields, never address.** Neither
+names this subject — the conversation does. A consumer that wants to know
+which world or instance holds the standing attachment reads it off the
+latest `attached` fact, the same way it reads `cwd`. It never derives
+standing from where the message came from.
+
+```json
+// conv.v2.conv-abc.attachment.attached
+{ "ts": "2026-07-25T14:02:00+10:00", "instanceId": "inst-1a2f", "world": "mac", "cwd": "~/repos/tower", "tip": "m12", "intervalS": 30 }
+// conv.v2.conv-abc.attachment.moved
+{ "ts": "2026-07-25T14:06:00+10:00", "instanceId": "inst-1a2f", "world": "mac", "cwd": "~/repos/tower/mvp" }
+// conv.v2.conv-abc.attachment.detached
+{ "ts": "2026-07-25T14:10:00+10:00", "instanceId": "inst-1a2f", "world": "mac" }
+```
 
 ## Requests — `requests`
 
@@ -501,12 +592,25 @@ export const conversationTelemetry = {
   }),
 };
 
-// conv.v2.{conversationId}.changes.>
+// conv.v2.{conversationId}.changes.> — instanceId is envelope metadata
+// (beside from, never inside it): which agent instance published the change.
 export const conversationChange = {
-  'message': z.looseObject({ ts, id: z.string(), ...turnRef, role: openEnum(['user', 'assistant']), from: sender.optional(), content: contentBlocks }),
-  'revision': z.looseObject({ ts, messageId: z.string(), content: contentBlocks }),
-  'tip.moved': z.looseObject({ ts, to: z.string() }),
-  'query': z.looseObject({ ts, queryId: z.string(), reason: openEnum(['completed', 'cancelled', 'aborted']) }),
+  'message': z.looseObject({ ts, instanceId: z.string().optional(), id: z.string(), ...turnRef, role: openEnum(['user', 'assistant']), from: sender.optional(), content: contentBlocks }),
+  'revision': z.looseObject({ ts, instanceId: z.string().optional(), messageId: z.string(), content: contentBlocks }),
+  'tip.moved': z.looseObject({ ts, instanceId: z.string().optional(), to: z.string() }),
+  'query': z.looseObject({ ts, instanceId: z.string().optional(), queryId: z.string(), reason: openEnum(['completed', 'cancelled', 'aborted']) }),
+};
+
+// conv.v2.{conversationId}.attachment.> — the wire shape of the model
+// agent-spec.md conducts (singular, unconditionally superseding). world is
+// provenance, never address, exactly like instanceId — but together they
+// are the instance identity (agent-spec.md, The entity), so world is
+// required of every compliant publisher; optional here only for producers
+// that predate this rule.
+export const conversationAttachment = {
+  'attached': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional(), cwd: z.string().optional(), tip: z.string().nullable().optional(), intervalS: z.number().int().positive().optional() }),
+  'moved': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional(), cwd: z.string() }),
+  'detached': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional() }),
 };
 
 // conv.v2.{conversationId}.deltas — the one flat subject: `delta` and `block`
@@ -547,6 +651,35 @@ optional because provenance travels when known; the `id` is the cancel's
 premise and is always required. `say.precondition` has no such asymmetry — it
 is always required; the first message of a new conversation states
 `{ tip: null }` rather than omitting it.
+
+## Migration note
+
+This spec's attachment model — the leaf, the exactly-once rule, `moved` —
+isn't implemented anywhere yet. Here's the full surface it touches,
+pending:
+
+- **Stream capture** (`mvp/stream-init.sh`) — `conv.v2.*.attachment.>` is a
+  new leaf. Existing capture config does not hold it, because the leaf
+  didn't exist when that config was last converged.
+- **towerd's fold** — reads `agent.v1.*.telemetry.attached`/`detached`
+  today. Must move to the conversation tree, add the standing-instance gate
+  (this section), and fold `moved`.
+- **Both frontends** (`frontend-svelte`, `frontend-leptos`) — read towerd's
+  `agents`/`agent` frames (`tower-ws-spec.md`). Their folds need the same
+  gate and the `moved` handling, per this repo's parity rule: a
+  wire-visible change lands in both, same piece of work.
+- **bridge's publisher** — currently publishes `attached`/`detached` on
+  `agent.v1.{world}.telemetry.>`. Must move to the conversation subject,
+  adopt the exactly-once-per-claim discipline, and publish `moved` on
+  `chdir` instead of re-publishing `attached`.
+- **claude-sdk-cli's `AgentPresence`** — a third producer, publishing
+  `attached` with `cwd` on the old subject today. Needs the same move.
+- **The Examples above** (agent-spec.md, Attachment) — become the
+  conformance fixtures for the exactly-once rule and its fold, alongside
+  the existing `docs/spec/fixtures/agent/` set. Fix lands twice: code and
+  fixture, same commit.
+
+None of this is implied by the spec landing. Each is separate, later work.
 
 ## The v1 tree — superseded, still spoken
 
