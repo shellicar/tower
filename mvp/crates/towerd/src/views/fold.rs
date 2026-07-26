@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use wire::{
     AgentEvent, AgentKind, AgentTelemetry, ApprovalEvent, ApprovalKind, ApprovalLifecycle,
-    ConvChange, ConvTelemetry, Event, EventKind, WireEvent, parse_ts,
+    ConvAttachment, ConvChange, ConvTelemetry, Event, EventKind, WireEvent, WorldId, parse_ts,
 };
 
 use crate::refs::{Blob, externalise};
@@ -232,8 +232,124 @@ impl Views {
         Ok(())
     }
 
+    /// The conversation-tree attachment fold (conversation-spec.md,
+    /// Attachment; agent-spec.md, Attachment): `attached` unconditionally
+    /// supersedes — one standing row per conv, no precondition. `moved` and
+    /// `detached` apply only under the standing-instance gate: the `(world,
+    /// instance_id)` pair (degraded to bare `instance_id` when either side
+    /// omits `world`) must match the row currently held, or the fact is a
+    /// stale claim about an already-superseded attachment and folds as
+    /// nothing. Never touches `rows`: this is a servicing fact, not
+    /// conversation activity (CLAUDE.md, Rules with teeth).
+    fn apply_conv_attachment(
+        &mut self,
+        stream_name: &str,
+        seq: u64,
+        conv: &wire::ConversationId,
+        attachment: &ConvAttachment,
+    ) -> anyhow::Result<()> {
+        let tx = self.db.transaction()?;
+        let fact = match attachment {
+            ConvAttachment::Attached(a) => {
+                let ts_ms = parse_ts(&a.ts).ok_or_else(|| {
+                    anyhow::anyhow!("attached {conv} has unparseable ts {}", a.ts)
+                })?;
+                let world = a.world.clone().unwrap_or_else(|| WorldId(String::new()));
+                tx.execute(
+                    "INSERT INTO conv_attachments (conv, world, instance_id, cwd, tip, attached_ts)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     ON CONFLICT(conv) DO UPDATE SET
+                         world       = excluded.world,
+                         instance_id = excluded.instance_id,
+                         cwd         = excluded.cwd,
+                         tip         = excluded.tip,
+                         attached_ts = excluded.attached_ts",
+                    rusqlite::params![
+                        conv.0,
+                        world.0,
+                        a.instance_id.0,
+                        a.cwd,
+                        a.tip.as_ref().map(|t| t.0.as_str()),
+                        ts_ms,
+                    ],
+                )?;
+                // Attaching is itself evidence of life (agent-spec.md,
+                // Liveness is a fold): fold it into the same pair-keyed
+                // pulse table `pulse` already updates. Only when `world` is
+                // actually known — agent_instances is keyed on the pair.
+                if let Some(w) = &a.world {
+                    tx.execute(
+                        "INSERT INTO agent_instances (world, instance_id, last_pulse, interval_s)
+                         VALUES (?1, ?2, ?3, ?4)
+                         ON CONFLICT(world, instance_id) DO UPDATE SET
+                             last_pulse = max(agent_instances.last_pulse, excluded.last_pulse),
+                             interval_s = COALESCE(excluded.interval_s, agent_instances.interval_s)",
+                        rusqlite::params![w.0, a.instance_id.0, ts_ms, a.interval_s],
+                    )?;
+                }
+                Some(AgentFact::Attached {
+                    world,
+                    instance: a.instance_id.clone(),
+                    ts: ts_ms,
+                    conv: conv.clone(),
+                    cwd: a.cwd.clone(),
+                    interval_s: a.interval_s,
+                })
+            }
+            ConvAttachment::Moved(m) => {
+                let ts_ms = parse_ts(&m.ts)
+                    .ok_or_else(|| anyhow::anyhow!("moved {conv} has unparseable ts {}", m.ts))?;
+                let world = m.world.clone().unwrap_or_else(|| WorldId(String::new()));
+                let changed = tx.execute(
+                    "UPDATE conv_attachments SET cwd = ?1
+                     WHERE conv = ?2 AND instance_id = ?3 AND world = ?4",
+                    rusqlite::params![m.cwd, conv.0, m.instance_id.0, world.0],
+                )? > 0;
+                changed.then_some(AgentFact::Attached {
+                    world,
+                    instance: m.instance_id.clone(),
+                    ts: ts_ms,
+                    conv: conv.clone(),
+                    cwd: Some(m.cwd.clone()),
+                    interval_s: None,
+                })
+            }
+            ConvAttachment::Detached(d) => {
+                let ts_ms = parse_ts(&d.ts).ok_or_else(|| {
+                    anyhow::anyhow!("detached {conv} has unparseable ts {}", d.ts)
+                })?;
+                let world = d.world.clone().unwrap_or_else(|| WorldId(String::new()));
+                let changed = tx.execute(
+                    "DELETE FROM conv_attachments WHERE conv = ?1 AND instance_id = ?2 AND world = ?3",
+                    rusqlite::params![conv.0, d.instance_id.0, world.0],
+                )? > 0;
+                changed.then_some(AgentFact::Detached {
+                    world,
+                    instance: d.instance_id.clone(),
+                    ts: ts_ms,
+                    conv: conv.clone(),
+                })
+            }
+        };
+        tx.execute(
+            "INSERT INTO cursor (stream_name, seq) VALUES (?1, ?2)
+             ON CONFLICT (stream_name) DO UPDATE SET seq = excluded.seq",
+            rusqlite::params![stream_name, seq as i64],
+        )?;
+        tx.commit()?;
+
+        if let Some(fact) = fact {
+            let _ = self.events.send(ViewEvent::Agent(fact));
+        }
+        Ok(())
+    }
+
     fn apply_conv(&mut self, stream_name: &str, seq: u64, event: &Event) -> anyhow::Result<()> {
         let conv = &event.conv;
+
+        if let EventKind::Attachment(a) = &event.kind {
+            return self.apply_conv_attachment(stream_name, seq, conv, a);
+        }
 
         // Deltas are ephemeral: never stored, no row touch (the wire's own
         // rule — the committed message is the record), just fanned out.
@@ -277,7 +393,9 @@ impl Views {
             EventKind::Telemetry(t) => (t.type_name().to_string(), parse_ts(t.ts())),
             EventKind::Change(c) => (c.type_name().to_string(), parse_ts(c.ts())),
             EventKind::Unknown { label, ts } => (label.clone(), ts.as_deref().and_then(parse_ts)),
-            EventKind::Delta(_) | EventKind::Block(_) => unreachable!("handled above"),
+            EventKind::Attachment(_) | EventKind::Delta(_) | EventKind::Block(_) => {
+                unreachable!("handled above")
+            }
         };
 
         let mut stored_message: Option<ConversationMessage> = None;

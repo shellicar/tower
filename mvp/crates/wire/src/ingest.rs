@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use crate::agent::AgentTelemetry;
 use crate::approval::ApprovalLifecycle;
-use crate::conv::{ConvBlock, ConvChange, ConvDelta, ConvTelemetry, Tolerant};
+use crate::conv::{ConvAttachment, ConvBlock, ConvChange, ConvDelta, ConvTelemetry, Tolerant};
 use crate::ids::{ApprovalId, ConversationId, WorldId};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +27,7 @@ pub struct Event {
 pub enum EventKind {
     Telemetry(ConvTelemetry),
     Change(ConvChange),
+    Attachment(ConvAttachment),
     Delta(ConvDelta),
     /// The stream changed character; the deltas that follow are `block_type`.
     Block(ConvBlock),
@@ -178,6 +179,12 @@ fn conv_kind(class: &str, event_type: &str, value: Value) -> Option<EventKind> {
             "query" => ConvChange::Query(serde_json::from_value(value).ok()?),
             _ => return None,
         }),
+        "attachment" => EventKind::Attachment(match event_type {
+            "attached" => ConvAttachment::Attached(serde_json::from_value(value).ok()?),
+            "moved" => ConvAttachment::Moved(serde_json::from_value(value).ok()?),
+            "detached" => ConvAttachment::Detached(serde_json::from_value(value).ok()?),
+            _ => return None,
+        }),
         // The one flat conversation subject: `delta` and `block` share it and
         // discriminate on the body `type`. Read that out (a short string) before
         // moving `value` into deserialise, so nothing large is cloned.
@@ -278,6 +285,7 @@ mod tests {
     use super::*;
     use crate::agent::Attached;
     use crate::conv::Message;
+    use crate::ids::{InstanceId, MessageId};
 
     fn conv_event(subject: &str, payload: &[u8]) -> Event {
         match parse_wire(subject, payload) {
@@ -405,6 +413,39 @@ mod tests {
         // malformed: too few tokens.
         assert_eq!(parse_wire("conv.v2", b"{}"), None);
         assert_eq!(parse_wire("conv.v2.conv-abc", b"{}"), None);
+    }
+
+    #[test]
+    fn conv_attachment_attached_parses_with_the_pair() {
+        let payload = br#"{"ts":"2026-07-25T14:02:00+10:00","instanceId":"inst-1a2f","world":"mac","cwd":"~/repos/tower","tip":"m12","intervalS":30}"#;
+        let event = conv_event("conv.v2.conv-abc.attachment.attached", payload);
+        let EventKind::Attachment(crate::conv::ConvAttachment::Attached(a)) = event.kind else {
+            panic!("expected attached");
+        };
+        assert_eq!(a.instance_id, InstanceId("inst-1a2f".into()));
+        assert_eq!(a.world, Some(WorldId("mac".into())));
+        assert_eq!(a.tip, Some(MessageId("m12".into())));
+    }
+
+    #[test]
+    fn conv_attachment_moved_parses() {
+        let payload = br#"{"ts":"2026-07-25T14:06:00+10:00","instanceId":"inst-1a2f","world":"mac","cwd":"~/repos/tower/mvp"}"#;
+        let event = conv_event("conv.v2.conv-abc.attachment.moved", payload);
+        let EventKind::Attachment(crate::conv::ConvAttachment::Moved(m)) = event.kind else {
+            panic!("expected moved");
+        };
+        assert_eq!(m.cwd, "~/repos/tower/mvp");
+    }
+
+    #[test]
+    fn conv_attachment_detached_parses() {
+        let payload =
+            br#"{"ts":"2026-07-25T14:10:00+10:00","instanceId":"inst-1a2f","world":"mac"}"#;
+        let event = conv_event("conv.v2.conv-abc.attachment.detached", payload);
+        assert!(matches!(
+            event.kind,
+            EventKind::Attachment(crate::conv::ConvAttachment::Detached(_))
+        ));
     }
 
     #[test]

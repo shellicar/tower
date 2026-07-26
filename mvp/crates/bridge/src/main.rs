@@ -24,12 +24,21 @@
 //! with the host (a deliberate cut, not a gap).
 //!
 //! The process is one agent instance in a world (agent-spec): `ready` on
-//! boot, a `pulse` every PULSE_INTERVAL_S, `attached` per spawn. The world
+//! boot, a `pulse` every PULSE_INTERVAL_S, on agent.v1 (unchanged by the
+//! attachment migration — only Attachment moved off that tree). The world
 //! is deployer-chosen (`BRIDGE_WORLD`, default `local`); the instance id is
 //! generated per process, so a restart is a new instance in the same world.
-//! No `detached` in v0: conversations die with the host, and a kill is a
-//! crash from the wire's view (a crash publishes nothing; the pulse going
-//! silent is what observers fold).
+//!
+//! Attachment claims ride the CONVERSATION's own tree now
+//! (conversation-spec.md, Attachment; agent-spec.md, Attachment): `attached`
+//! exactly once per spawn/adopt, `moved` on `chdir` (never a re-published
+//! `attached` — that is now the violation shape), and each servicer watches
+//! its own conversations' attachment leaves so a displacement (another
+//! instance's `attached` superseding this one) is observed and answered
+//! with `detached` — the same act of standing-down the spec describes for a
+//! zombie catching up to its own history. Clean exit still publishes
+//! nothing in v0 (conversations die with the host); a crash publishes
+//! nothing either, and the pulse going silent is what observers fold.
 
 mod agent;
 mod anthropic;
@@ -67,7 +76,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use wire::now_iso;
 
 use crate::anthropic::{DeltaSink, NatsDeltaSink};
-use bridge::broker::{Broker, BrokerMessage, BrokerReplay, NatsBroker};
+use bridge::broker::{Broker, BrokerMessage, BrokerReplay, BrokerSubscription, NatsBroker};
 use cwd::{ChdirError, ServedCwds, apply_chdir, resolve_cwd, validate_dir};
 
 const PULSE_INTERVAL_S: i64 = 30;
@@ -219,6 +228,82 @@ async fn publish_agent<B: Broker>(broker: &B, world: &str, leaf: &str, payload: 
     }
 }
 
+/// The attachment claim, on the conversation's own tree now
+/// (conversation-spec.md, Attachment): `attached`, `moved`, `detached`
+/// carry the full `(world, instanceId)` pair, per agent-spec.md's Attachment.
+async fn publish_conv_attachment<B: Broker>(
+    broker: &B,
+    conv: &str,
+    leaf: &str,
+    payload: serde_json::Value,
+) {
+    let subject = format!("conv.v2.{conv}.attachment.{leaf}");
+    let bytes = serde_json::to_vec(&payload).expect("json! of plain values cannot fail");
+    eprintln!(
+        "{} bridge[{conv}]: → {subject} ({} B)",
+        now_iso(),
+        bytes.len()
+    );
+    if let Err(e) = broker.publish(subject, bytes).await {
+        eprintln!(
+            "bridge[{conv}]: attachment publish failed: {:#}",
+            anyhow::Error::new(e)
+        );
+    }
+}
+
+/// Watch this conversation's own attachment leaf for a displacement: another
+/// instance's `attached` superseding ours (agent-spec.md, Attachment — "a
+/// compliant instance watches the attachment leaf for every conversation it
+/// serves"). On seeing one, stop serving (abort the running query task) and
+/// publish `detached` — the observable act of standing down; the fold
+/// already moved the claim, so this changes nothing but makes compliance
+/// visible in the record.
+async fn watch_attachment<B: Broker>(
+    broker: B,
+    conv: String,
+    world: String,
+    instance: String,
+    abort: tokio::task::AbortHandle,
+) {
+    let mut sub = match broker
+        .subscribe(format!("conv.v2.{conv}.attachment.>"))
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "bridge[{conv}]: attachment watch subscribe failed: {:#}",
+                anyhow::Error::new(e)
+            );
+            return;
+        }
+    };
+    while let Some(msg) = sub.next().await {
+        if !msg.subject.ends_with(".attachment.attached") {
+            continue;
+        }
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&msg.payload) else {
+            continue;
+        };
+        let their_instance = value.get("instanceId").and_then(serde_json::Value::as_str);
+        let their_world = value.get("world").and_then(serde_json::Value::as_str);
+        if their_instance == Some(instance.as_str()) && their_world == Some(world.as_str()) {
+            continue; // our own claim, not a displacement
+        }
+        eprintln!("bridge[{conv}]: displaced by {their_world:?}/{their_instance:?}; standing down");
+        abort.abort();
+        publish_conv_attachment(
+            &broker,
+            &conv,
+            "detached",
+            serde_json::json!({ "ts": now_iso(), "instanceId": instance, "world": world }),
+        )
+        .await;
+        break;
+    }
+}
+
 /// Serve a conversation: subscribe (the fact before the claim - a
 /// conversation that cannot hear requests is not spawned in any meaningful
 /// sense, so the claim and the reply both wait for this fact), spawn the
@@ -273,15 +358,27 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
     ));
     // The attachment is what makes the conversation exist for observers
     // before its first message. cwd is causal (an input to how the
-    // conversation unfolds).
+    // conversation unfolds). Rides the conversation's own tree now
+    // (conversation-spec.md, Attachment), carrying the full identity pair.
     let attached = serde_json::json!({
         "ts": now_iso(),
         "instanceId": instance,
-        "conversationId": conv,
+        "world": world,
         "tip": tip,
         "cwd": cwd,
+        "intervalS": PULSE_INTERVAL_S,
     });
-    publish_agent(broker, world, "attached", attached).await;
+    publish_conv_attachment(broker, &conv, "attached", attached).await;
+    // One instance per claim, watching its own conversation: a displacement
+    // (another instance's `attached` superseding ours) is observed and
+    // answered with `detached` (agent-spec.md, Attachment).
+    tokio::spawn(watch_attachment(
+        broker.clone(),
+        conv.clone(),
+        world.to_string(),
+        instance.to_string(),
+        handle.abort_handle(),
+    ));
     Some((conv, handle))
 }
 
@@ -566,14 +663,18 @@ impl Host {
                 Ok(resolved) => {
                     let now = resolved.to_string_lossy().to_string();
                     eprintln!("bridge[{conv}]: cwd → {now}");
-                    publish_agent(
+                    // A changed cwd is a fact about the standing claim, not
+                    // a new one — `moved`, never a re-published `attached`
+                    // (agent-spec.md, Attachment: that is now the violation
+                    // shape).
+                    publish_conv_attachment(
                         &self.broker,
-                        &self.world,
-                        "attached",
+                        conv,
+                        "moved",
                         serde_json::json!({
                             "ts": now_iso(),
                             "instanceId": self.instance,
-                            "conversationId": conv,
+                            "world": self.world,
                             "cwd": now,
                         }),
                     )
@@ -978,7 +1079,7 @@ mod tests {
             .unwrap();
         let attached_at = calls
             .iter()
-            .position(|c| c == "publish:agent.v1.local.telemetry.attached")
+            .position(|c| c == "publish:conv.v2.conv-a.attachment.attached")
             .unwrap();
         assert!(subscribe_at < attached_at, "{calls:?}");
 

@@ -762,6 +762,170 @@ fn agent_tables_are_derived_and_rematerialise() {
     assert!(attachments.is_empty());
 }
 
+// The conversation-tree attachment leaf (conversation-spec.md, Attachment;
+// agent-spec.md, Attachment, Examples a-e). agent.v1's fold above is
+// untouched; these exercise the new leaf's own fold and its gate.
+
+#[test]
+fn conv_attachment_a_ordinary_life() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].instance.0, "inst-1");
+
+    views.apply(
+        "conv-approval",
+        2,
+        &event(
+            "conv.v2.conv-abc.attachment.detached",
+            r#"{"ts":"2026-07-25T14:05:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    let (_, attachments) = views.agents().unwrap();
+    assert!(attachments.is_empty());
+
+    // Never conversation activity.
+    assert!(rows_of(&views).is_empty());
+}
+
+#[test]
+fn conv_attachment_b_crash_and_failover() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    // inst-1 goes silent; inst-2 supersedes unconditionally, no detached ever seen.
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:10:00+10:00","instanceId":"inst-2","world":"vm","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].instance.0, "inst-2");
+    assert_eq!(attachments[0].world.0, "vm");
+}
+
+#[test]
+fn conv_attachment_c_migration_takeover_then_stale_detach_is_a_noop() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:01:00+10:00","instanceId":"inst-2","world":"vm","cwd":"~/repos/tower"}"#));
+    // inst-1 observes its own displacement and publishes detached — a stale
+    // fact about an already-superseded claim, must fold as nothing.
+    views.apply(
+        "conv-approval",
+        3,
+        &event(
+            "conv.v2.conv-abc.attachment.detached",
+            r#"{"ts":"2026-07-25T14:01:05+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].instance.0, "inst-2");
+}
+
+#[test]
+fn conv_attachment_d_abandon_and_readopt() {
+    let (mut views, _rx) = fresh();
+    views.apply(
+        "conv-approval",
+        1,
+        &event(
+            "conv.v2.conv-abc.attachment.attached",
+            r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    views.apply(
+        "conv-approval",
+        2,
+        &event(
+            "conv.v2.conv-abc.attachment.detached",
+            r#"{"ts":"2026-07-25T14:01:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    // A closed claim leaves nothing to reopen: the next attached is ordinary.
+    views.apply(
+        "conv-approval",
+        3,
+        &event(
+            "conv.v2.conv-abc.attachment.attached",
+            r#"{"ts":"2026-07-25T14:02:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].instance.0, "inst-1");
+}
+
+#[test]
+fn conv_attachment_moved_updates_cwd_only_under_the_standing_gate() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    // A stale mover, superseded already, must not touch the standing cwd.
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.moved",
+        r#"{"ts":"2026-07-25T14:03:00+10:00","instanceId":"inst-9","world":"vm","cwd":"/nowhere"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower"));
+
+    // The standing instance's own move applies, and the conversation's
+    // change stream sees nothing (moved never touches rows/messages).
+    views.apply("conv-approval", 3, &event("conv.v2.conv-abc.attachment.moved",
+        r#"{"ts":"2026-07-25T14:06:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower/mvp"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower/mvp"));
+    assert!(rows_of(&views).is_empty());
+}
+
+#[test]
+fn conv_attachment_liveness_joins_the_pair_against_agent_v1_pulse() {
+    let (mut views, _rx) = fresh();
+    views.apply(
+        "conv-approval",
+        1,
+        &event(
+            "agent.v1.mac.telemetry.pulse",
+            r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","intervalS":30}"#,
+        ),
+    );
+    views.apply(
+        "conv-approval",
+        2,
+        &event(
+            "conv.v2.conv-abc.attachment.attached",
+            r#"{"ts":"2026-07-25T14:00:05+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    let (instances, attachments) = views.agents().unwrap();
+    assert_eq!(instances.len(), 1);
+    assert_eq!(instances[0].interval_s, Some(30));
+    assert_eq!(attachments[0].instance.0, "inst-1");
+    assert_eq!(attachments[0].world.0, "mac");
+}
+
+#[test]
+fn conv_attachment_table_is_derived_and_rematerialises() {
+    let (mut views, _rx) = fresh();
+    views.apply(
+        "conv-approval",
+        1,
+        &event(
+            "conv.v2.conv-abc.attachment.attached",
+            r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    views
+        .sync_stream("conv-approval", "incarnation-A", 100)
+        .unwrap();
+    views
+        .sync_stream("conv-approval", "incarnation-B", 100)
+        .unwrap();
+    let (_, attachments) = views.agents().unwrap();
+    assert!(attachments.is_empty());
+}
+
 #[test]
 fn out_of_order_row_touch_never_regresses() {
     let (mut views, _rx) = fresh();

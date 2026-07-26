@@ -216,6 +216,23 @@ const MIGRATIONS: &[&str] = &[
          unread  INTEGER NOT NULL,
          stale   INTEGER NOT NULL
      );",
+    // 14 - the conversation-tree attachment leaf (conversation-spec.md,
+    // Attachment; agent-spec.md, Attachment): singular, unconditionally
+    // superseding, so PRIMARY KEY(conv) alone - there is never more than one
+    // standing claim. `world` defaults to '' for a producer that omits it
+    // (add-only tolerance; the pair then degrades to bare instance_id, per
+    // spec). Liveness joins this row's (world, instance_id) against
+    // agent_instances' last_pulse/interval_s - pulse stays on agent.v1,
+    // untouched by this migration. Derived; in the rematerialise truncation
+    // set alongside agent_attachments (both feed the same `agents` snapshot).
+    "CREATE TABLE conv_attachments (
+         conv        TEXT PRIMARY KEY,
+         world       TEXT NOT NULL DEFAULT '',
+         instance_id TEXT NOT NULL,
+         cwd         TEXT,
+         tip         TEXT,
+         attached_ts INTEGER NOT NULL
+     );",
 ];
 
 pub fn apply_schema(db: &Connection) -> anyhow::Result<()> {

@@ -21,7 +21,7 @@ macro_rules! fixture {
 
 use wire::{
     AgentEvent, AgentKind, AgentTelemetry, ApprovalEvent, ApprovalKind, ApprovalLifecycle,
-    ConvChange, Event, EventKind, WireEvent, parse_ts, parse_wire,
+    ConvAttachment, ConvChange, Event, EventKind, WireEvent, parse_ts, parse_wire,
 };
 
 /// One fixture line: `{"subject":…,"message":{…}}` (reply keys ignored —
@@ -88,6 +88,10 @@ const AGENT_A2: &str = fixture!("agent/scenario-a2.jsonl");
 const AGENT_A3: &str = fixture!("agent/scenario-a3.jsonl");
 const AGENT_A4: &str = fixture!("agent/scenario-a4.jsonl");
 const AGENT_A5: &str = fixture!("agent/scenario-a5.jsonl");
+const AGENT_A7: &str = fixture!("agent/scenario-a7.jsonl");
+const AGENT_A8: &str = fixture!("agent/scenario-a8.jsonl");
+const AGENT_A9: &str = fixture!("agent/scenario-a9.jsonl");
+const AGENT_A10: &str = fixture!("agent/scenario-a10.jsonl");
 
 fn assert_all_known(events: &[Event]) {
     for e in events {
@@ -345,6 +349,60 @@ fn agent_a4_chdir_republishes_attached_with_new_cwd() {
         })
         .collect();
     assert_eq!(cwds, ["~/repos/tower", "~/repos/tower-wip"]);
+}
+
+#[test]
+fn conv_attachment_a7_ordinary_life() {
+    let evs = events(AGENT_A7);
+    assert_all_known(&evs);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(&e.kind, EventKind::Attachment(ConvAttachment::Attached(_))))
+    );
+    assert!(
+        evs.iter()
+            .any(|e| matches!(&e.kind, EventKind::Attachment(ConvAttachment::Detached(_))))
+    );
+}
+
+#[test]
+fn conv_attachment_a8_crash_and_failover() {
+    let evs = events(AGENT_A8);
+    assert_all_known(&evs);
+    let instances: Vec<_> = evs
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EventKind::Attachment(ConvAttachment::Attached(a)) => Some(a.instance_id.0.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(instances, ["inst-1a2f", "inst-9c4d"]);
+}
+
+#[test]
+fn conv_attachment_a9_migration_takeover() {
+    let evs = events(AGENT_A9);
+    assert_all_known(&evs);
+    // The final detached names the FIRST (now superseded) instance — the
+    // fold discards it; the wire still parses it as Known, verbatim.
+    let EventKind::Attachment(ConvAttachment::Detached(d)) = &evs.last().unwrap().kind else {
+        panic!("expected the trailing detached");
+    };
+    assert_eq!(d.instance_id.0, "inst-1a2f");
+}
+
+#[test]
+fn conv_attachment_a10_abandon_and_readopt() {
+    let evs = events(AGENT_A10);
+    assert_all_known(&evs);
+    let kinds: Vec<&str> = evs
+        .iter()
+        .map(|e| match &e.kind {
+            EventKind::Attachment(a) => a.type_name(),
+            other => panic!("expected an attachment event, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(kinds, ["attached", "detached", "attached"]);
 }
 
 #[test]

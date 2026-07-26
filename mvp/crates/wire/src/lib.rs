@@ -16,8 +16,9 @@ pub use approval::{
     encode_settled, parse_answer, parse_answer_reply,
 };
 pub use conv::{
-    ConvBlock, ConvChange, ConvDelta, ConvTelemetry, Message, Query, Revision, TipMoved, Tolerant,
-    ToolUse, TurnAborted, TurnCancelled, TurnEnded, TurnStarted, Usage,
+    ConvAttached, ConvAttachment, ConvBlock, ConvChange, ConvDelta, ConvDetached, ConvMoved,
+    ConvTelemetry, Message, Query, Revision, TipMoved, Tolerant, ToolUse, TurnAborted,
+    TurnCancelled, TurnEnded, TurnStarted, Usage,
 };
 pub use ids::{ApprovalId, ConversationId, InstanceId, MessageId, QueryId, TurnId, WorldId};
 pub use ingest::{

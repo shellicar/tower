@@ -52,7 +52,7 @@ NATS_URL="${NATS_URL:-nats://nats:4222}"
 # / EPHEMERAL_SUBJECTS exactly; nothing here should ever diverge from that
 # file, which is what actually reads these streams.
 AUDIT_STREAM='conv-approval'
-AUDIT_SUBJECTS='conv.v1.*.changes conv.v2.*.changes.> approval.v1.*.lifecycle conv.v2.*.telemetry.usage'
+AUDIT_SUBJECTS='conv.v1.*.changes conv.v2.*.changes.> conv.v2.*.attachment.> approval.v1.*.lifecycle conv.v2.*.telemetry.usage'
 AUDIT_MAX_AGE='0'
 
 DIAGNOSTIC_STREAM='conv-diagnostic'
