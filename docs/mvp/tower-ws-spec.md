@@ -332,16 +332,17 @@ anyway legitimately closes `completed`. `reason` is an open set
 ```
 
 The servicing snapshot, sent once per connection after `approvals`: every
-instance towerd's fold retains and **the one standing attachment per
-conversation** — a conversation has at most one; there is no candidate set
-and nothing to select among (conversation-spec.md, Attachment: a new
-`attached` unconditionally supersedes whatever stood before it). Facts only,
-never verdicts — **liveness is the client's derivation** (agent-spec.md,
-Attachment: a fold, never declared): an attachment whose instance's
-`lastPulse` lags the client's clock by ~3 of that instance's own `intervalS`
-renders as stranded; a live pulse renders as alive; no attachment is
-released. `intervalS` may be absent (an instance that has published `ready`
-but no pulse yet).
+instance towerd's fold retains, and **the one standing attachment per
+conversation**. A conversation has at most one — no candidate set, nothing
+to select among (conversation-spec.md, Attachment: a new `attached`
+unconditionally supersedes whatever stood before it).
+
+Facts only, never verdicts. **Liveness is the client's derivation**
+(agent-spec.md, Attachment: a fold, never declared): an attachment whose
+instance's `lastPulse` lags the client's clock by ~3 of that instance's own
+`intervalS` renders as stranded. A live pulse renders as alive. No
+attachment is ever released here. `intervalS` may be absent — an instance
+that has published `ready` but no pulse yet.
 
 **Existence is a union.** A `conv` present in `attachments` but absent from
 the `list` rows is a *potential* conversation — served, ready to receive, no
@@ -360,18 +361,23 @@ agent facts never touch `lastEvent`.
 { "type": "agent", "kind": "detached", "world": "mac", "instanceId": "inst-1a2f", "ts": 1760187600000, "conv": "c65b902d-…" }
 ```
 
-One wire fact, one packet — a pulse is one instance fact however many
-conversations the instance serves; it never fans out per conversation.
-Upsert into the client's two maps (`instanceId → pulse`, `conv →
-attachment`): an `attached` **replaces the held attachment for that `conv`
-wholesale** — there is exactly one, never a set to merge into; `moved`
-updates the held attachment's `cwd` **in place**, only when its `instanceId`
-matches the one currently held, else it is a no-op (conversation-spec.md,
-Attachment — a fact about the standing claim, never a new one); and a
-`detached` clears the held attachment only under the same match. A
-`detached` or `moved` from an instance that isn't the standing one is a
-stale fact about a claim already superseded, and is a no-op here. `kind` is
-an open set: unknown kinds are skipped, never fatal. `ts` is the fact's wire
+One wire fact, one packet. A pulse is one instance fact however many
+conversations the instance serves — it never fans out per conversation.
+
+Upsert into the client's two maps: `instanceId → pulse`, `conv →
+attachment`.
+
+- `attached` **replaces the held attachment for that `conv` wholesale**.
+  There is exactly one; never a set to merge into.
+- `moved` updates the held attachment's `cwd` **in place**, only when its
+  `instanceId` matches the one currently held — else it's a no-op
+  (conversation-spec.md, Attachment: a fact about the standing claim, never
+  a new one).
+- `detached` clears the held attachment only under the same match.
+
+A `detached` or `moved` from an instance that isn't the standing one is a
+stale fact about a claim already superseded — a no-op here. `kind` is an
+open set: unknown kinds are skipped, never fatal. `ts` is the fact's wire
 timestamp in millis; for `pulse` it is the new `lastPulse`.
 
 ### `layout` — once, on connect; live, unconditional

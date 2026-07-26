@@ -3,10 +3,12 @@
 The agent concern: who is serving conversations, and where. Structure per
 `nats-spec.md`; namespace `agent`. Every message here is *about* one world —
 the environment conversations are served from — never about a conversation's
-content: kill the process, restart it, and not one conversation wire fact
-changes. Attachment — which instance is serving which conversation — is a
-conversation fact, not a world fact, and its wire shape lives on the
-conversation's own tree (`conversation-spec.md`, Attachment); this spec
+content. Kill the process, restart it: not one conversation wire fact
+changes.
+
+Attachment is which instance serves which conversation. That is a
+conversation fact, not a world fact, so its wire shape lives on the
+conversation's own tree (`conversation-spec.md`, Attachment). This spec
 states the model an instance conducts itself by.
 
 ## The entity
@@ -38,8 +40,8 @@ economics (racing servicers waste work), a deployment's choice.
 | `agent.v1.{world}.telemetry.>` | events | servicing facts: ready, pulse |
 | `agent.v1.{world}.requests.>` | requests | operations on the world's servicing |
 
-Attachment claims are not here — a conversation's attachment is about the
-conversation, not the world, and lives on its own tree
+Attachment claims are not here. A conversation's attachment is about the
+conversation, not the world, so it lives on its own tree
 (`conversation-spec.md`, Attachment). This section covers only what is
 genuinely about the world: is a process up, and is it still promising to be.
 
@@ -97,65 +99,41 @@ postal label is not.
 
 ## Attachment
 
-**Attachment is singular.** `attached` claims "this conversation is served
-here, by me, now" — always one claim, never a set. A new `attached`
-unconditionally supersedes whatever attachment stood before it, in any world,
-from any instance: the superseded attachment stops contributing to every
-derivation — liveness, cwd, existence — the instant the new one lands. There
-is no stale precondition on `attached` and nothing to negotiate: publishing
-it never asks permission, and supersession does the rest. Failover (the old
-instance went silent, a new one adopts) and migration (the old instance is
-fine, something decided to move the conversation) are the same ordinary
-operation seen from different causes — the wire carries one operation
-either way.
+**Attachment is singular.** `attached` claims: this conversation is served here, by me, now. There is always one claim, never a set.
 
-Fencing and leases are deliberately not here. A spec can state what a
-compliant instance does; it cannot make a malfunctioning one behave by
-designing around it, and trying to buys only complexity — a lease adds a
-negotiation the model has no use for, since there is never a legitimate case
-for two instances serving one conversation at once (that is a deployment's
-race, not a wire state). A re-attacher that should not have re-attached is
-visible in the record — a second `attached` with no `detached` from the
-first, or a `detached` arriving after it was already superseded — not
-prevented by machinery.
+A new `attached` unconditionally supersedes whatever attachment stood before it. This holds across any world, any instance. The superseded attachment stops contributing to every derivation — liveness, cwd, existence — the instant the new one lands.
 
-**The rule, stated once.** A second `attached` for this conversation,
-published by the instance the fold currently holds as standing, with no
-intervening `detached` from that instance, is a violation — nothing else
-qualifies it and nothing else excuses it. Once a `detached` has closed the
-standing claim, a new `attached` is an ordinary new claim: it may come from
-any instance, including the one that just released it — the wire is
-indifferent to who claims next, because a closed claim leaves nothing
-behind to be re-opened. What this pins down for one open claim: from the
-moment its `attached` lands to the moment its `detached` lands, the
-standing instance publishes `attached` for it exactly once. A changed `cwd`
-under an unclosed claim is not grounds for a second `attached` — it is
-`moved` (`conversation-spec.md`, Attachment), because the claim itself has
-not changed, only a fact about it.
+`attached` carries no precondition. Publishing it never asks permission; supersession does the rest.
 
-A compliant instance watches the attachment leaf (`conversation-spec.md`,
-Attachment) for every conversation it serves. On seeing itself displaced —
-another instanceId's `attached` for a conversation it holds — it stops
-serving that conversation and publishes `detached`. This folds as nothing:
-the supersession already ended its claim, and a `detached` changes the fold
-only when its instanceId still matches the *standing* attachment (an
-instance detaching after it has already been superseded is stating a fact
-about its own past claim, not retracting the current one). It exists anyway,
-as the observable act of compliance — the difference between a crash and a
-violation is otherwise undecidable. An instance also publishes `detached`
-per conversation it serves on clean exit (Ctrl-C, drain), same as today.
+Failover and migration are the same operation. Failover: the old instance went silent, a new one adopts. Migration: the old instance is fine, something decided to move the conversation. Either way, the wire carries one operation.
 
-**Crash vs violation is derivable, never declared.** No `detached` plus dead
-pulses from the instance that held the claim reads as a crash — it went
-silent and never got the chance to release. No `detached` plus *live*
-pulses from an instance that has been superseded and is still publishing as
-though it serves the conversation reads as a violation — it saw the
-displacement (or should have) and kept going anyway. Neither is a state the
-wire declares; both are what a consumer reads off the same facts (`attached`,
-`detached`, `pulse`) it already folds.
+Fencing and leases are deliberately not here. A spec can state what a compliant instance does. It cannot make a malfunctioning one behave by designing around it — trying only buys complexity.
 
-A conversation's servicing state derives from these facts exactly as before,
-now read off the conversation's own tree rather than the world's:
+There is never a legitimate case for two instances serving one conversation at once; that is a deployment's race, not a wire state. So a lease would add a negotiation the model has no use for.
+
+A re-attacher that should not have re-attached is visible in the record instead — a second `attached` with no `detached` from the first, or a `detached` arriving after it was already superseded. Nothing prevents it by machinery; the record just shows it.
+
+**The rule, stated once.** The violation is a second `attached` for this conversation from the instance currently standing, with no `detached` in between. Nothing else qualifies it; nothing else excuses it.
+
+After a `detached` closes the standing claim, a new `attached` is an ordinary new claim. It may come from any instance — including the one that just released it. A closed claim leaves nothing behind to reopen, so the wire doesn't care who claims next.
+
+For one open claim, this means: the standing instance publishes `attached` exactly once, from the moment it attaches to the moment it detaches.
+
+A changed `cwd` is not a new claim. It's a fact about the claim already standing, so it gets its own event: `moved` (`conversation-spec.md`, Attachment).
+
+A compliant instance watches the attachment leaf for every conversation it serves (`conversation-spec.md`, Attachment). When it sees itself displaced — another instanceId's `attached` for a conversation it holds — it stops serving and publishes `detached`.
+
+That `detached` folds as nothing: the supersession already ended its claim. A `detached` only changes the fold when its instanceId still matches the standing attachment. An instance detaching after it's already superseded is stating a fact about its own past claim, not retracting the current one.
+
+It publishes `detached` anyway, as the observable act of compliance — without it, a crash and a violation would be impossible to tell apart. An instance also publishes `detached` per conversation on clean exit (Ctrl-C, drain), same as today.
+
+**Crash vs violation is derivable, never declared.** No `detached`, and dead pulses from the instance that held the claim: read as a crash. It went silent and never got the chance to release.
+
+No `detached`, and *live* pulses from an instance that's already been superseded: read as a violation. It saw the displacement — or should have — and kept going anyway.
+
+Neither is a state the wire declares. Both are what a consumer reads off facts it already folds: `attached`, `detached`, `pulse`.
+
+A conversation's servicing state derives from these facts exactly as before, now read off the conversation's own tree rather than the world's:
 
 - **alive** — attached by an instance whose pulse is fresh;
 - **released** — cleanly detached (by the instanceId that held the claim);
@@ -167,45 +145,44 @@ differently because they are different.
 
 ### Examples
 
-Concrete and orderable on purpose: these become the attachment scenario
-fixtures when implementation lands (`conversation-spec.md`, Migration note
-— fix lands twice, code and fixture in the same commit, per this repo's
-testing rule).
+These are concrete and orderable on purpose. They become the attachment
+scenario fixtures when implementation lands (`conversation-spec.md`,
+Migration note) — fix lands twice, code and fixture in the same commit, per
+this repo's testing rule.
 
 - **(a) Ordinary life.** `attached(inst-1)` → served → `detached(inst-1)`.
   One claim, opened and closed by the same instance.
-- **(b) Crash and failover.** `attached(inst-1)`; inst-1's pulses stop and
-  no `detached` ever comes — the fold reads inst-1 as stranded from silence
-  alone; `attached(inst-2)` supersedes it, unconditionally, whether or not a
-  `detached(inst-1)` shows up later.
-- **(c) Migration/takeover.** `attached(inst-1)`; while inst-1 still lives,
-  `attached(inst-2)` supersedes it anyway — no precondition checked inst-1's
-  liveness; inst-1 observes its own displacement and publishes
+- **(b) Crash and failover.** `attached(inst-1)`. inst-1's pulses stop and
+  no `detached` ever comes. The fold reads inst-1 as stranded, from silence
+  alone. `attached(inst-2)` supersedes it — unconditionally, whether or not
+  a `detached(inst-1)` shows up later.
+- **(c) Migration/takeover.** `attached(inst-1)`. While inst-1 still lives,
+  `attached(inst-2)` supersedes it anyway — no precondition checks inst-1's
+  liveness. inst-1 observes its own displacement and publishes
   `detached(inst-1)`, the observable act of standing down. This changes
-  nothing in the fold — the claim already moved when `attached(inst-2)`
+  nothing in the fold: the claim already moved when `attached(inst-2)`
   landed.
 - **(d) Abandon and re-adopt.** `attached(inst-1)` → `detached(inst-1)` →
-  `attached(inst-1)` (or equally `attached(inst-2)`) — legal either way: a
-  closed claim leaves nothing behind to re-open, so the next `attached` is
-  an ordinary new claim regardless of whose instanceId it carries.
-  "Abandon" as a named operation is not designed here; this example shows
-  the rule as stated already covers it, nothing extra needed.
-- **(e) The violation.** `attached(inst-1)`; `attached(inst-1)` again with
-  no `detached` between — the same instance claiming twice while its first
-  claim is still open, the zombie shape the rule exists to catch. Which of
-  the two derived readings applies is never declared, only read off pulses
-  after the fact: inst-1's pulses still live → violation (it kept claiming
-  after something should have told it to stop); inst-1's pulses dead →
-  crash (whatever published the second `attached` never got the chance to
-  detach either).
+  `attached(inst-1)` (or equally `attached(inst-2)`). Legal either way. A
+  closed claim leaves nothing behind to reopen, so the next `attached` is
+  an ordinary new claim, regardless of whose instanceId it carries.
+  "Abandon" isn't a designed operation here — this example just shows the
+  rule already covers it.
+- **(e) The violation.** `attached(inst-1)`; `attached(inst-1)` again, no
+  `detached` between. The same instance claims twice while its first claim
+  is still open — the zombie shape the rule exists to catch. Which reading
+  applies is never declared, only read off pulses after the fact: inst-1's
+  pulses still live → violation (it kept claiming after something should
+  have stopped it); inst-1's pulses dead → crash (the second `attached`
+  never got the chance to detach either).
 
 ## Requests
 
 | Request | Fields | Reply | Notes |
 |---|---|---|---|
-| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts, and the premise check is instance-local, never a liveness read on anyone else: already attached **to this instance** → `rejected: already_attached` (the request is redundant, nothing to do); attached to any *other* instance, whether that instance is live or stranded → accept and take over unconditionally — asking a second world or instance to serve a conversation already served elsewhere *is* the deliberate migration path, and whether the incumbent is still alive is irrelevant to the premise; no history → start fresh; history and no attachment → fold and re-attach. Any named environment value the world cannot establish rejects the request (`invalid_cwd`, for `cwd`); an omitted value falls to the world's own defaults — absence delegates, presence binds, never a silent best-effort fallback. Known reasons today: `already_attached`, `at_capacity`, `invalid` (a recognised request whose body doesn't carry what it needs, e.g. a missing or empty `conversationId`), `invalid_cwd`, `failed` (the world could not undertake the operation; the specific cause rides `detail`), `unsupported` |
+| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover. The servicer reads the conversation's record and reacts. The premise check is instance-local — never a liveness read on anyone else. Already attached **to this instance** → `rejected: already_attached`: the request is redundant, nothing to do. Attached to any *other* instance, live or stranded → accept and take over unconditionally: asking a second world or instance to serve an already-served conversation *is* the deliberate migration path, and the incumbent's liveness is irrelevant. No history → start fresh. History and no attachment → fold and re-attach. Any named environment value the world cannot establish rejects the request (`invalid_cwd`, for `cwd`); an omitted value falls to the world's own defaults — absence delegates, presence binds, never a silent fallback. Known reasons today: `already_attached`, `at_capacity`, `invalid` (a recognised request whose body doesn't carry what it needs, e.g. a missing or empty `conversationId`), `invalid_cwd`, `failed` (the world could not undertake the operation; the cause rides `detail`), `unsupported` |
 | `drain` | — | `accepted` \| `rejected` + `reason` | stop taking work and detach cleanly: a `detached` per conversation, then silence. Distinguishes a decided shutdown from a crash |
-| `chdir` | `conversationId`, `cwd` | `accepted` \| `rejected` + `reason` | move the working directory of a live attachment — Tower changing where a conversation is served without a Ctrl-C. Accept confirms the premise (this world serves the conversation), not the outcome: the move is observed, not promised — the agent publishes `attachment.moved` (`conversation-spec.md`, Attachment) when the move lands. The agent reconciles the directory and may decline to move; a move that never lands shows as an unchanged `cwd`, an observed outcome like any other. Known reasons today: `not_found` (this world is not serving that conversation), `unsupported` |
+| `chdir` | `conversationId`, `cwd` | `accepted` \| `rejected` + `reason` | move the working directory of a live attachment — Tower changing where a conversation is served without a Ctrl-C. Accept confirms the premise (this world serves the conversation), not the outcome. The move is observed, not promised: the agent publishes `attachment.moved` (`conversation-spec.md`, Attachment) when the move lands. The agent reconciles the directory and may decline to move. A move that never lands just shows as an unchanged `cwd` — an observed outcome like any other. Known reasons today: `not_found` (this world is not serving that conversation), `unsupported` |
 
 **cwd is intrinsic to the harness.** An agent is a harness and a model; the
 model is text-in-text-out and has no filesystem, while the harness runs
@@ -250,12 +227,12 @@ access and arbitrary work placement; deployments grade accordingly. World
 
 - Publication order per subject, and per subscription across one wildcard;
   nothing across classes.
-- Liveness, existence, strandedness are folds — computed from `ready`,
+- Liveness, existence, and strandedness are folds. Computed from `ready`,
   `pulse` (this tree) and `attached`, `detached` (conversation-spec.md,
-  Attachment); never carried as declared state. Names
-  are free to generate, never free to remember: what a folding consumer
-  retains of dead worlds and instances is its own retention policy, exactly
-  as a stream's capture is its deployment's.
+  Attachment) — never carried as declared state. Names are free to
+  generate, never free to remember: what a folding consumer retains of dead
+  worlds and instances is its own retention policy, same as a stream's
+  capture is its deployment's.
 - Unknown event types, fields, and reason values: the tolerance rules
   (nats-spec, Evolution).
 

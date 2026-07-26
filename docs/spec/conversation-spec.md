@@ -64,13 +64,17 @@ was kept.
 | `conv.v2.{conversationId}.requests.>` | requests | inbound: address the conversation |
 
 **`attachment` is its own leaf family, not a fifth `changes` kind.** It is
-named as functionality — the claim *does* something (it says who serves this
-conversation), the way `changes` and `requests` are named for what they do —
-deliberately not folded under `changes`: agent ephemera (a process attaching,
-detaching, migrating) is not history and must never touch the
-history/staleness stream `changes` drives, and deliberately not called
-`telemetry` either — this is a claim with consequences (agent-spec.md,
-Attachment), not observation a consumer may discard.
+named as functionality: the claim *does* something (it says who serves this
+conversation), the same way `changes` and `requests` are named for what
+they do.
+
+It's deliberately not folded under `changes`. Agent ephemera — a process
+attaching, detaching, migrating — is not history, and must never touch the
+history/staleness stream `changes` drives.
+
+It's deliberately not called `telemetry` either. This is a claim with
+consequences (agent-spec.md, Attachment), not observation a consumer may
+discard.
 
 **The subject spells the type** (nats-spec, Namespacing): a message's type is
 the subject tokens after the class — underscores become token boundaries — so
@@ -168,18 +172,23 @@ exactly that argument):
 
 **Envelope provenance: `instanceId` rides beside `from`, never inside it.**
 Every change event carries the publishing instance's id as envelope
-metadata — the same standing as `ts`, not a content field. `from` is who
-said it, forwarded verbatim from the sender; `instanceId` is which agent
-instance published the change, always the servicer's own, never forwarded.
-Required of every compliant publisher; the schema marks it `.optional()`
-only for producers that predate this rule (add-only tolerance, not licence
-— a new publisher carries it). The two answer different questions and must
-not collapse into one: a zombie instance publishing after it was
-superseded (agent-spec.md, Attachment) still carries a legitimate `from` —
-a human really did say it — but a wrong `instanceId`. For a producer that
-carries the field, this is what makes the two-agents case reconstructible
-from the record instead of merely suspected; a producer that omits it
-leaves that reconstruction undone, same as any other fact never stated.
+metadata — the same standing as `ts`, not a content field.
+
+`from` is who said it, forwarded verbatim from the sender. `instanceId` is
+which agent instance published the change, always the servicer's own,
+never forwarded. The two answer different questions and must not collapse
+into one.
+
+Required of every compliant publisher. The schema marks it `.optional()`
+only for producers that predate this rule — add-only tolerance, not
+licence: a new publisher carries it.
+
+A zombie instance publishing after it was superseded (agent-spec.md,
+Attachment) still carries a legitimate `from` — a human really did say
+it — but a wrong `instanceId`. For a producer that carries the field, this
+is what makes the two-agents case reconstructible from the record instead
+of merely suspected. A producer that omits it leaves that reconstruction
+undone, same as any other fact never stated.
 
 The folds:
 
@@ -277,34 +286,37 @@ terminal appears on the change stream the same as one that arrived over
 
 ## Attachment — `attachment`
 
-Who is serving this conversation, now — the wire shape of the claim
-agent-spec.md's Attachment section conducts itself by. Read that section
-first for the model (singular, unconditionally superseding, no fencing);
-this section is only the shape on this tree.
+Who is serving this conversation, now. This is the wire shape of the claim
+agent-spec.md's Attachment section conducts itself by — read that section
+first for the model (singular, unconditionally superseding, no fencing).
+This section only covers the shape on this tree.
 
 | Event | Fields | Notes |
 |---|---|---|
-| `attached` | `instanceId`, `world`?, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now — supersedes whatever attachment stood before it unconditionally, exactly once per claim (agent-spec.md, Attachment). What makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's current tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for a conversation with nothing in it yet) — so an observer knows where the conversation stands without replaying its own change stream first. `world`, `cwd` and `intervalS` are optional, backward compatible with producers that don't yet carry them; their absence is not a claim otherwise, only that this attach didn't state it |
-| `moved` | `instanceId`, `world`?, `cwd` | a fact about the standing attachment, not a new claim — the working directory changed under it (the wire outcome of a `chdir` request, agent-spec.md, Requests). Valid only from the instance the fold currently holds as standing; folds last-write-wins onto the held attachment's `cwd` |
-| `detached` | `instanceId`, `world`? | released — Ctrl-C, drain, done, or the observable act of a displaced instance complying (agent-spec.md, Attachment). Changes the fold only when `instanceId` matches the *standing* attachment; a crash publishes nothing |
+| `attached` | `instanceId`, `world`?, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now. Supersedes whatever attachment stood before it, unconditionally, exactly once per claim (agent-spec.md, Attachment). This is what makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for an empty conversation) — so an observer knows where the conversation stands without replaying the change stream first. `world`, `cwd` and `intervalS` are optional, for backward compatibility. Their absence is not a claim the value is empty — only that this attach didn't state it |
+| `moved` | `instanceId`, `world`?, `cwd` | a fact about the standing attachment, not a new claim: the working directory changed under it (the wire outcome of a `chdir` request, agent-spec.md, Requests). Valid only from the instance the fold currently holds as standing. Folds last-write-wins onto the held attachment's `cwd` |
+| `detached` | `instanceId`, `world`? | released — Ctrl-C, drain, done, or a displaced instance's observable act of standing down (agent-spec.md, Attachment). Changes the fold only when `instanceId` matches the *standing* attachment. A crash publishes nothing |
 
 **Two mechanisms, two guarantees — keep them apart.** One subject per
 conversation gives every `attached` claim a total order: whichever
-`attached` published last on this subject is standing, from any world, any
-instance, without cross-world timestamp comparison (nats-spec, What
-consumers may assume) — this is why attachment could not stay on the
-world's tree, since two worlds' clocks are not one order. That ordering
-settles who is standing; it is not what makes `moved` and `detached` safe
-to fold. That is the standing-instance gate's job (the Event table above):
-each carries its own `instanceId`, and a fold applies it only when that id
-matches the one currently held. A `moved` or `detached` from any other
-instance is a stale fact about a superseded claim — harmless because the
-gate discards it, not because the subject ordered it correctly.
+`attached` published last on this subject is standing. That holds from any
+world, any instance, with no cross-world timestamp comparison needed
+(nats-spec, What consumers may assume). This is why attachment could not
+stay on the world's tree — two worlds' clocks are not one order.
+
+That ordering only settles who is standing. It doesn't make `moved` and
+`detached` safe to fold — that's the standing-instance gate's job (the
+Event table above). Each carries its own `instanceId`; a fold applies it
+only when that id matches the one currently held.
+
+A `moved` or `detached` from any other instance is a stale fact about a
+superseded claim. It's harmless because the gate discards it — not because
+the subject ordered it correctly.
 
 **`world` and `instanceId` are provenance fields, never address.** Neither
 names this subject — the conversation does. A consumer that wants to know
 which world or instance holds the standing attachment reads it off the
-latest `attached` fact, the same way it reads `cwd`; it never derives
+latest `attached` fact, the same way it reads `cwd`. It never derives
 standing from where the message came from.
 
 ```json
@@ -630,30 +642,31 @@ is always required; the first message of a new conversation states
 ## Migration note
 
 This spec's attachment model — the leaf, the exactly-once rule, `moved` —
-is not implemented anywhere yet. The full surface it touches, pending:
+isn't implemented anywhere yet. Here's the full surface it touches,
+pending:
 
 - **Stream capture** (`mvp/stream-init.sh`) — `conv.v2.*.attachment.>` is a
-  new leaf; existing capture config does not hold it, because the leaf did
-  not exist when that config was last converged.
+  new leaf. Existing capture config does not hold it, because the leaf
+  didn't exist when that config was last converged.
 - **towerd's fold** — reads `agent.v1.*.telemetry.attached`/`detached`
-  today; must move to the conversation tree, add the standing-instance gate
+  today. Must move to the conversation tree, add the standing-instance gate
   (this section), and fold `moved`.
 - **Both frontends** (`frontend-svelte`, `frontend-leptos`) — read towerd's
-  `agents`/`agent` frames (`tower-ws-spec.md`); their folds need the same
-  gate and the `moved` handling, per this repo's parity rule (a wire-visible
-  change lands in both, same piece of work).
+  `agents`/`agent` frames (`tower-ws-spec.md`). Their folds need the same
+  gate and the `moved` handling, per this repo's parity rule: a
+  wire-visible change lands in both, same piece of work.
 - **bridge's publisher** — currently publishes `attached`/`detached` on
-  `agent.v1.{world}.telemetry.>`; must move to the conversation subject,
+  `agent.v1.{world}.telemetry.>`. Must move to the conversation subject,
   adopt the exactly-once-per-claim discipline, and publish `moved` on
   `chdir` instead of re-publishing `attached`.
 - **claude-sdk-cli's `AgentPresence`** — a third producer, publishing
-  `attached` with `cwd` on the old subject today; needs the same move.
+  `attached` with `cwd` on the old subject today. Needs the same move.
 - **The Examples above** (agent-spec.md, Attachment) — become the
   conformance fixtures for the exactly-once rule and its fold, alongside
-  the existing `docs/spec/fixtures/agent/` set (fix lands twice: code and
-  fixture, same commit).
+  the existing `docs/spec/fixtures/agent/` set. Fix lands twice: code and
+  fixture, same commit.
 
-None of this is implied by the spec landing; each is separate, later work.
+None of this is implied by the spec landing. Each is separate, later work.
 
 ## The v1 tree — superseded, still spoken
 

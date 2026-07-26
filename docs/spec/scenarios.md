@@ -312,14 +312,16 @@ The one `service` verb across two calls against the same conversation.
 
 ### a6 — the record a non-conformant publisher leaves
 
-On the new attachment leaf (conversation-spec, Attachment). Read inst-1's own
-publish sequence out of this record: `attached`, `attached`, `detached` — a
-second `attached` with no intervening `detached`, the violation shape
-verbatim (agent-spec, Attachment, example e). A compliant instance knows its
-own state and owns its own publish order across reconnects: its compliance
-`detached` goes out before any re-attach, so no delivery interleaving from
-compliant participants can produce this record. This fixture is what a
-broken publisher leaves behind, not a race the model has to survive.
+On the new attachment leaf (conversation-spec, Attachment). inst-1's own
+publish sequence: `attached`, `attached`, `detached`. A second `attached`
+with no intervening `detached` — the violation shape, verbatim (agent-spec,
+Attachment, example e).
+
+A compliant instance knows its own state and owns its own publish order
+across reconnects. Its `detached` goes out before any re-attach, so no
+delivery interleaving between compliant participants can produce this
+record. This fixture is what a broken publisher leaves behind — not a race
+the model has to survive.
 
 - Exercises: a non-conformant instance's record folded by the plain
   standing-instance gate — no claim ids, no timestamp gates, no special
