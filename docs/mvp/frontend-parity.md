@@ -146,6 +146,22 @@ side by side. Derived from code, not from any prior claim about what's missing.
   Not separately deep-walked pixel-for-pixel; flagged here as covered-but-shallow in case a future pass wants to be
   stricter about it.
 
+### Rail-level visual deviations (closed 27 Jul)
+
+- [x] **Row `lastKind`/age format.** Leptos's row-side only showed age; now shows `lastKind` then age, two
+  spans, matching `RowList.svelte`.
+- [x] **Attached-only status dot.** Leptos omitted the dot when there was no liveness verdict; now defaults to
+  the alive/green class unless the verdict is `Stranded`, matching Svelte.
+- [x] **Untitled-conversation fallback shows the full id.** Fixed in the rail row, the potential-conversation
+  row, the approvals view's conversation link, and the conversation panel header title (a single label
+  expression in `ui/conversation.rs` — touched, but nothing else in that file). `ui/mod.rs`'s `short()` helper
+  is now unused everywhere and was deleted; CSS (`.label`, `.conv-link`, `.conversation-header .title`) already
+  truncates visually with ellipsis, so the full id in the DOM costs nothing on screen.
+- [x] **New/attached-only conversations sort to the top.** Leptos's `<ul class="potential">` now renders before
+  `<ul class="rows">`, matching Svelte's ordering.
+- [x] **Ref-image height cap.** Svelte's `RefView.svelte` loaded-image `<img>` now also caps `max-h-96` (24rem),
+  matching Leptos's `.ref-image` CSS rule; previously width-only.
+
 ### Attachments — resolved by decision, not a port (23 Jul)
 
 - [x] **Resolved the other way: the client never carries `bucket` at all.** The SC ruled the original

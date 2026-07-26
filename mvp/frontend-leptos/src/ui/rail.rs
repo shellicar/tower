@@ -12,7 +12,6 @@ use crate::concerns::rail::Rail;
 use crate::concerns::view::View;
 use crate::time::{Liveness, Millis, age};
 use crate::transport::Status;
-use crate::ui::short;
 use ws_types::WsRow;
 
 fn view_key(tab_name: &str) -> String {
@@ -287,6 +286,48 @@ pub fn RailView(
                     })
                 }}
             </div>
+            <ul class="potential">
+                {move || {
+                    rail.with(|r| {
+                        r.attached_only(now.get())
+                            .into_iter()
+                            .map(|p| {
+                                let conv = p.conv.to_owned();
+                                let conv_click = conv.clone();
+                                let conv_dismiss = conv.clone();
+                                let cwd = p.cwd.map(str::to_owned);
+                                let stranded = p.verdict == Some(Liveness::Stranded);
+                                let dot = if stranded { "stranded" } else { "alive" };
+                                view! {
+                                    <li on:click=move |_| on_toggle.run(conv_click.clone())>
+                                        <span class="row-main">
+                                            <span class=format!("dot {dot}")></span>
+                                            <span class="label">{conv.clone()}</span>
+                                        </span>
+                                        <span class="row-side">
+                                            "served, silent"
+                                            {stranded.then(|| {
+                                                view! {
+                                                    <button
+                                                        class="dismiss"
+                                                        on:click=move |ev| {
+                                                            ev.stop_propagation();
+                                                            on_dismiss_attachment.run(conv_dismiss.clone());
+                                                        }
+                                                    >
+                                                        "Dismiss"
+                                                    </button>
+                                                }
+                                            })}
+                                        </span>
+                                        {cwd.map(|c| view! { <span class="cwd">{c}</span> })}
+                                    </li>
+                                }
+                            })
+                            .collect_view()
+                    })
+                }}
+            </ul>
             <ul class="rows">
                 {move || {
                     let pending = rail.with(|r| r.pending_by_conv(now.get()));
@@ -349,7 +390,7 @@ pub fn RailView(
                                 let rows = section.rows.into_iter().map(|row| {
                                     let conv = row.conv.clone();
                                     let conv_click = conv.clone();
-                                    let label = row.title.clone().unwrap_or_else(|| short(&conv));
+                                    let label = row.title.clone().unwrap_or_else(|| conv.clone());
                                     let is_pending = pending.contains(&conv);
                                     let live = rail.with(|r| r.verdict(&conv, now.get()));
                                     let selected = open_convs.with(|c| c.contains(&conv));
@@ -383,6 +424,7 @@ pub fn RailView(
                                                 <span class="label">{label}</span>
                                             </span>
                                             <span class="row-side">
+                                                <span>{row.last_kind.clone()}</span>
                                                 <span class=format!("age {heat}")>{age(now.get(), row.last_event)}</span>
                                             </span>
                                             {(!chips.is_empty()).then(|| view! { <span class="tag-chips">{chips}</span> })}
@@ -390,51 +432,6 @@ pub fn RailView(
                                     }
                                 }).collect_view();
                                 view! { <>{header}{rows}</> }
-                            })
-                            .collect_view()
-                    })
-                }}
-            </ul>
-            <ul class="potential">
-                {move || {
-                    rail.with(|r| {
-                        r.attached_only(now.get())
-                            .into_iter()
-                            .map(|p| {
-                                let conv = p.conv.to_owned();
-                                let conv_click = conv.clone();
-                                let conv_dismiss = conv.clone();
-                                let cwd = p.cwd.map(str::to_owned);
-                                let stranded = p.verdict == Some(Liveness::Stranded);
-                                let dot = p.verdict.map(|l| match l {
-                                    Liveness::Alive => "alive",
-                                    Liveness::Stranded => "stranded",
-                                });
-                                view! {
-                                    <li on:click=move |_| on_toggle.run(conv_click.clone())>
-                                        <span class="row-main">
-                                            {dot.map(|cls| view! { <span class=format!("dot {cls}")></span> })}
-                                            <span class="label">{short(&conv)}</span>
-                                        </span>
-                                        <span class="row-side">
-                                            "served, silent"
-                                            {stranded.then(|| {
-                                                view! {
-                                                    <button
-                                                        class="dismiss"
-                                                        on:click=move |ev| {
-                                                            ev.stop_propagation();
-                                                            on_dismiss_attachment.run(conv_dismiss.clone());
-                                                        }
-                                                    >
-                                                        "Dismiss"
-                                                    </button>
-                                                }
-                                            })}
-                                        </span>
-                                        {cwd.map(|c| view! { <span class="cwd">{c}</span> })}
-                                    </li>
-                                }
                             })
                             .collect_view()
                     })
