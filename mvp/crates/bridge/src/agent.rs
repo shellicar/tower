@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::anthropic;
+use crate::anthropic::DeltaSink;
 use crate::decisions::{CancelDecision, Conversation, Message, QueryEnd, SayDecision};
 use crate::skills::Skills;
 use bridge::broker::{Broker, BrokerSubscription};
@@ -232,9 +233,9 @@ impl<B: Broker> Publisher<B> {
 /// `conversation` is the servicer's starting tree: `Conversation::default()`
 /// for a spawn, an adopted record for a revival - the loop is identical
 /// either way, because the record constitutes the conversation.
-pub async fn run<B: Broker>(
-    client: Option<async_nats::Client>,
+pub async fn run<B: Broker, D: DeltaSink>(
     broker: B,
+    sink: D,
     requests: B::Subscription,
     config: AgentConfig,
     conversation: Conversation,
@@ -290,8 +291,8 @@ pub async fn run<B: Broker>(
                             // is empty) — honest and distinct from `stale`.
                             SayDecision::Empty => encode_rejected("empty"),
                             SayDecision::Accept => match accept_say(
-                                client.as_ref(),
                                 &broker,
+                                &sink,
                                 &config,
                                 &mut conversation,
                                 &mut skill_hashes,
@@ -360,9 +361,9 @@ pub async fn run<B: Broker>(
 /// before then leaves the record untouched - the cancel revoked the say, not
 /// just the turn.
 #[allow(clippy::too_many_arguments)]
-async fn accept_say<B: Broker>(
-    client: Option<&async_nats::Client>,
+async fn accept_say<B: Broker, D: DeltaSink>(
     broker: &B,
+    sink: &D,
     config: &AgentConfig,
     conversation: &mut Conversation,
     skill_hashes: &mut Option<HashMap<String, u64>>,
@@ -377,25 +378,15 @@ async fn accept_say<B: Broker>(
     // (wrong bucket, dropped upload, unreachable store), so the say rejects
     // outright rather than let the model see a placeholder in place of what
     // the sender actually attached.
-    // `client` is None only under a fake broker in tests, which never send
-    // real attachments; production always spawns with Some, so the
-    // attachment path is exercised exactly as before.
-    match (client, attachments.is_empty()) {
-        (_, true) => {}
-        (Some(client), false) => {
-            if let Err(detail) = crate::objects::validate_fresh(client, &attachments).await {
-                // The wire's reason is a short canonical token, same footing
-                // as `stale`/`empty`/`already_complete`; the detail (which
-                // bucket, which id, which error) is diagnostic and belongs in
-                // the log, not the reply.
-                eprintln!(
-                    "bridge[{}]: attachment validation failed: {detail}",
-                    config.conv.0
-                );
-                return Err("attachment_unavailable".to_string());
-            }
-        }
-        (None, false) => return Err("attachment_unavailable".to_string()),
+    if let Err(detail) = crate::objects::validate_fresh(broker, &attachments).await {
+        // The wire's reason is a short canonical token, same footing as
+        // `stale`/`empty`/`already_complete`; the detail (which bucket, which
+        // id, which error) is diagnostic and belongs in the log, not the reply.
+        eprintln!(
+            "bridge[{}]: attachment validation failed: {detail}",
+            config.conv.0
+        );
+        return Err("attachment_unavailable".to_string());
     }
     let query = uuid::Uuid::new_v4().to_string();
     let turn = uuid::Uuid::new_v4().to_string();
@@ -479,8 +470,8 @@ async fn accept_say<B: Broker>(
     history.push(json!({ "role": "user", "content": user.content }));
 
     let ctx = TurnContext {
-        client: client.cloned(),
         broker: broker.clone(),
+        sink: sink.clone(),
         conv: config.conv.clone(),
         // Read fresh per query: a stdio `model` line reaches even a running
         // conversation, here, on its next say.
@@ -509,20 +500,16 @@ async fn accept_say<B: Broker>(
         // render at this edge (objects.rs) — inside the task, never ahead of
         // the say's reply: on a long image-laden history it takes seconds, and
         // the sender's request deadline must not pay for it.
-        if let Some(client) = &ctx.client {
-            crate::objects::resolve_history(client, &mut history).await;
-        }
+        crate::objects::resolve_history(&ctx.broker, &mut history).await;
         let end = run_query(ctx, history, rx).await;
         let _ = done.send((q, end)).await;
     });
     Ok((query, tx))
 }
 
-struct TurnContext<B: Broker> {
-    /// `None` only under a fake broker in tests, which never drive a query
-    /// far enough to reach the model call; production always sets Some.
-    client: Option<async_nats::Client>,
+struct TurnContext<B: Broker, D: DeltaSink> {
     broker: B,
+    sink: D,
     conv: ConversationId,
     model: String,
     system: Arc<std::sync::RwLock<Option<String>>>,
@@ -569,14 +556,14 @@ pub(crate) async fn cancelled(rx: &mut watch::Receiver<bool>) {
 /// between rounds (the finished turn's commits are on the wire and stand;
 /// only the remaining work is cancelled). Failure is `turn_aborted` + the
 /// aborted closure: honesty over silence.
-async fn run_query<B: Broker>(
-    ctx: TurnContext<B>,
+async fn run_query<B: Broker, D: DeltaSink>(
+    ctx: TurnContext<B, D>,
     mut history: Vec<Value>,
     mut cancel: watch::Receiver<bool>,
 ) -> QueryEnd {
     let TurnContext {
-        client,
         broker,
+        sink,
         conv,
         model,
         system,
@@ -637,7 +624,7 @@ async fn run_query<B: Broker>(
         let system = system.read().unwrap().clone();
         let outcome = tokio::select! {
             outcome = anthropic::stream_turn(
-                client.as_ref().expect("nats client required to run a turn"),
+                sink,
                 http,
                 conv,
                 auth,
@@ -1353,50 +1340,12 @@ async fn run_tool_round<B: Broker>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anthropic::NoopDeltaSink;
     use bridge::broker::BrokerMessage;
+    use bridge::broker::fake::{FakeBroker, FakeSubscription, TestScratch};
     use std::collections::VecDeque;
-    use std::sync::Mutex;
 
-    /// The only fake is the Broker: records every publish, in order, and
-    /// hands the request loop a scripted subscription.
-    #[derive(Clone, Default)]
-    struct FakeBroker {
-        published: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
-    }
-
-    #[derive(Default)]
-    struct FakeSubscription {
-        queued: VecDeque<BrokerMessage>,
-    }
-
-    impl BrokerSubscription for FakeSubscription {
-        async fn next(&mut self) -> Option<BrokerMessage> {
-            self.queued.pop_front()
-        }
-    }
-
-    impl Broker for FakeBroker {
-        type Subscription = FakeSubscription;
-
-        async fn publish(&self, subject: String, payload: Vec<u8>) -> Result<(), String> {
-            self.published.lock().unwrap().push((subject, payload));
-            Ok(())
-        }
-
-        async fn subscribe(&self, _subject: String) -> Result<Self::Subscription, String> {
-            Ok(FakeSubscription::default())
-        }
-
-        async fn replay(
-            &self,
-            _stream: String,
-            _filter_subject: String,
-        ) -> Result<Vec<BrokerMessage>, String> {
-            Ok(Vec::new())
-        }
-    }
-
-    fn config(conv: &str) -> AgentConfig {
+    fn config(conv: &str, scratch: &TestScratch) -> AgentConfig {
         AgentConfig {
             conv: ConversationId(conv.to_string()),
             model: Arc::new(std::sync::RwLock::new("claude-sonnet-5".to_string())),
@@ -1405,21 +1354,9 @@ mod tests {
             auth: crate::anthropic::Auth::ApiKey,
             http: reqwest::Client::new(),
             skills_root: Arc::new(std::sync::RwLock::new(std::path::PathBuf::new())),
-            refs: crate::refs::open(&std::env::temp_dir().join(format!(
-                "bridge-agent-test-refs-{}.db",
-                uuid::Uuid::new_v4()
-            )))
-            .unwrap(),
-            memory: crate::memory::open(&std::env::temp_dir().join(format!(
-                "bridge-agent-test-memory-{}.db",
-                uuid::Uuid::new_v4()
-            )))
-            .unwrap(),
-            history: crate::history::open(&std::env::temp_dir().join(format!(
-                "bridge-agent-test-history-{}.db",
-                uuid::Uuid::new_v4()
-            )))
-            .unwrap(),
+            refs: crate::refs::open(&scratch.path("refs.db")).unwrap(),
+            memory: crate::memory::open(&scratch.path("memory.db")).unwrap(),
+            history: crate::history::open(&scratch.path("history.db")).unwrap(),
             thinking_budget: None,
             attach: None,
             cwd: Arc::new(std::sync::RwLock::new(std::env::temp_dir())),
@@ -1436,6 +1373,7 @@ mod tests {
     #[tokio::test]
     async fn a_cancel_of_an_unknown_query_replies_rejected_not_found() {
         let broker = FakeBroker::default();
+        let scratch = TestScratch::new("agent");
         let mut queued = VecDeque::new();
         queued.push_back(BrokerMessage {
             subject: "conv.v2.conv-t.requests.cancel".to_string(),
@@ -1447,21 +1385,21 @@ mod tests {
         let requests = FakeSubscription { queued };
 
         run(
-            None,
             broker.clone(),
+            NoopDeltaSink,
             requests,
-            config("conv-t"),
+            config("conv-t", &scratch),
             Conversation::default(),
         )
         .await;
 
         let published = broker.published.lock().unwrap().clone();
         let (subject, payload) = published
-            .iter()
+            .into_iter()
             .find(|(s, _)| s == "reply-1")
             .expect("a reply was published to the request's own reply subject");
         assert_eq!(subject, "reply-1");
-        let value: serde_json::Value = serde_json::from_slice(payload).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&payload).unwrap();
         assert_eq!(value["rejected"], true);
         assert_eq!(value["reason"], "not_found");
     }

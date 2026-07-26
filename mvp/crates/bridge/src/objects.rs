@@ -24,6 +24,8 @@
 use base64::Engine;
 use serde_json::{Value, json};
 
+use bridge::broker::Broker;
+
 pub(crate) fn is_object_source(block: &Value) -> bool {
     block["source"]["type"] == "object"
 }
@@ -31,8 +33,8 @@ pub(crate) fn is_object_source(block: &Value) -> bool {
 /// Fetch one `object`-source block's bytes from the bucket it names. No
 /// fallback: a block naming no bucket is unresolvable, not a guess away from
 /// resolvable. Never degrades — the caller decides what a failure means.
-async fn fetch_object(
-    client: Option<&async_nats::Client>,
+async fn fetch_object<B: Broker>(
+    broker: Option<&B>,
     source: &Value,
 ) -> Result<(Vec<u8>, String), String> {
     let media_type = source["mediaType"]
@@ -45,24 +47,12 @@ async fn fetch_object(
     let Some(bucket) = source["bucket"].as_str() else {
         return Err("attachment reference carries no bucket".to_string());
     };
-    let Some(client) = client else {
+    let Some(broker) = broker else {
         return Err("no object store client configured".to_string());
     };
-    let js = async_nats::jetstream::new(client.clone());
-    let store = js
-        .get_object_store(bucket)
-        .await
-        .map_err(|e| format!("object store {bucket:?} unavailable: {e}"))?;
-    let mut object = store
-        .get(id)
-        .await
-        .map_err(|e| format!("attachment {id:?} not found in {bucket:?}: {e}"))?;
-    use tokio::io::AsyncReadExt;
-    let mut bytes = Vec::new();
-    object
-        .read_to_end(&mut bytes)
-        .await
-        .map_err(|e| format!("attachment {id:?} read failed: {e}"))?;
+    let bytes = broker
+        .fetch_object(bucket.to_string(), id.to_string())
+        .await?;
     Ok((bytes, media_type))
 }
 
@@ -85,7 +75,7 @@ async fn condition(block_type: &str, bytes: Vec<u8>, media_type: String) -> (Vec
 /// source kinds and failed fetches degrade to a placeholder text block
 /// carrying what the block itself states (media type, size) — this is
 /// replay, so a failure here is ageing, not a live bug (module doc).
-pub async fn resolve_history(client: &async_nats::Client, history: &mut [Value]) {
+pub async fn resolve_history<B: Broker>(broker: &B, history: &mut [Value]) {
     // Cheap scan first: most requests carry no reference blocks at all.
     let needs = history.iter().any(|m| {
         m["content"]
@@ -106,13 +96,13 @@ pub async fn resolve_history(client: &async_nats::Client, history: &mut [Value])
         slots.extend(blocks.iter_mut().filter(|b| is_object_source(b)));
     }
     let resolved =
-        futures::future::join_all(slots.iter().map(|b| resolve_one(Some(client), b))).await;
+        futures::future::join_all(slots.iter().map(|b| resolve_one(Some(broker), b))).await;
     for (slot, value) in slots.into_iter().zip(resolved) {
         *slot = value;
     }
 }
 
-async fn resolve_one(client: Option<&async_nats::Client>, block: &Value) -> Value {
+async fn resolve_one<B: Broker>(broker: Option<&B>, block: &Value) -> Value {
     let source = &block["source"];
     let media_type = source["mediaType"]
         .as_str()
@@ -125,7 +115,7 @@ async fn resolve_one(client: Option<&async_nats::Client>, block: &Value) -> Valu
         })
     };
 
-    let Ok((bytes, media_type)) = fetch_object(client, source).await else {
+    let Ok((bytes, media_type)) = fetch_object(broker, source).await else {
         return placeholder();
     };
     let block_type = block["type"].as_str().unwrap_or("image").to_string();
@@ -143,13 +133,10 @@ async fn resolve_one(client: Option<&async_nats::Client>, block: &Value) -> Valu
 /// there (no bucket named, wrong bucket, dropped upload, unreachable store),
 /// so the whole say must reject rather than let the model see a placeholder
 /// in place of what the sender actually attached (module doc).
-pub async fn validate_fresh(
-    client: &async_nats::Client,
-    attachments: &[Value],
-) -> Result<(), String> {
+pub async fn validate_fresh<B: Broker>(broker: &B, attachments: &[Value]) -> Result<(), String> {
     for block in attachments {
         if is_object_source(block) {
-            fetch_object(Some(client), &block["source"]).await?;
+            fetch_object(Some(broker), &block["source"]).await?;
         }
     }
     Ok(())
@@ -158,6 +145,7 @@ pub async fn validate_fresh(
 #[cfg(test)]
 mod tests {
     use super::{is_object_source, resolve_one};
+    use bridge::broker::fake::FakeBroker;
     use serde_json::json;
 
     #[test]
@@ -181,7 +169,7 @@ mod tests {
             "type": "image",
             "source": { "type": "object", "id": "abc", "bucket": "attach", "mediaType": "image/png", "size": 2048 },
         });
-        let out = resolve_one(None, &block).await;
+        let out = resolve_one::<FakeBroker>(None, &block).await;
         assert_eq!(out["type"], "text");
         let text = out["text"].as_str().unwrap();
         assert!(text.contains("image/png"), "media type absent: {text:?}");
@@ -194,7 +182,7 @@ mod tests {
             "type": "document",
             "source": { "type": "object", "bucket": "attach", "mediaType": "application/pdf", "size": 10 },
         });
-        let out = resolve_one(None, &block).await;
+        let out = resolve_one::<FakeBroker>(None, &block).await;
         assert_eq!(out["type"], "text");
         assert!(out["text"].as_str().unwrap().contains("application/pdf"));
     }
@@ -205,7 +193,26 @@ mod tests {
             "type": "image",
             "source": { "type": "object", "id": "abc", "mediaType": "image/png", "size": 2048 },
         });
-        let out = resolve_one(None, &block).await;
+        let out = resolve_one::<FakeBroker>(None, &block).await;
         assert_eq!(out["type"], "text");
+    }
+
+    /// Widened onto the seam because a test needs it: a real broker's fetch
+    /// succeeding degrades to nothing — the block resolves inline.
+    #[tokio::test]
+    async fn a_fetch_that_succeeds_resolves_to_a_base64_block() {
+        let broker = FakeBroker::default();
+        broker
+            .fetch_data
+            .lock()
+            .unwrap()
+            .insert(("attach".to_string(), "abc".to_string()), b"hello".to_vec());
+        let block = json!({
+            "type": "document",
+            "source": { "type": "object", "id": "abc", "bucket": "attach", "mediaType": "text/plain", "size": 5 },
+        });
+        let out = resolve_one(Some(&broker), &block).await;
+        assert_eq!(out["type"], "document");
+        assert_eq!(out["source"]["media_type"], "text/plain");
     }
 }
