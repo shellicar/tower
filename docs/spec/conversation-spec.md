@@ -293,9 +293,17 @@ This section only covers the shape on this tree.
 
 | Event | Fields | Notes |
 |---|---|---|
-| `attached` | `instanceId`, `world`?, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now. Supersedes whatever attachment stood before it, unconditionally, exactly once per claim (agent-spec.md, Attachment). This is what makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for an empty conversation) — so an observer knows where the conversation stands without replaying the change stream first. `world`, `cwd` and `intervalS` are optional, for backward compatibility. Their absence is not a claim the value is empty — only that this attach didn't state it |
-| `moved` | `instanceId`, `world`?, `cwd` | a fact about the standing attachment, not a new claim: the working directory changed under it (the wire outcome of a `chdir` request, agent-spec.md, Requests). Valid only from the instance the fold currently holds as standing. Folds last-write-wins onto the held attachment's `cwd` |
-| `detached` | `instanceId`, `world`? | released — Ctrl-C, drain, done, or a displaced instance's observable act of standing down (agent-spec.md, Attachment). Changes the fold only when `instanceId` matches the *standing* attachment. A crash publishes nothing |
+| `attached` | `instanceId`, `world`?, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now. Supersedes whatever attachment stood before it, unconditionally, exactly once per claim (agent-spec.md, Attachment). This is what makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for an empty conversation) — so an observer knows where the conversation stands without replaying the change stream first. `world` is required of every compliant publisher (below); `cwd` and `intervalS` are optional for backward compatibility, and their absence is not a claim the value is empty — only that this attach didn't state it |
+| `moved` | `instanceId`, `world`?, `cwd` | a fact about the standing attachment, not a new claim: the working directory changed under it (the wire outcome of a `chdir` request, agent-spec.md, Requests). Valid only from the instance identity — `(world, instanceId)`, or bare `instanceId` if either side omits `world` — the fold currently holds as standing. Folds last-write-wins onto the held attachment's `cwd` |
+| `detached` | `instanceId`, `world`? | released — Ctrl-C, drain, done, or a displaced instance's observable act of standing down (agent-spec.md, Attachment). Changes the fold only when its identity matches the *standing* attachment's, same rule as `moved`. A crash publishes nothing |
+
+**`world` is required of every compliant publisher.** Same tolerance as
+envelope `instanceId` (this spec, The change stream): the schema marks it
+`.optional()` only for producers that predate this rule — add-only
+tolerance, not licence. Reason: instance identity is the pair
+`(world, instanceId)` (agent-spec.md, The entity), so both the liveness
+join and the standing-instance gate compare the pair. An `attached` without
+`world` names only half an identity.
 
 **Two mechanisms, two guarantees — keep them apart.** One subject per
 conversation gives every `attached` claim a total order: whichever
@@ -306,8 +314,10 @@ stay on the world's tree — two worlds' clocks are not one order.
 
 That ordering only settles who is standing. It doesn't make `moved` and
 `detached` safe to fold — that's the standing-instance gate's job (the
-Event table above). Each carries its own `instanceId`; a fold applies it
-only when that id matches the one currently held.
+Event table above). Each carries its own identity, the `(world,
+instanceId)` pair; a fold applies it only when that pair matches the one
+currently held. If either side omits `world`, the gate falls back to bare
+`instanceId`: degraded, not broken.
 
 A `moved` or `detached` from any other instance is a stale fact about a
 superseded claim. It's harmless because the gate discards it — not because
@@ -593,7 +603,10 @@ export const conversationChange = {
 
 // conv.v2.{conversationId}.attachment.> — the wire shape of the model
 // agent-spec.md conducts (singular, unconditionally superseding). world is
-// provenance, never address, exactly like instanceId.
+// provenance, never address, exactly like instanceId — but together they
+// are the instance identity (agent-spec.md, The entity), so world is
+// required of every compliant publisher; optional here only for producers
+// that predate this rule.
 export const conversationAttachment = {
   'attached': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional(), cwd: z.string().optional(), tip: z.string().nullable().optional(), intervalS: z.number().int().positive().optional() }),
   'moved': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional(), cwd: z.string() }),

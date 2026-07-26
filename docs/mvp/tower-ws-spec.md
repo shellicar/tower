@@ -364,13 +364,15 @@ agent facts never touch `lastEvent`.
 One wire fact, one packet. A pulse is one instance fact however many
 conversations the instance serves — it never fans out per conversation.
 
-Upsert into the client's two maps: `instanceId → pulse`, `conv →
-attachment`.
+Upsert into the client's two maps: `(world, instanceId) → pulse`, `conv →
+attachment`. Instance identity is the pair, not bare `instanceId` (agent-spec.md,
+The entity) — if either side of a comparison omits `world`, the map keys and
+the gates below fall back to bare `instanceId`: degraded, not broken.
 
 - `attached` **replaces the held attachment for that `conv` wholesale**.
   There is exactly one; never a set to merge into.
 - `moved` updates the held attachment's `cwd` **in place**, only when its
-  `instanceId` matches the one currently held — else it's a no-op
+  identity matches the one currently held — else it's a no-op
   (conversation-spec.md, Attachment: a fact about the standing claim, never
   a new one).
 - `detached` clears the held attachment only under the same match.

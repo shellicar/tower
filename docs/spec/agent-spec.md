@@ -21,11 +21,17 @@ durable names for places; the processes standing in them are disposable.
   world id. Deployer-chosen, never centrally registered; a creator generates
   a fresh world id per container exactly as it pre-generates a
   conversationId.
-- **agent instance** — one process currently serving a world. Identified by
-  `instanceId` in payloads, never in subjects: address a process and you
-  inherit its lifecycle (nats-spec, first principle). A restarted bridge is a
-  new instance in the same world — it resubscribes, and the world's address
-  never changed.
+- **agent instance** — a process's presence in a world, identified by the
+  pair `(world, instanceId)` — in payloads, never in subjects: address a
+  process and you inherit its lifecycle (nats-spec, first principle).
+  `instanceId` is minted fresh per process and unique within its world; the
+  pair is then unique everywhere, since worlds are. The format is free — a
+  pid qualifies, a uuid is typical — the spec mandates uniqueness within
+  the world, nothing else. Never reused or inherited across a restart: a
+  restarted process is a new instance in the same world — it resubscribes,
+  and the world's address never changed. A process standing in several
+  worlds is simply several instances that share a process, each with its
+  own pulses and its own liveness.
 
 One process may serve a world alone; several may share one; one process
 serving many conversations is still one instance. The wire does not care:
@@ -123,7 +129,7 @@ A changed `cwd` is not a new claim. It's a fact about the claim already open, so
 
 A compliant instance watches the attachment leaf for every conversation it serves (`conversation-spec.md`, Attachment). When it sees itself displaced — another instanceId's `attached` for a conversation it holds — it stops serving and publishes `detached`.
 
-That `detached` folds as nothing: the supersession already ended its claim. A `detached` only changes the fold when its instanceId still matches the standing attachment. An instance detaching after it's already superseded is stating a fact about its own past claim, not retracting the current one.
+That `detached` folds as nothing: the supersession already ended its claim. A `detached` only changes the fold when its identity — the `(world, instanceId)` pair, or bare `instanceId` if either side omits `world` — still matches the standing attachment's. An instance detaching after it's already superseded is stating a fact about its own past claim, not retracting the current one.
 
 It publishes `detached` anyway, as the observable act of compliance — without it, a crash and a violation would be impossible to tell apart. An instance also publishes `detached` per conversation on clean exit (Ctrl-C, drain), same as today.
 
