@@ -27,41 +27,96 @@ pub struct BrokerMessage {
     pub reply: Option<String>,
 }
 
-/// A live source of messages: pull the next one, or `None` when it has
-/// ended (the broker dropped the subscription, the replay's backlog is
-/// exhausted, or — for a fake — the scripted messages are used up).
+/// The seam's own error type: every operation names what it was doing, and
+/// carries its cause (`#[source]`) so the chain survives through `?` and
+/// `anyhow` rather than flattening to a message-only string.
+#[derive(Debug, thiserror::Error)]
+pub enum BrokerError {
+    #[error("publish failed")]
+    Publish(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("subscribe failed")]
+    Subscribe(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("capture stream {stream:?} unavailable")]
+    StreamUnavailable {
+        stream: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("replay consumer setup failed")]
+    ReplaySetup(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("replay read failed")]
+    ReplayRead(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("attachment reference carries no id")]
+    ObjectNoId,
+    #[error("attachment reference carries no bucket")]
+    ObjectNoBucket,
+    #[error("no object store client configured")]
+    ObjectStoreAbsent,
+    #[error("object store {bucket:?} unavailable")]
+    ObjectStoreUnavailable {
+        bucket: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("attachment {id:?} not found in {bucket:?}")]
+    ObjectNotFound {
+        id: String,
+        bucket: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("attachment {id:?} read failed")]
+    ObjectReadFailed {
+        id: String,
+        #[source]
+        source: std::io::Error,
+    },
+    /// A fake's own scripted failure — never produced by `NatsBroker`.
+    #[error("{0}")]
+    Fake(String),
+}
+
+/// A live subscription: pull the next message, or `None` when it has ended
+/// (the broker dropped it, or — for a fake — the scripted messages are used
+/// up). Ordinary pub/sub delivery has no per-message failure mode; a
+/// dropped connection just ends the stream.
 pub trait BrokerSubscription: Send {
     fn next(&mut self) -> impl Future<Output = Option<BrokerMessage>> + Send;
 }
 
+/// A replay's own source: unlike a subscription, a read can fail mid-
+/// backlog, and that must never be indistinguishable from the backlog
+/// simply ending — an adopt missing its tail because a read error was
+/// swallowed is worse than an adopt that fails outright.
+pub trait BrokerReplay: Send {
+    fn next(&mut self) -> impl Future<Output = Option<Result<BrokerMessage, BrokerError>>> + Send;
+}
+
 pub trait Broker: Clone + Send + Sync + 'static {
     type Subscription: BrokerSubscription;
-    /// Adopt's replay source: frames pulled one at a time so a caller can
-    /// tee and fold each as it arrives, never holding the whole backlog's
-    /// raw bytes at once (a raw message can run to ~17.8 MB — workload
-    /// facts).
-    type Replay: BrokerSubscription;
+    type Replay: BrokerReplay;
 
     fn publish(
         &self,
         subject: String,
         payload: Vec<u8>,
-    ) -> impl Future<Output = Result<(), String>> + Send;
+    ) -> impl Future<Output = Result<(), BrokerError>> + Send;
 
     fn subscribe(
         &self,
         subject: String,
-    ) -> impl Future<Output = Result<Self::Subscription, String>> + Send;
+    ) -> impl Future<Output = Result<Self::Subscription, BrokerError>> + Send;
 
     /// Open a JetStream capture stream's backlog, filtered to
     /// `filter_subject`, in stream order — adopt's replay. Bounded: the
     /// returned source yields exactly the backlog pending at consumer
-    /// creation, once.
+    /// creation, once; an empty backlog yields a source that ends
+    /// immediately rather than reaching for the underlying client at all.
     fn replay(
         &self,
         stream: String,
         filter_subject: String,
-    ) -> impl Future<Output = Result<Self::Replay, String>> + Send;
+    ) -> impl Future<Output = Result<Self::Replay, BrokerError>> + Send;
 
     /// Fetch one attachment's bytes from the transit object store
     /// (objects.rs's `fetch_object`/`resolve_history`/`validate_fresh`) —
@@ -71,7 +126,7 @@ pub trait Broker: Clone + Send + Sync + 'static {
         &self,
         bucket: String,
         id: String,
-    ) -> impl Future<Output = Result<Vec<u8>, String>> + Send;
+    ) -> impl Future<Output = Result<Vec<u8>, BrokerError>> + Send;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,21 +149,52 @@ impl BrokerSubscription for NatsSubscription {
     }
 }
 
-/// A replay's live source: the JetStream pull consumer's own message
-/// stream, mapped frame by frame — nothing buffered ahead of what the
-/// caller has already pulled.
-pub struct NatsReplay(async_nats::jetstream::consumer::pull::Batch);
+/// Whether an empty backlog is worth reaching for the client at all — pure,
+/// so the guard against calling `fetch().max_messages(0)` (unproven
+/// semantics; never exercised pre-refactor either, since the old code took
+/// the same `pending == 0` early return) is provable without a live broker.
+#[derive(Debug, PartialEq)]
+enum ReplayPlan {
+    Empty,
+    Fetch(usize),
+}
 
-impl BrokerSubscription for NatsReplay {
-    async fn next(&mut self) -> Option<BrokerMessage> {
+fn replay_plan(pending: usize) -> ReplayPlan {
+    if pending == 0 {
+        ReplayPlan::Empty
+    } else {
+        ReplayPlan::Fetch(pending)
+    }
+}
+
+/// A replay's live source: either nothing was pending at consumer creation
+/// (`Empty`, ending immediately), or the JetStream pull consumer's own
+/// message stream, mapped frame by frame. A read failure is surfaced, not
+/// swallowed — `Some(Err(_))`, never folded into "the backlog ended".
+pub enum NatsReplay {
+    Empty,
+    Batch(Box<async_nats::jetstream::consumer::pull::Batch>),
+}
+
+impl BrokerReplay for NatsReplay {
+    async fn next(&mut self) -> Option<Result<BrokerMessage, BrokerError>> {
         use futures::StreamExt;
-        // A read failure mid-replay: nothing more to offer honestly.
-        let msg = self.0.next().await?.ok()?;
-        Some(BrokerMessage {
-            subject: msg.subject.to_string(),
-            payload: msg.payload.to_vec(),
-            reply: None,
-        })
+        match self {
+            NatsReplay::Empty => None,
+            NatsReplay::Batch(batch) => {
+                let msg = batch.next().await?;
+                Some(match msg {
+                    Ok(msg) => Ok(BrokerMessage {
+                        subject: msg.subject.to_string(),
+                        payload: msg.payload.to_vec(),
+                        reply: None,
+                    }),
+                    // Batch's Item error is already `async_nats::Error`
+                    // (`Box<dyn Error + Send + Sync>`) — no double-boxing.
+                    Err(e) => Err(BrokerError::ReplayRead(e)),
+                })
+            }
+        }
     }
 }
 
@@ -116,86 +202,113 @@ impl Broker for NatsBroker {
     type Subscription = NatsSubscription;
     type Replay = NatsReplay;
 
-    async fn publish(&self, subject: String, payload: Vec<u8>) -> Result<(), String> {
+    async fn publish(&self, subject: String, payload: Vec<u8>) -> Result<(), BrokerError> {
         self.client
             .publish(subject, payload.into())
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| BrokerError::Publish(Box::new(e)))
     }
 
-    async fn subscribe(&self, subject: String) -> Result<Self::Subscription, String> {
+    async fn subscribe(&self, subject: String) -> Result<Self::Subscription, BrokerError> {
         self.client
             .subscribe(subject)
             .await
             .map(NatsSubscription)
-            .map_err(|e| e.to_string())
+            .map_err(|e| BrokerError::Subscribe(Box::new(e)))
     }
 
-    async fn replay(&self, stream: String, filter_subject: String) -> Result<Self::Replay, String> {
+    async fn replay(
+        &self,
+        stream: String,
+        filter_subject: String,
+    ) -> Result<Self::Replay, BrokerError> {
         let js = async_nats::jetstream::new(self.client.clone());
         let handle = js
             .get_stream(&stream)
             .await
-            .map_err(|e| format!("capture stream {stream:?} unavailable: {e}"))?;
+            .map_err(|e| BrokerError::StreamUnavailable {
+                stream: stream.clone(),
+                source: Box::new(e),
+            })?;
         let consumer = handle
             .create_consumer(async_nats::jetstream::consumer::pull::Config {
                 filter_subject,
                 deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
+                // Ephemeral (no durable_name): explicit, not the crate
+                // default reached by omission, since this is now a trait
+                // contract — the server reclaims it if a replay is ever
+                // abandoned mid-adopt (a crash between creation and drain).
+                inactive_threshold: std::time::Duration::from_secs(30),
                 ..Default::default()
             })
             .await
-            .map_err(|e| e.to_string())?;
-        // num_pending at creation is the full backlog: read exactly that
-        // many, one frame at a time, as the caller drains it.
+            .map_err(|e| BrokerError::ReplaySetup(Box::new(e)))?;
+        // num_pending at creation is the full backlog. An empty one never
+        // reaches for `fetch().max_messages(0)` — its semantics are
+        // unproven here and untested pre-refactor too, since the old code
+        // took this same early return before ever calling fetch.
         let pending = consumer.cached_info().num_pending as usize;
-        let messages = consumer
-            .fetch()
-            .max_messages(pending)
-            .messages()
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(NatsReplay(messages))
+        match replay_plan(pending) {
+            ReplayPlan::Empty => Ok(NatsReplay::Empty),
+            ReplayPlan::Fetch(pending) => {
+                let messages = consumer
+                    .fetch()
+                    .max_messages(pending)
+                    .messages()
+                    .await
+                    .map_err(|e| BrokerError::ReplaySetup(Box::new(e)))?;
+                Ok(NatsReplay::Batch(Box::new(messages)))
+            }
+        }
     }
 
-    async fn fetch_object(&self, bucket: String, id: String) -> Result<Vec<u8>, String> {
+    async fn fetch_object(&self, bucket: String, id: String) -> Result<Vec<u8>, BrokerError> {
         let js = async_nats::jetstream::new(self.client.clone());
-        let store = js
-            .get_object_store(&bucket)
-            .await
-            .map_err(|e| format!("object store {bucket:?} unavailable: {e}"))?;
+        let store = js.get_object_store(&bucket).await.map_err(|e| {
+            BrokerError::ObjectStoreUnavailable {
+                bucket: bucket.clone(),
+                source: Box::new(e),
+            }
+        })?;
         let mut object = store
             .get(&id)
             .await
-            .map_err(|e| format!("attachment {id:?} not found in {bucket:?}: {e}"))?;
+            .map_err(|e| BrokerError::ObjectNotFound {
+                id: id.clone(),
+                bucket: bucket.clone(),
+                source: Box::new(e),
+            })?;
         use tokio::io::AsyncReadExt;
         let mut bytes = Vec::new();
         object
             .read_to_end(&mut bytes)
             .await
-            .map_err(|e| format!("attachment {id:?} read failed: {e}"))?;
+            .map_err(|source| BrokerError::ObjectReadFailed { id, source })?;
         Ok(bytes)
     }
 }
 
 // ---------------------------------------------------------------------------
 
-/// Test doubles, shared across every module's tests (objects.rs, agent.rs,
-/// main.rs) rather than each defining its own copy. Not `#[cfg(test)]`:
-/// bridge's binary target links this library as an ordinary dependency, so
-/// a `cfg(test)` item here is invisible to the binary's own test build —
-/// these stay plain `pub` so both sides can reach the one definition.
+/// Test doubles, compiled only for a test build: `cfg(test)` covers the
+/// library's own unit tests, and `feature = "test-fakes"` covers the
+/// binary target's tests (a `cfg(test)` item in this library is invisible
+/// to the binary's test compilation, which otherwise links the library as
+/// an ordinary, non-test dependency — `just test` enables the feature for
+/// exactly this). Never compiled into a shipped build either way.
+#[cfg(any(test, feature = "test-fakes"))]
 pub mod fake {
-    use super::{Broker, BrokerMessage, BrokerSubscription};
+    use super::{Broker, BrokerError, BrokerMessage, BrokerReplay, BrokerSubscription};
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
+
+    type Published = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
+    type FetchData = Arc<Mutex<std::collections::HashMap<(String, String), Vec<u8>>>>;
 
     /// The only fake in a test is the Broker (CLAUDE.md's house rule).
     /// Records every subscribe/publish call, in order (`calls`) and every
     /// publish's full payload (`published`), and answers subscribe/replay
     /// from scripted queues a test seeds up front.
-    type Published = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
-    type FetchData = Arc<Mutex<std::collections::HashMap<(String, String), Vec<u8>>>>;
-
     #[derive(Clone, Default)]
     pub struct FakeBroker {
         pub calls: Arc<Mutex<Vec<String>>>,
@@ -216,11 +329,22 @@ pub mod fake {
         }
     }
 
+    #[derive(Default)]
+    pub struct FakeReplay {
+        pub queued: VecDeque<BrokerMessage>,
+    }
+
+    impl BrokerReplay for FakeReplay {
+        async fn next(&mut self) -> Option<Result<BrokerMessage, BrokerError>> {
+            self.queued.pop_front().map(Ok)
+        }
+    }
+
     impl Broker for FakeBroker {
         type Subscription = FakeSubscription;
-        type Replay = FakeSubscription;
+        type Replay = FakeReplay;
 
-        async fn publish(&self, subject: String, payload: Vec<u8>) -> Result<(), String> {
+        async fn publish(&self, subject: String, payload: Vec<u8>) -> Result<(), BrokerError> {
             self.calls
                 .lock()
                 .unwrap()
@@ -229,13 +353,13 @@ pub mod fake {
             Ok(())
         }
 
-        async fn subscribe(&self, subject: String) -> Result<Self::Subscription, String> {
+        async fn subscribe(&self, subject: String) -> Result<Self::Subscription, BrokerError> {
             self.calls
                 .lock()
                 .unwrap()
                 .push(format!("subscribe:{subject}"));
             if self.subscribe_fails {
-                Err("boom".to_string())
+                Err(BrokerError::Fake("boom".to_string()))
             } else {
                 Ok(FakeSubscription::default())
             }
@@ -245,19 +369,21 @@ pub mod fake {
             &self,
             _stream: String,
             _filter_subject: String,
-        ) -> Result<Self::Replay, String> {
-            Ok(FakeSubscription {
+        ) -> Result<Self::Replay, BrokerError> {
+            Ok(FakeReplay {
                 queued: self.replay_data.lock().unwrap().clone(),
             })
         }
 
-        async fn fetch_object(&self, bucket: String, id: String) -> Result<Vec<u8>, String> {
+        async fn fetch_object(&self, bucket: String, id: String) -> Result<Vec<u8>, BrokerError> {
             self.fetch_data
                 .lock()
                 .unwrap()
                 .get(&(bucket.clone(), id.clone()))
                 .cloned()
-                .ok_or_else(|| format!("no fixture fetch data for {bucket:?}/{id:?}"))
+                .ok_or(BrokerError::Fake(format!(
+                    "no fixture fetch data for {bucket:?}/{id:?}"
+                )))
         }
     }
 
@@ -285,5 +411,20 @@ pub mod fake {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ReplayPlan, replay_plan};
+
+    #[test]
+    fn replay_plan_is_empty_when_nothing_is_pending() {
+        assert_eq!(replay_plan(0), ReplayPlan::Empty);
+    }
+
+    #[test]
+    fn replay_plan_fetches_the_pending_count_otherwise() {
+        assert_eq!(replay_plan(5), ReplayPlan::Fetch(5));
     }
 }

@@ -24,7 +24,7 @@
 use base64::Engine;
 use serde_json::{Value, json};
 
-use bridge::broker::Broker;
+use bridge::broker::{Broker, BrokerError};
 
 pub(crate) fn is_object_source(block: &Value) -> bool {
     block["source"]["type"] == "object"
@@ -36,19 +36,19 @@ pub(crate) fn is_object_source(block: &Value) -> bool {
 async fn fetch_object<B: Broker>(
     broker: Option<&B>,
     source: &Value,
-) -> Result<(Vec<u8>, String), String> {
+) -> Result<(Vec<u8>, String), BrokerError> {
     let media_type = source["mediaType"]
         .as_str()
         .unwrap_or("application/octet-stream")
         .to_string();
     let Some(id) = source["id"].as_str() else {
-        return Err("attachment reference carries no id".to_string());
+        return Err(BrokerError::ObjectNoId);
     };
     let Some(bucket) = source["bucket"].as_str() else {
-        return Err("attachment reference carries no bucket".to_string());
+        return Err(BrokerError::ObjectNoBucket);
     };
     let Some(broker) = broker else {
-        return Err("no object store client configured".to_string());
+        return Err(BrokerError::ObjectStoreAbsent);
     };
     let bytes = broker
         .fetch_object(bucket.to_string(), id.to_string())
@@ -133,7 +133,10 @@ async fn resolve_one<B: Broker>(broker: Option<&B>, block: &Value) -> Value {
 /// there (no bucket named, wrong bucket, dropped upload, unreachable store),
 /// so the whole say must reject rather than let the model see a placeholder
 /// in place of what the sender actually attached (module doc).
-pub async fn validate_fresh<B: Broker>(broker: &B, attachments: &[Value]) -> Result<(), String> {
+pub async fn validate_fresh<B: Broker>(
+    broker: &B,
+    attachments: &[Value],
+) -> Result<(), BrokerError> {
     for block in attachments {
         if is_object_source(block) {
             fetch_object(Some(broker), &block["source"]).await?;

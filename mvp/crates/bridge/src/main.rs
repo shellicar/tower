@@ -65,7 +65,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use wire::now_iso;
 
 use crate::anthropic::{DeltaSink, NatsDeltaSink};
-use bridge::broker::{Broker, BrokerMessage, BrokerSubscription, NatsBroker};
+use bridge::broker::{Broker, BrokerMessage, BrokerReplay, NatsBroker};
 use cwd::{ChdirError, ServedCwds, apply_chdir, resolve_cwd, validate_dir};
 
 const PULSE_INTERVAL_S: i64 = 30;
@@ -122,20 +122,34 @@ fn fold_one(
     }
 }
 
-/// The pure fold over an already-collected batch: proves `fold_one` and the
-/// revision-apply finish without a broker at all, given a literal slice of
-/// frames.
+/// Apply every pending revision, last-write-wins per id, once the whole
+/// backlog (or the seeded batch, in the test) has been folded through
+/// `fold_one` — shared so the streaming shell and the pure batch test
+/// finish identically, never each carrying its own copy of this loop.
+fn apply_revisions(
+    messages: &mut [decisions::Message],
+    revisions: &mut std::collections::HashMap<String, Vec<serde_json::Value>>,
+) {
+    for message in messages {
+        if let Some(content) = revisions.remove(&message.id) {
+            message.content = content;
+        }
+    }
+}
+
+/// The pure fold over an already-collected batch: proves `fold_one` and
+/// `apply_revisions` finish without a broker at all, given a literal slice
+/// of frames. Test-only: nothing in the production path collects a batch
+/// first any more (see `replay_conversation`), so this never ships in the
+/// binary.
+#[cfg(test)]
 fn fold_replay(raw: &[BrokerMessage]) -> Vec<decisions::Message> {
     let mut messages = Vec::with_capacity(raw.len());
     let mut revisions = std::collections::HashMap::new();
     for msg in raw {
         fold_one(msg, &mut messages, &mut revisions);
     }
-    for message in &mut messages {
-        if let Some(content) = revisions.remove(&message.id) {
-            message.content = content;
-        }
-    }
+    apply_revisions(&mut messages, &mut revisions);
     messages
 }
 
@@ -147,10 +161,19 @@ fn fold_replay(raw: &[BrokerMessage]) -> Vec<decisions::Message> {
 /// current state). Telemetry, deltas and tip movements stay observation,
 /// not replayed.
 ///
-/// Streamed frame by frame — teed and folded as each arrives off the
-/// broker's replay source — rather than collected into memory first: a raw
-/// message can run to ~17.8 MB (workload facts), so an adopt of an
-/// image-laden conversation must not hold its whole backlog at once.
+/// Frame by frame on this side — teed and folded as each arrives, rather
+/// than collected into a `Vec` here first — so this shell doesn't hold a
+/// second full copy of the backlog on top of whatever the client already
+/// buffers. That said: `Broker::replay`'s own `fetch().max_messages(pending)`
+/// call still asks the async-nats client for the whole pending count as one
+/// batch, exactly as the pre-refactor code did — genuine paging (bounding
+/// memory against an arbitrarily large backlog, independent of the client's
+/// own buffering) was never implemented here and is deferred as an
+/// improvement outside this behaviour-preserving refactor.
+///
+/// A mid-replay read failure surfaces loudly (`?` below): an adopt missing
+/// its tail because a read error was silently folded into "the backlog
+/// ended" is worse than an adopt that fails outright.
 async fn replay_conversation<B: Broker>(
     broker: &B,
     stream_name: &str,
@@ -159,11 +182,11 @@ async fn replay_conversation<B: Broker>(
 ) -> anyhow::Result<Vec<decisions::Message>> {
     let mut replay = broker
         .replay(stream_name.to_string(), format!("conv.v2.{conv}.changes.>"))
-        .await
-        .map_err(|e| anyhow::anyhow!(e))?;
+        .await?;
     let mut messages = Vec::new();
     let mut revisions = std::collections::HashMap::new();
     while let Some(msg) = replay.next().await {
+        let msg = msg?;
         // History reaches an attached client as the same envelopes the live
         // tee sends — the record replayed, not a second history protocol.
         // The client's fold rebuilds the conversation exactly as fold_one
@@ -171,11 +194,7 @@ async fn replay_conversation<B: Broker>(
         bridge::attach::tee(attach, &msg.subject, &msg.payload).await;
         fold_one(&msg, &mut messages, &mut revisions);
     }
-    for message in &mut messages {
-        if let Some(content) = revisions.remove(&message.id) {
-            message.content = content;
-        }
-    }
+    apply_revisions(&mut messages, &mut revisions);
     Ok(messages)
 }
 

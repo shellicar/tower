@@ -27,6 +27,14 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 similar.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 yaml_serde.workspace = true
+
+[features]
+# Compiles bridge::broker::fake into the library outside of tests, for the
+# binary target's own test builds (a cfg(test) item in the lib is invisible
+# to the bin's test compilation, which links the lib as an ordinary,
+# non-test dependency). Never enabled for a shipped build.
+test-fakes = []

@@ -23,7 +23,7 @@ use crate::anthropic;
 use crate::anthropic::DeltaSink;
 use crate::decisions::{CancelDecision, Conversation, Message, QueryEnd, SayDecision};
 use crate::skills::Skills;
-use bridge::broker::{Broker, BrokerSubscription};
+use bridge::broker::{Broker, BrokerError, BrokerSubscription};
 
 /// Every tool schema offered on every turn, except `Skill` (gated on a
 /// non-empty catalogue — conversation-specific, not static). The one source
@@ -112,7 +112,7 @@ pub struct AgentConfig {
 pub async fn subscribe<B: Broker>(
     broker: &B,
     conv: &ConversationId,
-) -> Result<B::Subscription, String> {
+) -> Result<B::Subscription, BrokerError> {
     broker
         .subscribe(format!("conv.v2.{}.requests.>", conv.0))
         .await
