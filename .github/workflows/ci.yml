@@ -41,12 +41,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: mvp
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
       - name: Determine build scope
         id: scope
         shell: bash
@@ -67,6 +61,12 @@ jobs:
         working-directory: mvp
       - run: cargo fmt --check ${{ steps.scope.outputs.fmt_packages }}
         working-directory: mvp
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: mvp/frontend-svelte
       - run: pnpm check
