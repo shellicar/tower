@@ -1341,30 +1341,10 @@ async fn run_tool_round<B: Broker>(
 mod tests {
     use super::*;
     use crate::anthropic::NoopDeltaSink;
+    use crate::testsupport::config;
     use bridge::broker::BrokerMessage;
     use bridge_testkit::{FakeBroker, FakeSubscription, TestScratch};
     use std::collections::VecDeque;
-
-    fn config(conv: &str, scratch: &TestScratch) -> AgentConfig {
-        AgentConfig {
-            conv: ConversationId(conv.to_string()),
-            model: Arc::new(std::sync::RwLock::new("claude-sonnet-5".to_string())),
-            system: Arc::new(std::sync::RwLock::new(None)),
-            context: Arc::new(std::sync::RwLock::new(None)),
-            auth: crate::anthropic::Auth::ApiKey,
-            http: reqwest::Client::new(),
-            skills_root: Arc::new(std::sync::RwLock::new(std::path::PathBuf::new())),
-            refs: crate::refs::open(&scratch.path("refs.db")).unwrap(),
-            memory: crate::memory::open(&scratch.path("memory.db")).unwrap(),
-            history: crate::history::open(&scratch.path("history.db")).unwrap(),
-            thinking_budget: None,
-            attach: None,
-            cwd: Arc::new(std::sync::RwLock::new(std::env::temp_dir())),
-            permissions: Arc::new(std::sync::RwLock::new(
-                crate::permissions::PermissionSet::strict_default(),
-            )),
-        }
-    }
 
     /// The request loop's reply shape for a cancel naming a query this
     /// servicer never started: `rejected: not_found`, published to the

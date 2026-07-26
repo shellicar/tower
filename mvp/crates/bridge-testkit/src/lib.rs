@@ -63,7 +63,10 @@ impl Broker for FakeBroker {
             .unwrap()
             .push(format!("subscribe:{subject}"));
         if self.subscribe_fails {
-            Err(BrokerError::Fake("boom".to_string()))
+            Err(BrokerError::Subscribe(Box::new(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                "scripted subscribe failure",
+            ))))
         } else {
             Ok(FakeSubscription::default())
         }
@@ -85,9 +88,14 @@ impl Broker for FakeBroker {
             .unwrap()
             .get(&(bucket.clone(), id.clone()))
             .cloned()
-            .ok_or(BrokerError::Fake(format!(
-                "no fixture fetch data for {bucket:?}/{id:?}"
-            )))
+            .ok_or_else(|| BrokerError::ObjectNotFound {
+                id: id.clone(),
+                bucket: bucket.clone(),
+                source: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "no fixture data configured for this bucket/id",
+                )),
+            })
     }
 }
 

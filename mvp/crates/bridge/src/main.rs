@@ -56,6 +56,8 @@ mod refs;
 mod skills;
 mod slice;
 mod stream;
+#[cfg(test)]
+mod testsupport;
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -918,35 +920,15 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ServedCwds, agent, decisions, expand_tilde, fold_replay, serve_conversation};
+    use super::{ServedCwds, decisions, expand_tilde, fold_replay, serve_conversation};
     use crate::anthropic::NoopDeltaSink;
+    use crate::testsupport::config;
     use bridge::broker::BrokerMessage;
     use bridge_testkit::{FakeBroker, TestScratch};
     use std::sync::{Arc, RwLock};
 
     fn served() -> ServedCwds {
         Arc::new(RwLock::new(std::collections::HashMap::new()))
-    }
-
-    fn config(conv: &str, scratch: &TestScratch) -> agent::AgentConfig {
-        agent::AgentConfig {
-            conv: wire::ConversationId(conv.to_string()),
-            model: Arc::new(RwLock::new("claude-sonnet-5".to_string())),
-            system: Arc::new(RwLock::new(None)),
-            context: Arc::new(RwLock::new(None)),
-            auth: crate::anthropic::Auth::ApiKey,
-            http: reqwest::Client::new(),
-            skills_root: Arc::new(RwLock::new(std::path::PathBuf::new())),
-            refs: crate::refs::open(&scratch.path("refs.db")).unwrap(),
-            memory: crate::memory::open(&scratch.path("memory.db")).unwrap(),
-            history: crate::history::open(&scratch.path("history.db")).unwrap(),
-            thinking_budget: None,
-            attach: None,
-            cwd: Arc::new(RwLock::new(std::env::temp_dir())),
-            permissions: Arc::new(RwLock::new(
-                crate::permissions::PermissionSet::strict_default(),
-            )),
-        }
     }
 
     /// The fact the module doc names directly: a conversation that cannot

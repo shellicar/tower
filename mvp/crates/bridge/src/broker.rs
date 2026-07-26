@@ -32,48 +32,43 @@ pub struct BrokerMessage {
 /// `anyhow` rather than flattening to a message-only string.
 #[derive(Debug, thiserror::Error)]
 pub enum BrokerError {
-    #[error("publish failed")]
+    #[error("publish failed: {0}")]
     Publish(#[source] Box<dyn std::error::Error + Send + Sync>),
-    #[error("subscribe failed")]
+    #[error("subscribe failed: {0}")]
     Subscribe(#[source] Box<dyn std::error::Error + Send + Sync>),
-    #[error("capture stream {stream:?} unavailable")]
+    #[error("capture stream {stream:?} unavailable: {source}")]
     StreamUnavailable {
         stream: String,
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    #[error("replay consumer setup failed")]
+    #[error("replay consumer setup failed: {0}")]
     ReplaySetup(#[source] Box<dyn std::error::Error + Send + Sync>),
-    #[error("replay read failed")]
+    #[error("replay read failed: {0}")]
     ReplayRead(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("attachment reference carries no id")]
     ObjectNoId,
     #[error("attachment reference carries no bucket")]
     ObjectNoBucket,
-    #[error("no object store client configured")]
-    ObjectStoreAbsent,
-    #[error("object store {bucket:?} unavailable")]
+    #[error("object store {bucket:?} unavailable: {source}")]
     ObjectStoreUnavailable {
         bucket: String,
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    #[error("attachment {id:?} not found in {bucket:?}")]
+    #[error("attachment {id:?} not found in {bucket:?}: {source}")]
     ObjectNotFound {
         id: String,
         bucket: String,
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    #[error("attachment {id:?} read failed")]
+    #[error("attachment {id:?} read failed: {source}")]
     ObjectReadFailed {
         id: String,
         #[source]
         source: std::io::Error,
     },
-    /// A fake's own scripted failure — never produced by `NatsBroker`.
-    #[error("{0}")]
-    Fake(String),
 }
 
 /// A live subscription: pull the next message, or `None` when it has ended
@@ -300,5 +295,24 @@ mod tests {
     #[test]
     fn replay_plan_fetches_the_pending_count_otherwise() {
         assert_eq!(replay_plan(5), ReplayPlan::Fetch(5));
+    }
+
+    /// The message a log site prints for a broker failure must name the
+    /// underlying cause: "subscribe failed" alone is undiagnosable in the
+    /// field, where pre-seam the async-nats error text was logged. Every
+    /// `eprintln!("...: {e}")` site renders via Display, so Display must
+    /// carry the chain.
+    #[test]
+    fn a_broker_error_displays_its_underlying_cause() {
+        let source = std::io::Error::new(
+            std::io::ErrorKind::ConnectionRefused,
+            "connection refused by broker",
+        );
+        let err = super::BrokerError::Subscribe(Box::new(source));
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("connection refused by broker"),
+            "cause missing from {rendered:?}"
+        );
     }
 }

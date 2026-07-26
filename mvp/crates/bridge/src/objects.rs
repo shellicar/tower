@@ -34,7 +34,7 @@ pub(crate) fn is_object_source(block: &Value) -> bool {
 /// fallback: a block naming no bucket is unresolvable, not a guess away from
 /// resolvable. Never degrades — the caller decides what a failure means.
 async fn fetch_object<B: Broker>(
-    broker: Option<&B>,
+    broker: &B,
     source: &Value,
 ) -> Result<(Vec<u8>, String), BrokerError> {
     let media_type = source["mediaType"]
@@ -46,9 +46,6 @@ async fn fetch_object<B: Broker>(
     };
     let Some(bucket) = source["bucket"].as_str() else {
         return Err(BrokerError::ObjectNoBucket);
-    };
-    let Some(broker) = broker else {
-        return Err(BrokerError::ObjectStoreAbsent);
     };
     let bytes = broker
         .fetch_object(bucket.to_string(), id.to_string())
@@ -95,14 +92,13 @@ pub async fn resolve_history<B: Broker>(broker: &B, history: &mut [Value]) {
         };
         slots.extend(blocks.iter_mut().filter(|b| is_object_source(b)));
     }
-    let resolved =
-        futures::future::join_all(slots.iter().map(|b| resolve_one(Some(broker), b))).await;
+    let resolved = futures::future::join_all(slots.iter().map(|b| resolve_one(broker, b))).await;
     for (slot, value) in slots.into_iter().zip(resolved) {
         *slot = value;
     }
 }
 
-async fn resolve_one<B: Broker>(broker: Option<&B>, block: &Value) -> Value {
+async fn resolve_one<B: Broker>(broker: &B, block: &Value) -> Value {
     let source = &block["source"];
     let media_type = source["mediaType"]
         .as_str()
@@ -139,7 +135,7 @@ pub async fn validate_fresh<B: Broker>(
 ) -> Result<(), BrokerError> {
     for block in attachments {
         if is_object_source(block) {
-            fetch_object(Some(broker), &block["source"]).await?;
+            fetch_object(broker, &block["source"]).await?;
         }
     }
     Ok(())
@@ -168,11 +164,14 @@ mod tests {
     async fn without_a_store_the_block_degrades_to_a_stated_placeholder() {
         // The record still holds the reference block; the repair is
         // re-attaching. The placeholder states what the block itself carries.
+        // An unconfigured FakeBroker has no fixture for this id/bucket, so
+        // the fetch fails honestly, same as a real store missing the object.
+        let broker = FakeBroker::default();
         let block = json!({
             "type": "image",
             "source": { "type": "object", "id": "abc", "bucket": "attach", "mediaType": "image/png", "size": 2048 },
         });
-        let out = resolve_one::<FakeBroker>(None, &block).await;
+        let out = resolve_one(&broker, &block).await;
         assert_eq!(out["type"], "text");
         let text = out["text"].as_str().unwrap();
         assert!(text.contains("image/png"), "media type absent: {text:?}");
@@ -181,22 +180,24 @@ mod tests {
 
     #[tokio::test]
     async fn a_source_without_an_id_is_a_placeholder_too() {
+        let broker = FakeBroker::default();
         let block = json!({
             "type": "document",
             "source": { "type": "object", "bucket": "attach", "mediaType": "application/pdf", "size": 10 },
         });
-        let out = resolve_one::<FakeBroker>(None, &block).await;
+        let out = resolve_one(&broker, &block).await;
         assert_eq!(out["type"], "text");
         assert!(out["text"].as_str().unwrap().contains("application/pdf"));
     }
 
     #[tokio::test]
     async fn a_source_without_a_bucket_is_a_placeholder_in_replay() {
+        let broker = FakeBroker::default();
         let block = json!({
             "type": "image",
             "source": { "type": "object", "id": "abc", "mediaType": "image/png", "size": 2048 },
         });
-        let out = resolve_one::<FakeBroker>(None, &block).await;
+        let out = resolve_one(&broker, &block).await;
         assert_eq!(out["type"], "text");
     }
 
@@ -214,7 +215,7 @@ mod tests {
             "type": "document",
             "source": { "type": "object", "id": "abc", "bucket": "attach", "mediaType": "text/plain", "size": 5 },
         });
-        let out = resolve_one(Some(&broker), &block).await;
+        let out = resolve_one(&broker, &block).await;
         assert_eq!(out["type"], "document");
         assert_eq!(out["source"]["media_type"], "text/plain");
     }
