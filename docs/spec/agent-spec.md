@@ -119,20 +119,19 @@ visible in the record — a second `attached` with no `detached` from the
 first, or a `detached` arriving after it was already superseded — not
 prevented by machinery.
 
-**An instanceId's claim lifecycle is linear: one `attached`, one `detached`,
-nothing between.** `attached` is published *exactly once* per claim — there
-is no legitimate re-publish, qualified or not. A rule that allows "a second
-`attached` is a violation, except when it carries new information" is not a
-rule: every zombie re-attach is one parameter tweak away from looking
-compliant, and the conformance check (two `attached` for one conversation
-from one `instanceId` with no intervening `detached`) stops being
-checkable. A changed `cwd` is not a new claim — it is a fact about the
-claim already standing, and gets its own event on the same leaf family:
-`moved` (`conversation-spec.md`, Attachment), valid only from the standing
-instance. new-process-equals-new-`instanceId` (this spec, The entity) means
-the only process that could ever legitimately touch an existing claim is the
-same still-running process, and now it has an event scoped to exactly what
-it is doing (moving cwd) rather than a reason to re-assert the whole claim.
+**The rule, stated once.** A second `attached` for this conversation,
+published by the instance the fold currently holds as standing, with no
+intervening `detached` from that instance, is a violation — nothing else
+qualifies it and nothing else excuses it. Once a `detached` has closed the
+standing claim, a new `attached` is an ordinary new claim: it may come from
+any instance, including the one that just released it — the wire is
+indifferent to who claims next, because a closed claim leaves nothing
+behind to be re-opened. What this pins down for one open claim: from the
+moment its `attached` lands to the moment its `detached` lands, the
+standing instance publishes `attached` for it exactly once. A changed `cwd`
+under an unclosed claim is not grounds for a second `attached` — it is
+`moved` (`conversation-spec.md`, Attachment), because the claim itself has
+not changed, only a fact about it.
 
 A compliant instance watches the attachment leaf (`conversation-spec.md`,
 Attachment) for every conversation it serves. On seeing itself displaced —
@@ -165,6 +164,40 @@ now read off the conversation's own tree rather than the world's:
 The decided/emergent line is deliberate: `detached` is a fact someone
 published; stranded is inferred from a broken promise. Consumers render them
 differently because they are different.
+
+### Examples
+
+Concrete and orderable on purpose: these become the attachment scenario
+fixtures when implementation lands (`conversation-spec.md`, Migration note
+— fix lands twice, code and fixture in the same commit, per this repo's
+testing rule).
+
+- **(a) Ordinary life.** `attached(inst-1)` → served → `detached(inst-1)`.
+  One claim, opened and closed by the same instance.
+- **(b) Crash and failover.** `attached(inst-1)`; inst-1's pulses stop and
+  no `detached` ever comes — the fold reads inst-1 as stranded from silence
+  alone; `attached(inst-2)` supersedes it, unconditionally, whether or not a
+  `detached(inst-1)` shows up later.
+- **(c) Migration/takeover.** `attached(inst-1)`; while inst-1 still lives,
+  `attached(inst-2)` supersedes it anyway — no precondition checked inst-1's
+  liveness; inst-1 observes its own displacement and publishes
+  `detached(inst-1)`, the observable act of standing down. This changes
+  nothing in the fold — the claim already moved when `attached(inst-2)`
+  landed.
+- **(d) Abandon and re-adopt.** `attached(inst-1)` → `detached(inst-1)` →
+  `attached(inst-1)` (or equally `attached(inst-2)`) — legal either way: a
+  closed claim leaves nothing behind to re-open, so the next `attached` is
+  an ordinary new claim regardless of whose instanceId it carries.
+  "Abandon" as a named operation is not designed here; this example shows
+  the rule as stated already covers it, nothing extra needed.
+- **(e) The violation.** `attached(inst-1)`; `attached(inst-1)` again with
+  no `detached` between — the same instance claiming twice while its first
+  claim is still open, the zombie shape the rule exists to catch. Which of
+  the two derived readings applies is never declared, only read off pulses
+  after the fact: inst-1's pulses still live → violation (it kept claiming
+  after something should have told it to stop); inst-1's pulses dead →
+  crash (whatever published the second `attached` never got the chance to
+  detach either).
 
 ## Requests
 
