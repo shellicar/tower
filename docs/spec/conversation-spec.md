@@ -59,8 +59,18 @@ was kept.
 |---|---|---|
 | `conv.v2.{conversationId}.telemetry.>` | events | observation: turns, tools, usage — never authority |
 | `conv.v2.{conversationId}.changes.>` | events | the committal change stream: messages, revisions, tip movements, query closures |
+| `conv.v2.{conversationId}.attachment.>` | events | who is serving this conversation, now — see Attachment |
 | `conv.v2.{conversationId}.deltas` | events | the in-progress message, chunk by chunk |
 | `conv.v2.{conversationId}.requests.>` | requests | inbound: address the conversation |
+
+**`attachment` is its own leaf family, not a fifth `changes` kind.** It is
+named as functionality — the claim *does* something (it says who serves this
+conversation), the way `changes` and `requests` are named for what they do —
+deliberately not folded under `changes`: agent ephemera (a process attaching,
+detaching, migrating) is not history and must never touch the
+history/staleness stream `changes` drives, and deliberately not called
+`telemetry` either — this is a claim with consequences (agent-spec.md,
+Attachment), not observation a consumer may discard.
 
 **The subject spells the type** (nats-spec, Namespacing): a message's type is
 the subject tokens after the class — underscores become token boundaries — so
@@ -80,6 +90,8 @@ axis, so the type stays in the body there as a `type` field. The full map:
 | `revision` | `conv.v2.{id}.changes.revision` |
 | `tip_moved` | `conv.v2.{id}.changes.tip.moved` |
 | `query` | `conv.v2.{id}.changes.query` |
+| `attached` | `conv.v2.{id}.attachment.attached` |
+| `detached` | `conv.v2.{id}.attachment.detached` |
 | `delta`, `block` | `conv.v2.{id}.deltas` — flat, deliberately |
 | `say` | `conv.v2.{id}.requests.say` |
 | `cancel` | `conv.v2.{id}.requests.cancel` |
@@ -152,6 +164,17 @@ exactly that argument):
 | `revision` | `messageId`, `content` | **revision** — the content under a stable id changed: a trim, a resize, or the words themselves rewritten. Carries the resulting content, never the why — the record carries effects, never reasons |
 | `tip_moved` | `to` (a message id) | **tip movement** — the tip pointer moved: rewind, fast-forward. The reflog, as events |
 | `query` | `queryId`, `reason` | **query closure** — the query will grow no further; the record now contains everything it will ever contain. `reason` is the system's own vocabulary, an open set under add-only: `completed` (closed by `end_turn`), `cancelled` (a `cancel` was accepted), `aborted` (the attempt failed and the servicer gave the query up). Committal like every change: published after the closing fact is in the record, never speculatively |
+
+**Envelope provenance: `instanceId` rides beside `from`, never inside it.**
+Every change event carries the publishing instance's id as envelope
+metadata — the same standing as `ts`, not a content field. `from` is who
+said it, forwarded verbatim from the sender; `instanceId` is which agent
+instance published the change, always the servicer's own, never forwarded.
+The two answer different questions and must not collapse into one: a
+zombie instance publishing after it was superseded (agent-spec.md,
+Attachment) still carries a legitimate `from` — a human really did say
+it — but a wrong `instanceId`, which is what makes the two-agents case
+reconstructible from the record instead of merely suspected.
 
 The folds:
 
@@ -246,6 +269,39 @@ A delta is how a message looks *while it is happening*; the committed message
 is what happened. Locally-entered input commits too: a message typed at the
 terminal appears on the change stream the same as one that arrived over
 `requests` — half a chat is not a chat.
+
+## Attachment — `attachment`
+
+Who is serving this conversation, now — the wire shape of the claim
+agent-spec.md's Attachment section conducts itself by. Read that section
+first for the model (singular, unconditionally superseding, no fencing);
+this section is only the shape on this tree.
+
+| Event | Fields | Notes |
+|---|---|---|
+| `attached` | `instanceId`, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now — supersedes whatever attachment stood before it unconditionally. What makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's current tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for a conversation with nothing in it yet) — so an observer knows where the conversation stands without replaying its own change stream first. `cwd` and `intervalS` are optional, backward compatible with producers that don't yet carry them; their absence is not a claim otherwise, only that this attach didn't state it |
+| `detached` | `instanceId` | released — Ctrl-C, drain, done, or the observable act of a displaced instance complying (agent-spec.md, Attachment). Changes the fold only when `instanceId` matches the *standing* attachment; a crash publishes nothing |
+
+**One subject per conversation is what makes supersession a total order.**
+Every `attached` for this conversation, from any world, any instance,
+publishes to the same subject — the wire's own per-subject publication
+guarantee (nats-spec, What consumers may assume) is the ordering, so "which
+attachment is standing" is simply "the last `attached` on this subject,"
+never a cross-world timestamp comparison. This is why attachment could not
+stay on the world's tree: two worlds' clocks are not one order.
+
+**`world` and `instanceId` are provenance fields, never address.** Neither
+names this subject — the conversation does. A consumer that wants to know
+which world or instance holds the standing attachment reads it off the
+latest `attached` fact, the same way it reads `cwd`; it never derives
+standing from where the message came from.
+
+```json
+// conv.v2.conv-abc.attachment.attached
+{ "ts": "2026-07-25T14:02:00+10:00", "instanceId": "inst-1a2f", "world": "mac", "cwd": "~/repos/tower", "tip": "m12", "intervalS": 30 }
+// conv.v2.conv-abc.attachment.detached
+{ "ts": "2026-07-25T14:10:00+10:00", "instanceId": "inst-1a2f", "world": "mac" }
+```
 
 ## Requests — `requests`
 
@@ -501,12 +557,21 @@ export const conversationTelemetry = {
   }),
 };
 
-// conv.v2.{conversationId}.changes.>
+// conv.v2.{conversationId}.changes.> — instanceId is envelope metadata
+// (beside from, never inside it): which agent instance published the change.
 export const conversationChange = {
-  'message': z.looseObject({ ts, id: z.string(), ...turnRef, role: openEnum(['user', 'assistant']), from: sender.optional(), content: contentBlocks }),
-  'revision': z.looseObject({ ts, messageId: z.string(), content: contentBlocks }),
-  'tip.moved': z.looseObject({ ts, to: z.string() }),
-  'query': z.looseObject({ ts, queryId: z.string(), reason: openEnum(['completed', 'cancelled', 'aborted']) }),
+  'message': z.looseObject({ ts, instanceId: z.string().optional(), id: z.string(), ...turnRef, role: openEnum(['user', 'assistant']), from: sender.optional(), content: contentBlocks }),
+  'revision': z.looseObject({ ts, instanceId: z.string().optional(), messageId: z.string(), content: contentBlocks }),
+  'tip.moved': z.looseObject({ ts, instanceId: z.string().optional(), to: z.string() }),
+  'query': z.looseObject({ ts, instanceId: z.string().optional(), queryId: z.string(), reason: openEnum(['completed', 'cancelled', 'aborted']) }),
+};
+
+// conv.v2.{conversationId}.attachment.> — the wire shape of the model
+// agent-spec.md conducts (singular, unconditionally superseding). world is
+// provenance, never address, exactly like instanceId.
+export const conversationAttachment = {
+  'attached': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional(), cwd: z.string().optional(), tip: z.string().nullable().optional(), intervalS: z.number().int().positive().optional() }),
+  'detached': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional() }),
 };
 
 // conv.v2.{conversationId}.deltas — the one flat subject: `delta` and `block`
@@ -547,6 +612,13 @@ optional because provenance travels when known; the `id` is the cancel's
 premise and is always required. `say.precondition` has no such asymmetry — it
 is always required; the first message of a new conversation states
 `{ tip: null }` rather than omitting it.
+
+## Migration note
+
+`conv.v2.*.attachment.>` is a new leaf; stream capture (`mvp/stream-init.sh`)
+must be told to hold it — it does not today, since the leaf did not exist
+when that config was last converged. Landing the config change is a later
+PR, not this one: the spec lands first, capture follows.
 
 ## The v1 tree — superseded, still spoken
 
