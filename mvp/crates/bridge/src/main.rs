@@ -301,13 +301,6 @@ struct Host {
     /// `skills_root`. Strict-default until a line sets it: every gated
     /// operation asks, identical to bridge's behavior before this existed.
     permissions: Arc<RwLock<permissions::PermissionSet>>,
-    /// The world's cross-instance attachment fold (worldstate.rs), built
-    /// from `agent.v1.{world}.telemetry.>` by a background subscriber.
-    /// Unconsulted by `service` since supersession is unconditional
-    /// (agent-spec, "The premise for `service` in a shared world"); kept for
-    /// the deferred stand-down/detached-on-displacement pass.
-    #[allow(dead_code)]
-    world_state: Arc<RwLock<worldstate::WorldState>>,
 }
 
 impl Host {
@@ -977,57 +970,6 @@ async fn main() -> anyhow::Result<()> {
             }
         });
     }
-
-    // The world's cross-instance liveness fold (worldstate.rs): plain NATS
-    // (telemetry, never JetStream-gated), broadcast — every instance sees
-    // every other's `ready`/`pulse`/`attached`/`detached`, which is what lets
-    // `service` answer `already_attached` for a conversation this instance
-    // never touched. Started before `ready` so this instance's own facts feed
-    // it too, harmlessly (attached_elsewhere excludes `own_instance`
-    // deliberately, so self-facts never self-reject).
-    let world_state = Arc::new(RwLock::new(worldstate::WorldState::new()));
-    {
-        let world_state = Arc::clone(&world_state);
-        let mut telemetry = client
-            .subscribe(format!("agent.v1.{world}.telemetry.>"))
-            .await
-            .with_context(|| "agent telemetry subscribe failed")?;
-        tokio::spawn(async move {
-            while let Some(msg) = telemetry.next().await {
-                let now = std::time::Instant::now();
-                let Some(wire::WireEvent::Agent(wire::AgentEvent { kind, .. })) =
-                    wire::parse_wire(&msg.subject, &msg.payload)
-                else {
-                    continue;
-                };
-                let wire::AgentKind::Telemetry(t) = kind else {
-                    continue;
-                };
-                let mut world_state = world_state.write().unwrap();
-                match t {
-                    wire::AgentTelemetry::Ready(r) => {
-                        world_state.on_ready(&r.instance_id.0, now);
-                    }
-                    wire::AgentTelemetry::Pulse(p) => {
-                        world_state.on_pulse(&p.instance_id.0, p.interval_s, now);
-                    }
-                    wire::AgentTelemetry::Attached(a) => {
-                        world_state.on_attached(
-                            &a.instance_id.0,
-                            &a.conversation_id.0,
-                            a.interval_s,
-                            now,
-                        );
-                    }
-                    wire::AgentTelemetry::Detached(d) => {
-                        world_state.on_detached(&d.instance_id.0, &d.conversation_id.0);
-                    }
-                }
-            }
-            eprintln!("bridge: agent telemetry subscription ended");
-        });
-    }
-
     // Host: the shared config and live cells every control line reads. One
     // grammar, two delivery points — the -c batch, then live stdin.
     let default_model = Arc::new(RwLock::new(default_model));
@@ -1053,7 +995,6 @@ async fn main() -> anyhow::Result<()> {
         attach_bucket,
         thinking_budget,
         permissions: Arc::new(RwLock::new(permissions::PermissionSet::strict_default())),
-        world_state,
     });
 
     // The world's own requests (agent-spec): one queue group per world, so

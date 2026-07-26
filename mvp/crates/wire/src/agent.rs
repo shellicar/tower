@@ -115,30 +115,32 @@ pub enum AgentRequest {
         model: Option<String>,
         from: Option<Value>,
     },
-    /// A known leaf whose body doesn't carry what that verb requires (e.g.
-    /// `service` missing `conversationId`, or carrying an empty one —
-    /// present but not a usable id) — answered `rejected: invalid`, distinct
-    /// from `unsupported`: the verb is known, the shape isn't.
+    /// A recognised leaf whose body isn't usable — unparseable bytes, or
+    /// JSON missing what that verb requires (e.g. `service` missing
+    /// `conversationId`, or carrying an empty one — present but not a
+    /// usable id) — answered `rejected: invalid`, distinct from
+    /// `unsupported`: the verb is known, the body isn't.
     Invalid { type_name: String },
-    /// An unrecognised leaf, or bytes that don't parse as JSON at all —
-    /// answered `unsupported`, carrying the leaf for logs.
+    /// An unrecognised leaf, whatever its bytes — answered `unsupported`,
+    /// carrying the leaf for logs.
     Other { type_name: String },
 }
 
 /// (leaf, bytes) → request. The subject leaf spells the operation
 /// (`agent.v1.{world}.requests.service` → `"service"`); the body carries no
-/// type. Unparseable bytes, or an unrecognised leaf, are `Other`
-/// (`unsupported`); a recognised leaf whose body lacks what it requires —
-/// `service` missing `conversationId`, or carrying an empty one — is
-/// `Invalid` (`invalid`). A servicer must answer everything addressed to it
-/// either way.
+/// type. The leaf is matched first: an unrecognised leaf is `Other`
+/// (`unsupported`) regardless of what its bytes look like — a servicer must
+/// answer everything addressed to it, whether or not it can even parse the
+/// body. A recognised leaf is `Invalid` (`invalid`) whenever its body isn't
+/// usable — unparseable JSON, or JSON lacking what the verb requires
+/// (`service` missing `conversationId`, or carrying an empty one).
 pub fn parse_agent_request(leaf: &str, bytes: &[u8]) -> AgentRequest {
     let type_name = leaf.to_string();
-    let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
-        return AgentRequest::Other { type_name };
-    };
     match leaf {
         "service" => {
+            let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
+                return AgentRequest::Invalid { type_name };
+            };
             let Some(conversation_id) = value
                 .get("conversationId")
                 .and_then(Value::as_str)
@@ -236,22 +238,30 @@ mod tests {
     }
 
     #[test]
-    fn service_request_with_empty_conversation_id_is_not_serviced() {
+    fn service_request_with_empty_conversation_id_is_invalid() {
         let bytes = br#"{"ts":"2026-07-07T21:00:00+10:00","conversationId":""}"#;
-        assert!(!matches!(
+        assert!(matches!(
             parse_agent_request("service", bytes),
-            AgentRequest::Service { .. }
+            AgentRequest::Invalid { .. }
         ));
     }
 
     #[test]
-    fn unknown_leaf_and_garbage_bytes_are_unsupported() {
+    fn a_recognised_leaf_with_unparseable_bytes_is_invalid_not_unsupported() {
+        assert!(matches!(
+            parse_agent_request("service", b"not json"),
+            AgentRequest::Invalid { .. }
+        ));
+    }
+
+    #[test]
+    fn an_unrecognised_leaf_is_unsupported_regardless_of_its_bytes() {
         assert!(matches!(
             parse_agent_request("drain", br#"{"ts":"2026-07-07T21:00:00+10:00"}"#),
             AgentRequest::Other { .. }
         ));
         assert!(matches!(
-            parse_agent_request("service", b"not json"),
+            parse_agent_request("drain", b"not json"),
             AgentRequest::Other { .. }
         ));
     }
