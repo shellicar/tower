@@ -239,6 +239,26 @@ html, body {
 .block.thinking summary { color: #737373; }
 .dim { color: #737373; }
 
+.markdown-content :is(p, ul, ol, blockquote, pre, table) { margin: 4px 0; }
+.markdown-content pre { background: #171717; padding: 6px 8px; overflow-x: auto; }
+.markdown-content code { background: #171717; padding: 0 3px; }
+.markdown-content a { color: #7dd3fc; }
+
+.tool-toggle {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  border: none;
+  background: none;
+  color: #a3a3a3;
+  padding: 2px 0;
+}
+.tool-toggle:hover { color: #ddd; background: none; }
+.tool-preview { color: #737373; }
+
 .ref-load {
   display: block;
   margin: 4px 0;

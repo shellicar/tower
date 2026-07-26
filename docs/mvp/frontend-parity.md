@@ -86,7 +86,7 @@ side by side. Derived from code, not from any prior claim about what's missing.
   pretext port; if it's used, run the same line-diff verification (compare against real `Range.getClientRects()`
   output) that found pretext's own wrap-boundary divergence from Chrome before trusting it.
 
-- [ ] **No markdown rendering for assistant text in Leptos.** `ui/block.rs`'s `render_block` renders every `text`
+- [x] **No markdown rendering for assistant text in Leptos.** `ui/block.rs`'s `render_block` renders every `text`
   block as a plain `<div>{text}</div>`, regardless of role. Svelte's `BlockView.svelte` renders assistant-role text
   through `MarkdownRenderer.svelte` (`core/markdown.ts`: `marked` v18 + `DOMPurify.sanitize`, GFM+breaks on, links
   forced `target=_blank rel=noopener`); user/tool text stays raw. Porting task: bring in a Rust markdown renderer
@@ -94,6 +94,10 @@ side by side. Derived from code, not from any prior claim about what's missing.
   `render_block` the way `BlockView` threads its `markdown` prop, gate it the same way (`role == "assistant"`), and
   keep the same link-safety behaviour (`target="_blank" rel="noopener"`, no raw `javascript:`/`<script>` survival —
   Svelte's `markdown.test.ts` has three hostile-payload tests worth porting verbatim as the acceptance check).
+  Ported to `src/markdown.rs` (pulldown-cmark + ammonia, verified building under `--target wasm32-unknown-unknown`),
+  threaded through `render_block(block, role)`, gated on `role == "assistant"`; the tool-block collapse affordance
+  (`tool_use`/`tool_result`) was also converted to Svelte's plain-button/ellipsis-preview shape in the same pass
+  (`thinking`/unknown blocks unchanged, per the SC's ruling that it covers tool blocks only).
 
 - [ ] **Re-verify: the scroll-anchor / approval-card bug may now also affect Leptos.** Memory `88f25ddd` (19 Jul)
   recorded that Leptos's stick-to-bottom effect re-scrolls "on any DOM patch when at_bottom is true, unaffected by

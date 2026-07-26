@@ -13,6 +13,10 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
+# HTML sanitizer for the rendered markdown output — verified to build under
+# --target wasm32-unknown-unknown (pure Rust HTML parsing, no OS/thread deps).
+ammonia = "4.1.4"
+pulldown-cmark = { workspace = true, features = ["html"] }
 # leptos 0.8 (stable) over the 0.9 alpha in the vetted clone — deliberate:
 # this build is testing the DOM-render axis, not tracking bleeding-edge
 # leptos.
