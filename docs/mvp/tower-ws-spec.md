@@ -356,6 +356,7 @@ agent facts never touch `lastEvent`.
 { "type": "agent", "kind": "ready",    "world": "mac", "instanceId": "inst-1a2f", "ts": 1760187514000, "host": "mac" }
 { "type": "agent", "kind": "pulse",    "world": "mac", "instanceId": "inst-1a2f", "ts": 1760187544000, "intervalS": 30 }
 { "type": "agent", "kind": "attached", "world": "mac", "instanceId": "inst-1a2f", "ts": 1760187514000, "conv": "c65b902d-…", "cwd": "~/repos/tower" }
+{ "type": "agent", "kind": "moved",    "world": "mac", "instanceId": "inst-1a2f", "ts": 1760187560000, "conv": "c65b902d-…", "cwd": "~/repos/tower/mvp" }
 { "type": "agent", "kind": "detached", "world": "mac", "instanceId": "inst-1a2f", "ts": 1760187600000, "conv": "c65b902d-…" }
 ```
 
@@ -363,13 +364,15 @@ One wire fact, one packet — a pulse is one instance fact however many
 conversations the instance serves; it never fans out per conversation.
 Upsert into the client's two maps (`instanceId → pulse`, `conv →
 attachment`): an `attached` **replaces the held attachment for that `conv`
-wholesale** — there is exactly one, never a set to merge into — and a
-`detached` clears it only when its `instanceId` matches the one currently
-held (conversation-spec.md, Attachment); a `detached` from an instance that
-isn't the standing one is a stale fact about a claim already superseded, and
-is a no-op here. `kind` is an open set: unknown kinds are skipped, never
-fatal. `ts` is the fact's wire timestamp in millis; for `pulse` it is the new
-`lastPulse`.
+wholesale** — there is exactly one, never a set to merge into; `moved`
+updates the held attachment's `cwd` **in place**, only when its `instanceId`
+matches the one currently held, else it is a no-op (conversation-spec.md,
+Attachment — a fact about the standing claim, never a new one); and a
+`detached` clears the held attachment only under the same match. A
+`detached` or `moved` from an instance that isn't the standing one is a
+stale fact about a claim already superseded, and is a no-op here. `kind` is
+an open set: unknown kinds are skipped, never fatal. `ts` is the fact's wire
+timestamp in millis; for `pulse` it is the new `lastPulse`.
 
 ### `layout` — once, on connect; live, unconditional
 
