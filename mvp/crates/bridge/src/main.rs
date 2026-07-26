@@ -398,7 +398,11 @@ impl Host {
                 match replay_conversation(&self.broker, &stream_name, &conv, &self.attach).await {
                     Ok(m) => m,
                     Err(e) => {
-                        eprintln!("bridge: adopt failed for {conv}: {e:#}");
+                        // BrokerError's Display already carries its cause
+                        // (round-three fix); anyhow's alternate `{:#}` would
+                        // walk the same source chain again and print it
+                        // twice, so this stays plain `{e}`.
+                        eprintln!("bridge: adopt failed for {conv}: {e}");
                         println!("{}", serde_json::json!({ "error": "replay failed" }));
                         return;
                     }
