@@ -135,17 +135,18 @@ only for what cargo can't do. Config env vars — towerd: `NATS_URL`,
 `TOWER_STREAM_EPHEMERAL`, `TOWER_ATTACH_BUCKET`, `TOWER_ATTACH_TTL_S`;
 vite: `WEB_PORT`; bridge: `NATS_URL`, `BRIDGE_WORLD`, `BRIDGE_MODEL`,
 `BRIDGE_STREAM`, `BRIDGE_ATTACH_BUCKET`, `BRIDGE_THINKING_BUDGET`,
-`BRIDGE_REFS_DB`, `BRIDGE_MEMORY_DB`, `BRIDGE_HISTORY_DB`, `BRIDGE_SKILLS`
-(skills default to `~/.claude/skills`, re-scanned per say: the first say
-commits the full catalogue, later says a delta naming skills whose SKILL.md
-changed; the stdio `skills` control line repoints the directory live).
+`BRIDGE_REFS_DB`, `BRIDGE_MEMORY_DB`, `BRIDGE_HISTORY_DB`
+(skills has no env var and no default: the directory is empty until a stdio
+`skills` control line sets it, re-scanned per say — the first say commits the
+full catalogue, later says a delta naming skills whose SKILL.md changed; the
+same control line repoints it live).
 
 ## helm
 
 The terminal client (`mvp/crates/helm`): one bridge, spawned as a child,
-dialed over a second fd (`BRIDGE_ATTACH_FD`, a socketpair dup'd to fd 3 —
-stdio keeps the control protocol untouched). The fd is duplex: events and
-replies flow down (`{subject,payload}` / `{id,payload}`), requests and
+dialed over two inheritable OS pipes (`BRIDGE_ATTACH_FD_DOWN`/
+`BRIDGE_ATTACH_FD_UP` — stdio keeps the control protocol untouched). The pair
+is duplex: events and replies flow down (`{subject,payload}` / `{id,payload}`), requests and
 uploads flow up (`{id,subject,payload}` / `{id,upload}`) and bridge proxies
 them onto NATS — helm is genuinely NATS-less; the broker is bridge's concern
 alone. Bridge's lifetime is its stdin: helm dies, bridge exits. Internal shape mirrors
