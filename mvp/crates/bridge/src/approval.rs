@@ -44,7 +44,10 @@ async fn publish<B: Broker>(
     // lifecycle and are never teed. Tee first: it borrows, the publish moves.
     bridge::attach::tee(attach, &subject, &bytes).await;
     if let Err(e) = broker.publish(subject, bytes).await {
-        eprintln!("bridge: approval publish failed: {e}");
+        eprintln!(
+            "bridge: approval publish failed: {:#}",
+            anyhow::Error::new(e)
+        );
     }
 }
 
@@ -67,7 +70,10 @@ pub async fn gate<B: Broker>(
         Ok(s) => s,
         Err(e) => {
             // A gate that cannot hear answers must not run the tool.
-            eprintln!("bridge: approval subscribe failed: {e}");
+            eprintln!(
+                "bridge: approval subscribe failed: {:#}",
+                anyhow::Error::new(e)
+            );
             return Verdict::Denied {
                 by: Value::String("unraisable: approval subscribe failed".into()),
             };

@@ -172,7 +172,11 @@ impl<B: Broker> Publisher<B> {
         // doesn't have).
         bridge::attach::tee(&self.attach, &subject, &bytes).await;
         if let Err(e) = self.broker.publish(subject, bytes).await {
-            eprintln!("bridge[{}]: publish failed: {e}", self.conv.0);
+            eprintln!(
+                "bridge[{}]: publish failed: {:#}",
+                self.conv.0,
+                anyhow::Error::new(e)
+            );
         }
     }
 
@@ -343,7 +347,11 @@ pub async fn run<B: Broker, D: DeltaSink>(
                     }
                 };
                 if let Err(e) = broker.publish(reply_to, response).await {
-                    eprintln!("bridge[{}]: reply publish failed: {e}", config.conv.0);
+                    eprintln!(
+                        "bridge[{}]: reply publish failed: {:#}",
+                        config.conv.0,
+                        anyhow::Error::new(e)
+                    );
                 }
             }
         }
@@ -383,8 +391,9 @@ async fn accept_say<B: Broker, D: DeltaSink>(
         // `stale`/`empty`/`already_complete`; the detail (which bucket, which
         // id, which error) is diagnostic and belongs in the log, not the reply.
         eprintln!(
-            "bridge[{}]: attachment validation failed: {detail}",
-            config.conv.0
+            "bridge[{}]: attachment validation failed: {:#}",
+            config.conv.0,
+            anyhow::Error::new(detail)
         );
         return Err("attachment_unavailable".to_string());
     }

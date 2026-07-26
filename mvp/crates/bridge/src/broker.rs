@@ -27,43 +27,45 @@ pub struct BrokerMessage {
     pub reply: Option<String>,
 }
 
-/// The seam's own error type: every operation names what it was doing, and
-/// carries its cause (`#[source]`) so the chain survives through `?` and
-/// `anyhow` rather than flattening to a message-only string.
+/// The seam's own error type: every operation names what it was doing; the
+/// cause rides `#[source]` alone, never repeated in the message itself
+/// (CLAUDE.md's Errors rule) — a chain-walker like anyhow's `{:#}` renders
+/// the cause from `#[source]`, so putting it in the message too would print
+/// it twice.
 #[derive(Debug, thiserror::Error)]
 pub enum BrokerError {
-    #[error("publish failed: {0}")]
+    #[error("publish failed")]
     Publish(#[source] Box<dyn std::error::Error + Send + Sync>),
-    #[error("subscribe failed: {0}")]
+    #[error("subscribe failed")]
     Subscribe(#[source] Box<dyn std::error::Error + Send + Sync>),
-    #[error("capture stream {stream:?} unavailable: {source}")]
+    #[error("capture stream {stream:?} unavailable")]
     StreamUnavailable {
         stream: String,
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    #[error("replay consumer setup failed: {0}")]
+    #[error("replay consumer setup failed")]
     ReplaySetup(#[source] Box<dyn std::error::Error + Send + Sync>),
-    #[error("replay read failed: {0}")]
+    #[error("replay read failed")]
     ReplayRead(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("attachment reference carries no id")]
     ObjectNoId,
     #[error("attachment reference carries no bucket")]
     ObjectNoBucket,
-    #[error("object store {bucket:?} unavailable: {source}")]
+    #[error("object store {bucket:?} unavailable")]
     ObjectStoreUnavailable {
         bucket: String,
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    #[error("attachment {id:?} not found in {bucket:?}: {source}")]
+    #[error("attachment {id:?} not found in {bucket:?}")]
     ObjectNotFound {
         id: String,
         bucket: String,
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    #[error("attachment {id:?} read failed: {source}")]
+    #[error("attachment {id:?} read failed")]
     ObjectReadFailed {
         id: String,
         #[source]
@@ -85,6 +87,13 @@ pub trait BrokerSubscription: Send {
 /// swallowed is worse than an adopt that fails outright.
 pub trait BrokerReplay: Send {
     fn next(&mut self) -> impl Future<Output = Option<Result<BrokerMessage, BrokerError>>> + Send;
+
+    /// The backlog size known at replay's start (0 for a fake unless it
+    /// scripts one), so the caller can pre-size its accumulator instead of
+    /// growing it one frame at a time.
+    fn pending(&self) -> usize {
+        0
+    }
 }
 
 pub trait Broker: Clone + Send + Sync + 'static {
@@ -168,7 +177,7 @@ fn replay_plan(pending: usize) -> ReplayPlan {
 /// swallowed — `Some(Err(_))`, never folded into "the backlog ended".
 pub enum NatsReplay {
     Empty,
-    Batch(Box<async_nats::jetstream::consumer::pull::Batch>),
+    Batch(Box<async_nats::jetstream::consumer::pull::Batch>, usize),
 }
 
 impl BrokerReplay for NatsReplay {
@@ -176,7 +185,7 @@ impl BrokerReplay for NatsReplay {
         use futures::StreamExt;
         match self {
             NatsReplay::Empty => None,
-            NatsReplay::Batch(batch) => {
+            NatsReplay::Batch(batch, _) => {
                 let msg = batch.next().await?;
                 Some(match msg {
                     Ok(msg) => Ok(BrokerMessage {
@@ -189,6 +198,13 @@ impl BrokerReplay for NatsReplay {
                     Err(e) => Err(BrokerError::ReplayRead(e)),
                 })
             }
+        }
+    }
+
+    fn pending(&self) -> usize {
+        match self {
+            NatsReplay::Empty => 0,
+            NatsReplay::Batch(_, pending) => *pending,
         }
     }
 }
@@ -252,7 +268,7 @@ impl Broker for NatsBroker {
                     .messages()
                     .await
                     .map_err(|e| BrokerError::ReplaySetup(Box::new(e)))?;
-                Ok(NatsReplay::Batch(Box::new(messages)))
+                Ok(NatsReplay::Batch(Box::new(messages), pending))
             }
         }
     }
@@ -297,19 +313,20 @@ mod tests {
         assert_eq!(replay_plan(5), ReplayPlan::Fetch(5));
     }
 
-    /// The message a log site prints for a broker failure must name the
-    /// underlying cause: "subscribe failed" alone is undiagnosable in the
-    /// field, where pre-seam the async-nats error text was logged. Every
-    /// `eprintln!("...: {e}")` site renders via Display, so Display must
-    /// carry the chain.
+    /// CLAUDE.md's Errors rule pinned: a log site never renders a bare
+    /// `BrokerError` (its own Display omits the cause on purpose, so a
+    /// chain-walker doesn't print it twice) — it renders the full chain via
+    /// `anyhow`'s `{:#}`, and that rendered chain must still name the
+    /// underlying cause. "subscribe failed" alone is undiagnosable in the
+    /// field, where pre-seam the async-nats error text was logged.
     #[test]
-    fn a_broker_error_displays_its_underlying_cause() {
+    fn a_rendered_error_chain_names_its_underlying_cause() {
         let source = std::io::Error::new(
             std::io::ErrorKind::ConnectionRefused,
             "connection refused by broker",
         );
         let err = super::BrokerError::Subscribe(Box::new(source));
-        let rendered = err.to_string();
+        let rendered = format!("{:#}", anyhow::Error::new(err));
         assert!(
             rendered.contains("connection refused by broker"),
             "cause missing from {rendered:?}"

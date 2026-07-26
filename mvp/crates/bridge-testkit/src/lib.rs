@@ -42,6 +42,10 @@ impl BrokerReplay for FakeReplay {
     async fn next(&mut self) -> Option<Result<BrokerMessage, BrokerError>> {
         self.queued.pop_front().map(Ok)
     }
+
+    fn pending(&self) -> usize {
+        self.queued.len()
+    }
 }
 
 impl Broker for FakeBroker {

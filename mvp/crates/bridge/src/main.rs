@@ -146,7 +146,7 @@ fn apply_revisions(
 /// binary.
 #[cfg(test)]
 fn fold_replay(raw: &[BrokerMessage]) -> Vec<decisions::Message> {
-    let mut messages = Vec::with_capacity(raw.len());
+    let mut messages = Vec::new();
     let mut revisions = std::collections::HashMap::new();
     for msg in raw {
         fold_one(msg, &mut messages, &mut revisions);
@@ -185,7 +185,9 @@ async fn replay_conversation<B: Broker>(
     let mut replay = broker
         .replay(stream_name.to_string(), format!("conv.v2.{conv}.changes.>"))
         .await?;
-    let mut messages = Vec::new();
+    // The pending count is known upfront even though frames arrive one at a
+    // time — pre-size instead of growing the accumulator frame by frame.
+    let mut messages = Vec::with_capacity(replay.pending());
     let mut revisions = std::collections::HashMap::new();
     while let Some(msg) = replay.next().await {
         let msg = msg?;
@@ -209,7 +211,10 @@ async fn publish_agent<B: Broker>(broker: &B, world: &str, leaf: &str, payload: 
         eprintln!("{} bridge: → {subject} ({} B)", now_iso(), bytes.len());
     }
     if let Err(e) = broker.publish(subject, bytes).await {
-        eprintln!("bridge: agent telemetry publish failed: {e}");
+        eprintln!(
+            "bridge: agent telemetry publish failed: {:#}",
+            anyhow::Error::new(e)
+        );
     }
 }
 
@@ -237,7 +242,10 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
     let requests = match agent::subscribe(broker, &config.conv).await {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("bridge: subscribe failed for {conv}: {e}");
+            eprintln!(
+                "bridge: subscribe failed for {conv}: {:#}",
+                anyhow::Error::new(e)
+            );
             println!("{}", serde_json::json!({ "error": "subscribe failed" }));
             return None;
         }
@@ -398,11 +406,11 @@ impl Host {
                 match replay_conversation(&self.broker, &stream_name, &conv, &self.attach).await {
                     Ok(m) => m,
                     Err(e) => {
-                        // BrokerError's Display already carries its cause
-                        // (round-three fix); anyhow's alternate `{:#}` would
-                        // walk the same source chain again and print it
-                        // twice, so this stays plain `{e}`.
-                        eprintln!("bridge: adopt failed for {conv}: {e}");
+                        // `e` is already an `anyhow::Error` (via `?` in
+                        // replay_conversation); `{:#}` renders its full
+                        // chain, per CLAUDE.md's Errors rule — a bare `{e}`
+                        // would drop the cause.
+                        eprintln!("bridge: adopt failed for {conv}: {e:#}");
                         println!("{}", serde_json::json!({ "error": "replay failed" }));
                         return;
                     }
@@ -629,7 +637,7 @@ impl Host {
                     serde_json::json!({ "conversationId": conv, "revisedMessage": message_id })
                 ),
                 Err(e) => {
-                    eprintln!("bridge: revise publish failed: {e}");
+                    eprintln!("bridge: revise publish failed: {:#}", anyhow::Error::new(e));
                     println!("{}", serde_json::json!({ "error": "publish failed" }));
                 }
             }
@@ -965,6 +973,13 @@ mod tests {
             .position(|c| c == "publish:agent.v1.local.telemetry.attached")
             .unwrap();
         assert!(subscribe_at < attached_at, "{calls:?}");
+
+        // serve_conversation spawns agent::run fire-and-forget, holding the
+        // config's sqlite handles into `scratch`'s own directory; let it run
+        // to completion (the fake subscription ends the loop immediately)
+        // before `scratch` drops and removes that directory out from under
+        // it.
+        drain_spawned_tasks().await;
     }
 
     /// A subscribe failure must release the claim: no `attached` publish, no
@@ -995,6 +1010,17 @@ mod tests {
             !calls.iter().any(|c| c.starts_with("publish:")),
             "no attached publish on a failed subscribe: {calls:?}"
         );
+    }
+
+    /// A subscribe failure returns before ever spawning `agent::run`, so
+    /// nothing outlives this test's `scratch` — but `subscription_is_made_
+    /// before_attached_is_published` does spawn one, fire-and-forget; this
+    /// yields enough times for that trivial (no real I/O) task to reach its
+    /// own completion before the caller's `TestScratch` drops.
+    async fn drain_spawned_tasks() {
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
     }
 
     /// The pure fold: a message and a later revision for the same id, in
