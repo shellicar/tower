@@ -19,9 +19,10 @@ check:
 run:
     cargo run -p towerd
 
-# Bring the whole mvp up (towerd + the leptos frontend with hot reload).
-# Multi-process orchestration is the one job cargo doesn't do; dev.sh owns it.
-# The broker is expected up (docker compose up -d). Web: http://localhost:8082.
+# Bring the whole mvp up: towerd + BOTH frontends with hot reload, side by
+# side for comparison. Multi-process orchestration is the one job cargo
+# doesn't do; dev.sh owns it. The broker is expected up (docker compose up
+# -d). Web: leptos http://localhost:8082, svelte http://localhost:5174.
 dev:
     ./dev.sh
 

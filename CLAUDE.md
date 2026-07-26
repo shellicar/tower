@@ -146,7 +146,7 @@ same control line repoints it live).
 The terminal client (`mvp/crates/helm`): one bridge, spawned as a child,
 dialed over two inheritable OS pipes (`BRIDGE_ATTACH_FD_DOWN`/
 `BRIDGE_ATTACH_FD_UP` — stdio keeps the control protocol untouched). The pair
-is duplex: events and replies flow down (`{subject,payload}` / `{id,payload}`), requests and
+is one-way each: events and replies flow down (`{subject,payload}` / `{id,payload}`), requests and
 uploads flow up (`{id,subject,payload}` / `{id,upload}`) and bridge proxies
 them onto NATS — helm is genuinely NATS-less; the broker is bridge's concern
 alone. Bridge's lifetime is its stdin: helm dies, bridge exits. Internal shape mirrors
