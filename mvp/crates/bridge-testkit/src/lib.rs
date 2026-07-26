@@ -9,16 +9,27 @@ use std::sync::{Arc, Mutex};
 type Published = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 type FetchData = Arc<Mutex<std::collections::HashMap<(String, String), Vec<u8>>>>;
 
+/// One scripted replay frame: `Ok` yields a message, `Err` (a plain message
+/// string — `BrokerError`'s own variants aren't `Clone`, and a fake's
+/// scripted failure doesn't need their exact shape) yields a read failure,
+/// so a test can prove a mid-replay error fails the adopt instead of
+/// reading as the backlog simply ending.
+pub type FakeReplayFrame = Result<BrokerMessage, String>;
+type ReplayData = Arc<Mutex<std::collections::HashMap<String, VecDeque<FakeReplayFrame>>>>;
+
 /// The only fake in a test is the Broker (CLAUDE.md's house rule). Records
 /// every subscribe/publish call, in order (`calls`) and every publish's
 /// full payload (`published`), and answers subscribe/replay from scripted
-/// queues a test seeds up front.
+/// queues a test seeds up front, keyed by the exact filter subject asked
+/// for — a call with the wrong filter gets nothing, same as a real backlog
+/// with no matching messages, rather than silently answering from whatever
+/// was seeded for some other conversation.
 #[derive(Clone, Default)]
 pub struct FakeBroker {
     pub calls: Arc<Mutex<Vec<String>>>,
     pub published: Published,
     pub subscribe_fails: bool,
-    pub replay_data: Arc<Mutex<VecDeque<BrokerMessage>>>,
+    pub replay_data: ReplayData,
     pub fetch_data: FetchData,
 }
 
@@ -35,16 +46,16 @@ impl BrokerSubscription for FakeSubscription {
 
 #[derive(Default)]
 pub struct FakeReplay {
-    pub queued: VecDeque<BrokerMessage>,
+    pub queued: VecDeque<FakeReplayFrame>,
 }
 
 impl BrokerReplay for FakeReplay {
     async fn next(&mut self) -> Option<Result<BrokerMessage, BrokerError>> {
-        self.queued.pop_front().map(Ok)
-    }
-
-    fn pending(&self) -> usize {
-        self.queued.len()
+        self.queued.pop_front().map(|frame| {
+            frame.map_err(|message| {
+                BrokerError::ReplayRead(Box::new(std::io::Error::other(message)))
+            })
+        })
     }
 }
 
@@ -85,9 +96,14 @@ impl Broker for FakeBroker {
             .lock()
             .unwrap()
             .push(format!("replay:{stream}:{filter_subject}"));
-        Ok(FakeReplay {
-            queued: self.replay_data.lock().unwrap().clone(),
-        })
+        let queued = self
+            .replay_data
+            .lock()
+            .unwrap()
+            .get(&filter_subject)
+            .cloned()
+            .unwrap_or_default();
+        Ok(FakeReplay { queued })
     }
 
     async fn fetch_object(&self, bucket: String, id: String) -> Result<Vec<u8>, BrokerError> {

@@ -19,11 +19,14 @@ use std::future::Future;
 /// One inbound message off a subscription or a replay: the subject it
 /// arrived on, its bytes, and the reply subject to answer on, if any (a
 /// request always carries one; a broadcast-style subscribe or a replayed
-/// frame never does).
+/// frame never does). `payload` is the same ref-counted `Bytes` async-nats
+/// and JetStream already hand back — a replayed frame can run to ~17.8 MB
+/// (workload facts), so cloning it across the seam must stay a cheap
+/// refcount bump, never a copy.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BrokerMessage {
     pub subject: String,
-    pub payload: Vec<u8>,
+    pub payload: bytes::Bytes,
     pub reply: Option<String>,
 }
 
@@ -83,13 +86,6 @@ pub trait BrokerSubscription: Send {
 /// swallowed is worse than an adopt that fails outright.
 pub trait BrokerReplay: Send {
     fn next(&mut self) -> impl Future<Output = Option<Result<BrokerMessage, BrokerError>>> + Send;
-
-    /// The backlog size known at replay's start (0 for a fake unless it
-    /// scripts one), so the caller can pre-size its accumulator instead of
-    /// growing it one frame at a time.
-    fn pending(&self) -> usize {
-        0
-    }
 }
 
 pub trait Broker: Clone + Send + Sync + 'static {
@@ -143,7 +139,7 @@ impl BrokerSubscription for NatsSubscription {
         use futures::StreamExt;
         self.0.next().await.map(|m| BrokerMessage {
             subject: m.subject.to_string(),
-            payload: m.payload.to_vec(),
+            payload: m.payload,
             reply: m.reply.map(|r| r.to_string()),
         })
     }
@@ -173,7 +169,7 @@ fn replay_plan(pending: usize) -> ReplayPlan {
 /// swallowed — `Some(Err(_))`, never folded into "the backlog ended".
 pub enum NatsReplay {
     Empty,
-    Batch(Box<async_nats::jetstream::consumer::pull::Batch>, usize),
+    Batch(Box<async_nats::jetstream::consumer::pull::Batch>),
 }
 
 impl BrokerReplay for NatsReplay {
@@ -181,12 +177,15 @@ impl BrokerReplay for NatsReplay {
         use futures::StreamExt;
         match self {
             NatsReplay::Empty => None,
-            NatsReplay::Batch(batch, _) => {
+            NatsReplay::Batch(batch) => {
                 let msg = batch.next().await?;
                 Some(match msg {
+                    // `msg` derefs to the raw message (it also carries the
+                    // ack context), so `payload` can't move out of it —
+                    // `Bytes::clone` is a refcount bump, not a copy.
                     Ok(msg) => Ok(BrokerMessage {
                         subject: msg.subject.to_string(),
-                        payload: msg.payload.to_vec(),
+                        payload: msg.payload.clone(),
                         reply: None,
                     }),
                     // Batch's Item error is already `async_nats::Error`
@@ -194,13 +193,6 @@ impl BrokerReplay for NatsReplay {
                     Err(e) => Err(BrokerError::ReplayRead(e)),
                 })
             }
-        }
-    }
-
-    fn pending(&self) -> usize {
-        match self {
-            NatsReplay::Empty => 0,
-            NatsReplay::Batch(_, pending) => *pending,
         }
     }
 }
@@ -266,7 +258,7 @@ impl Broker for NatsBroker {
                     .messages()
                     .await
                     .map_err(|e| BrokerError::ReplaySetup(Box::new(e)))?;
-                Ok(NatsReplay::Batch(Box::new(messages), pending))
+                Ok(NatsReplay::Batch(Box::new(messages)))
             }
         }
     }

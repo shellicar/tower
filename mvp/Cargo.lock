@@ -254,6 +254,7 @@ dependencies = [
  "async-nats",
  "base64",
  "bridge-testkit",
+ "bytes",
  "futures",
  "image",
  "interprocess",

@@ -184,10 +184,9 @@ async fn replay_conversation<B: Broker>(
 ) -> anyhow::Result<Vec<decisions::Message>> {
     let mut replay = broker
         .replay(stream_name.to_string(), format!("conv.v2.{conv}.changes.>"))
-        .await?;
-    // The pending count is known upfront even though frames arrive one at a
-    // time — pre-size instead of growing the accumulator frame by frame.
-    let mut messages = Vec::with_capacity(replay.pending());
+        .await
+        .context("adopt needs the capture")?;
+    let mut messages = Vec::new();
     let mut revisions = std::collections::HashMap::new();
     while let Some(msg) = replay.next().await {
         let msg = msg?;
@@ -941,6 +940,7 @@ mod tests {
     use crate::testsupport::config;
     use bridge::broker::BrokerMessage;
     use bridge_testkit::{FakeBroker, TestScratch};
+    use std::collections::VecDeque;
     use std::sync::{Arc, RwLock};
 
     fn served() -> ServedCwds {
@@ -1052,7 +1052,8 @@ mod tests {
                     "role": "user", "content": [{ "type": "text", "text": "original" }],
                 })
                 .to_string()
-                .into_bytes(),
+                .into_bytes()
+                .into(),
                 reply: None,
             },
             BrokerMessage {
@@ -1063,7 +1064,8 @@ mod tests {
                     "content": [{ "type": "text", "text": "corrected" }],
                 })
                 .to_string()
-                .into_bytes(),
+                .into_bytes()
+                .into(),
                 reply: None,
             },
         ];
@@ -1081,10 +1083,45 @@ mod tests {
     fn fold_replay_skips_frames_that_do_not_parse_as_a_conv_change() {
         let unrelated = vec![BrokerMessage {
             subject: "conv.v2.c1.telemetry.turn.started".to_string(),
-            payload: b"{}".to_vec(),
+            payload: b"{}".to_vec().into(),
             reply: None,
         }];
         assert!(fold_replay(&unrelated).is_empty());
+    }
+
+    /// The refactor's own headline invariant, proven with a fake that can
+    /// actually script the failure: a mid-replay read error must fail the
+    /// adopt loudly, never read as the backlog simply ending.
+    #[tokio::test]
+    async fn a_mid_replay_read_failure_fails_the_adopt_and_publishes_nothing() {
+        let broker = FakeBroker::default();
+        let filter = "conv.v2.conv-y.changes.>".to_string();
+        broker.replay_data.lock().unwrap().insert(
+            filter,
+            VecDeque::from([
+                Ok(BrokerMessage {
+                    subject: "conv.v2.conv-y.changes.message".to_string(),
+                    payload: serde_json::json!({
+                        "ts": "2026-07-26T00:00:00+00:00",
+                        "id": "m1", "queryId": "q1", "turnId": "t1",
+                        "role": "user", "content": [{ "type": "text", "text": "hi" }],
+                    })
+                    .to_string()
+                    .into_bytes()
+                    .into(),
+                    reply: None,
+                }),
+                Err("connection reset mid-replay".to_string()),
+            ]),
+        );
+
+        let result = replay_conversation(&broker, "conv-approval", "conv-y", &None).await;
+
+        assert!(
+            result.is_err(),
+            "a mid-replay read failure must fail the adopt"
+        );
+        assert!(broker.published.lock().unwrap().is_empty());
     }
 
     #[test]

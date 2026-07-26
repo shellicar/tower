@@ -1368,7 +1368,8 @@ mod tests {
             subject: "conv.v2.conv-t.requests.cancel".to_string(),
             payload: serde_json::json!({ "id": "q-unknown", "from": { "kind": "human" } })
                 .to_string()
-                .into_bytes(),
+                .into_bytes()
+                .into(),
             reply: Some("reply-1".to_string()),
         });
         let requests = FakeSubscription { queued };
