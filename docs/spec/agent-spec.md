@@ -101,7 +101,7 @@ postal label is not.
 
 **Attachment is singular.** `attached` claims: this conversation is served here, by me, now. There is always one claim, never a set.
 
-A new `attached` unconditionally supersedes whatever attachment stood before it. This holds across any world, any instance. The superseded attachment stops contributing to every derivation — liveness, cwd, existence — the instant the new one lands.
+A new `attached` unconditionally supersedes whatever attachment stood before it, across any world, any instance. The instant the new one lands, the old one stops counting for anything: liveness, cwd, existence.
 
 `attached` carries no precondition. Publishing it never asks permission; supersession does the rest.
 
@@ -113,13 +113,13 @@ There is never a legitimate case for two instances serving one conversation at o
 
 A re-attacher that should not have re-attached is visible in the record instead — a second `attached` with no `detached` from the first, or a `detached` arriving after it was already superseded. Nothing prevents it by machinery; the record just shows it.
 
-**The rule, stated once.** The violation is a second `attached` for this conversation from the instance currently standing, with no `detached` in between. Nothing else qualifies it; nothing else excuses it.
+**The rule, stated once.** An instance must not claim a conversation it hasn't released. In the record, that violation looks like: `attached`, `attached` from the same instance, no `detached` between. Nothing else qualifies it; nothing else excuses it.
 
 After a `detached` closes the standing claim, a new `attached` is an ordinary new claim. It may come from any instance — including the one that just released it. A closed claim leaves nothing behind to reopen, so the wire doesn't care who claims next.
 
-For one open claim, this means: the standing instance publishes `attached` exactly once, from the moment it attaches to the moment it detaches.
+So one open claim means one `attached`: an instance publishes it once, at the moment it attaches — nothing more until it detaches.
 
-A changed `cwd` is not a new claim. It's a fact about the claim already standing, so it gets its own event: `moved` (`conversation-spec.md`, Attachment).
+A changed `cwd` is not a new claim. It's a fact about the claim already open, so it gets its own event: `moved` (`conversation-spec.md`, Attachment).
 
 A compliant instance watches the attachment leaf for every conversation it serves (`conversation-spec.md`, Attachment). When it sees itself displaced — another instanceId's `attached` for a conversation it holds — it stops serving and publishes `detached`.
 
