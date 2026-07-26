@@ -78,15 +78,23 @@ impl Broker for FakeBroker {
 
     async fn replay(
         &self,
-        _stream: String,
-        _filter_subject: String,
+        stream: String,
+        filter_subject: String,
     ) -> Result<Self::Replay, BrokerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("replay:{stream}:{filter_subject}"));
         Ok(FakeReplay {
             queued: self.replay_data.lock().unwrap().clone(),
         })
     }
 
     async fn fetch_object(&self, bucket: String, id: String) -> Result<Vec<u8>, BrokerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("fetch_object:{bucket}:{id}"));
         self.fetch_data
             .lock()
             .unwrap()

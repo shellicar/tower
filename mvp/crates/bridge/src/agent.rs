@@ -1383,11 +1383,10 @@ mod tests {
         .await;
 
         let published = broker.published.lock().unwrap().clone();
-        let (subject, payload) = published
+        let (_, payload) = published
             .into_iter()
             .find(|(s, _)| s == "reply-1")
             .expect("a reply was published to the request's own reply subject");
-        assert_eq!(subject, "reply-1");
         let value: serde_json::Value = serde_json::from_slice(&payload).unwrap();
         assert_eq!(value["rejected"], true);
         assert_eq!(value["reason"], "not_found");

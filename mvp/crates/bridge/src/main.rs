@@ -226,9 +226,11 @@ async fn publish_agent<B: Broker>(broker: &B, world: &str, leaf: &str, payload: 
 /// tree) and adopt (a replayed record), and by the future warden before a
 /// third caller copies the wiring.
 ///
-/// Returns the conversation id on success (the caller writes the stdout
-/// reply); None means the subscription could not be made - the error line is
-/// already written, so the caller moves on.
+/// Returns the conversation id and a handle to the spawned servicer task on
+/// success (the caller writes the stdout reply; a test awaits the handle
+/// before tearing down anything the task still holds, e.g. a scratch dir's
+/// sqlite files); None means the subscription could not be made - the error
+/// line is already written, so the caller moves on.
 async fn serve_conversation<B: Broker, D: DeltaSink>(
     broker: &B,
     sink: D,
@@ -237,7 +239,7 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
     served: &ServedCwds,
     config: agent::AgentConfig,
     conversation: decisions::Conversation,
-) -> Option<String> {
+) -> Option<(String, tokio::task::JoinHandle<()>)> {
     let conv = config.conv.0.clone();
     let requests = match agent::subscribe(broker, &config.conv).await {
         Ok(s) => s,
@@ -261,7 +263,7 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
     let cwd_cell = Arc::clone(&config.cwd);
     let cwd = cwd_cell.read().unwrap().to_string_lossy().to_string();
     served.write().unwrap().insert(conv.clone(), cwd_cell);
-    tokio::spawn(agent::run(
+    let handle = tokio::spawn(agent::run(
         broker.clone(),
         sink,
         requests,
@@ -279,7 +281,7 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
         "cwd": cwd,
     });
     publish_agent(broker, world, "attached", attached).await;
-    Some(conv)
+    Some((conv, handle))
 }
 
 /// The host's shared config and live cells. Every control line — from `-c` or
@@ -374,7 +376,7 @@ impl Host {
                 }
             };
             let config = self.config(&conv, model, Arc::new(RwLock::new(cwd)));
-            let Some(conv) = serve_conversation(
+            let Some((conv, _handle)) = serve_conversation(
                 &self.broker,
                 self.delta.clone(),
                 &self.world,
@@ -432,7 +434,7 @@ impl Host {
                 Arc::clone(&self.default_model),
                 Arc::new(RwLock::new(cwd)),
             );
-            let Some(conv) = serve_conversation(
+            let Some((conv, _handle)) = serve_conversation(
                 &self.broker,
                 self.delta.clone(),
                 &self.world,
@@ -932,7 +934,9 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ServedCwds, decisions, expand_tilde, fold_replay, serve_conversation};
+    use super::{
+        ServedCwds, decisions, expand_tilde, fold_replay, replay_conversation, serve_conversation,
+    };
     use crate::anthropic::NoopDeltaSink;
     use crate::testsupport::config;
     use bridge::broker::BrokerMessage;
@@ -951,7 +955,7 @@ mod tests {
     async fn subscription_is_made_before_attached_is_published() {
         let broker = FakeBroker::default();
         let scratch = TestScratch::new("serve-ordering");
-        let conv = serve_conversation(
+        let served_conv = serve_conversation(
             &broker,
             NoopDeltaSink,
             "local",
@@ -961,7 +965,9 @@ mod tests {
             decisions::Conversation::default(),
         )
         .await;
-        assert!(conv.is_some());
+        let Some((_conv, handle)) = served_conv else {
+            panic!("expected a served conversation");
+        };
 
         let calls = broker.calls.lock().unwrap().clone();
         let subscribe_at = calls
@@ -975,11 +981,31 @@ mod tests {
         assert!(subscribe_at < attached_at, "{calls:?}");
 
         // serve_conversation spawns agent::run fire-and-forget, holding the
-        // config's sqlite handles into `scratch`'s own directory; let it run
-        // to completion (the fake subscription ends the loop immediately)
-        // before `scratch` drops and removes that directory out from under
-        // it.
-        drain_spawned_tasks().await;
+        // config's sqlite handles into `scratch`'s own directory; await the
+        // handle directly so `scratch` never drops while the task might
+        // still be running (the fake subscription ends the loop immediately,
+        // so this resolves right away).
+        handle.await.unwrap();
+    }
+
+    /// Adopt must replay only the conversation record's own changes, never
+    /// widen to `.requests.>` (a live request subject, not a capture-stream
+    /// filter) or any other conversation's subjects.
+    #[tokio::test]
+    async fn adopt_replays_only_this_conversations_changes() {
+        let broker = FakeBroker::default();
+
+        replay_conversation(&broker, "conv-approval", "conv-x", &None)
+            .await
+            .unwrap();
+
+        let calls = broker.calls.lock().unwrap().clone();
+        assert!(
+            calls
+                .iter()
+                .any(|c| c == "replay:conv-approval:conv.v2.conv-x.changes.>"),
+            "{calls:?}"
+        );
     }
 
     /// A subscribe failure must release the claim: no `attached` publish, no
@@ -1010,17 +1036,6 @@ mod tests {
             !calls.iter().any(|c| c.starts_with("publish:")),
             "no attached publish on a failed subscribe: {calls:?}"
         );
-    }
-
-    /// A subscribe failure returns before ever spawning `agent::run`, so
-    /// nothing outlives this test's `scratch` — but `subscription_is_made_
-    /// before_attached_is_published` does spawn one, fire-and-forget; this
-    /// yields enough times for that trivial (no real I/O) task to reach its
-    /// own completion before the caller's `TestScratch` drops.
-    async fn drain_spawned_tasks() {
-        for _ in 0..8 {
-            tokio::task::yield_now().await;
-        }
     }
 
     /// The pure fold: a message and a later revision for the same id, in

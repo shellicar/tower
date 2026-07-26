@@ -48,10 +48,6 @@ pub enum BrokerError {
     ReplaySetup(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("replay read failed")]
     ReplayRead(#[source] Box<dyn std::error::Error + Send + Sync>),
-    #[error("attachment reference carries no id")]
-    ObjectNoId,
-    #[error("attachment reference carries no bucket")]
-    ObjectNoBucket,
     #[error("object store {bucket:?} unavailable")]
     ObjectStoreUnavailable {
         bucket: String,
@@ -69,7 +65,7 @@ pub enum BrokerError {
     ObjectReadFailed {
         id: String,
         #[source]
-        source: std::io::Error,
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
 }
 
@@ -245,11 +241,13 @@ impl Broker for NatsBroker {
             .create_consumer(async_nats::jetstream::consumer::pull::Config {
                 filter_subject,
                 deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
-                // Ephemeral (no durable_name): explicit, not the crate
+                // Ephemeral (no durable_name): explicit, not the server
                 // default reached by omission, since this is now a trait
                 // contract — the server reclaims it if a replay is ever
                 // abandoned mid-adopt (a crash between creation and drain).
-                inactive_threshold: std::time::Duration::from_secs(30),
+                // 5s pins the server's own current default; not a behaviour
+                // change.
+                inactive_threshold: std::time::Duration::from_secs(5),
                 ..Default::default()
             })
             .await
@@ -294,7 +292,10 @@ impl Broker for NatsBroker {
         object
             .read_to_end(&mut bytes)
             .await
-            .map_err(|source| BrokerError::ObjectReadFailed { id, source })?;
+            .map_err(|source| BrokerError::ObjectReadFailed {
+                id,
+                source: Box::new(source),
+            })?;
         Ok(bytes)
     }
 }

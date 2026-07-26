@@ -26,6 +26,21 @@ use serde_json::{Value, json};
 
 use bridge::broker::{Broker, BrokerError};
 
+/// Attachment resolution's own errors: the sender-fault validation cases
+/// (`NoId`/`NoBucket`) never come from a `Broker` — no impl can produce
+/// them, since they're caught here before ever calling one — so they don't
+/// belong on `BrokerError`. `Transport` wraps whatever a real fetch failed
+/// with.
+#[derive(Debug, thiserror::Error)]
+pub enum ObjectError {
+    #[error("attachment reference carries no id")]
+    NoId,
+    #[error("attachment reference carries no bucket")]
+    NoBucket,
+    #[error(transparent)]
+    Transport(#[from] BrokerError),
+}
+
 pub(crate) fn is_object_source(block: &Value) -> bool {
     block["source"]["type"] == "object"
 }
@@ -36,16 +51,16 @@ pub(crate) fn is_object_source(block: &Value) -> bool {
 async fn fetch_object<B: Broker>(
     broker: &B,
     source: &Value,
-) -> Result<(Vec<u8>, String), BrokerError> {
+) -> Result<(Vec<u8>, String), ObjectError> {
     let media_type = source["mediaType"]
         .as_str()
         .unwrap_or("application/octet-stream")
         .to_string();
     let Some(id) = source["id"].as_str() else {
-        return Err(BrokerError::ObjectNoId);
+        return Err(ObjectError::NoId);
     };
     let Some(bucket) = source["bucket"].as_str() else {
-        return Err(BrokerError::ObjectNoBucket);
+        return Err(ObjectError::NoBucket);
     };
     let bytes = broker
         .fetch_object(bucket.to_string(), id.to_string())
@@ -132,7 +147,7 @@ async fn resolve_one<B: Broker>(broker: &B, block: &Value) -> Value {
 pub async fn validate_fresh<B: Broker>(
     broker: &B,
     attachments: &[Value],
-) -> Result<(), BrokerError> {
+) -> Result<(), ObjectError> {
     for block in attachments {
         if is_object_source(block) {
             fetch_object(broker, &block["source"]).await?;
