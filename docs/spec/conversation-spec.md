@@ -91,6 +91,7 @@ axis, so the type stays in the body there as a `type` field. The full map:
 | `tip_moved` | `conv.v2.{id}.changes.tip.moved` |
 | `query` | `conv.v2.{id}.changes.query` |
 | `attached` | `conv.v2.{id}.attachment.attached` |
+| `moved` | `conv.v2.{id}.attachment.moved` |
 | `detached` | `conv.v2.{id}.attachment.detached` |
 | `delta`, `block` | `conv.v2.{id}.deltas` — flat, deliberately |
 | `say` | `conv.v2.{id}.requests.say` |
@@ -279,8 +280,9 @@ this section is only the shape on this tree.
 
 | Event | Fields | Notes |
 |---|---|---|
-| `attached` | `instanceId`, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now — supersedes whatever attachment stood before it unconditionally. What makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's current tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for a conversation with nothing in it yet) — so an observer knows where the conversation stands without replaying its own change stream first. `cwd` and `intervalS` are optional, backward compatible with producers that don't yet carry them; their absence is not a claim otherwise, only that this attach didn't state it |
-| `detached` | `instanceId` | released — Ctrl-C, drain, done, or the observable act of a displaced instance complying (agent-spec.md, Attachment). Changes the fold only when `instanceId` matches the *standing* attachment; a crash publishes nothing |
+| `attached` | `instanceId`, `world`?, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now — supersedes whatever attachment stood before it unconditionally, exactly once per claim (agent-spec.md, Attachment). What makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's current tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for a conversation with nothing in it yet) — so an observer knows where the conversation stands without replaying its own change stream first. `world`, `cwd` and `intervalS` are optional, backward compatible with producers that don't yet carry them; their absence is not a claim otherwise, only that this attach didn't state it |
+| `moved` | `instanceId`, `world`?, `cwd` | a fact about the standing attachment, not a new claim — the working directory changed under it (the wire outcome of a `chdir` request, agent-spec.md, Requests). Valid only from the instance the fold currently holds as standing; folds last-write-wins onto the held attachment's `cwd` |
+| `detached` | `instanceId`, `world`? | released — Ctrl-C, drain, done, or the observable act of a displaced instance complying (agent-spec.md, Attachment). Changes the fold only when `instanceId` matches the *standing* attachment; a crash publishes nothing |
 
 **One subject per conversation is what makes supersession a total order.**
 Every `attached` for this conversation, from any world, any instance,
@@ -299,6 +301,8 @@ standing from where the message came from.
 ```json
 // conv.v2.conv-abc.attachment.attached
 { "ts": "2026-07-25T14:02:00+10:00", "instanceId": "inst-1a2f", "world": "mac", "cwd": "~/repos/tower", "tip": "m12", "intervalS": 30 }
+// conv.v2.conv-abc.attachment.moved
+{ "ts": "2026-07-25T14:06:00+10:00", "instanceId": "inst-1a2f", "world": "mac", "cwd": "~/repos/tower/mvp" }
 // conv.v2.conv-abc.attachment.detached
 { "ts": "2026-07-25T14:10:00+10:00", "instanceId": "inst-1a2f", "world": "mac" }
 ```
@@ -571,6 +575,7 @@ export const conversationChange = {
 // provenance, never address, exactly like instanceId.
 export const conversationAttachment = {
   'attached': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional(), cwd: z.string().optional(), tip: z.string().nullable().optional(), intervalS: z.number().int().positive().optional() }),
+  'moved': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional(), cwd: z.string() }),
   'detached': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional() }),
 };
 
