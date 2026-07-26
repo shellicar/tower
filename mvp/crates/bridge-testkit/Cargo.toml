@@ -1,0 +1,17 @@
+[package]
+name = "bridge-testkit"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+# The only fake in bridge's tests (CLAUDE.md's house rule): a Broker
+# implementing bridge::broker::Broker, plus a scratch-directory helper for
+# tests that need their own sqlite files. A dev-dependency of bridge, not a
+# feature flag: dev-dependencies compile automatically for any test/bench in
+# the depending crate, including a binary target's own tests, with no extra
+# flag for CI to remember. Never a dependency of anything shipped.
+[dependencies]
+bridge = { path = "../bridge" }
+uuid = { workspace = true }

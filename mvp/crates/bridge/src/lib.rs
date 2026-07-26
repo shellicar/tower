@@ -5,4 +5,5 @@
 //! duplicating it.
 
 pub mod attach;
+pub mod broker;
 pub mod home;

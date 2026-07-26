@@ -9,10 +9,11 @@
 //! abandons the ask (heartbeats stop, nobody settles it, watchers grey it
 //! as void).
 
-use futures::StreamExt;
 use serde_json::Value;
 use tokio::sync::watch;
 use wire::{encode_heartbeat, encode_raised, encode_settled, now_iso, parse_answer};
+
+use bridge::broker::{Broker, BrokerSubscription};
 
 const HEARTBEAT_SECS: u64 = 15;
 
@@ -28,8 +29,8 @@ pub enum Verdict {
     Cancelled,
 }
 
-async fn publish(
-    client: &async_nats::Client,
+async fn publish<B: Broker>(
+    broker: &B,
     attach: &Option<bridge::attach::AttachHandle>,
     approval_id: &str,
     leaf: &str,
@@ -42,16 +43,19 @@ async fn publish(
     // like conv events do. Addressed replies (msg.reply) are not broadcast
     // lifecycle and are never teed. Tee first: it borrows, the publish moves.
     bridge::attach::tee(attach, &subject, &bytes).await;
-    if let Err(e) = client.publish(subject, bytes.into()).await {
-        eprintln!("bridge: approval publish failed: {e}");
+    if let Err(e) = broker.publish(subject, bytes).await {
+        eprintln!(
+            "bridge: approval publish failed: {:#}",
+            anyhow::Error::new(e)
+        );
     }
 }
 
 /// Raise the ask and wait for the human. First valid answer wins and is
 /// settled; unintelligible requests are answered `rejected` (a holder must
 /// answer everything addressed to it); the cancel signal abandons the ask.
-pub async fn gate(
-    client: &async_nats::Client,
+pub async fn gate<B: Broker>(
+    broker: &B,
     attach: &Option<bridge::attach::AttachHandle>,
     approval_id: &str,
     ask: &Value,
@@ -59,14 +63,17 @@ pub async fn gate(
     cancel: &mut watch::Receiver<bool>,
 ) -> Verdict {
     // Subscribe before raising: an answer must never race the raise.
-    let mut answers = match client
+    let mut answers = match broker
         .subscribe(format!("approval.v1.{approval_id}.requests"))
         .await
     {
         Ok(s) => s,
         Err(e) => {
             // A gate that cannot hear answers must not run the tool.
-            eprintln!("bridge: approval subscribe failed: {e}");
+            eprintln!(
+                "bridge: approval subscribe failed: {:#}",
+                anyhow::Error::new(e)
+            );
             return Verdict::Denied {
                 by: Value::String("unraisable: approval subscribe failed".into()),
             };
@@ -74,7 +81,7 @@ pub async fn gate(
     };
 
     publish(
-        client,
+        broker,
         attach,
         approval_id,
         "lifecycle",
@@ -88,7 +95,7 @@ pub async fn gate(
     loop {
         tokio::select! {
             _ = pulse.tick() => {
-                publish(client, attach, approval_id, "telemetry", encode_heartbeat(&now_iso())).await;
+                publish(broker, attach, approval_id, "telemetry", encode_heartbeat(&now_iso())).await;
             }
             _ = crate::agent::cancelled(cancel) => {
                 return Verdict::Cancelled;
@@ -100,8 +107,8 @@ pub async fn gate(
                 };
                 let Some((approved, from)) = parse_answer(&msg.payload) else {
                     if let Some(reply) = msg.reply {
-                        let _ = client
-                            .publish(reply, wire::encode_rejected("unsupported").into())
+                        let _ = broker
+                            .publish(reply, wire::encode_rejected("unsupported"))
                             .await;
                     }
                     continue;
@@ -109,12 +116,12 @@ pub async fn gate(
                 // First valid answer wins: accept, settle with the
                 // answerer's provenance, and the gate is decided.
                 if let Some(reply) = msg.reply {
-                    let _ = client
-                        .publish(reply, wire::encode_accepted(None).into())
+                    let _ = broker
+                        .publish(reply, wire::encode_accepted(None))
                         .await;
                 }
                 publish(
-                    client,
+                    broker,
                     attach,
                     approval_id,
                     "lifecycle",

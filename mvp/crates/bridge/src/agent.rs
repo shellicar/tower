@@ -14,15 +14,16 @@
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, watch};
 
-use futures::StreamExt;
 use wire::{ConvRequest, ConversationId, encode_accepted, encode_rejected, now_iso, parse_request};
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::anthropic;
+use crate::anthropic::DeltaSink;
 use crate::decisions::{CancelDecision, Conversation, Message, QueryEnd, SayDecision};
 use crate::skills::Skills;
+use bridge::broker::{Broker, BrokerError, BrokerSubscription};
 
 /// Every tool schema offered on every turn, except `Skill` (gated on a
 /// non-empty catalogue — conversation-specific, not static). The one source
@@ -108,11 +109,11 @@ pub struct AgentConfig {
 /// publishing `attached` and before reporting the spawn: a conversation
 /// that cannot hear requests is not spawned in any meaningful sense, so
 /// the claim and the reply both wait for this fact.
-pub async fn subscribe(
-    client: &async_nats::Client,
+pub async fn subscribe<B: Broker>(
+    broker: &B,
     conv: &ConversationId,
-) -> Result<async_nats::Subscriber, async_nats::SubscribeError> {
-    client
+) -> Result<B::Subscription, BrokerError> {
+    broker
         .subscribe(format!("conv.v2.{}.requests.>", conv.0))
         .await
 }
@@ -120,30 +121,30 @@ pub async fn subscribe(
 /// A publisher bound to one conversation: every event carries the same
 /// client and id, so the call sites spell only the leaf and the body. This
 /// is the shell's one door onto the wire for a served conversation.
-struct Publisher {
-    client: async_nats::Client,
+struct Publisher<B: Broker> {
+    broker: B,
     conv: ConversationId,
     history: crate::history::HistoryStore,
     attach: Option<bridge::attach::AttachHandle>,
 }
 
-impl Publisher {
+impl<B: Broker> Publisher<B> {
     fn new(
-        client: &async_nats::Client,
+        broker: &B,
         conv: &ConversationId,
         history: &crate::history::HistoryStore,
         attach: Option<bridge::attach::AttachHandle>,
     ) -> Self {
         Self {
-            client: client.clone(),
+            broker: broker.clone(),
             conv: conv.clone(),
             history: crate::history::HistoryStore::clone(history),
             attach,
         }
     }
 
-    fn client(&self) -> &async_nats::Client {
-        &self.client
+    fn broker(&self) -> &B {
+        &self.broker
     }
 
     fn conv(&self) -> &ConversationId {
@@ -170,8 +171,12 @@ impl Publisher {
         // hundreds of KB; a tower-only instance must not pay for a mirror it
         // doesn't have).
         bridge::attach::tee(&self.attach, &subject, &bytes).await;
-        if let Err(e) = self.client.publish(subject, bytes.into()).await {
-            eprintln!("bridge[{}]: publish failed: {e}", self.conv.0);
+        if let Err(e) = self.broker.publish(subject, bytes).await {
+            eprintln!(
+                "bridge[{}]: publish failed: {:#}",
+                self.conv.0,
+                anyhow::Error::new(e)
+            );
         }
     }
 
@@ -232,9 +237,10 @@ impl Publisher {
 /// `conversation` is the servicer's starting tree: `Conversation::default()`
 /// for a spawn, an adopted record for a revival - the loop is identical
 /// either way, because the record constitutes the conversation.
-pub async fn run(
-    client: async_nats::Client,
-    requests: async_nats::Subscriber,
+pub async fn run<B: Broker, D: DeltaSink>(
+    broker: B,
+    sink: D,
+    requests: B::Subscription,
     config: AgentConfig,
     conversation: Conversation,
 ) {
@@ -289,7 +295,8 @@ pub async fn run(
                             // is empty) — honest and distinct from `stale`.
                             SayDecision::Empty => encode_rejected("empty"),
                             SayDecision::Accept => match accept_say(
-                                &client,
+                                &broker,
+                                &sink,
                                 &config,
                                 &mut conversation,
                                 &mut skill_hashes,
@@ -339,8 +346,12 @@ pub async fn run(
                         encode_rejected("unsupported")
                     }
                 };
-                if let Err(e) = client.publish(reply_to, response.into()).await {
-                    eprintln!("bridge[{}]: reply publish failed: {e}", config.conv.0);
+                if let Err(e) = broker.publish(reply_to, response).await {
+                    eprintln!(
+                        "bridge[{}]: reply publish failed: {:#}",
+                        config.conv.0,
+                        anyhow::Error::new(e)
+                    );
                 }
             }
         }
@@ -358,8 +369,9 @@ pub async fn run(
 /// before then leaves the record untouched - the cancel revoked the say, not
 /// just the turn.
 #[allow(clippy::too_many_arguments)]
-async fn accept_say(
-    client: &async_nats::Client,
+async fn accept_say<B: Broker, D: DeltaSink>(
+    broker: &B,
+    sink: &D,
     config: &AgentConfig,
     conversation: &mut Conversation,
     skill_hashes: &mut Option<HashMap<String, u64>>,
@@ -374,13 +386,14 @@ async fn accept_say(
     // (wrong bucket, dropped upload, unreachable store), so the say rejects
     // outright rather than let the model see a placeholder in place of what
     // the sender actually attached.
-    if let Err(detail) = crate::objects::validate_fresh(client, &attachments).await {
+    if let Err(detail) = crate::objects::validate_fresh(broker, &attachments).await {
         // The wire's reason is a short canonical token, same footing as
         // `stale`/`empty`/`already_complete`; the detail (which bucket, which
         // id, which error) is diagnostic and belongs in the log, not the reply.
         eprintln!(
-            "bridge[{}]: attachment validation failed: {detail}",
-            config.conv.0
+            "bridge[{}]: attachment validation failed: {:#}",
+            config.conv.0,
+            anyhow::Error::new(detail)
         );
         return Err("attachment_unavailable".to_string());
     }
@@ -466,7 +479,8 @@ async fn accept_say(
     history.push(json!({ "role": "user", "content": user.content }));
 
     let ctx = TurnContext {
-        client: client.clone(),
+        broker: broker.clone(),
+        sink: sink.clone(),
         conv: config.conv.clone(),
         // Read fresh per query: a stdio `model` line reaches even a running
         // conversation, here, on its next say.
@@ -495,15 +509,16 @@ async fn accept_say(
         // render at this edge (objects.rs) — inside the task, never ahead of
         // the say's reply: on a long image-laden history it takes seconds, and
         // the sender's request deadline must not pay for it.
-        crate::objects::resolve_history(&ctx.client, &mut history).await;
+        crate::objects::resolve_history(&ctx.broker, &mut history).await;
         let end = run_query(ctx, history, rx).await;
         let _ = done.send((q, end)).await;
     });
     Ok((query, tx))
 }
 
-struct TurnContext {
-    client: async_nats::Client,
+struct TurnContext<B: Broker, D: DeltaSink> {
+    broker: B,
+    sink: D,
     conv: ConversationId,
     model: String,
     system: Arc<std::sync::RwLock<Option<String>>>,
@@ -550,13 +565,14 @@ pub(crate) async fn cancelled(rx: &mut watch::Receiver<bool>) {
 /// between rounds (the finished turn's commits are on the wire and stand;
 /// only the remaining work is cancelled). Failure is `turn_aborted` + the
 /// aborted closure: honesty over silence.
-async fn run_query(
-    ctx: TurnContext,
+async fn run_query<B: Broker, D: DeltaSink>(
+    ctx: TurnContext<B, D>,
     mut history: Vec<Value>,
     mut cancel: watch::Receiver<bool>,
 ) -> QueryEnd {
     let TurnContext {
-        client,
+        broker,
+        sink,
         conv,
         model,
         system,
@@ -575,7 +591,7 @@ async fn run_query(
         cwd,
         permissions,
     } = &ctx;
-    let pubr = Publisher::new(client, conv, history_store, attach.clone());
+    let pubr = Publisher::new(broker, conv, history_store, attach.clone());
 
     // Skill only when a catalogue exists; every other tool is always this
     // same list (static_tool_schemas) — the one source main.rs's startup log
@@ -617,7 +633,7 @@ async fn run_query(
         let system = system.read().unwrap().clone();
         let outcome = tokio::select! {
             outcome = anthropic::stream_turn(
-                client,
+                sink,
                 http,
                 conv,
                 auth,
@@ -817,8 +833,8 @@ fn permission_verdict(
 /// committed tool_use without its result is an invalid conversation the
 /// caller must still be able to close.
 #[allow(clippy::too_many_arguments)]
-async fn run_tool_round(
-    pubr: &Publisher,
+async fn run_tool_round<B: Broker>(
+    pubr: &Publisher<B>,
     skills: &Skills,
     refs: &crate::refs::RefStore,
     memory: &crate::memory::MemoryStore,
@@ -922,7 +938,7 @@ async fn run_tool_round(
                             "toolUseId": id,
                         });
                         match crate::approval::gate(
-                            pubr.client(),
+                            pubr.broker(),
                             pubr.attach(),
                             &approval_id,
                             &ask,
@@ -989,7 +1005,7 @@ async fn run_tool_round(
                                 "toolUseId": id,
                             });
                             match crate::approval::gate(
-                                pubr.client(),
+                                pubr.broker(),
                                 pubr.attach(),
                                 &approval_id,
                                 &ask,
@@ -1080,7 +1096,7 @@ async fn run_tool_round(
                             "toolUseId": id,
                         });
                         match crate::approval::gate(
-                            pubr.client(),
+                            pubr.broker(),
                             pubr.attach(),
                             &approval_id,
                             &ask,
@@ -1128,7 +1144,7 @@ async fn run_tool_round(
                             "toolUseId": id,
                         });
                         match crate::approval::gate(
-                            pubr.client(),
+                            pubr.broker(),
                             pubr.attach(),
                             &approval_id,
                             &ask,
@@ -1176,7 +1192,7 @@ async fn run_tool_round(
                             "toolUseId": id,
                         });
                         match crate::approval::gate(
-                            pubr.client(),
+                            pubr.broker(),
                             pubr.attach(),
                             &approval_id,
                             &ask,
@@ -1226,7 +1242,7 @@ async fn run_tool_round(
                             "toolUseId": id,
                         });
                         match crate::approval::gate(
-                            pubr.client(),
+                            pubr.broker(),
                             pubr.attach(),
                             &approval_id,
                             &ask,
@@ -1259,7 +1275,7 @@ async fn run_tool_round(
                     "toolUseId": id,
                 });
                 match crate::approval::gate(
-                    pubr.client(),
+                    pubr.broker(),
                     pubr.attach(),
                     &approval_id,
                     &ask,
@@ -1287,7 +1303,7 @@ async fn run_tool_round(
                     "toolUseId": id,
                 });
                 match crate::approval::gate(
-                    pubr.client(),
+                    pubr.broker(),
                     pubr.attach(),
                     &approval_id,
                     &ask,
@@ -1328,4 +1344,52 @@ async fn run_tool_round(
         }));
     }
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::anthropic::NoopDeltaSink;
+    use crate::testsupport::config;
+    use bridge::broker::BrokerMessage;
+    use bridge_testkit::{FakeBroker, FakeSubscription, TestScratch};
+    use std::collections::VecDeque;
+
+    /// The request loop's reply shape for a cancel naming a query this
+    /// servicer never started: `rejected: not_found`, published to the
+    /// request's own reply subject — proven through the broker seam, not
+    /// just decisions.rs's pure `on_cancel`.
+    #[tokio::test]
+    async fn a_cancel_of_an_unknown_query_replies_rejected_not_found() {
+        let broker = FakeBroker::default();
+        let scratch = TestScratch::new("agent");
+        let mut queued = VecDeque::new();
+        queued.push_back(BrokerMessage {
+            subject: "conv.v2.conv-t.requests.cancel".to_string(),
+            payload: serde_json::json!({ "id": "q-unknown", "from": { "kind": "human" } })
+                .to_string()
+                .into_bytes()
+                .into(),
+            reply: Some("reply-1".to_string()),
+        });
+        let requests = FakeSubscription { queued };
+
+        run(
+            broker.clone(),
+            NoopDeltaSink,
+            requests,
+            config("conv-t", &scratch),
+            Conversation::default(),
+        )
+        .await;
+
+        let published = broker.published.lock().unwrap().clone();
+        let (_, payload) = published
+            .into_iter()
+            .find(|(s, _)| s == "reply-1")
+            .expect("a reply was published to the request's own reply subject");
+        let value: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(value["rejected"], true);
+        assert_eq!(value["reason"], "not_found");
+    }
 }

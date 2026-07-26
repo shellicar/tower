@@ -16,6 +16,7 @@ wire = { path = "../wire" }
 anyhow.workspace = true
 async-nats.workspace = true
 base64.workspace = true
+bytes.workspace = true
 futures.workspace = true
 image.workspace = true
 interprocess.workspace = true
@@ -27,6 +28,14 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 similar.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 yaml_serde.workspace = true
+
+[dev-dependencies]
+# The only fake (bridge-testkit's FakeBroker) plus a test scratch-dir
+# helper. A dev-dependency compiles for any test/bench in this crate,
+# binary target included, with no feature flag for CI to remember, and
+# never ships in a normal build.
+bridge-testkit = { path = "../bridge-testkit" }

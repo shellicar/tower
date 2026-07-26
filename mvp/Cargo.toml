@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/wire", "crates/ws-types", "crates/towerd", "crates/bridge", "crates/helm", "frontend-leptos"]
+members = ["crates/wire", "crates/ws-types", "crates/towerd", "crates/bridge", "crates/bridge-testkit", "crates/helm", "frontend-leptos"]
 
 [workspace.package]
 version = "0.1.0"
@@ -18,6 +18,10 @@ anyhow = "1"
 async-nats = "0.49"
 axum = { version = "0.8", features = ["ws"] }
 futures = "0.3"
+# bridge::broker::BrokerMessage's payload: the same ref-counted byte buffer
+# async-nats/JetStream already hand back, so a replayed frame's bytes (up to
+# ~17.8 MB, workload facts) are never copied just to cross the seam.
+bytes = "1"
 # reqwest: the bridge's model adapter — one streaming HTTPS call; rustls (no
 # system OpenSSL) with native-roots so it trusts the OS keychain — required
 # behind TLS-intercepting proxies (Zscaler). uuid: id minting.

@@ -253,6 +253,8 @@ dependencies = [
  "anyhow",
  "async-nats",
  "base64",
+ "bridge-testkit",
+ "bytes",
  "futures",
  "image",
  "interprocess",
@@ -264,10 +266,19 @@ dependencies = [
  "serde_json",
  "sha2",
  "similar",
+ "thiserror 2.0.18",
  "tokio",
  "uuid",
  "wire",
  "yaml_serde",
+]
+
+[[package]]
+name = "bridge-testkit"
+version = "0.1.0"
+dependencies = [
+ "bridge",
+ "uuid",
 ]
 
 [[package]]

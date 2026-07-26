@@ -213,6 +213,60 @@ fn mark_message_cache_breakpoint(messages: &mut [Value]) {
     block["cache_control"] = json!({ "type": "ephemeral", "ttl": "1h" });
 }
 
+/// The turn's own boundary onto NATS: publishing streamed deltas as they
+/// arrive (`content_block_start`/`content_block_delta`). Deliberately not
+/// `Broker` — request handling's seam covers the conversation record's
+/// subscribe/publish/replay/fetch traffic; a turn's delta stream is a
+/// different concern that happens to share a transport in production, so
+/// it gets its own narrow trait rather than growing `Broker` to cover a
+/// caller it wasn't shaped for.
+pub trait DeltaSink: Clone + Send + Sync + 'static {
+    fn publish(
+        &self,
+        subject: String,
+        payload: Vec<u8>,
+    ) -> impl std::future::Future<Output = Result<(), Box<dyn std::error::Error + Send + Sync>>> + Send;
+}
+
+#[derive(Clone)]
+pub struct NatsDeltaSink(pub async_nats::Client);
+
+impl DeltaSink for NatsDeltaSink {
+    async fn publish(
+        &self,
+        subject: String,
+        payload: Vec<u8>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.0
+            .publish(subject, payload.into())
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+}
+
+/// A delta sink that publishes nothing — test doubles that never drive a
+/// query far enough to reach a model call still need a value to satisfy
+/// the generic parameter. This type lives in the binary's own anthropic
+/// module (unlike bridge-testkit's fakes, which sit in a separate
+/// dev-dependency crate because the library and binary targets compile
+/// separately), so a plain `cfg(test)` already keeps it out of a normal
+/// build: the binary's own test compilation is what turns `cfg(test)` on
+/// here.
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub struct NoopDeltaSink;
+
+#[cfg(test)]
+impl DeltaSink for NoopDeltaSink {
+    async fn publish(
+        &self,
+        _subject: String,
+        _payload: Vec<u8>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+}
+
 pub struct TurnDone {
     pub content: Vec<Value>,
     pub stop_reason: String,
@@ -233,8 +287,8 @@ pub struct TurnDone {
 /// `thinking_budget` enables extended thinking when Some — the stream and
 /// fold paths already carry thinking blocks; this is the ask.
 #[allow(clippy::too_many_arguments)]
-pub async fn stream_turn(
-    client: &async_nats::Client,
+pub async fn stream_turn<D: DeltaSink>(
+    sink: &D,
     http: &reqwest::Client,
     conv: &ConversationId,
     auth: &Auth,
@@ -309,13 +363,17 @@ pub async fn stream_turn(
     // fd like every other publish — they're the whole point of a live TUI.
     let deltas_subject = format!("conv.v2.{}.deltas", conv.0);
     let publish = |payload: Value| {
-        let client = client.clone();
+        let sink = sink.clone();
         let subject = deltas_subject.clone();
         let attach = attach.clone();
         async move {
             let bytes = serde_json::to_vec(&payload).expect("json! cannot fail");
             bridge::attach::tee(&attach, &subject, &bytes).await;
-            let _ = client.publish(subject, bytes.into()).await;
+            // Fixing the trait's shape here (Result, not swallowed inside
+            // it) without also fixing what a turn does when a delta fails to
+            // publish is a separate, larger change than this refactor's
+            // scope — same behaviour as before: drop it explicitly.
+            let _ = sink.publish(subject, bytes).await;
         }
     };
 

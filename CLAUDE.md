@@ -88,6 +88,12 @@ the right one instead of guessing.
   UI's own says, never fabricated.
 - Staleness is the product: `row` events are unconditional; `open` gates
   content only, any number open.
+- Errors: the cause rides `#[source]` only — an `#[error("...")]` message
+  never repeats the cause's text (chain-walkers like anyhow's `{:#}` would
+  print it twice). Anywhere an error is logged or shown renders the full
+  chain via `{:#}` (for an owned error: `eprintln!("{:#}", anyhow::Error::new(e))`);
+  a bare `{e}` on an error type drops the cause and is a bug. One test pins
+  that a rendered chain names its underlying cause.
 
 ## Workload facts (measured, not assumed)
 
