@@ -119,17 +119,20 @@ visible in the record — a second `attached` with no `detached` from the
 first, or a `detached` arriving after it was already superseded — not
 prevented by machinery.
 
-**An instanceId's claim lifecycle is linear: attach, serve, detach.** There
-is no bare re-assert. A re-publish of `attached` carrying new information (a
-changed `cwd` after `chdir` lands) is legitimate — it is the same instance
-restating what it already holds, not reclaiming something it lost. What
-never happens under this model is one instance publishing `attached` again
-for a conversation it never stopped serving and nothing displaced it from:
-new-process-equals-new-`instanceId` (this spec, The entity) means the only
-process that could re-assert a claim it still holds is the same still-running
-process, which has no reason to, and a *restarted* process is a new instance
-by definition — so a bare re-assert is never legitimate traffic, only a
-zombie's.
+**An instanceId's claim lifecycle is linear: one `attached`, one `detached`,
+nothing between.** `attached` is published *exactly once* per claim — there
+is no legitimate re-publish, qualified or not. A rule that allows "a second
+`attached` is a violation, except when it carries new information" is not a
+rule: every zombie re-attach is one parameter tweak away from looking
+compliant, and the conformance check (two `attached` for one conversation
+from one `instanceId` with no intervening `detached`) stops being
+checkable. A changed `cwd` is not a new claim — it is a fact about the
+claim already standing, and gets its own event on the same leaf family:
+`moved` (`conversation-spec.md`, Attachment), valid only from the standing
+instance. new-process-equals-new-`instanceId` (this spec, The entity) means
+the only process that could ever legitimately touch an existing claim is the
+same still-running process, and now it has an event scoped to exactly what
+it is doing (moving cwd) rather than a reason to re-assert the whole claim.
 
 A compliant instance watches the attachment leaf (`conversation-spec.md`,
 Attachment) for every conversation it serves. On seeing itself displaced —
@@ -167,9 +170,9 @@ differently because they are different.
 
 | Request | Fields | Reply | Notes |
 |---|---|---|---|
-| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts, and the premise check is instance-local, never a liveness read on anyone else: already attached **to this instance** → `rejected: already_attached` (the request is redundant, nothing to do); attached to any *other* instance, whether that instance is live or stranded → accept and take over unconditionally — asking a second world or instance to serve a conversation already served elsewhere *is* the deliberate migration path, and whether the incumbent is still alive is irrelevant to the premise; no history → start fresh; history and no live attachment → fold and re-attach. Known reasons today: `already_attached`, `at_capacity`, `unsupported` |
+| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts, and the premise check is instance-local, never a liveness read on anyone else: already attached **to this instance** → `rejected: already_attached` (the request is redundant, nothing to do); attached to any *other* instance, whether that instance is live or stranded → accept and take over unconditionally — asking a second world or instance to serve a conversation already served elsewhere *is* the deliberate migration path, and whether the incumbent is still alive is irrelevant to the premise; no history → start fresh; history and no attachment → fold and re-attach. Known reasons today: `already_attached`, `at_capacity`, `unsupported` |
 | `drain` | — | `accepted` \| `rejected` + `reason` | stop taking work and detach cleanly: a `detached` per conversation, then silence. Distinguishes a decided shutdown from a crash |
-| `chdir` | `conversationId`, `cwd` | `accepted` \| `rejected` + `reason` | move the working directory of a live attachment — Tower changing where a conversation is served without a Ctrl-C. Accept confirms the premise (this world serves the conversation), not the outcome: the move is observed, not promised — the agent re-publishes `attached` with the new `cwd` when it lands, folded last-write-wins. The agent reconciles the directory and may decline to move; a move that never lands shows as an unchanged `cwd`, an observed outcome like any other. Known reasons today: `not_found` (this world is not serving that conversation), `unsupported` |
+| `chdir` | `conversationId`, `cwd` | `accepted` \| `rejected` + `reason` | move the working directory of a live attachment — Tower changing where a conversation is served without a Ctrl-C. Accept confirms the premise (this world serves the conversation), not the outcome: the move is observed, not promised — the agent publishes `attachment.moved` (`conversation-spec.md`, Attachment) when the move lands. The agent reconciles the directory and may decline to move; a move that never lands shows as an unchanged `cwd`, an observed outcome like any other. Known reasons today: `not_found` (this world is not serving that conversation), `unsupported` |
 
 **cwd is intrinsic to the harness.** An agent is a harness and a model; the
 model is text-in-text-out and has no filesystem, while the harness runs
