@@ -173,9 +173,11 @@ fn fold_replay(raw: &[BrokerMessage]) -> Vec<decisions::Message> {
 /// own buffering) was never implemented here and is deferred as an
 /// improvement outside this behaviour-preserving refactor.
 ///
-/// A mid-replay read failure surfaces loudly (`?` below): an adopt missing
-/// its tail because a read error was silently folded into "the backlog
-/// ended" is worse than an adopt that fails outright.
+/// A mid-replay read failure the client actually surfaces fails loudly
+/// (`?` below) rather than reading as a clean end. Scoped: a fetch that
+/// simply expires short of the pending count with no error at all is a
+/// separate, real hole (see `BrokerReplay`'s own doc) — deferred, not closed
+/// here.
 async fn replay_conversation<B: Broker>(
     broker: &B,
     stream_name: &str,
@@ -994,6 +996,11 @@ mod tests {
     #[tokio::test]
     async fn adopt_replays_only_this_conversations_changes() {
         let broker = FakeBroker::default();
+        broker
+            .replay_data
+            .lock()
+            .unwrap()
+            .insert("conv.v2.conv-x.changes.>".to_string(), VecDeque::new());
 
         replay_conversation(&broker, "conv-approval", "conv-x", &None)
             .await
@@ -1093,7 +1100,7 @@ mod tests {
     /// actually script the failure: a mid-replay read error must fail the
     /// adopt loudly, never read as the backlog simply ending.
     #[tokio::test]
-    async fn a_mid_replay_read_failure_fails_the_adopt_and_publishes_nothing() {
+    async fn a_mid_replay_read_failure_fails_the_adopt() {
         let broker = FakeBroker::default();
         let filter = "conv.v2.conv-y.changes.>".to_string();
         broker.replay_data.lock().unwrap().insert(
@@ -1121,7 +1128,6 @@ mod tests {
             result.is_err(),
             "a mid-replay read failure must fail the adopt"
         );
-        assert!(broker.published.lock().unwrap().is_empty());
     }
 
     #[test]

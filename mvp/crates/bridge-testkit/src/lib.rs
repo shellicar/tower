@@ -21,9 +21,10 @@ type ReplayData = Arc<Mutex<std::collections::HashMap<String, VecDeque<FakeRepla
 /// every subscribe/publish call, in order (`calls`) and every publish's
 /// full payload (`published`), and answers subscribe/replay from scripted
 /// queues a test seeds up front, keyed by the exact filter subject asked
-/// for — a call with the wrong filter gets nothing, same as a real backlog
-/// with no matching messages, rather than silently answering from whatever
-/// was seeded for some other conversation.
+/// for. An unseeded filter is a scripting error (panics naming it), not a
+/// silent empty backlog — a typo'd filter must fail the test that made it,
+/// not pass vacuously; a test that genuinely wants an empty backlog seeds
+/// that filter with an empty queue explicitly.
 #[derive(Clone, Default)]
 pub struct FakeBroker {
     pub calls: Arc<Mutex<Vec<String>>>,
@@ -102,7 +103,13 @@ impl Broker for FakeBroker {
             .unwrap()
             .get(&filter_subject)
             .cloned()
-            .unwrap_or_default();
+            .unwrap_or_else(|| {
+                panic!(
+                    "FakeBroker::replay called with unscripted filter {filter_subject:?} — \
+                     seed replay_data for it first (an empty VecDeque for a deliberately \
+                     empty backlog)"
+                )
+            });
         Ok(FakeReplay { queued })
     }
 

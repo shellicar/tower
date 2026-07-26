@@ -83,7 +83,12 @@ pub trait BrokerSubscription: Send {
 /// A replay's own source: unlike a subscription, a read can fail mid-
 /// backlog, and that must never be indistinguishable from the backlog
 /// simply ending — an adopt missing its tail because a read error was
-/// swallowed is worse than an adopt that fails outright.
+/// swallowed is worse than an adopt that fails outright. Scoped claim: this
+/// covers errors the client surfaces (a dropped connection, a server error
+/// reply); it does NOT cover a fetch that simply expires having delivered
+/// fewer than the pending count with no error at all (async-nats's
+/// `max_messages` request can end a batch short with nothing to surface) —
+/// that hole is real and is deferred, not closed by this trait.
 pub trait BrokerReplay: Send {
     fn next(&mut self) -> impl Future<Output = Option<Result<BrokerMessage, BrokerError>>> + Send;
 }
@@ -237,8 +242,14 @@ impl Broker for NatsBroker {
                 // default reached by omission, since this is now a trait
                 // contract — the server reclaims it if a replay is ever
                 // abandoned mid-adopt (a crash between creation and drain).
-                // 5s pins the server's own current default; not a behaviour
-                // change.
+                // 5s pins the server's own current default — empirically
+                // verified (2026-07-26) against nats-server 2.14.3, the
+                // version `nats:latest` (compose.yaml) pulled at the time of
+                // writing: a genuinely ephemeral pull consumer
+                // (durable_name absent) created via this same async-nats
+                // 0.49.1 client, with inactive_threshold left unset, reports
+                // `inactive_threshold: 5s` back from the server. Not a
+                // behaviour change; re-verify if the pinned image moves.
                 inactive_threshold: std::time::Duration::from_secs(5),
                 ..Default::default()
             })

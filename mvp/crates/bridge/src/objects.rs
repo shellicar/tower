@@ -126,8 +126,19 @@ async fn resolve_one<B: Broker>(broker: &B, block: &Value) -> Value {
         })
     };
 
-    let Ok((bytes, media_type)) = fetch_object(broker, source).await else {
-        return placeholder();
+    let (bytes, media_type) = match fetch_object(broker, source).await {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            // Expected over time in replay (module doc), so this is a log
+            // line, not a rejection — but it must still reach one: a
+            // swallowed cause here is undiagnosable when someone asks why an
+            // attachment silently went missing.
+            eprintln!(
+                "bridge: attachment degraded to placeholder: {:#}",
+                anyhow::Error::new(e)
+            );
+            return placeholder();
+        }
     };
     let block_type = block["type"].as_str().unwrap_or("image").to_string();
     let (bytes, media_type) = condition(&block_type, bytes, media_type).await;
