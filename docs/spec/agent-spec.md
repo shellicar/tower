@@ -203,7 +203,7 @@ testing rule).
 
 | Request | Fields | Reply | Notes |
 |---|---|---|---|
-| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts, and the premise check is instance-local, never a liveness read on anyone else: already attached **to this instance** → `rejected: already_attached` (the request is redundant, nothing to do); attached to any *other* instance, whether that instance is live or stranded → accept and take over unconditionally — asking a second world or instance to serve a conversation already served elsewhere *is* the deliberate migration path, and whether the incumbent is still alive is irrelevant to the premise; no history → start fresh; history and no attachment → fold and re-attach. Known reasons today: `already_attached`, `at_capacity`, `unsupported` |
+| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts, and the premise check is instance-local, never a liveness read on anyone else: already attached **to this instance** → `rejected: already_attached` (the request is redundant, nothing to do); attached to any *other* instance, whether that instance is live or stranded → accept and take over unconditionally — asking a second world or instance to serve a conversation already served elsewhere *is* the deliberate migration path, and whether the incumbent is still alive is irrelevant to the premise; no history → start fresh; history and no attachment → fold and re-attach. Any named environment value the world cannot establish rejects the request (`invalid_cwd`, for `cwd`); an omitted value falls to the world's own defaults — absence delegates, presence binds, never a silent best-effort fallback. Known reasons today: `already_attached`, `at_capacity`, `invalid` (a recognised request whose body doesn't carry what it needs, e.g. a missing or empty `conversationId`), `invalid_cwd`, `failed` (the world could not undertake the operation; the specific cause rides `detail`), `unsupported` |
 | `drain` | — | `accepted` \| `rejected` + `reason` | stop taking work and detach cleanly: a `detached` per conversation, then silence. Distinguishes a decided shutdown from a crash |
 | `chdir` | `conversationId`, `cwd` | `accepted` \| `rejected` + `reason` | move the working directory of a live attachment — Tower changing where a conversation is served without a Ctrl-C. Accept confirms the premise (this world serves the conversation), not the outcome: the move is observed, not promised — the agent publishes `attachment.moved` (`conversation-spec.md`, Attachment) when the move lands. The agent reconciles the directory and may decline to move; a move that never lands shows as an unchanged `cwd`, an observed outcome like any other. Known reasons today: `not_found` (this world is not serving that conversation), `unsupported` |
 
@@ -301,10 +301,13 @@ export const agentRequest = {
 };
 
 // Replies (transport truth, never outcome). Known reasons today:
-// already_attached, at_capacity, not_found, unsupported.
+// already_attached, at_capacity, invalid, invalid_cwd, not_found, failed,
+// unsupported. `detail` is optional free-text diagnostics for a human —
+// `reason` is the machine-facing token a caller branches on, `detail` names
+// the step and underlying error; never the other way around.
 export const agentRequestReply = z.union([
   z.looseObject({ accepted: z.literal(true) }),
-  z.looseObject({ rejected: z.literal(true), reason: z.string() }),
+  z.looseObject({ rejected: z.literal(true), reason: z.string(), detail: z.string().optional() }),
 ]);
 ```
 
