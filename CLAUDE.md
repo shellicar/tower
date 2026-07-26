@@ -27,10 +27,11 @@ exact-most-of-the-time, not exact: verified line-by-line against Chrome
 more word fits at a wrap boundary — off by a line on some messages, and
 engine behaviour drifts across browser versions. The mounted row's
 ResizeObserver correction is load-bearing for exactly this; never remove
-it on the argument that the prediction is accurate. Leptos has no virtual
-list yet; when it gets one, the technique ports via web-sys canvas
-measureText, but pretext's line-breaking logic would need a port
-(gpui-pretext on crates.io claims to be one — unverified).
+it on the argument that the prediction is accurate. Leptos has the windowed
+virtual list (keyed `<For>`, height cache, spacers, per-row ResizeObserver —
+same technique, ported) but no height prediction yet; when that ports, canvas
+measureText comes via web-sys, but pretext's line-breaking logic would need a
+port (gpui-pretext on crates.io claims to be one — unverified).
 
 ## The documents govern
 
@@ -122,18 +123,22 @@ just build     # cargo build --workspace (mvp/)
 just test      # cargo test --workspace
 just check     # cargo clippy + fmt --check
 docker compose up -d        # broker + stream-init (event subjects only)
-just dev       # towerd + vite together — the v2 stack, beside a v1 tower:
-               # towerd 127.0.0.1:8081, db tower-v2.db, web localhost:5174
+just dev       # towerd + BOTH frontends, hot reload, beside a v1 tower:
+               # towerd 127.0.0.1:8081 (svelte dist) + 8083 (leptos dist),
+               # db tower-v2.db, vite localhost:5174, trunk localhost:8082
 ```
 
 Toolchain pinned by `rust-toolchain.toml`. `just` is the verbs file; scripts
-only for what cargo can't do. Config env vars: `NATS_URL`, `TOWER_BIND`, `TOWER_BIND_LEPTOS`,
-`TOWER_DIST`, `TOWER_DIST_LEPTOS`, `TOWER_DB`, `TOWER_STREAM` (towerd);
-`WEB_PORT` (vite); `BRIDGE_WORLD`,
-`BRIDGE_MODEL`, `BRIDGE_SKILLS` (bridge — skills default to
-`~/.claude/skills`, re-scanned per say: the first say commits the full
-catalogue, later says a delta naming skills whose SKILL.md changed; the
-stdio `skills` control line repoints the directory live).
+only for what cargo can't do. Config env vars — towerd: `NATS_URL`,
+`TOWER_BIND`, `TOWER_BIND_LEPTOS`, `TOWER_DIST`, `TOWER_DIST_LEPTOS`,
+`TOWER_DB`, `TOWER_STREAM_AUDIT`, `TOWER_STREAM_DIAGNOSTIC`,
+`TOWER_STREAM_EPHEMERAL`, `TOWER_ATTACH_BUCKET`, `TOWER_ATTACH_TTL_S`;
+vite: `WEB_PORT`; bridge: `NATS_URL`, `BRIDGE_WORLD`, `BRIDGE_MODEL`,
+`BRIDGE_STREAM`, `BRIDGE_ATTACH_BUCKET`, `BRIDGE_THINKING_BUDGET`,
+`BRIDGE_REFS_DB`, `BRIDGE_MEMORY_DB`, `BRIDGE_HISTORY_DB`, `BRIDGE_SKILLS`
+(skills default to `~/.claude/skills`, re-scanned per say: the first say
+commits the full catalogue, later says a delta naming skills whose SKILL.md
+changed; the stdio `skills` control line repoints the directory live).
 
 ## helm
 
@@ -154,7 +159,7 @@ HELM_BRIDGE_PATH=./target/debug/bridge cargo run -p helm
 ```
 
 Env: `HELM_BRIDGE_PATH`, `HELM_BRIDGE_LOG` (bridge stderr, default
-`/tmp/helm-bridge.log`).
+`/tmp/helm-bridge.log`), `HELM_EMOJI`.
 
 ## Seams
 
@@ -206,7 +211,14 @@ commit, don't reach.
 - Stage by exact path; never `git add .`/`-A`.
 - Comments carry why, not what. Abstraction discipline lives in the Seams
   section: edges seamed at birth, no ceremony above them.
-- That rule is for code and design, **not database schemas**. A schema is
+- Errors: the cause rides `#[source]` only — an `#[error("...")]` message
+  never repeats it (chain-walkers would print it twice). Anything logged or
+  shown renders the chain via anyhow's `{:#}` (wrap an owned error:
+  `eprintln!("{:#}", anyhow::Error::new(e))`); a bare `{e}` on an error type
+  drops the cause and is a bug. One test pins that a rendered chain names
+  its underlying cause.
+- The no-premature-abstraction rule is for code and design, **not database
+  schemas**. A schema is
   the last thing to keep changing: when the future shape is known (a second
   stream, groups, layouts), key the table for it now — don't singleton it
   and migrate later.
