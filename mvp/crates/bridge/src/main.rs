@@ -194,8 +194,11 @@ enum ServeOutcome {
     /// NATS alike — racing the same id concurrently.
     AlreadyAttached,
     /// The claim was taken but the subscribe failed; released before
-    /// returning so a retry is not permanently locked out.
-    SubscribeFailed,
+    /// returning so a retry is not permanently locked out. Carries the
+    /// underlying error for the caller's diagnostics (a NATS reply's
+    /// `detail`; a stdio reply's `error` string) — the reason token itself
+    /// stays the coarse, machine-facing `failed`.
+    SubscribeFailed(String),
 }
 
 /// Serve a conversation: claim the id in `served` (the fact before the
@@ -239,7 +242,7 @@ async fn serve_conversation(
         Err(e) => {
             eprintln!("bridge: subscribe failed for {conv}: {e}");
             served.write().unwrap().remove(&conv);
-            return ServeOutcome::SubscribeFailed;
+            return ServeOutcome::SubscribeFailed(e.to_string());
         }
     };
     let cwd = cwd_cell.read().unwrap().to_string_lossy().to_string();
@@ -375,8 +378,11 @@ impl Host {
                         serde_json::json!({ "error": format!("already serving {conv}") })
                     );
                 }
-                ServeOutcome::SubscribeFailed => {
-                    println!("{}", serde_json::json!({ "error": "subscribe failed" }));
+                ServeOutcome::SubscribeFailed(detail) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("subscribe failed: {detail}") })
+                    );
                 }
             }
         } else if let Some(adopt) = value.get("adopt") {
@@ -441,8 +447,11 @@ impl Host {
                         serde_json::json!({ "error": format!("already serving {conv}") })
                     );
                 }
-                ServeOutcome::SubscribeFailed => {
-                    println!("{}", serde_json::json!({ "error": "subscribe failed" }));
+                ServeOutcome::SubscribeFailed(detail) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("subscribe failed: {detail}") })
+                    );
                 }
             }
         } else if let Some(skills) = value.get("skills") {
@@ -700,8 +709,9 @@ async fn handle_service(
     {
         Ok(m) => m,
         Err(e) => {
+            let detail = format!("replay failed: {e:#}");
             eprintln!("bridge: service replay failed for {conv}: {e:#}");
-            return wire::encode_rejected("replay_failed");
+            return wire::encode_rejected_detailed("failed", &detail);
         }
     };
     let default_cwd = host.default_cwd.read().unwrap().clone();
@@ -734,7 +744,9 @@ async fn handle_service(
     {
         ServeOutcome::Attached(_) => wire::encode_accepted(None),
         ServeOutcome::AlreadyAttached => wire::encode_rejected("already_attached"),
-        ServeOutcome::SubscribeFailed => wire::encode_rejected("subscribe_failed"),
+        ServeOutcome::SubscribeFailed(detail) => {
+            wire::encode_rejected_detailed("failed", &format!("subscribe failed: {detail}"))
+        }
     }
 }
 

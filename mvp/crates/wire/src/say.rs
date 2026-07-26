@@ -174,6 +174,15 @@ pub fn encode_rejected(reason: &str) -> Vec<u8> {
         .expect("json! of plain values cannot fail")
 }
 
+/// `{ rejected: true, reason, detail }` — `detail` is optional human-facing
+/// diagnostics (which step, which underlying error), never a second
+/// machine-facing token; a caller branches on `reason` alone (nats-spec,
+/// "Operations fulfil in full or not at all").
+pub fn encode_rejected_detailed(reason: &str, detail: &str) -> Vec<u8> {
+    serde_json::to_vec(&json!({ "rejected": true, "reason": reason, "detail": detail }))
+        .expect("json! of plain values cannot fail")
+}
+
 /// Reply → outcome. A reply that fits neither shape is a servicer speaking a
 /// newer contract; honesty is "rejected, reason unintelligible", not a crash.
 pub fn parse_say_reply(bytes: &[u8]) -> SayOutcome {
@@ -359,6 +368,15 @@ mod tests {
                 reason: "stale".into()
             }
         );
+    }
+
+    #[test]
+    fn encode_rejected_detailed_carries_both_fields() {
+        let bytes = encode_rejected_detailed("failed", "replay failed: stream unavailable");
+        let v: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["rejected"], true);
+        assert_eq!(v["reason"], "failed");
+        assert_eq!(v["detail"], "replay failed: stream unavailable");
     }
 
     #[test]

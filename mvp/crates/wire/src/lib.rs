@@ -27,6 +27,7 @@ pub use ingest::{
 };
 pub use say::{
     CancelOutcome, ConvRequest, SayCommand, SayOutcome, encode_accepted, encode_cancel,
-    encode_rejected, encode_say, parse_cancel_reply, parse_request, parse_say_reply,
+    encode_rejected, encode_rejected_detailed, encode_say, parse_cancel_reply, parse_request,
+    parse_say_reply,
 };
 pub use ts::{format_ts, now_iso, parse_ts};
