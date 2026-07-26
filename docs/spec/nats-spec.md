@@ -335,7 +335,6 @@ decided claim with consequences (agent-spec.md, Attachment), not something a
 layer merely functions without — removing it changes who is being served,
 which fails the Telemetry section's own severability test.
 
-
 The control plane is not a third row — it is a **participant**. It reads the
 observability row across every column, acts on the operational row (spawns,
 configures, delivers), and the traffic it generates is not a plane of its own:
