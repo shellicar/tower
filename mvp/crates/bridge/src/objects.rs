@@ -148,7 +148,7 @@ pub async fn validate_fresh<B: Broker>(
 #[cfg(test)]
 mod tests {
     use super::{is_object_source, resolve_one};
-    use bridge::broker::fake::FakeBroker;
+    use bridge_testkit::FakeBroker;
     use serde_json::json;
 
     #[test]

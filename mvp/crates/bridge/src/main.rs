@@ -921,7 +921,7 @@ mod tests {
     use super::{ServedCwds, agent, decisions, expand_tilde, fold_replay, serve_conversation};
     use crate::anthropic::NoopDeltaSink;
     use bridge::broker::BrokerMessage;
-    use bridge::broker::fake::{FakeBroker, TestScratch};
+    use bridge_testkit::{FakeBroker, TestScratch};
     use std::sync::{Arc, RwLock};
 
     fn served() -> ServedCwds {

@@ -239,15 +239,17 @@ impl DeltaSink for NatsDeltaSink {
 
 /// A delta sink that publishes nothing — test doubles that never drive a
 /// query far enough to reach a model call still need a value to satisfy
-/// the generic parameter. Test-only, same reasoning as `broker::fake`: a
-/// `cfg(test)` item here is invisible to the binary target's own test
-/// build, which links this library as an ordinary dependency, so
-/// `feature = "test-fakes"` (enabled by `just test`) covers that case too.
-#[cfg(any(test, feature = "test-fakes"))]
+/// the generic parameter. This type lives in the binary's own anthropic
+/// module (unlike bridge-testkit's fakes, which sit in a separate
+/// dev-dependency crate because the library and binary targets compile
+/// separately), so a plain `cfg(test)` already keeps it out of a normal
+/// build: the binary's own test compilation is what turns `cfg(test)` on
+/// here.
+#[cfg(test)]
 #[derive(Clone, Default)]
 pub struct NoopDeltaSink;
 
-#[cfg(any(test, feature = "test-fakes"))]
+#[cfg(test)]
 impl DeltaSink for NoopDeltaSink {
     async fn publish(&self, _subject: String, _payload: Vec<u8>) {}
 }

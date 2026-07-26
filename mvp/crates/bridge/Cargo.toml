@@ -32,9 +32,9 @@ tokio.workspace = true
 uuid.workspace = true
 yaml_serde.workspace = true
 
-[features]
-# Compiles bridge::broker::fake into the library outside of tests, for the
-# binary target's own test builds (a cfg(test) item in the lib is invisible
-# to the bin's test compilation, which links the lib as an ordinary,
-# non-test dependency). Never enabled for a shipped build.
-test-fakes = []
+[dev-dependencies]
+# The only fake (bridge-testkit's FakeBroker) plus a test scratch-dir
+# helper. A dev-dependency compiles for any test/bench in this crate,
+# binary target included, with no feature flag for CI to remember, and
+# never ships in a normal build.
+bridge-testkit = { path = "../bridge-testkit" }

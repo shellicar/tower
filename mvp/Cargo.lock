@@ -253,6 +253,7 @@ dependencies = [
  "anyhow",
  "async-nats",
  "base64",
+ "bridge-testkit",
  "futures",
  "image",
  "interprocess",
@@ -269,6 +270,14 @@ dependencies = [
  "uuid",
  "wire",
  "yaml_serde",
+]
+
+[[package]]
+name = "bridge-testkit"
+version = "0.1.0"
+dependencies = [
+ "bridge",
+ "uuid",
 ]
 
 [[package]]

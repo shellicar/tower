@@ -4,10 +4,9 @@
 build:
     cargo build --workspace
 
-# Test every crate. bridge/test-fakes compiles bridge::broker::fake so the
-# binary target's own tests can reach it (see the feature's own doc).
+# Test every crate.
 test:
-    cargo test --workspace --features bridge/test-fakes
+    cargo test --workspace
 
 # Lint + format check — what CI would run.
 check:

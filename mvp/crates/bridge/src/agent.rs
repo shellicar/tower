@@ -1342,7 +1342,7 @@ mod tests {
     use super::*;
     use crate::anthropic::NoopDeltaSink;
     use bridge::broker::BrokerMessage;
-    use bridge::broker::fake::{FakeBroker, FakeSubscription, TestScratch};
+    use bridge_testkit::{FakeBroker, FakeSubscription, TestScratch};
     use std::collections::VecDeque;
 
     fn config(conv: &str, scratch: &TestScratch) -> AgentConfig {
