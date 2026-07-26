@@ -111,8 +111,10 @@ pub trait Broker: Clone + Send + Sync + 'static {
     /// Open a JetStream capture stream's backlog, filtered to
     /// `filter_subject`, in stream order — adopt's replay. Bounded: the
     /// returned source yields exactly the backlog pending at consumer
-    /// creation, once; an empty backlog yields a source that ends
-    /// immediately rather than reaching for the underlying client at all.
+    /// creation, once. The stream lookup and consumer creation always run;
+    /// an empty backlog only skips the fetch itself (the one call whose
+    /// `max_messages(0)` semantics are unproven — see `replay_plan`), not
+    /// the whole setup.
     fn replay(
         &self,
         stream: String,

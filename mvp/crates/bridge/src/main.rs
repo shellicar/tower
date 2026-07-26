@@ -1020,7 +1020,7 @@ mod tests {
     #[tokio::test]
     async fn a_subscribe_failure_releases_the_claim() {
         let broker = FakeBroker {
-            subscribe_fails: true,
+            subscribe_fails: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             ..Default::default()
         };
         let scratch = TestScratch::new("serve-subscribe-fail");

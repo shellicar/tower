@@ -225,15 +225,22 @@ pub trait DeltaSink: Clone + Send + Sync + 'static {
         &self,
         subject: String,
         payload: Vec<u8>,
-    ) -> impl std::future::Future<Output = ()> + Send;
+    ) -> impl std::future::Future<Output = Result<(), Box<dyn std::error::Error + Send + Sync>>> + Send;
 }
 
 #[derive(Clone)]
 pub struct NatsDeltaSink(pub async_nats::Client);
 
 impl DeltaSink for NatsDeltaSink {
-    async fn publish(&self, subject: String, payload: Vec<u8>) {
-        let _ = self.0.publish(subject, payload.into()).await;
+    async fn publish(
+        &self,
+        subject: String,
+        payload: Vec<u8>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.0
+            .publish(subject, payload.into())
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 }
 
@@ -251,7 +258,13 @@ pub struct NoopDeltaSink;
 
 #[cfg(test)]
 impl DeltaSink for NoopDeltaSink {
-    async fn publish(&self, _subject: String, _payload: Vec<u8>) {}
+    async fn publish(
+        &self,
+        _subject: String,
+        _payload: Vec<u8>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
 }
 
 pub struct TurnDone {
@@ -356,7 +369,11 @@ pub async fn stream_turn<D: DeltaSink>(
         async move {
             let bytes = serde_json::to_vec(&payload).expect("json! cannot fail");
             bridge::attach::tee(&attach, &subject, &bytes).await;
-            sink.publish(subject, bytes).await;
+            // Fixing the trait's shape here (Result, not swallowed inside
+            // it) without also fixing what a turn does when a delta fails to
+            // publish is a separate, larger change than this refactor's
+            // scope — same behaviour as before: drop it explicitly.
+            let _ = sink.publish(subject, bytes).await;
         }
     };
 

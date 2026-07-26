@@ -4,6 +4,7 @@
 
 use bridge::broker::{Broker, BrokerError, BrokerMessage, BrokerReplay, BrokerSubscription};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 type Published = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
@@ -29,7 +30,11 @@ type ReplayData = Arc<Mutex<std::collections::HashMap<String, VecDeque<FakeRepla
 pub struct FakeBroker {
     pub calls: Arc<Mutex<Vec<String>>>,
     pub published: Published,
-    pub subscribe_fails: bool,
+    // Arc'd like every other piece of shared state: a `bool` copied on
+    // Clone would let flipping it on the original silently leave a clone
+    // the code under test holds unaffected — exactly the vacuity this fake
+    // exists to rule out.
+    pub subscribe_fails: Arc<AtomicBool>,
     pub replay_data: ReplayData,
     pub fetch_data: FetchData,
 }
@@ -78,7 +83,7 @@ impl Broker for FakeBroker {
             .lock()
             .unwrap()
             .push(format!("subscribe:{subject}"));
-        if self.subscribe_fails {
+        if self.subscribe_fails.load(Ordering::SeqCst) {
             Err(BrokerError::Subscribe(Box::new(std::io::Error::new(
                 std::io::ErrorKind::ConnectionRefused,
                 "scripted subscribe failure",
