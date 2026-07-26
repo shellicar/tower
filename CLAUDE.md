@@ -156,6 +156,36 @@ HELM_BRIDGE_PATH=./target/debug/bridge cargo run -p helm
 Env: `HELM_BRIDGE_PATH`, `HELM_BRIDGE_LOG` (bridge stderr, default
 `/tmp/helm-bridge.log`).
 
+## Seams
+
+Edges get their seam at birth. An edge is anywhere the code meets what a
+test cannot control from inside the process. At an edge, the fake is a
+known second implementation, not speculation — it exists the day the first
+test is owed, which is day one. Retrofitting a seam costs more than a
+rewrite (learned on the bridge broker seam, PR #14); building with one
+costs nothing. A seam is whatever makes the edge controllable — a trait
+only when needed: a connection, a path, or a plain value passed in counts.
+
+The edges:
+
+- **network/broker**: NATS pub/sub, request/reply, JetStream replay, object store
+- **time**: clocks, timers, intervals, timeouts
+- **filesystem**: reads, writes, watched dirs (skills)
+- **databases**: an in-memory provider is the fake (sqlite `:memory:`); the
+  real file-backed db appears only in tests that need what only it has —
+  WAL, cross-connection visibility, the file itself
+- **child processes**: tool exec, spawned bridges, ptys, clipboard helpers
+- **model APIs**: the Anthropic SSE client, any future provider
+- **entropy**: uuid/instance-id minting
+- **ambient env**: read once at the composition root into config passed as
+  data — never at call sites
+- **cwd**: data threaded to where it's used, never process state (learned in #7)
+- **terminal**: stdin/stdout, the TUI surface
+
+Above the edges, no ceremony: no reflexive traits over your own logic —
+three similar lines beat a premature abstraction. Abstraction there is a
+decision made in the brief, never invented by the operator.
+
 ## Testing
 
 - `wire` folds: pure tests, inputs from `docs/spec/scenarios.md` fixtures.
@@ -174,8 +204,8 @@ commit, don't reach.
 
 - Commits: one imperative line, no prefixes, no trailer ceremony.
 - Stage by exact path; never `git add .`/`-A`.
-- Comments carry why, not what. No ceremony traits, no speculative
-  abstraction — a seam appears when a second implementation exists.
+- Comments carry why, not what. Abstraction discipline lives in the Seams
+  section: edges seamed at birth, no ceremony above them.
 - That rule is for code and design, **not database schemas**. A schema is
   the last thing to keep changing: when the future shape is known (a second
   stream, groups, layouts), key the table for it now — don't singleton it
