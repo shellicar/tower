@@ -80,9 +80,15 @@ pub fn App(ws_url: String) -> impl IntoView {
     let approvals = RwSignal::new(Approvals::default());
     let usage = RwSignal::new(Usage::default());
     let view = RwSignal::new({
-        let mut v = View::default();
-        v.switch_tab(load_active());
-        v
+        // Set the raw persisted index directly, unclamped, against the
+        // still-default single-tab set (mirrors Svelte's `active =
+        // $state(readActiveTab())`) — `View::tab()` and `View::apply` clamp
+        // it once the real tab count is known. `switch_tab`'s own bounds
+        // guard would silently drop any index beyond the placeholder tab.
+        View {
+            active: load_active(),
+            ..View::default()
+        }
     });
     let ids = StoredValue::new_local(IdCounter::default());
     let now = RwSignal::new(now_ms());
@@ -95,7 +101,17 @@ pub fn App(ws_url: String) -> impl IntoView {
             conversations.update_value(|c| c.apply(&frame));
             approvals.update(|a| a.apply(&frame));
             usage.update(|u| u.apply(&frame));
-            view.maybe_update(|v| v.apply(&frame, crate::ui::rail::load_view));
+            let mut layout_applied = false;
+            view.maybe_update(|v| {
+                layout_applied = v.apply(&frame, crate::ui::rail::load_view);
+                layout_applied
+            });
+            if layout_applied {
+                // Mirrors Svelte's `#fold`: re-persist `active` after a
+                // `layout` fold even when unchanged, so a clamp (tabs shrank
+                // since this browser last saved) survives the next refresh.
+                save_active(view.with(|v| v.active));
+            }
         })
         .expect("websocket connect"),
     );
