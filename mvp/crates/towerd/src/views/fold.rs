@@ -2,6 +2,7 @@
 //! `ViewEvent` broadcast, one transaction per event. Publish after commit:
 //! subscribers read the db they can now see.
 
+use rusqlite::OptionalExtension;
 use serde_json::Value;
 
 use wire::{
@@ -301,54 +302,71 @@ impl Views {
                 // never restarts the claim's own attached_ts.
                 parse_ts(&m.ts)
                     .ok_or_else(|| anyhow::anyhow!("moved {conv} has unparseable ts {}", m.ts))?;
-                let world = m.world.clone().unwrap_or_else(|| WorldId(String::new()));
+                let incoming_world = m.world.clone().unwrap_or_else(|| WorldId(String::new()));
                 // The standing-instance gate, degraded per the doc comment
                 // above: a bare instanceId match when either side omits
                 // `world` (empty string, this table's stand-in for absent).
-                let changed = tx.execute(
-                    "UPDATE conv_attachments SET cwd = ?1
-                     WHERE conv = ?2 AND instance_id = ?3
-                       AND (?4 = '' OR world = '' OR world = ?4)",
-                    rusqlite::params![m.cwd, conv.0, m.instance_id.0, world.0],
-                )? > 0;
-                // A move is a fact about the standing claim, not a new one:
-                // the fact fanned out must carry the claim's OWN
-                // attached_ts, never the move's — a live observer and a
-                // fresh snapshot must agree on when the attachment began.
-                changed
-                    .then(|| {
-                        tx.query_row(
-                            "SELECT attached_ts FROM conv_attachments WHERE conv = ?1",
-                            [&conv.0],
-                            |r| r.get::<_, i64>(0),
-                        )
-                    })
-                    .transpose()?
-                    .map(|attached_ts| AgentFact::Attached {
-                        world,
-                        instance: m.instance_id.clone(),
-                        ts: attached_ts,
-                        conv: conv.clone(),
-                        cwd: Some(m.cwd.clone()),
-                        interval_s: None,
-                    })
+                // Read the standing row's OWN world/attached_ts first — a
+                // degraded match must fan out the claim's real identity and
+                // start time, never the incoming (possibly empty) world or
+                // the move's own ts, or a client keyed on the pair can never
+                // match the fact back to the claim it already holds.
+                let standing = tx
+                    .query_row(
+                        "SELECT world, attached_ts FROM conv_attachments
+                         WHERE conv = ?1 AND instance_id = ?2
+                           AND (?3 = '' OR world = '' OR world = ?3)",
+                        rusqlite::params![conv.0, m.instance_id.0, incoming_world.0],
+                        |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+                    )
+                    .optional()?;
+                match standing {
+                    Some((world, attached_ts)) => {
+                        tx.execute(
+                            "UPDATE conv_attachments SET cwd = ?1 WHERE conv = ?2",
+                            rusqlite::params![m.cwd, conv.0],
+                        )?;
+                        Some(AgentFact::Attached {
+                            world: WorldId(world),
+                            instance: m.instance_id.clone(),
+                            ts: attached_ts,
+                            conv: conv.clone(),
+                            cwd: Some(m.cwd.clone()),
+                            interval_s: None,
+                        })
+                    }
+                    None => None,
+                }
             }
             ConvAttachment::Detached(d) => {
                 let ts_ms = parse_ts(&d.ts).ok_or_else(|| {
                     anyhow::anyhow!("detached {conv} has unparseable ts {}", d.ts)
                 })?;
-                let world = d.world.clone().unwrap_or_else(|| WorldId(String::new()));
-                let changed = tx.execute(
-                    "DELETE FROM conv_attachments WHERE conv = ?1 AND instance_id = ?2
-                       AND (?3 = '' OR world = '' OR world = ?3)",
-                    rusqlite::params![conv.0, d.instance_id.0, world.0],
-                )? > 0;
-                changed.then_some(AgentFact::Detached {
-                    world,
-                    instance: d.instance_id.clone(),
-                    ts: ts_ms,
-                    conv: conv.clone(),
-                })
+                let incoming_world = d.world.clone().unwrap_or_else(|| WorldId(String::new()));
+                // Same reasoning as `moved`: capture the standing row's own
+                // world before it's gone, so a degraded match's fact still
+                // names the claim that actually held.
+                let standing_world = tx
+                    .query_row(
+                        "SELECT world FROM conv_attachments
+                         WHERE conv = ?1 AND instance_id = ?2
+                           AND (?3 = '' OR world = '' OR world = ?3)",
+                        rusqlite::params![conv.0, d.instance_id.0, incoming_world.0],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .optional()?;
+                match standing_world {
+                    Some(world) => {
+                        tx.execute("DELETE FROM conv_attachments WHERE conv = ?1", [&conv.0])?;
+                        Some(AgentFact::Detached {
+                            world: WorldId(world),
+                            instance: d.instance_id.clone(),
+                            ts: ts_ms,
+                            conv: conv.clone(),
+                        })
+                    }
+                    None => None,
+                }
             }
         };
         tx.execute(

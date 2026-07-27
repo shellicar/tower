@@ -339,17 +339,22 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
     // out, or a competing claim landing in the gap is never seen — so this
     // subscribes before anything is published, same discipline as `requests`
     // above.
+    // Watching for a displacement is a compliance requirement of serving
+    // (agent-spec.md, Attachment), not an optional extra: an instance that
+    // cannot watch can never see itself superseded, so it must not claim in
+    // the first place — same discipline as the `requests` subscribe above.
     let attachment_watch = match broker
         .subscribe(format!("conv.v2.{conv}.attachment.>"))
         .await
     {
-        Ok(s) => Some(s),
+        Ok(s) => s,
         Err(e) => {
             eprintln!(
                 "bridge[{conv}]: attachment watch subscribe failed: {:#}",
                 anyhow::Error::new(e)
             );
-            None
+            println!("{}", serde_json::json!({ "error": "subscribe failed" }));
+            return None;
         }
     };
     // tip: where the conversation stands right now, so an observer other
@@ -386,17 +391,15 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
     // One instance per claim, watching its own conversation: a displacement
     // (another instance's `attached` superseding ours) is observed and
     // answered with `detached` (agent-spec.md, Attachment).
-    if let Some(sub) = attachment_watch {
-        tokio::spawn(watch_attachment(
-            broker.clone(),
-            sub,
-            Arc::clone(served),
-            conv.clone(),
-            world.to_string(),
-            instance.to_string(),
-            handle.abort_handle(),
-        ));
-    }
+    tokio::spawn(watch_attachment(
+        broker.clone(),
+        attachment_watch,
+        Arc::clone(served),
+        conv.clone(),
+        world.to_string(),
+        instance.to_string(),
+        handle.abort_handle(),
+    ));
     Some((conv, handle))
 }
 
@@ -1248,7 +1251,10 @@ mod tests {
         )
         .await;
 
-        assert!(conv.is_none(), "an unwatchable conversation must not be served");
+        assert!(
+            conv.is_none(),
+            "an unwatchable conversation must not be served"
+        );
         assert!(served_cwds.read().unwrap().is_empty());
         let calls = broker.calls.lock().unwrap().clone();
         assert!(

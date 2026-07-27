@@ -93,7 +93,11 @@ impl Broker for FakeBroker {
             .unwrap()
             .push(format!("subscribe:{subject}"));
         if self.subscribe_fails.load(Ordering::SeqCst)
-            || self.subscribe_fail_subjects.lock().unwrap().contains(&subject)
+            || self
+                .subscribe_fail_subjects
+                .lock()
+                .unwrap()
+                .contains(&subject)
         {
             Err(BrokerError::Subscribe(Box::new(std::io::Error::new(
                 std::io::ErrorKind::ConnectionRefused,
