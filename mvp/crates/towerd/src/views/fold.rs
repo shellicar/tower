@@ -185,6 +185,25 @@ impl Views {
                     [&a.conversation_id.0],
                     |r| r.get(0),
                 )?;
+                // Attaching is itself evidence of life, and may carry the
+                // liveness promise a `pulse` would otherwise be the only
+                // source of (docs/spec/agent-spec.md: the gap where an
+                // instance that dies before its first pulse read as alive
+                // forever). COALESCE keeps a held interval when this fact
+                // doesn't carry one, rather than clobbering it with NULL.
+                // Unconditional, even when the claim itself is gated below:
+                // this is evidence about the INSTANCE, not this claim — an
+                // instance serving several conversations must not read
+                // stranded on its other, legitimate claims just because one
+                // was superseded on the conv leaf.
+                tx.execute(
+                    "INSERT INTO agent_instances (world, instance_id, last_pulse, interval_s)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(world, instance_id) DO UPDATE SET
+                         last_pulse = max(agent_instances.last_pulse, excluded.last_pulse),
+                         interval_s = COALESCE(excluded.interval_s, agent_instances.interval_s)",
+                    rusqlite::params![world.0, a.instance_id.0, ts_ms, a.interval_s],
+                )?;
                 if conv_leaf_stands {
                     None
                 } else {
@@ -200,20 +219,6 @@ impl Views {
                             a.cwd,
                             ts_ms
                         ],
-                    )?;
-                    // Attaching is itself evidence of life, and may carry the
-                    // liveness promise a `pulse` would otherwise be the only
-                    // source of (docs/spec/agent-spec.md: the gap where an
-                    // instance that dies before its first pulse read as alive
-                    // forever). COALESCE keeps a held interval when this fact
-                    // doesn't carry one, rather than clobbering it with NULL.
-                    tx.execute(
-                        "INSERT INTO agent_instances (world, instance_id, last_pulse, interval_s)
-                         VALUES (?1, ?2, ?3, ?4)
-                         ON CONFLICT(world, instance_id) DO UPDATE SET
-                             last_pulse = max(agent_instances.last_pulse, excluded.last_pulse),
-                             interval_s = COALESCE(excluded.interval_s, agent_instances.interval_s)",
-                        rusqlite::params![world.0, a.instance_id.0, ts_ms, a.interval_s],
                     )?;
                     Some(AgentFact::Attached {
                         world: world.clone(),

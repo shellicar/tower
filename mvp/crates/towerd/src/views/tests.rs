@@ -785,6 +785,40 @@ fn an_agent_v1_attached_never_resurrects_a_superseded_conv_leaf_claim() {
     assert_eq!(attachments[0].instance.0, "inst-new");
 }
 
+#[test]
+fn a_gated_agent_v1_attached_still_feeds_the_instances_liveness_fold() {
+    // The instance is legitimately serving TWO conversations; only one is
+    // superseded on the conv leaf. Gating the claim must not gate the
+    // liveness evidence — the instance's OTHER, legitimate claim must not
+    // read stranded just because this attached's claim half was dropped.
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-28T01:00:00+10:00","instanceId":"inst-new","world":"vm","cwd":"~/repos/tower"}"#));
+    views.apply("conv-approval", 2, &event("agent.v1.mac.telemetry.attached",
+        r#"{"ts":"2026-07-28T01:01:00+10:00","instanceId":"inst-old","conversationId":"conv-other","cwd":"~/repos/tower","intervalS":30}"#));
+    // conv-other is ungated (never superseded): both claims stand.
+    let (instances, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 2);
+    let inst_old = instances
+        .iter()
+        .find(|i| i.instance.0 == "inst-old")
+        .expect("inst-old's liveness fact must still be folded");
+    assert_eq!(inst_old.interval_s, Some(30));
+
+    // Gate this attached too (world=mac, conv=conv-abc, already superseded);
+    // the pair's OWN liveness must still update even while its claim on
+    // conv-abc is dropped.
+    views.apply("conv-approval", 3, &event("agent.v1.mac.telemetry.attached",
+        r#"{"ts":"2026-07-28T01:02:00+10:00","instanceId":"inst-gated","conversationId":"conv-abc","cwd":"~/repos/tower","intervalS":30}"#));
+    let (instances, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 2, "the gated claim must not resurrect");
+    let gated = instances
+        .iter()
+        .find(|i| i.instance.0 == "inst-gated")
+        .expect("a gated attached must still feed the instance's own liveness fold");
+    assert_eq!(gated.interval_s, Some(30));
+}
+
 // The conversation-tree attachment leaf (conversation-spec.md, Attachment;
 // agent-spec.md, Attachment, Examples a-e). agent.v1's fold above is
 // untouched; these exercise the new leaf's own fold and its gate.
