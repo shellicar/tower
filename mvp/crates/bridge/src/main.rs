@@ -255,30 +255,26 @@ async fn publish_conv_attachment<B: Broker>(
 /// Watch this conversation's own attachment leaf for a displacement: another
 /// instance's `attached` superseding ours (agent-spec.md, Attachment — "a
 /// compliant instance watches the attachment leaf for every conversation it
-/// serves"). On seeing one, stop serving (abort the running query task) and
-/// publish `detached` — the observable act of standing down; the fold
-/// already moved the claim, so this changes nothing but makes compliance
-/// visible in the record.
+/// serves"). On seeing one, stop serving (abort the running query task),
+/// release the conversation's `served` entry (so a later `chdir` can't
+/// "succeed" against a claim we no longer hold, and a re-adopt of this
+/// conversation doesn't collide with a stale one), and publish `detached` —
+/// the observable act of standing down; the fold already moved the claim, so
+/// this changes nothing but makes compliance visible in the record.
+///
+/// Takes an already-live subscription rather than making its own: the watch
+/// must be listening BEFORE our own `attached` is announced, or a
+/// displacement landing in that window is never seen (the caller subscribes
+/// first and hands the subscription in).
 async fn watch_attachment<B: Broker>(
     broker: B,
+    mut sub: B::Subscription,
+    served: ServedCwds,
     conv: String,
     world: String,
     instance: String,
     abort: tokio::task::AbortHandle,
 ) {
-    let mut sub = match broker
-        .subscribe(format!("conv.v2.{conv}.attachment.>"))
-        .await
-    {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!(
-                "bridge[{conv}]: attachment watch subscribe failed: {:#}",
-                anyhow::Error::new(e)
-            );
-            return;
-        }
-    };
     while let Some(msg) = sub.next().await {
         if !msg.subject.ends_with(".attachment.attached") {
             continue;
@@ -293,6 +289,7 @@ async fn watch_attachment<B: Broker>(
         }
         eprintln!("bridge[{conv}]: displaced by {their_world:?}/{their_instance:?}; standing down");
         abort.abort();
+        served.write().unwrap().remove(&conv);
         publish_conv_attachment(
             &broker,
             &conv,
@@ -338,6 +335,23 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
             return None;
         }
     };
+    // The displacement watch must be live before our own `attached` goes
+    // out, or a competing claim landing in the gap is never seen — so this
+    // subscribes before anything is published, same discipline as `requests`
+    // above.
+    let attachment_watch = match broker
+        .subscribe(format!("conv.v2.{conv}.attachment.>"))
+        .await
+    {
+        Ok(s) => Some(s),
+        Err(e) => {
+            eprintln!(
+                "bridge[{conv}]: attachment watch subscribe failed: {:#}",
+                anyhow::Error::new(e)
+            );
+            None
+        }
+    };
     // tip: where the conversation stands right now, so an observer other
     // than this servicer (towerd, a client, another agent) can learn it
     // without replaying the change stream first — the gap that made a
@@ -372,13 +386,17 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
     // One instance per claim, watching its own conversation: a displacement
     // (another instance's `attached` superseding ours) is observed and
     // answered with `detached` (agent-spec.md, Attachment).
-    tokio::spawn(watch_attachment(
-        broker.clone(),
-        conv.clone(),
-        world.to_string(),
-        instance.to_string(),
-        handle.abort_handle(),
-    ));
+    if let Some(sub) = attachment_watch {
+        tokio::spawn(watch_attachment(
+            broker.clone(),
+            sub,
+            Arc::clone(served),
+            conv.clone(),
+            world.to_string(),
+            instance.to_string(),
+            handle.abort_handle(),
+        ));
+    }
     Some((conv, handle))
 }
 

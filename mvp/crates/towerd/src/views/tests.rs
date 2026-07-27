@@ -913,8 +913,14 @@ fn conv_attachment_gate_degrades_to_bare_instance_when_world_is_omitted() {
     // A producer that omits `world` still names the standing claim by bare
     // instanceId — the degraded pair the fold's contract promises when
     // either side omits `world`.
-    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.moved",
-        r#"{"ts":"2026-07-25T14:01:00+10:00","instanceId":"inst-1","cwd":"~/repos/tower/mvp"}"#));
+    views.apply(
+        "conv-approval",
+        2,
+        &event(
+            "conv.v2.conv-abc.attachment.moved",
+            r#"{"ts":"2026-07-25T14:01:00+10:00","instanceId":"inst-1","cwd":"~/repos/tower/mvp"}"#,
+        ),
+    );
     let (_, attachments) = views.agents().unwrap();
     assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower/mvp"));
 

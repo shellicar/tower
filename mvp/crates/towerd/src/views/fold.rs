@@ -297,22 +297,41 @@ impl Views {
                 })
             }
             ConvAttachment::Moved(m) => {
-                let ts_ms = parse_ts(&m.ts)
+                // Validated but not carried in the fact below — a `moved`
+                // never restarts the claim's own attached_ts.
+                parse_ts(&m.ts)
                     .ok_or_else(|| anyhow::anyhow!("moved {conv} has unparseable ts {}", m.ts))?;
                 let world = m.world.clone().unwrap_or_else(|| WorldId(String::new()));
+                // The standing-instance gate, degraded per the doc comment
+                // above: a bare instanceId match when either side omits
+                // `world` (empty string, this table's stand-in for absent).
                 let changed = tx.execute(
                     "UPDATE conv_attachments SET cwd = ?1
-                     WHERE conv = ?2 AND instance_id = ?3 AND world = ?4",
+                     WHERE conv = ?2 AND instance_id = ?3
+                       AND (?4 = '' OR world = '' OR world = ?4)",
                     rusqlite::params![m.cwd, conv.0, m.instance_id.0, world.0],
                 )? > 0;
-                changed.then_some(AgentFact::Attached {
-                    world,
-                    instance: m.instance_id.clone(),
-                    ts: ts_ms,
-                    conv: conv.clone(),
-                    cwd: Some(m.cwd.clone()),
-                    interval_s: None,
-                })
+                // A move is a fact about the standing claim, not a new one:
+                // the fact fanned out must carry the claim's OWN
+                // attached_ts, never the move's — a live observer and a
+                // fresh snapshot must agree on when the attachment began.
+                changed
+                    .then(|| {
+                        tx.query_row(
+                            "SELECT attached_ts FROM conv_attachments WHERE conv = ?1",
+                            [&conv.0],
+                            |r| r.get::<_, i64>(0),
+                        )
+                    })
+                    .transpose()?
+                    .map(|attached_ts| AgentFact::Attached {
+                        world,
+                        instance: m.instance_id.clone(),
+                        ts: attached_ts,
+                        conv: conv.clone(),
+                        cwd: Some(m.cwd.clone()),
+                        interval_s: None,
+                    })
             }
             ConvAttachment::Detached(d) => {
                 let ts_ms = parse_ts(&d.ts).ok_or_else(|| {
@@ -320,7 +339,8 @@ impl Views {
                 })?;
                 let world = d.world.clone().unwrap_or_else(|| WorldId(String::new()));
                 let changed = tx.execute(
-                    "DELETE FROM conv_attachments WHERE conv = ?1 AND instance_id = ?2 AND world = ?3",
+                    "DELETE FROM conv_attachments WHERE conv = ?1 AND instance_id = ?2
+                       AND (?3 = '' OR world = '' OR world = ?3)",
                     rusqlite::params![conv.0, d.instance_id.0, world.0],
                 )? > 0;
                 changed.then_some(AgentFact::Detached {
