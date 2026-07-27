@@ -172,35 +172,58 @@ impl Views {
             AgentKind::Telemetry(AgentTelemetry::Attached(a)) => {
                 let ts_ms = parse_ts(&a.ts)
                     .ok_or_else(|| anyhow::anyhow!("attached has unparseable ts {}", a.ts))?;
-                // Re-attach (chdir's new cwd) is last-write-wins in place.
-                tx.execute(
-                    "INSERT OR REPLACE INTO agent_attachments
-                         (world, instance_id, conv, cwd, attached_ts)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    rusqlite::params![world.0, a.instance_id.0, a.conversation_id.0, a.cwd, ts_ms],
+                // Cross-plane supersession, order-independent: a standing
+                // conv-leaf claim (conversation-spec.md, Attachment) is the
+                // one that counts, always — gate rather than one-shot
+                // delete, or a rematerialise replaying the two streams
+                // through independent consumers can land this AFTER the
+                // delete and resurrect a claim the conv leaf already
+                // superseded (the same shape an unmigrated agent's `chdir`
+                // produces live, republishing `attached` on this tree).
+                let conv_leaf_stands: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM conv_attachments WHERE conv = ?1)",
+                    [&a.conversation_id.0],
+                    |r| r.get(0),
                 )?;
-                // Attaching is itself evidence of life, and may carry the
-                // liveness promise a `pulse` would otherwise be the only
-                // source of (docs/spec/agent-spec.md: the gap where an
-                // instance that dies before its first pulse read as alive
-                // forever). COALESCE keeps a held interval when this fact
-                // doesn't carry one, rather than clobbering it with NULL.
-                tx.execute(
-                    "INSERT INTO agent_instances (world, instance_id, last_pulse, interval_s)
-                     VALUES (?1, ?2, ?3, ?4)
-                     ON CONFLICT(world, instance_id) DO UPDATE SET
-                         last_pulse = max(agent_instances.last_pulse, excluded.last_pulse),
-                         interval_s = COALESCE(excluded.interval_s, agent_instances.interval_s)",
-                    rusqlite::params![world.0, a.instance_id.0, ts_ms, a.interval_s],
-                )?;
-                Some(AgentFact::Attached {
-                    world: world.clone(),
-                    instance: a.instance_id.clone(),
-                    ts: ts_ms,
-                    conv: a.conversation_id.clone(),
-                    cwd: a.cwd.clone(),
-                    interval_s: a.interval_s,
-                })
+                if conv_leaf_stands {
+                    None
+                } else {
+                    // Re-attach (chdir's new cwd) is last-write-wins in place.
+                    tx.execute(
+                        "INSERT OR REPLACE INTO agent_attachments
+                             (world, instance_id, conv, cwd, attached_ts)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        rusqlite::params![
+                            world.0,
+                            a.instance_id.0,
+                            a.conversation_id.0,
+                            a.cwd,
+                            ts_ms
+                        ],
+                    )?;
+                    // Attaching is itself evidence of life, and may carry the
+                    // liveness promise a `pulse` would otherwise be the only
+                    // source of (docs/spec/agent-spec.md: the gap where an
+                    // instance that dies before its first pulse read as alive
+                    // forever). COALESCE keeps a held interval when this fact
+                    // doesn't carry one, rather than clobbering it with NULL.
+                    tx.execute(
+                        "INSERT INTO agent_instances (world, instance_id, last_pulse, interval_s)
+                         VALUES (?1, ?2, ?3, ?4)
+                         ON CONFLICT(world, instance_id) DO UPDATE SET
+                             last_pulse = max(agent_instances.last_pulse, excluded.last_pulse),
+                             interval_s = COALESCE(excluded.interval_s, agent_instances.interval_s)",
+                        rusqlite::params![world.0, a.instance_id.0, ts_ms, a.interval_s],
+                    )?;
+                    Some(AgentFact::Attached {
+                        world: world.clone(),
+                        instance: a.instance_id.clone(),
+                        ts: ts_ms,
+                        conv: a.conversation_id.clone(),
+                        cwd: a.cwd.clone(),
+                        interval_s: a.interval_s,
+                    })
+                }
             }
             AgentKind::Telemetry(AgentTelemetry::Detached(d)) => {
                 let ts_ms = parse_ts(&d.ts)

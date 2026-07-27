@@ -762,6 +762,29 @@ fn agent_tables_are_derived_and_rematerialise() {
     assert!(attachments.is_empty());
 }
 
+#[test]
+fn an_agent_v1_attached_never_resurrects_a_superseded_conv_leaf_claim() {
+    // Order-independent: whichever of the two streams a rematerialise
+    // replays first, the conv leaf's claim must be the one that stands —
+    // never a one-shot delete an out-of-order agent.v1 `attached` can slip
+    // past (the same shape an unmigrated agent's `chdir` produces live).
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-28T01:00:00+10:00","instanceId":"inst-new","world":"vm","cwd":"~/repos/tower"}"#));
+    // An agent.v1 `attached` landing AFTER the conv leaf already stands —
+    // stale data from an unmigrated instance, or a chdir re-publish — must
+    // never resurrect an agent_attachments row.
+    views.apply("conv-approval", 2, &event("agent.v1.mac.telemetry.attached",
+        r#"{"ts":"2026-07-28T00:59:00+10:00","instanceId":"inst-old","conversationId":"conv-abc","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(
+        attachments.len(),
+        1,
+        "the conv leaf's claim must stand alone: {attachments:?}"
+    );
+    assert_eq!(attachments[0].instance.0, "inst-new");
+}
+
 // The conversation-tree attachment leaf (conversation-spec.md, Attachment;
 // agent-spec.md, Attachment, Examples a-e). agent.v1's fold above is
 // untouched; these exercise the new leaf's own fold and its gate.
