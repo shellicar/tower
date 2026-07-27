@@ -236,11 +236,12 @@ const MIGRATIONS: &[&str] = &[
     // 15 — compliance (agent-spec.md, Attachment, "The rule, stated once"):
     // an instance that publishes a second `attached` for a conversation
     // while its own claim on it is still open — no `detached` between — is
-    // non-compliant, globally, from that publish on. Every attachment fact
-    // it publishes anywhere is ignored until its own `detached` is
-    // processed, which is the one way back to compliant. Keyed on the pair
-    // (`world` '' stand-in for absent, degraded matching same as
-    // conv_attachments). Derived; in the rematerialise truncation set.
+    // non-compliant, permanently, from that publish on. Every fact it
+    // publishes anywhere, including its own `detached`, is ignored from
+    // then on — there is no way back; a restart mints a new instance id.
+    // Keyed on the pair (`world` '' stand-in for absent, degraded matching
+    // same as conv_attachments). Derived; in the rematerialise truncation
+    // set.
     "CREATE TABLE noncompliant_instances (
          world       TEXT NOT NULL DEFAULT '',
          instance_id TEXT NOT NULL,

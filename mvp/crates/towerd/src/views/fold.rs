@@ -247,13 +247,14 @@ impl Views {
     /// Compliance (agent-spec.md, Attachment, "The rule, stated once"): an
     /// instance that publishes a second `attached` for a conversation while
     /// its own claim on it is still open — no `detached` between — is
-    /// non-compliant, globally, from that publish on; everything it
-    /// publishes anywhere is ignored. `detached` is the one way back — the
-    /// compliant act — processed regardless of standing, and it restores
-    /// compliance once it actually matches the standing gate. This is the
-    /// ONE crisp rule the spec states outright; the other "violation"
-    /// (live pulses past a displacement) is explicitly never declared, only
-    /// inferred by a reader — not folded into this flag.
+    /// non-compliant, permanently, from that publish on; every fact it
+    /// publishes anywhere, including its own `detached`, is ignored from
+    /// then on. There is no way back: like a crashed process, it is fixed
+    /// by restarting, and a restart is a new instance id — nothing on the
+    /// wire clears the flag. This is the ONE crisp rule the spec states
+    /// outright; the other "violation" (live pulses past a displacement) is
+    /// explicitly never declared, only inferred by a reader — not folded
+    /// into this flag.
     fn apply_conv_attachment(
         &mut self,
         stream_name: &str,
@@ -393,41 +394,37 @@ impl Views {
                 }
             }
             ConvAttachment::Detached(d) => {
-                // Detached is the exception: processed regardless of
-                // compliance ("the one way back"), never gated on it.
                 let ts_ms = parse_ts(&d.ts).ok_or_else(|| {
                     anyhow::anyhow!("detached {conv} has unparseable ts {}", d.ts)
                 })?;
                 let incoming_world = d.world.clone().unwrap_or_else(|| WorldId(String::new()));
-                // Same reasoning as `moved`: capture the standing row's own
-                // world before it's gone, so a degraded match's fact still
-                // names the claim that actually held.
-                let standing_world = tx
-                    .query_row(
-                        "SELECT world FROM conv_attachments
-                         WHERE conv = ?1 AND instance_id = ?2
-                           AND (?3 = '' OR world = '' OR world = ?3)",
-                        rusqlite::params![conv.0, d.instance_id.0, incoming_world.0],
-                        |r| r.get::<_, String>(0),
-                    )
-                    .optional()?;
-                match standing_world {
-                    Some(world) => {
-                        tx.execute("DELETE FROM conv_attachments WHERE conv = ?1", [&conv.0])?;
-                        // Standing down is the compliant act: this instance
-                        // is compliant again from here.
-                        tx.execute(
-                            "DELETE FROM noncompliant_instances WHERE world = ?1 AND instance_id = ?2",
-                            rusqlite::params![world, d.instance_id.0],
-                        )?;
-                        Some(AgentFact::Detached {
-                            world: WorldId(world),
-                            instance: d.instance_id.clone(),
-                            ts: ts_ms,
-                            conv: conv.clone(),
-                        })
+                if is_noncompliant(&tx, &incoming_world, &d.instance_id)? {
+                    None
+                } else {
+                    // Same reasoning as `moved`: capture the standing row's
+                    // own world before it's gone, so a degraded match's
+                    // fact still names the claim that actually held.
+                    let standing_world = tx
+                        .query_row(
+                            "SELECT world FROM conv_attachments
+                             WHERE conv = ?1 AND instance_id = ?2
+                               AND (?3 = '' OR world = '' OR world = ?3)",
+                            rusqlite::params![conv.0, d.instance_id.0, incoming_world.0],
+                            |r| r.get::<_, String>(0),
+                        )
+                        .optional()?;
+                    match standing_world {
+                        Some(world) => {
+                            tx.execute("DELETE FROM conv_attachments WHERE conv = ?1", [&conv.0])?;
+                            Some(AgentFact::Detached {
+                                world: WorldId(world),
+                                instance: d.instance_id.clone(),
+                                ts: ts_ms,
+                                conv: conv.clone(),
+                            })
+                        }
+                        None => None,
                     }
-                    None => None,
                 }
             }
         };
@@ -711,14 +708,19 @@ impl Views {
 }
 
 /// Whether this (world, instance) pair is currently flagged non-compliant
-/// (fold.rs's Compliance doc comment on `apply_conv_attachment`).
+/// (fold.rs's Compliance doc comment on `apply_conv_attachment`). Degraded
+/// the same way the standing-instance gate is: a bare instanceId match when
+/// either side omits `world` (empty string, this table's stand-in for
+/// absent) — an exact-only match would miss a flagged instance the moment
+/// it published one fact with `world` and the next without it.
 fn is_noncompliant(
     tx: &rusqlite::Transaction<'_>,
     world: &WorldId,
     instance: &InstanceId,
 ) -> rusqlite::Result<bool> {
     tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM noncompliant_instances WHERE world = ?1 AND instance_id = ?2)",
+        "SELECT EXISTS(SELECT 1 FROM noncompliant_instances
+          WHERE instance_id = ?2 AND (?1 = '' OR world = '' OR world = ?1))",
         rusqlite::params![world.0, instance.0],
         |r| r.get(0),
     )

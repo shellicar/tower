@@ -1011,7 +1011,7 @@ fn conv_leaf_attached_supersedes_a_standing_agent_v1_claim() {
 }
 
 #[test]
-fn a_reattach_with_no_detached_between_marks_the_instance_noncompliant() {
+fn a_reattach_with_no_detached_between_marks_the_instance_permanently_noncompliant() {
     let (mut views, _rx) = fresh();
     views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
         r#"{"ts":"2026-07-27T22:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
@@ -1024,8 +1024,8 @@ fn a_reattach_with_no_detached_between_marks_the_instance_noncompliant() {
     assert_eq!(attachments.len(), 1);
     assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower"));
 
-    // Non-compliant now, globally: even a claim on a DIFFERENT conversation
-    // from the same instance is ignored.
+    // Non-compliant now, permanently: even a claim on a DIFFERENT
+    // conversation from the same instance is ignored.
     views.apply("conv-approval", 3, &event("conv.v2.conv-other.attachment.attached",
         r#"{"ts":"2026-07-27T22:02:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
     let (_, attachments) = views.agents().unwrap();
@@ -1035,8 +1035,9 @@ fn a_reattach_with_no_detached_between_marks_the_instance_noncompliant() {
         "a non-compliant instance's attached elsewhere must be ignored: {attachments:?}"
     );
 
-    // Its own detached is the one way back — processed, and it restores
-    // compliance.
+    // There is no way back: its own `detached` is ALSO ignored (agent-spec.md,
+    // Attachment — recovery is a restart, a new instance id, never a
+    // detached). The original claim on conv-abc still stands, untouched.
     views.apply(
         "conv-approval",
         4,
@@ -1046,14 +1047,65 @@ fn a_reattach_with_no_detached_between_marks_the_instance_noncompliant() {
         ),
     );
     let (_, attachments) = views.agents().unwrap();
-    assert!(attachments.is_empty());
+    assert_eq!(
+        attachments.len(),
+        1,
+        "a non-compliant instance's detached must be ignored too"
+    );
+    assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower"));
 
-    // Compliant again: a fresh attached now applies normally.
+    // Still non-compliant: a later, otherwise-ordinary attached is ignored too.
     views.apply("conv-approval", 5, &event("conv.v2.conv-abc.attachment.attached",
-        r#"{"ts":"2026-07-27T22:04:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+        r#"{"ts":"2026-07-27T22:04:00+10:00","instanceId":"inst-1","world":"mac","cwd":"/never"}"#));
     let (_, attachments) = views.agents().unwrap();
     assert_eq!(attachments.len(), 1);
-    assert_eq!(attachments[0].instance.0, "inst-1");
+    assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower"));
+
+    // Recovery is a restart under a new instance id — a different instance
+    // claiming supersedes normally, same as any other takeover.
+    views.apply("conv-approval", 6, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-27T22:05:00+10:00","instanceId":"inst-2","world":"mac","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].instance.0, "inst-2");
+}
+
+#[test]
+fn is_noncompliant_gate_degrades_to_bare_instance_when_world_is_omitted() {
+    let (mut views, _rx) = fresh();
+    views.apply(
+        "conv-approval",
+        1,
+        &event(
+            "conv.v2.conv-abc.attachment.attached",
+            r#"{"ts":"2026-07-27T22:00:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    views.apply(
+        "conv-approval",
+        2,
+        &event(
+            "conv.v2.conv-abc.attachment.attached",
+            r#"{"ts":"2026-07-27T22:01:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    // The same instance publishing WITHOUT `world` next must still be caught
+    // by the flag — an exact-string match on `world` would miss it. Only
+    // the original conv-abc claim (from before it was flagged) may stand;
+    // conv-other must never gain one.
+    views.apply(
+        "conv-approval",
+        3,
+        &event(
+            "conv.v2.conv-other.attachment.attached",
+            r#"{"ts":"2026-07-27T22:02:00+10:00","instanceId":"inst-1"}"#,
+        ),
+    );
+    let (_, attachments) = views.agents().unwrap();
+    assert!(
+        attachments.iter().all(|a| a.conv.0 == "conv-abc"),
+        "a flagged instance publishing without world must still be ignored: {attachments:?}"
+    );
 }
 
 #[test]
