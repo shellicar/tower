@@ -292,6 +292,7 @@ impl Views {
             "agent_instances",
             "agent_attachments",
             "conv_attachments",
+            "noncompliant_instances",
             "usage",
             "layout",
             "dismissed_approvals",

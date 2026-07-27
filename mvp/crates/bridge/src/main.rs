@@ -73,6 +73,7 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::Context;
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::watch;
 use wire::now_iso;
 
 use crate::anthropic::{DeltaSink, NatsDeltaSink};
@@ -255,17 +256,27 @@ async fn publish_conv_attachment<B: Broker>(
 /// Watch this conversation's own attachment leaf for a displacement: another
 /// instance's `attached` superseding ours (agent-spec.md, Attachment — "a
 /// compliant instance watches the attachment leaf for every conversation it
-/// serves"). On seeing one, stop serving (abort the running query task),
-/// release the conversation's `served` entry (so a later `chdir` can't
-/// "succeed" against a claim we no longer hold, and a re-adopt of this
-/// conversation doesn't collide with a stale one), and publish `detached` —
-/// the observable act of standing down; the fold already moved the claim, so
-/// this changes nothing but makes compliance visible in the record.
+/// serves"). On seeing one, stop serving — signal the servicer's own
+/// `displaced` watch (never an `AbortHandle`: aborting the outer loop drops
+/// the live query's cancel sender out from under it, and a spawned query
+/// task the abort never reaches keeps running beside the new instance; the
+/// servicer instead stops at the cancel checkpoint it already has, exactly
+/// as a `cancel` request would) — release the conversation's `served` entry
+/// (so a later `chdir` can't "succeed" against a claim we no longer hold,
+/// and a re-adopt of this conversation doesn't collide with a stale one),
+/// and publish `detached` — the observable act of standing down; the fold
+/// already moved the claim, so this changes nothing but makes compliance
+/// visible in the record.
 ///
 /// Takes an already-live subscription rather than making its own: the watch
 /// must be listening BEFORE our own `attached` is announced, or a
 /// displacement landing in that window is never seen (the caller subscribes
-/// first and hands the subscription in).
+/// first and hands the subscription in). `own_ts` is our own claim's
+/// published ts: two instances racing to attach each see the OTHER's
+/// `attached` and would both stand down, leaving the conversation unserved
+/// — an incoming claim whose ts precedes ours is ignored rather than read as
+/// a displacement, breaking the symmetry.
+#[allow(clippy::too_many_arguments)]
 async fn watch_attachment<B: Broker>(
     broker: B,
     mut sub: B::Subscription,
@@ -273,8 +284,10 @@ async fn watch_attachment<B: Broker>(
     conv: String,
     world: String,
     instance: String,
-    abort: tokio::task::AbortHandle,
+    own_ts: String,
+    displaced: watch::Sender<bool>,
 ) {
+    let own_ts_ms = wire::parse_ts(&own_ts);
     while let Some(msg) = sub.next().await {
         if !msg.subject.ends_with(".attachment.attached") {
             continue;
@@ -287,8 +300,19 @@ async fn watch_attachment<B: Broker>(
         if their_instance == Some(instance.as_str()) && their_world == Some(world.as_str()) {
             continue; // our own claim, not a displacement
         }
+        let their_ts_ms = value
+            .get("ts")
+            .and_then(serde_json::Value::as_str)
+            .and_then(wire::parse_ts);
+        if let (Some(own), Some(theirs)) = (own_ts_ms, their_ts_ms)
+            && theirs < own
+        {
+            // A concurrent race, not a real displacement: their claim is
+            // OLDER than ours, so we consider ours the one that stands.
+            continue;
+        }
         eprintln!("bridge[{conv}]: displaced by {their_world:?}/{their_instance:?}; standing down");
-        abort.abort();
+        let _ = displaced.send(true);
         served.write().unwrap().remove(&conv);
         publish_conv_attachment(
             &broker,
@@ -368,19 +392,25 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
     let cwd_cell = Arc::clone(&config.cwd);
     let cwd = cwd_cell.read().unwrap().to_string_lossy().to_string();
     served.write().unwrap().insert(conv.clone(), cwd_cell);
+    // The displacement signal: a plain flag the servicer loop races
+    // alongside its requests and its live query's own cancel — never an
+    // `AbortHandle` (watch_attachment's doc explains why).
+    let (displaced_tx, displaced_rx) = watch::channel(false);
     let handle = tokio::spawn(agent::run(
         broker.clone(),
         sink,
         requests,
         config,
         conversation,
+        displaced_rx,
     ));
     // The attachment is what makes the conversation exist for observers
     // before its first message. cwd is causal (an input to how the
     // conversation unfolds). Rides the conversation's own tree now
     // (conversation-spec.md, Attachment), carrying the full identity pair.
+    let own_ts = now_iso();
     let attached = serde_json::json!({
-        "ts": now_iso(),
+        "ts": own_ts,
         "instanceId": instance,
         "world": world,
         "tip": tip,
@@ -398,7 +428,8 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
         conv.clone(),
         world.to_string(),
         instance.to_string(),
-        handle.abort_handle(),
+        own_ts,
+        displaced_tx,
     ));
     Some((conv, handle))
 }
@@ -1164,6 +1195,63 @@ mod tests {
         handle.await.unwrap();
     }
 
+    /// Two instances racing to attach each see the OTHER's `attached` over
+    /// the watch — read naively, both would stand down and the
+    /// conversation would go unserved. An incoming claim whose ts precedes
+    /// our own must never be treated as a displacement.
+    #[tokio::test]
+    async fn an_older_concurrent_attached_is_not_a_displacement() {
+        let broker = FakeBroker::default();
+        broker.subscribe_data.lock().unwrap().insert(
+            "conv.v2.conv-a.attachment.>".to_string(),
+            VecDeque::from([BrokerMessage {
+                subject: "conv.v2.conv-a.attachment.attached".to_string(),
+                payload: serde_json::json!({
+                    "ts": "1970-01-01T00:00:01+00:00",
+                    "instanceId": "inst-other",
+                    "world": "vm",
+                    "cwd": "~/repos/tower",
+                })
+                .to_string()
+                .into_bytes()
+                .into(),
+                reply: None,
+            }]),
+        );
+        let scratch = TestScratch::new("concurrent-race");
+        let served_cwds = served();
+        let served_conv = serve_conversation(
+            &broker,
+            NoopDeltaSink,
+            "local",
+            "instance-1",
+            &served_cwds,
+            config("conv-a", &scratch),
+            decisions::Conversation::default(),
+        )
+        .await;
+        let Some((_conv, handle)) = served_conv else {
+            panic!("expected a served conversation");
+        };
+        handle.await.unwrap();
+
+        // The watcher drains the queued message off the fake subscription
+        // synchronously; give its task a moment to run before asserting
+        // silence.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let calls = broker.calls.lock().unwrap().clone();
+        assert!(
+            !calls
+                .iter()
+                .any(|c| c == "publish:conv.v2.conv-a.attachment.detached"),
+            "an older concurrent claim must never read as a displacement: {calls:?}"
+        );
+        assert!(
+            served_cwds.read().unwrap().contains_key("conv-a"),
+            "the claim must still be held"
+        );
+    }
+
     /// Standing down on displacement is more than aborting the servicer:
     /// the conversation must leave `served`, or a later chdir "succeeds"
     /// against a claim we no longer hold and a re-adopt collides with the
@@ -1176,7 +1264,11 @@ mod tests {
             VecDeque::from([BrokerMessage {
                 subject: "conv.v2.conv-a.attachment.attached".to_string(),
                 payload: serde_json::json!({
-                    "ts": "2026-07-26T19:00:00+10:00",
+                    // Deliberately far in the future: must read as a real
+                    // displacement regardless of when this test runs, never
+                    // ignored as an older concurrent-race claim (issue 4's
+                    // ts-precedence guard).
+                    "ts": "2099-01-01T00:00:00+10:00",
                     "instanceId": "inst-other",
                     "world": "vm",
                     "cwd": "~/repos/tower",

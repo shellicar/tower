@@ -60,9 +60,12 @@ export class Rail {
       }
       case 'agents':
         this.#instances = new Map(event.instances.map((i) => [`${i.world}/${i.instanceId}`, i]));
-        this.#attachments = new Map(
-          event.attachments.map((a) => [`${a.world}/${a.instanceId}/${a.conv}`, a]),
-        );
+        // Keyed by conv: the conversation is the identity (agent-spec.md,
+        // Attachment — attachment is singular), never the (world, instance)
+        // pair that happened to claim it. A superseded claim must leave the
+        // map the instant a new `attached` replaces it, or a connected
+        // client and a fresh snapshot disagree.
+        this.#attachments = new Map(event.attachments.map((a) => [a.conv, a]));
         break;
       case 'agent': {
         const ikey = `${event.world}/${event.instanceId}`;
@@ -92,8 +95,10 @@ export class Rail {
             intervalS: event.intervalS ?? heldInstance?.intervalS,
           });
           this.#instances = nextInstances;
+          // One attachment per conv: a new `attached` REPLACES whatever
+          // stood, unconditionally — never merges beside it.
           const next = new Map(this.#attachments);
-          next.set(`${ikey}/${event.conv}`, {
+          next.set(event.conv, {
             world: event.world,
             instanceId: event.instanceId,
             conv: event.conv,
@@ -103,7 +108,7 @@ export class Rail {
           this.#attachments = next;
         } else if (event.kind === 'detached' && event.conv) {
           const next = new Map(this.#attachments);
-          next.delete(`${ikey}/${event.conv}`);
+          next.delete(event.conv);
           this.#attachments = next;
         }
         break;
@@ -144,7 +149,7 @@ export class Rail {
         // A human dismissed it (tower's own annotation, never a claim the
         // agent detached) — drop it, same as a real `detached` would.
         const next = new Map(this.#attachments);
-        next.delete(`${event.world}/${event.instanceId}/${event.conv}`);
+        next.delete(event.conv);
         this.#attachments = next;
         break;
       }
@@ -181,13 +186,8 @@ export class Rail {
   }
 
   #liveness(conv: string): AgentInstance | null {
-    let best: AgentInstance | null = null;
-    for (const a of this.#attachments.values()) {
-      if (a.conv !== conv) continue;
-      const inst = this.#instances.get(`${a.world}/${a.instanceId}`);
-      if (inst && (!best || inst.lastPulse > best.lastPulse)) best = inst;
-    }
-    return best;
+    const a = this.#attachments.get(conv);
+    return a ? (this.#instances.get(`${a.world}/${a.instanceId}`) ?? null) : null;
   }
 
   /** Potential conversations: attached, no row yet — served, silent. Transient
@@ -195,11 +195,9 @@ export class Rail {
    *  message births an ordinary row. Carries the liveness verdict, so a
    *  stranded one can offer Dismiss (the RailView pattern). */
   get attachedOnly(): (AgentAttachment & { verdict: 'alive' | 'stranded' | null })[] {
-    const byConv = new Map<string, AgentAttachment>();
-    for (const a of this.#attachments.values()) {
-      if (!this.#rows.has(a.conv) && !byConv.has(a.conv)) byConv.set(a.conv, a);
-    }
-    return [...byConv.values()].map((a) => ({ ...a, verdict: this.verdict(a.conv) }));
+    return [...this.#attachments.values()]
+      .filter((a) => !this.#rows.has(a.conv))
+      .map((a) => ({ ...a, verdict: this.verdict(a.conv) }));
   }
 
   /** Conversations currently flagged stale (unread/ticket-system signal) —
@@ -253,7 +251,7 @@ export class Rail {
    *  arrives back, same as any other fold. A no-op if nothing is attached
    *  under that conversation. */
   dismissAttachment(conv: string): void {
-    const a = [...this.#attachments.values()].find((a) => a.conv === conv);
+    const a = this.#attachments.get(conv);
     if (!a) return;
     this.#transport.send({
       type: 'dismiss_attachment',

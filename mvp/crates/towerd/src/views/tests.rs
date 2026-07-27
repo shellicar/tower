@@ -1011,6 +1011,52 @@ fn conv_leaf_attached_supersedes_a_standing_agent_v1_claim() {
 }
 
 #[test]
+fn a_reattach_with_no_detached_between_marks_the_instance_noncompliant() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-27T22:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    // The violation shape, verbatim (agent-spec.md, Attachment, example e):
+    // the SAME instance claims the SAME conversation again, no detached
+    // between. Must be ignored — the first claim still stands.
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-27T22:01:00+10:00","instanceId":"inst-1","world":"mac","cwd":"/elsewhere"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower"));
+
+    // Non-compliant now, globally: even a claim on a DIFFERENT conversation
+    // from the same instance is ignored.
+    views.apply("conv-approval", 3, &event("conv.v2.conv-other.attachment.attached",
+        r#"{"ts":"2026-07-27T22:02:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(
+        attachments.len(),
+        1,
+        "a non-compliant instance's attached elsewhere must be ignored: {attachments:?}"
+    );
+
+    // Its own detached is the one way back — processed, and it restores
+    // compliance.
+    views.apply(
+        "conv-approval",
+        4,
+        &event(
+            "conv.v2.conv-abc.attachment.detached",
+            r#"{"ts":"2026-07-27T22:03:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    let (_, attachments) = views.agents().unwrap();
+    assert!(attachments.is_empty());
+
+    // Compliant again: a fresh attached now applies normally.
+    views.apply("conv-approval", 5, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-27T22:04:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].instance.0, "inst-1");
+}
+
+#[test]
 fn conv_attachment_table_is_derived_and_rematerialises() {
     let (mut views, _rx) = fresh();
     views.apply(
