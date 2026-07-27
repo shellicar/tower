@@ -121,6 +121,8 @@ A re-attacher that should not have re-attached is visible in the record instead 
 
 **The rule, stated once.** An instance must not claim a conversation while its own claim on it is open. In the record, that violation looks like: `attached`, `attached` from the same instance, no `detached` between. Nothing else qualifies it; nothing else excuses it.
 
+An instance that breaks the conduct rule — a second `attached` with no `detached` between — is non-compliant, and consumers ignore everything it publishes from then on. There is no way back for the instance: like a crashed process, it is fixed by restarting, and a restart is a new instance id. Nothing on the wire enforces this; the record shows the violation, and every reader derives the same state from it independently.
+
 After a `detached` closes the standing claim, a new `attached` is an ordinary new claim. It may come from any instance — including the one that just released it. A closed claim leaves nothing behind to reopen, so the wire doesn't care who claims next.
 
 So one open claim means one `attached`: an instance publishes it once, at the moment it attaches — nothing more until it detaches.
@@ -181,6 +183,14 @@ this repo's testing rule.
   pulses still live → violation (it kept claiming after something should
   have stopped it); inst-1's pulses dead → crash (the second `attached`
   never got the chance to detach either).
+
+  Non-compliance is permanent from the second `attached` on: that event
+  itself does not fold, and neither does anything inst-1 publishes after
+  it, including a `detached`. The fold's standing claim stays exactly what
+  the first `attached(inst-1)` left it — held, unreleased, until some other
+  instance's `attached` supersedes it. inst-1 cannot detach its way back;
+  only a restart, under a new instanceId, can serve this conversation
+  compliantly again.
 
 ## Requests
 

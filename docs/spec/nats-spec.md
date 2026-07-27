@@ -197,6 +197,27 @@ any request may be answered `rejected: unsupported` — compliance is
 answering, not implementing — and tolerance covers unknown types, fields,
 and values.
 
+Conformance is also the whole enforcement model. There is no negotiation on
+the wire and no cooperation protocol: the system works because participants
+conform, not because anything makes them. A participant that breaks a
+concern's conduct rules is non-compliant, and what would normally govern it
+no longer does — from then on, nothing it publishes carries authority. This
+is loss of authority, not invisibility: its events stay in the record,
+visible and monitorable — you don't stop watching a submarine because it was
+boarded — but they no longer move the fold; you stop treating its calls as
+commands.
+There is no way back for that identity: like a crashed process, it is fixed
+by restarting, and a restart is a new identity. Each concern's spec defines
+its own conduct rules; the consequence is inherited from here, stated once.
+
+This is a deliberate trade. Leases, fencing, and multi-party release would
+let a violator be reasoned back in, at the price of machinery every correct
+run carries. Instead the happy path is trivially simple, and a violation is
+expensive on purpose: the violator's word stops being authoritative, and the
+deployment restarts it. Nothing on the wire enforces any of this — the
+record shows the violation, and every reader derives the same loss of
+authority from it independently.
+
 ## System principles
 
 Not NATS rules — the design posture the spec serves. Recorded here because each
