@@ -937,6 +937,43 @@ fn conv_attachment_gate_degrades_to_bare_instance_when_world_is_omitted() {
 }
 
 #[test]
+fn conv_attachment_degraded_facts_carry_the_standing_world() {
+    let (mut views, mut rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    while rx.try_recv().is_ok() {}
+
+    // A degraded-gate match is a fact about the STANDING claim: the fanned
+    // fact must carry the stored world, or a live client keyed on the pair
+    // can never match it to the claim it already holds.
+    views.apply(
+        "conv-approval",
+        2,
+        &event(
+            "conv.v2.conv-abc.attachment.moved",
+            r#"{"ts":"2026-07-25T14:01:00+10:00","instanceId":"inst-1","cwd":"~/repos/tower/mvp"}"#,
+        ),
+    );
+    let ViewEvent::Agent(AgentFact::Attached { world, .. }) = rx.try_recv().unwrap() else {
+        panic!("expected the moved fact");
+    };
+    assert_eq!(world.0, "mac");
+
+    views.apply(
+        "conv-approval",
+        3,
+        &event(
+            "conv.v2.conv-abc.attachment.detached",
+            r#"{"ts":"2026-07-25T14:02:00+10:00","instanceId":"inst-1"}"#,
+        ),
+    );
+    let ViewEvent::Agent(AgentFact::Detached { world, .. }) = rx.try_recv().unwrap() else {
+        panic!("expected the detached fact");
+    };
+    assert_eq!(world.0, "mac");
+}
+
+#[test]
 fn conv_attachment_moved_fact_keeps_the_standing_attached_ts() {
     let (mut views, mut rx) = fresh();
     views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",

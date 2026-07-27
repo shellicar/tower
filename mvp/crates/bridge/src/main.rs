@@ -1223,6 +1223,42 @@ mod tests {
         let _ = handle.await;
     }
 
+    /// Watching the attachment leaf is a compliance requirement of serving
+    /// (agent-spec.md, Attachment): if the watch can't be established, the
+    /// claim must be released — same discipline as a `requests` subscribe
+    /// failure — not served unwatched, where a displacement is never seen.
+    #[tokio::test]
+    async fn an_attachment_watch_subscribe_failure_releases_the_claim() {
+        let broker = FakeBroker::default();
+        broker
+            .subscribe_fail_subjects
+            .lock()
+            .unwrap()
+            .insert("conv.v2.conv-b.attachment.>".to_string());
+        let scratch = TestScratch::new("watch-subscribe-fail");
+        let served_cwds = served();
+        let conv = serve_conversation(
+            &broker,
+            NoopDeltaSink,
+            "local",
+            "instance-1",
+            &served_cwds,
+            config("conv-b", &scratch),
+            decisions::Conversation::default(),
+        )
+        .await;
+
+        assert!(conv.is_none(), "an unwatchable conversation must not be served");
+        assert!(served_cwds.read().unwrap().is_empty());
+        let calls = broker.calls.lock().unwrap().clone();
+        assert!(
+            !calls
+                .iter()
+                .any(|c| c == "publish:conv.v2.conv-b.attachment.attached"),
+            "no attached publish when the watch cannot be established: {calls:?}"
+        );
+    }
+
     /// Adopt must replay only the conversation record's own changes, never
     /// widen to `.requests.>` (a live request subject, not a capture-stream
     /// filter) or any other conversation's subjects.

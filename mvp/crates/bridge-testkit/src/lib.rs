@@ -36,6 +36,9 @@ pub struct FakeBroker {
     // the code under test holds unaffected — exactly the vacuity this fake
     // exists to rule out.
     pub subscribe_fails: Arc<AtomicBool>,
+    /// Subjects whose subscribe fails, for a test that needs one subscribe
+    /// to fail while the others succeed (`subscribe_fails` is all-or-nothing).
+    pub subscribe_fail_subjects: Arc<Mutex<std::collections::HashSet<String>>>,
     pub replay_data: ReplayData,
     pub fetch_data: FetchData,
     /// Messages a subscription yields, keyed by the exact subject subscribed
@@ -89,7 +92,9 @@ impl Broker for FakeBroker {
             .lock()
             .unwrap()
             .push(format!("subscribe:{subject}"));
-        if self.subscribe_fails.load(Ordering::SeqCst) {
+        if self.subscribe_fails.load(Ordering::SeqCst)
+            || self.subscribe_fail_subjects.lock().unwrap().contains(&subject)
+        {
             Err(BrokerError::Subscribe(Box::new(std::io::Error::new(
                 std::io::ErrorKind::ConnectionRefused,
                 "scripted subscribe failure",
