@@ -216,6 +216,38 @@ const MIGRATIONS: &[&str] = &[
          unread  INTEGER NOT NULL,
          stale   INTEGER NOT NULL
      );",
+    // 14 - the conversation-tree attachment leaf (conversation-spec.md,
+    // Attachment; agent-spec.md, Attachment): singular, unconditionally
+    // superseding, so PRIMARY KEY(conv) alone - there is never more than one
+    // standing claim. `world` defaults to '' for a producer that omits it
+    // (add-only tolerance; the pair then degrades to bare instance_id, per
+    // spec). Liveness joins this row's (world, instance_id) against
+    // agent_instances' last_pulse/interval_s - pulse stays on agent.v1,
+    // untouched by this migration. Derived; in the rematerialise truncation
+    // set alongside agent_attachments (both feed the same `agents` snapshot).
+    "CREATE TABLE conv_attachments (
+         conv        TEXT PRIMARY KEY,
+         world       TEXT NOT NULL DEFAULT '',
+         instance_id TEXT NOT NULL,
+         cwd         TEXT,
+         tip         TEXT,
+         attached_ts INTEGER NOT NULL
+     );",
+    // 15 — compliance (agent-spec.md, Attachment, "The rule, stated once"):
+    // an instance that publishes a second `attached` for a conversation
+    // while its own claim on it is still open — no `detached` between — is
+    // non-compliant, permanently, from that publish on. Every fact it
+    // publishes anywhere, including its own `detached`, is ignored from
+    // then on — there is no way back; a restart mints a new instance id.
+    // Keyed on the pair (`world` '' stand-in for absent, degraded matching
+    // same as conv_attachments). Derived; in the rematerialise truncation
+    // set.
+    "CREATE TABLE noncompliant_instances (
+         world       TEXT NOT NULL DEFAULT '',
+         instance_id TEXT NOT NULL,
+         since_ts    INTEGER NOT NULL,
+         PRIMARY KEY (world, instance_id)
+     );",
 ];
 
 pub fn apply_schema(db: &Connection) -> anyhow::Result<()> {

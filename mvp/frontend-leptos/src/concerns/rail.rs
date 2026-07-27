@@ -91,11 +91,14 @@ impl Rail {
                         )
                     })
                     .collect();
+                // Keyed by conv: the conversation is the identity
+                // (agent-spec.md, Attachment — attachment is singular), never
+                // the (world, instance) pair that happened to claim it.
                 self.attachments = attachments
                     .iter()
                     .map(|a| {
                         (
-                            format!("{}/{}/{}", a.world, a.instance_id, a.conv),
+                            a.conv.clone(),
                             Attachment {
                                 conv: a.conv.clone(),
                                 world: a.world.clone(),
@@ -119,13 +122,8 @@ impl Rail {
             // A human dismissed it (tower's own annotation, never a claim
             // the agent detached) — drop it from the potential-conversation
             // list, same as a real `detached` would.
-            ServerMsg::AttachmentDismissed {
-                world,
-                instance_id,
-                conv,
-            } => {
-                self.attachments
-                    .remove(&format!("{world}/{instance_id}/{conv}"));
+            ServerMsg::AttachmentDismissed { conv, .. } => {
+                self.attachments.remove(conv);
             }
             ServerMsg::StaleConversations { conversations } => {
                 self.stale = conversations.iter().map(|u| u.conv.clone()).collect();
@@ -162,10 +160,12 @@ impl Rail {
                     last_pulse: fact.ts.max(held.map(|h| h.last_pulse).unwrap_or(0)),
                     interval_s: fact.interval_s.or_else(|| held.and_then(|h| h.interval_s)),
                 };
-                self.instances.insert(ikey.clone(), instance);
+                self.instances.insert(ikey, instance);
+                // One attachment per conv: a new `attached` REPLACES
+                // whatever stood, unconditionally — never merges beside it.
                 if let Some(conv) = &fact.conv {
                     self.attachments.insert(
-                        format!("{ikey}/{conv}"),
+                        conv.clone(),
                         Attachment {
                             conv: conv.clone(),
                             world: fact.world.clone(),
@@ -177,7 +177,7 @@ impl Rail {
             }
             "detached" => {
                 if let Some(conv) = &fact.conv {
-                    self.attachments.remove(&format!("{ikey}/{conv}"));
+                    self.attachments.remove(conv);
                 }
             }
             _ => {} // unknown/other kind: represented as nothing to fold
@@ -210,14 +210,9 @@ impl Rail {
     }
 
     fn best_liveness(&self, conv: &str) -> Option<&Instance> {
-        self.attachments
-            .values()
-            .filter(|a| a.conv == conv)
-            .filter_map(|a| {
-                self.instances
-                    .get(&format!("{}/{}", a.world, a.instance_id))
-            })
-            .max_by_key(|i| i.last_pulse)
+        let a = self.attachments.get(conv)?;
+        self.instances
+            .get(&format!("{}/{}", a.world, a.instance_id))
     }
 
     /// Potential conversations: attached, no row yet — served, silent. They
@@ -305,7 +300,7 @@ impl Rail {
     /// `AttachmentDismissed` broadcast arrives back, same as any other fold.
     /// `None` if nothing is attached under that key (nothing to dismiss).
     pub fn dismiss_attachment(&self, conv: &str, id: String) -> Option<ClientMsg> {
-        let a = self.attachments.values().find(|a| a.conv == conv)?;
+        let a = self.attachments.get(conv)?;
         Some(ClientMsg::DismissAttachment {
             id,
             world: a.world.clone(),
@@ -544,6 +539,41 @@ mod tests {
             conv: "ghost".into(),
         });
         assert!(rail.attached_only(1).is_empty());
+    }
+
+    #[test]
+    fn a_new_attached_supersedes_the_old_pair_not_beside_it() {
+        // Keyed by conv, not (world, instance, conv): a takeover from a
+        // different pair must REPLACE the entry, never leave both live.
+        let mut rail = Rail::default();
+        rail.apply(&ServerMsg::Agent(WsAgent {
+            kind: "attached".into(),
+            world: "mac".into(),
+            instance_id: "inst-1".into(),
+            ts: 1,
+            conv: Some("a".into()),
+            cwd: None,
+            interval_s: None,
+            host: None,
+        }));
+        rail.apply(&ServerMsg::Agent(WsAgent {
+            kind: "attached".into(),
+            world: "vm".into(),
+            instance_id: "inst-2".into(),
+            ts: 2,
+            conv: Some("a".into()),
+            cwd: None,
+            interval_s: None,
+            host: None,
+        }));
+        let potential = rail.attached_only(2);
+        assert_eq!(potential.len(), 1, "one conv must never show two claims");
+        let dismiss = rail.dismiss_attachment("a", "r1".into()).unwrap();
+        assert!(matches!(
+            dismiss,
+            ClientMsg::DismissAttachment { ref world, ref instance_id, .. }
+            if world == "vm" && instance_id == "inst-2"
+        ));
     }
 
     #[test]

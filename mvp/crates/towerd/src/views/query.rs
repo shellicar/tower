@@ -222,7 +222,7 @@ impl Views {
                  ON d.world = a.world AND d.instance_id = a.instance_id AND d.conv = a.conv
              WHERE d.dismissed_ts IS NULL OR a.attached_ts > d.dismissed_ts",
         )?;
-        let attachments = stmt
+        let mut attachments = stmt
             .query_map([], |r| {
                 Ok(AgentAttachmentState {
                     world: WorldId(r.get(0)?),
@@ -233,6 +233,30 @@ impl Views {
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
+
+        // The conversation-tree leaf (conversation-spec.md, Attachment): the
+        // same snapshot, folded from a different subject. Same dismissal
+        // discipline as the agent.v1 table above — both feed one `agents`
+        // answer so a client never has to know which wire path a claim rode.
+        let mut stmt = self.db.prepare_cached(
+            "SELECT a.world, a.instance_id, a.conv, a.cwd, a.attached_ts
+             FROM conv_attachments a
+             LEFT JOIN dismissed_attachments d
+                 ON d.world = a.world AND d.instance_id = a.instance_id AND d.conv = a.conv
+             WHERE d.dismissed_ts IS NULL OR a.attached_ts > d.dismissed_ts",
+        )?;
+        let conv_leaf_attachments = stmt
+            .query_map([], |r| {
+                Ok(AgentAttachmentState {
+                    world: WorldId(r.get(0)?),
+                    instance: InstanceId(r.get(1)?),
+                    conv: ConversationId(r.get(2)?),
+                    cwd: r.get(3)?,
+                    attached_ts: r.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        attachments.extend(conv_leaf_attachments);
         Ok((instances, attachments))
     }
 
@@ -267,6 +291,8 @@ impl Views {
             "tag_keys",
             "agent_instances",
             "agent_attachments",
+            "conv_attachments",
+            "noncompliant_instances",
             "usage",
             "layout",
             "dismissed_approvals",

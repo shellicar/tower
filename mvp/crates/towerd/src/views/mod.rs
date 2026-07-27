@@ -266,7 +266,8 @@ impl Views {
                 tx.execute_batch(
                     "DELETE FROM rows; DELETE FROM messages; DELETE FROM refs;
                      DELETE FROM approvals; DELETE FROM usage;
-                     DELETE FROM agent_instances; DELETE FROM agent_attachments;",
+                     DELETE FROM agent_instances; DELETE FROM agent_attachments;
+                     DELETE FROM conv_attachments; DELETE FROM noncompliant_instances;",
                 )?;
                 // Every stream's cursor resets, not just this one: the
                 // derived tables just wiped are the union of all three

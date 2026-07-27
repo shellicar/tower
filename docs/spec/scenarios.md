@@ -260,6 +260,10 @@ presence, not on literal timestamps — silence is represented the way approval
 | a4 — chdir | `fixtures/agent/scenario-a4.jsonl` |
 | a5 — resume, then already-attached | `fixtures/agent/scenario-a5.jsonl` |
 | a6 — the record a non-conformant publisher leaves | `fixtures/agent/scenario-a6.jsonl` |
+| a7 — ordinary life, on the new leaf | `fixtures/agent/scenario-a7.jsonl` |
+| a8 — crash and failover, on the new leaf | `fixtures/agent/scenario-a8.jsonl` |
+| a9 — migration/takeover, on the new leaf | `fixtures/agent/scenario-a9.jsonl` |
+| a10 — abandon and re-adopt, on the new leaf | `fixtures/agent/scenario-a10.jsonl` |
 
 ### a1 — world up, fresh conversation
 
@@ -330,3 +334,47 @@ the model has to survive.
   matches the standing `instanceId` and clears the claim; and the violation
   is visible in the record itself (attached-attached-detached from one
   instance), derivable by any reader, never declared.
+
+### a7 — ordinary life, on the new leaf
+
+agent-spec, Attachment, example (a), verbatim: `attached(inst-1)` → served →
+`detached(inst-1)`. One claim, opened and closed by the same instance, on
+the conversation's own attachment leaf.
+
+- Exercises: `attached` then `detached` from the same `(world, instanceId)`.
+- Asserts: the standing-instance gate accepts a `detached` whose pair matches
+  the held claim — the released fold, decided, not inferred.
+
+### a8 — crash and failover, on the new leaf
+
+agent-spec, Attachment, example (b): `attached(inst-1)`; its pulses stop and
+no `detached` ever comes. `attached(inst-2)` supersedes it anyway —
+unconditionally, whether or not a `detached(inst-1)` shows up later.
+
+- Exercises: two `attached` claims for the same conversation, different
+  `(world, instanceId)` pairs, no `detached` between them.
+- Asserts: the second `attached` is standing regardless of the first
+  holder's liveness — supersession carries no precondition.
+
+### a9 — migration/takeover, on the new leaf
+
+agent-spec, Attachment, example (c): `attached(inst-1)`; while inst-1 still
+lives, `attached(inst-2)` supersedes it anyway; inst-1 observes its own
+displacement and publishes `detached(inst-1)` — changing nothing in the
+fold, since the claim already moved.
+
+- Exercises: `attached`, `attached` (a different pair), then `detached` from
+  the FIRST (now superseded) pair.
+- Asserts: the standing-instance gate discards the stale `detached` — it
+  names a claim that is no longer held, so it folds as nothing.
+
+### a10 — abandon and re-adopt, on the new leaf
+
+agent-spec, Attachment, example (d): `attached(inst-1)` → `detached(inst-1)`
+→ `attached(inst-1)` again. Legal: a closed claim leaves nothing behind to
+reopen, so the next `attached` is an ordinary new claim, regardless of whose
+instanceId it carries.
+
+- Exercises: attach, detach, re-attach, same `(world, instanceId)` pair.
+- Asserts: the re-attach is standing exactly as any other fresh claim — no
+  memory of the prior claim blocks or qualifies it.

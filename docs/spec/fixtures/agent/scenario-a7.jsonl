@@ -1,0 +1,2 @@
+{"subject":"conv.v2.conv-abc.attachment.attached","message":{"ts":"2026-07-26T19:00:00+10:00","instanceId":"inst-1a2f","world":"mac","cwd":"~/repos/tower"}}
+{"subject":"conv.v2.conv-abc.attachment.detached","message":{"ts":"2026-07-26T19:05:00+10:00","instanceId":"inst-1a2f","world":"mac"}}

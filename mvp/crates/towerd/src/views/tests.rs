@@ -763,6 +763,430 @@ fn agent_tables_are_derived_and_rematerialise() {
 }
 
 #[test]
+fn an_agent_v1_attached_never_resurrects_a_superseded_conv_leaf_claim() {
+    // Order-independent: whichever of the two streams a rematerialise
+    // replays first, the conv leaf's claim must be the one that stands —
+    // never a one-shot delete an out-of-order agent.v1 `attached` can slip
+    // past (the same shape an unmigrated agent's `chdir` produces live).
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-28T01:00:00+10:00","instanceId":"inst-new","world":"vm","cwd":"~/repos/tower"}"#));
+    // An agent.v1 `attached` landing AFTER the conv leaf already stands —
+    // stale data from an unmigrated instance, or a chdir re-publish — must
+    // never resurrect an agent_attachments row.
+    views.apply("conv-approval", 2, &event("agent.v1.mac.telemetry.attached",
+        r#"{"ts":"2026-07-28T00:59:00+10:00","instanceId":"inst-old","conversationId":"conv-abc","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(
+        attachments.len(),
+        1,
+        "the conv leaf's claim must stand alone: {attachments:?}"
+    );
+    assert_eq!(attachments[0].instance.0, "inst-new");
+}
+
+#[test]
+fn a_gated_agent_v1_attached_still_feeds_the_instances_liveness_fold() {
+    // The instance is legitimately serving TWO conversations; only one is
+    // superseded on the conv leaf. Gating the claim must not gate the
+    // liveness evidence — the instance's OTHER, legitimate claim must not
+    // read stranded just because this attached's claim half was dropped.
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-28T01:00:00+10:00","instanceId":"inst-new","world":"vm","cwd":"~/repos/tower"}"#));
+    views.apply("conv-approval", 2, &event("agent.v1.mac.telemetry.attached",
+        r#"{"ts":"2026-07-28T01:01:00+10:00","instanceId":"inst-old","conversationId":"conv-other","cwd":"~/repos/tower","intervalS":30}"#));
+    // conv-other is ungated (never superseded): both claims stand.
+    let (instances, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 2);
+    let inst_old = instances
+        .iter()
+        .find(|i| i.instance.0 == "inst-old")
+        .expect("inst-old's liveness fact must still be folded");
+    assert_eq!(inst_old.interval_s, Some(30));
+
+    // Gate this attached too (world=mac, conv=conv-abc, already superseded);
+    // the pair's OWN liveness must still update even while its claim on
+    // conv-abc is dropped.
+    views.apply("conv-approval", 3, &event("agent.v1.mac.telemetry.attached",
+        r#"{"ts":"2026-07-28T01:02:00+10:00","instanceId":"inst-gated","conversationId":"conv-abc","cwd":"~/repos/tower","intervalS":30}"#));
+    let (instances, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 2, "the gated claim must not resurrect");
+    let gated = instances
+        .iter()
+        .find(|i| i.instance.0 == "inst-gated")
+        .expect("a gated attached must still feed the instance's own liveness fold");
+    assert_eq!(gated.interval_s, Some(30));
+}
+
+// The conversation-tree attachment leaf (conversation-spec.md, Attachment;
+// agent-spec.md, Attachment, Examples a-e). agent.v1's fold above is
+// untouched; these exercise the new leaf's own fold and its gate.
+
+#[test]
+fn conv_attachment_a_ordinary_life() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].instance.0, "inst-1");
+
+    views.apply(
+        "conv-approval",
+        2,
+        &event(
+            "conv.v2.conv-abc.attachment.detached",
+            r#"{"ts":"2026-07-25T14:05:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    let (_, attachments) = views.agents().unwrap();
+    assert!(attachments.is_empty());
+
+    // Never conversation activity.
+    assert!(rows_of(&views).is_empty());
+}
+
+#[test]
+fn conv_attachment_b_crash_and_failover() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    // inst-1 goes silent; inst-2 supersedes unconditionally, no detached ever seen.
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:10:00+10:00","instanceId":"inst-2","world":"vm","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].instance.0, "inst-2");
+    assert_eq!(attachments[0].world.0, "vm");
+}
+
+#[test]
+fn conv_attachment_c_migration_takeover_then_stale_detach_is_a_noop() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:01:00+10:00","instanceId":"inst-2","world":"vm","cwd":"~/repos/tower"}"#));
+    // inst-1 observes its own displacement and publishes detached — a stale
+    // fact about an already-superseded claim, must fold as nothing.
+    views.apply(
+        "conv-approval",
+        3,
+        &event(
+            "conv.v2.conv-abc.attachment.detached",
+            r#"{"ts":"2026-07-25T14:01:05+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].instance.0, "inst-2");
+}
+
+#[test]
+fn conv_attachment_d_abandon_and_readopt() {
+    let (mut views, _rx) = fresh();
+    views.apply(
+        "conv-approval",
+        1,
+        &event(
+            "conv.v2.conv-abc.attachment.attached",
+            r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    views.apply(
+        "conv-approval",
+        2,
+        &event(
+            "conv.v2.conv-abc.attachment.detached",
+            r#"{"ts":"2026-07-25T14:01:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    // A closed claim leaves nothing to reopen: the next attached is ordinary.
+    views.apply(
+        "conv-approval",
+        3,
+        &event(
+            "conv.v2.conv-abc.attachment.attached",
+            r#"{"ts":"2026-07-25T14:02:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].instance.0, "inst-1");
+}
+
+#[test]
+fn conv_attachment_moved_updates_cwd_only_under_the_standing_gate() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    // A stale mover, superseded already, must not touch the standing cwd.
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.moved",
+        r#"{"ts":"2026-07-25T14:03:00+10:00","instanceId":"inst-9","world":"vm","cwd":"/nowhere"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower"));
+
+    // The standing instance's own move applies, and the conversation's
+    // change stream sees nothing (moved never touches rows/messages).
+    views.apply("conv-approval", 3, &event("conv.v2.conv-abc.attachment.moved",
+        r#"{"ts":"2026-07-25T14:06:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower/mvp"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower/mvp"));
+    assert!(rows_of(&views).is_empty());
+}
+
+#[test]
+fn conv_attachment_liveness_joins_the_pair_against_agent_v1_pulse() {
+    let (mut views, _rx) = fresh();
+    views.apply(
+        "conv-approval",
+        1,
+        &event(
+            "agent.v1.mac.telemetry.pulse",
+            r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","intervalS":30}"#,
+        ),
+    );
+    views.apply(
+        "conv-approval",
+        2,
+        &event(
+            "conv.v2.conv-abc.attachment.attached",
+            r#"{"ts":"2026-07-25T14:00:05+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    let (instances, attachments) = views.agents().unwrap();
+    assert_eq!(instances.len(), 1);
+    assert_eq!(instances[0].interval_s, Some(30));
+    assert_eq!(attachments[0].instance.0, "inst-1");
+    assert_eq!(attachments[0].world.0, "mac");
+}
+
+#[test]
+fn conv_attachment_gate_degrades_to_bare_instance_when_world_is_omitted() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    // A producer that omits `world` still names the standing claim by bare
+    // instanceId — the degraded pair the fold's contract promises when
+    // either side omits `world`.
+    views.apply(
+        "conv-approval",
+        2,
+        &event(
+            "conv.v2.conv-abc.attachment.moved",
+            r#"{"ts":"2026-07-25T14:01:00+10:00","instanceId":"inst-1","cwd":"~/repos/tower/mvp"}"#,
+        ),
+    );
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower/mvp"));
+
+    views.apply(
+        "conv-approval",
+        3,
+        &event(
+            "conv.v2.conv-abc.attachment.detached",
+            r#"{"ts":"2026-07-25T14:02:00+10:00","instanceId":"inst-1"}"#,
+        ),
+    );
+    let (_, attachments) = views.agents().unwrap();
+    assert!(attachments.is_empty());
+}
+
+#[test]
+fn conv_attachment_degraded_facts_carry_the_standing_world() {
+    let (mut views, mut rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    while rx.try_recv().is_ok() {}
+
+    // A degraded-gate match is a fact about the STANDING claim: the fanned
+    // fact must carry the stored world, or a live client keyed on the pair
+    // can never match it to the claim it already holds.
+    views.apply(
+        "conv-approval",
+        2,
+        &event(
+            "conv.v2.conv-abc.attachment.moved",
+            r#"{"ts":"2026-07-25T14:01:00+10:00","instanceId":"inst-1","cwd":"~/repos/tower/mvp"}"#,
+        ),
+    );
+    let ViewEvent::Agent(AgentFact::Attached { world, .. }) = rx.try_recv().unwrap() else {
+        panic!("expected the moved fact");
+    };
+    assert_eq!(world.0, "mac");
+
+    views.apply(
+        "conv-approval",
+        3,
+        &event(
+            "conv.v2.conv-abc.attachment.detached",
+            r#"{"ts":"2026-07-25T14:02:00+10:00","instanceId":"inst-1"}"#,
+        ),
+    );
+    let ViewEvent::Agent(AgentFact::Detached { world, .. }) = rx.try_recv().unwrap() else {
+        panic!("expected the detached fact");
+    };
+    assert_eq!(world.0, "mac");
+}
+
+#[test]
+fn conv_attachment_moved_fact_keeps_the_standing_attached_ts() {
+    let (mut views, mut rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    while rx.try_recv().is_ok() {}
+
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.moved",
+        r#"{"ts":"2026-07-25T14:06:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower/mvp"}"#));
+    let ViewEvent::Agent(AgentFact::Attached { ts, cwd, .. }) = rx.try_recv().unwrap() else {
+        panic!("expected the moved fact");
+    };
+    assert_eq!(cwd.as_deref(), Some("~/repos/tower/mvp"));
+    // A move never restarts the claim: live observers and a fresh snapshot
+    // must agree on when the attachment began.
+    assert_eq!(ts, parse_ts("2026-07-25T14:00:00+10:00").unwrap());
+}
+
+#[test]
+fn conv_leaf_attached_supersedes_a_standing_agent_v1_claim() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("agent.v1.mac.telemetry.attached",
+        r#"{"ts":"2026-07-27T21:00:00+10:00","instanceId":"inst-old","conversationId":"conv-abc","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-27T21:05:00+10:00","instanceId":"inst-new","world":"vm","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(
+        attachments.len(),
+        1,
+        "a conv-leaf attached must supersede the agent.v1 claim, not sit beside it: {attachments:?}"
+    );
+    assert_eq!(attachments[0].instance.0, "inst-new");
+}
+
+#[test]
+fn a_reattach_with_no_detached_between_marks_the_instance_permanently_noncompliant() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-27T22:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    // The violation shape, verbatim (agent-spec.md, Attachment, example e):
+    // the SAME instance claims the SAME conversation again, no detached
+    // between. Must be ignored — the first claim still stands.
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-27T22:01:00+10:00","instanceId":"inst-1","world":"mac","cwd":"/elsewhere"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower"));
+
+    // Non-compliant now, permanently: even a claim on a DIFFERENT
+    // conversation from the same instance is ignored.
+    views.apply("conv-approval", 3, &event("conv.v2.conv-other.attachment.attached",
+        r#"{"ts":"2026-07-27T22:02:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(
+        attachments.len(),
+        1,
+        "a non-compliant instance's attached elsewhere must be ignored: {attachments:?}"
+    );
+
+    // There is no way back: its own `detached` is ALSO ignored (agent-spec.md,
+    // Attachment — recovery is a restart, a new instance id, never a
+    // detached). The original claim on conv-abc still stands, untouched.
+    views.apply(
+        "conv-approval",
+        4,
+        &event(
+            "conv.v2.conv-abc.attachment.detached",
+            r#"{"ts":"2026-07-27T22:03:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(
+        attachments.len(),
+        1,
+        "a non-compliant instance's detached must be ignored too"
+    );
+    assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower"));
+
+    // Still non-compliant: a later, otherwise-ordinary attached is ignored too.
+    views.apply("conv-approval", 5, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-27T22:04:00+10:00","instanceId":"inst-1","world":"mac","cwd":"/never"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower"));
+
+    // Recovery is a restart under a new instance id — a different instance
+    // claiming supersedes normally, same as any other takeover.
+    views.apply("conv-approval", 6, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-27T22:05:00+10:00","instanceId":"inst-2","world":"mac","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].instance.0, "inst-2");
+}
+
+#[test]
+fn is_noncompliant_gate_degrades_to_bare_instance_when_world_is_omitted() {
+    let (mut views, _rx) = fresh();
+    views.apply(
+        "conv-approval",
+        1,
+        &event(
+            "conv.v2.conv-abc.attachment.attached",
+            r#"{"ts":"2026-07-27T22:00:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    views.apply(
+        "conv-approval",
+        2,
+        &event(
+            "conv.v2.conv-abc.attachment.attached",
+            r#"{"ts":"2026-07-27T22:01:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    // The same instance publishing WITHOUT `world` next must still be caught
+    // by the flag — an exact-string match on `world` would miss it. Only
+    // the original conv-abc claim (from before it was flagged) may stand;
+    // conv-other must never gain one.
+    views.apply(
+        "conv-approval",
+        3,
+        &event(
+            "conv.v2.conv-other.attachment.attached",
+            r#"{"ts":"2026-07-27T22:02:00+10:00","instanceId":"inst-1"}"#,
+        ),
+    );
+    let (_, attachments) = views.agents().unwrap();
+    assert!(
+        attachments.iter().all(|a| a.conv.0 == "conv-abc"),
+        "a flagged instance publishing without world must still be ignored: {attachments:?}"
+    );
+}
+
+#[test]
+fn conv_attachment_table_is_derived_and_rematerialises() {
+    let (mut views, _rx) = fresh();
+    views.apply(
+        "conv-approval",
+        1,
+        &event(
+            "conv.v2.conv-abc.attachment.attached",
+            r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac"}"#,
+        ),
+    );
+    views
+        .sync_stream("conv-approval", "incarnation-A", 100)
+        .unwrap();
+    views
+        .sync_stream("conv-approval", "incarnation-B", 100)
+        .unwrap();
+    let (_, attachments) = views.agents().unwrap();
+    assert!(attachments.is_empty());
+}
+
+#[test]
 fn out_of_order_row_touch_never_regresses() {
     let (mut views, _rx) = fresh();
     views.apply(

@@ -24,12 +24,21 @@
 //! with the host (a deliberate cut, not a gap).
 //!
 //! The process is one agent instance in a world (agent-spec): `ready` on
-//! boot, a `pulse` every PULSE_INTERVAL_S, `attached` per spawn. The world
+//! boot, a `pulse` every PULSE_INTERVAL_S, on agent.v1 (unchanged by the
+//! attachment migration — only Attachment moved off that tree). The world
 //! is deployer-chosen (`BRIDGE_WORLD`, default `local`); the instance id is
 //! generated per process, so a restart is a new instance in the same world.
-//! No `detached` in v0: conversations die with the host, and a kill is a
-//! crash from the wire's view (a crash publishes nothing; the pulse going
-//! silent is what observers fold).
+//!
+//! Attachment claims ride the CONVERSATION's own tree now
+//! (conversation-spec.md, Attachment; agent-spec.md, Attachment): `attached`
+//! exactly once per spawn/adopt, `moved` on `chdir` (never a re-published
+//! `attached` — that is now the violation shape), and each servicer watches
+//! its own conversations' attachment leaves so a displacement (another
+//! instance's `attached` superseding this one) is observed and answered
+//! with `detached` — the same act of standing-down the spec describes for a
+//! zombie catching up to its own history. Clean exit still publishes
+//! nothing in v0 (conversations die with the host); a crash publishes
+//! nothing either, and the pulse going silent is what observers fold.
 
 mod agent;
 mod anthropic;
@@ -64,10 +73,11 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::Context;
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::watch;
 use wire::now_iso;
 
 use crate::anthropic::{DeltaSink, NatsDeltaSink};
-use bridge::broker::{Broker, BrokerMessage, BrokerReplay, NatsBroker};
+use bridge::broker::{Broker, BrokerMessage, BrokerReplay, BrokerSubscription, NatsBroker};
 use cwd::{ChdirError, ServedCwds, apply_chdir, resolve_cwd, validate_dir};
 
 const PULSE_INTERVAL_S: i64 = 30;
@@ -219,6 +229,102 @@ async fn publish_agent<B: Broker>(broker: &B, world: &str, leaf: &str, payload: 
     }
 }
 
+/// The attachment claim, on the conversation's own tree now
+/// (conversation-spec.md, Attachment): `attached`, `moved`, `detached`
+/// carry the full `(world, instanceId)` pair, per agent-spec.md's Attachment.
+async fn publish_conv_attachment<B: Broker>(
+    broker: &B,
+    conv: &str,
+    leaf: &str,
+    payload: serde_json::Value,
+) {
+    let subject = format!("conv.v2.{conv}.attachment.{leaf}");
+    let bytes = serde_json::to_vec(&payload).expect("json! of plain values cannot fail");
+    eprintln!(
+        "{} bridge[{conv}]: → {subject} ({} B)",
+        now_iso(),
+        bytes.len()
+    );
+    if let Err(e) = broker.publish(subject, bytes).await {
+        eprintln!(
+            "bridge[{conv}]: attachment publish failed: {:#}",
+            anyhow::Error::new(e)
+        );
+    }
+}
+
+/// Watch this conversation's own attachment leaf for a displacement: another
+/// instance's `attached` superseding ours (agent-spec.md, Attachment — "a
+/// compliant instance watches the attachment leaf for every conversation it
+/// serves"). On seeing one, stop serving — signal the servicer's own
+/// `displaced` watch (never an `AbortHandle`: aborting the outer loop drops
+/// the live query's cancel sender out from under it, and a spawned query
+/// task the abort never reaches keeps running beside the new instance; the
+/// servicer instead stops at the cancel checkpoint it already has, exactly
+/// as a `cancel` request would) — release the conversation's `served` entry
+/// (so a later `chdir` can't "succeed" against a claim we no longer hold,
+/// and a re-adopt of this conversation doesn't collide with a stale one),
+/// and publish `detached` — the observable act of standing down; the fold
+/// already moved the claim, so this changes nothing but makes compliance
+/// visible in the record.
+///
+/// Takes an already-live subscription rather than making its own: the watch
+/// must be listening BEFORE our own `attached` is announced, or a
+/// displacement landing in that window is never seen (the caller subscribes
+/// first and hands the subscription in). `own_ts` is our own claim's
+/// published ts: two instances racing to attach each see the OTHER's
+/// `attached` and would both stand down, leaving the conversation unserved
+/// — an incoming claim whose ts precedes ours is ignored rather than read as
+/// a displacement, breaking the symmetry.
+#[allow(clippy::too_many_arguments)]
+async fn watch_attachment<B: Broker>(
+    broker: B,
+    mut sub: B::Subscription,
+    served: ServedCwds,
+    conv: String,
+    world: String,
+    instance: String,
+    own_ts: String,
+    displaced: watch::Sender<bool>,
+) {
+    let own_ts_ms = wire::parse_ts(&own_ts);
+    while let Some(msg) = sub.next().await {
+        if !msg.subject.ends_with(".attachment.attached") {
+            continue;
+        }
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&msg.payload) else {
+            continue;
+        };
+        let their_instance = value.get("instanceId").and_then(serde_json::Value::as_str);
+        let their_world = value.get("world").and_then(serde_json::Value::as_str);
+        if their_instance == Some(instance.as_str()) && their_world == Some(world.as_str()) {
+            continue; // our own claim, not a displacement
+        }
+        let their_ts_ms = value
+            .get("ts")
+            .and_then(serde_json::Value::as_str)
+            .and_then(wire::parse_ts);
+        if let (Some(own), Some(theirs)) = (own_ts_ms, their_ts_ms)
+            && theirs < own
+        {
+            // A concurrent race, not a real displacement: their claim is
+            // OLDER than ours, so we consider ours the one that stands.
+            continue;
+        }
+        eprintln!("bridge[{conv}]: displaced by {their_world:?}/{their_instance:?}; standing down");
+        let _ = displaced.send(true);
+        served.write().unwrap().remove(&conv);
+        publish_conv_attachment(
+            &broker,
+            &conv,
+            "detached",
+            serde_json::json!({ "ts": now_iso(), "instanceId": instance, "world": world }),
+        )
+        .await;
+        break;
+    }
+}
+
 /// Serve a conversation: subscribe (the fact before the claim - a
 /// conversation that cannot hear requests is not spawned in any meaningful
 /// sense, so the claim and the reply both wait for this fact), spawn the
@@ -253,6 +359,28 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
             return None;
         }
     };
+    // The displacement watch must be live before our own `attached` goes
+    // out, or a competing claim landing in the gap is never seen — so this
+    // subscribes before anything is published, same discipline as `requests`
+    // above.
+    // Watching for a displacement is a compliance requirement of serving
+    // (agent-spec.md, Attachment), not an optional extra: an instance that
+    // cannot watch can never see itself superseded, so it must not claim in
+    // the first place — same discipline as the `requests` subscribe above.
+    let attachment_watch = match broker
+        .subscribe(format!("conv.v2.{conv}.attachment.>"))
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "bridge[{conv}]: attachment watch subscribe failed: {:#}",
+                anyhow::Error::new(e)
+            );
+            println!("{}", serde_json::json!({ "error": "subscribe failed" }));
+            return None;
+        }
+    };
     // tip: where the conversation stands right now, so an observer other
     // than this servicer (towerd, a client, another agent) can learn it
     // without replaying the change stream first — the gap that made a
@@ -264,24 +392,45 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
     let cwd_cell = Arc::clone(&config.cwd);
     let cwd = cwd_cell.read().unwrap().to_string_lossy().to_string();
     served.write().unwrap().insert(conv.clone(), cwd_cell);
+    // The displacement signal: a plain flag the servicer loop races
+    // alongside its requests and its live query's own cancel — never an
+    // `AbortHandle` (watch_attachment's doc explains why).
+    let (displaced_tx, displaced_rx) = watch::channel(false);
     let handle = tokio::spawn(agent::run(
         broker.clone(),
         sink,
         requests,
         config,
         conversation,
+        displaced_rx,
     ));
     // The attachment is what makes the conversation exist for observers
     // before its first message. cwd is causal (an input to how the
-    // conversation unfolds).
+    // conversation unfolds). Rides the conversation's own tree now
+    // (conversation-spec.md, Attachment), carrying the full identity pair.
+    let own_ts = now_iso();
     let attached = serde_json::json!({
-        "ts": now_iso(),
+        "ts": own_ts,
         "instanceId": instance,
-        "conversationId": conv,
+        "world": world,
         "tip": tip,
         "cwd": cwd,
+        "intervalS": PULSE_INTERVAL_S,
     });
-    publish_agent(broker, world, "attached", attached).await;
+    publish_conv_attachment(broker, &conv, "attached", attached).await;
+    // One instance per claim, watching its own conversation: a displacement
+    // (another instance's `attached` superseding ours) is observed and
+    // answered with `detached` (agent-spec.md, Attachment).
+    tokio::spawn(watch_attachment(
+        broker.clone(),
+        attachment_watch,
+        Arc::clone(served),
+        conv.clone(),
+        world.to_string(),
+        instance.to_string(),
+        own_ts,
+        displaced_tx,
+    ));
     Some((conv, handle))
 }
 
@@ -566,14 +715,18 @@ impl Host {
                 Ok(resolved) => {
                     let now = resolved.to_string_lossy().to_string();
                     eprintln!("bridge[{conv}]: cwd → {now}");
-                    publish_agent(
+                    // A changed cwd is a fact about the standing claim, not
+                    // a new one — `moved`, never a re-published `attached`
+                    // (agent-spec.md, Attachment: that is now the violation
+                    // shape).
+                    publish_conv_attachment(
                         &self.broker,
-                        &self.world,
-                        "attached",
+                        conv,
+                        "moved",
                         serde_json::json!({
                             "ts": now_iso(),
                             "instanceId": self.instance,
-                            "conversationId": conv,
+                            "world": self.world,
                             "cwd": now,
                         }),
                     )
@@ -978,7 +1131,7 @@ mod tests {
             .unwrap();
         let attached_at = calls
             .iter()
-            .position(|c| c == "publish:agent.v1.local.telemetry.attached")
+            .position(|c| c == "publish:conv.v2.conv-a.attachment.attached")
             .unwrap();
         assert!(subscribe_at < attached_at, "{calls:?}");
 
@@ -988,6 +1141,220 @@ mod tests {
         // still be running (the fake subscription ends the loop immediately,
         // so this resolves right away).
         handle.await.unwrap();
+    }
+
+    /// A displacement landing between our `attached` publish and the
+    /// watcher's subscribe is never seen: the watch must be live before the
+    /// claim is announced, or the window is a silent double-serve.
+    #[tokio::test]
+    async fn attachment_watch_subscribes_before_attached_is_published() {
+        let broker = FakeBroker::default();
+        let scratch = TestScratch::new("watch-ordering");
+        let served_conv = serve_conversation(
+            &broker,
+            NoopDeltaSink,
+            "local",
+            "instance-1",
+            &served(),
+            config("conv-a", &scratch),
+            decisions::Conversation::default(),
+        )
+        .await;
+        let Some((_conv, handle)) = served_conv else {
+            panic!("expected a served conversation");
+        };
+
+        // The watcher runs as its own task; give its subscribe time to land
+        // before reading the order.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let calls = loop {
+            let calls = broker.calls.lock().unwrap().clone();
+            if calls
+                .iter()
+                .any(|c| c == "subscribe:conv.v2.conv-a.attachment.>")
+            {
+                break calls;
+            }
+            if std::time::Instant::now() > deadline {
+                panic!("attachment watch never subscribed: {calls:?}");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        };
+        let watch_at = calls
+            .iter()
+            .position(|c| c == "subscribe:conv.v2.conv-a.attachment.>")
+            .unwrap();
+        let attached_at = calls
+            .iter()
+            .position(|c| c == "publish:conv.v2.conv-a.attachment.attached")
+            .unwrap();
+        assert!(
+            watch_at < attached_at,
+            "watch must be live before the claim is announced: {calls:?}"
+        );
+        handle.await.unwrap();
+    }
+
+    /// Two instances racing to attach each see the OTHER's `attached` over
+    /// the watch — read naively, both would stand down and the
+    /// conversation would go unserved. An incoming claim whose ts precedes
+    /// our own must never be treated as a displacement.
+    #[tokio::test]
+    async fn an_older_concurrent_attached_is_not_a_displacement() {
+        let broker = FakeBroker::default();
+        broker.subscribe_data.lock().unwrap().insert(
+            "conv.v2.conv-a.attachment.>".to_string(),
+            VecDeque::from([BrokerMessage {
+                subject: "conv.v2.conv-a.attachment.attached".to_string(),
+                payload: serde_json::json!({
+                    "ts": "1970-01-01T00:00:01+00:00",
+                    "instanceId": "inst-other",
+                    "world": "vm",
+                    "cwd": "~/repos/tower",
+                })
+                .to_string()
+                .into_bytes()
+                .into(),
+                reply: None,
+            }]),
+        );
+        let scratch = TestScratch::new("concurrent-race");
+        let served_cwds = served();
+        let served_conv = serve_conversation(
+            &broker,
+            NoopDeltaSink,
+            "local",
+            "instance-1",
+            &served_cwds,
+            config("conv-a", &scratch),
+            decisions::Conversation::default(),
+        )
+        .await;
+        let Some((_conv, handle)) = served_conv else {
+            panic!("expected a served conversation");
+        };
+        handle.await.unwrap();
+
+        // The watcher drains the queued message off the fake subscription
+        // synchronously; give its task a moment to run before asserting
+        // silence.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let calls = broker.calls.lock().unwrap().clone();
+        assert!(
+            !calls
+                .iter()
+                .any(|c| c == "publish:conv.v2.conv-a.attachment.detached"),
+            "an older concurrent claim must never read as a displacement: {calls:?}"
+        );
+        assert!(
+            served_cwds.read().unwrap().contains_key("conv-a"),
+            "the claim must still be held"
+        );
+    }
+
+    /// Standing down on displacement is more than aborting the servicer:
+    /// the conversation must leave `served`, or a later chdir "succeeds"
+    /// against a claim we no longer hold and a re-adopt collides with the
+    /// stale entry.
+    #[tokio::test]
+    async fn displacement_releases_the_served_entry() {
+        let broker = FakeBroker::default();
+        broker.subscribe_data.lock().unwrap().insert(
+            "conv.v2.conv-a.attachment.>".to_string(),
+            VecDeque::from([BrokerMessage {
+                subject: "conv.v2.conv-a.attachment.attached".to_string(),
+                payload: serde_json::json!({
+                    // Deliberately far in the future: must read as a real
+                    // displacement regardless of when this test runs, never
+                    // ignored as an older concurrent-race claim (issue 4's
+                    // ts-precedence guard).
+                    "ts": "2099-01-01T00:00:00+10:00",
+                    "instanceId": "inst-other",
+                    "world": "vm",
+                    "cwd": "~/repos/tower",
+                })
+                .to_string()
+                .into_bytes()
+                .into(),
+                reply: None,
+            }]),
+        );
+        let scratch = TestScratch::new("displacement-served");
+        let served_cwds = served();
+        let served_conv = serve_conversation(
+            &broker,
+            NoopDeltaSink,
+            "local",
+            "instance-1",
+            &served_cwds,
+            config("conv-a", &scratch),
+            decisions::Conversation::default(),
+        )
+        .await;
+        let Some((_conv, handle)) = served_conv else {
+            panic!("expected a served conversation");
+        };
+
+        // Standing down is observable as the detached publish; wait for it.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let calls = broker.calls.lock().unwrap().clone();
+            if calls
+                .iter()
+                .any(|c| c == "publish:conv.v2.conv-a.attachment.detached")
+            {
+                break;
+            }
+            if std::time::Instant::now() > deadline {
+                panic!("displaced instance never stood down: {calls:?}");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(
+            served_cwds.read().unwrap().is_empty(),
+            "a displaced conversation must leave `served`"
+        );
+        // The servicer was aborted by the watcher; either outcome ends it.
+        let _ = handle.await;
+    }
+
+    /// Watching the attachment leaf is a compliance requirement of serving
+    /// (agent-spec.md, Attachment): if the watch can't be established, the
+    /// claim must be released — same discipline as a `requests` subscribe
+    /// failure — not served unwatched, where a displacement is never seen.
+    #[tokio::test]
+    async fn an_attachment_watch_subscribe_failure_releases_the_claim() {
+        let broker = FakeBroker::default();
+        broker
+            .subscribe_fail_subjects
+            .lock()
+            .unwrap()
+            .insert("conv.v2.conv-b.attachment.>".to_string());
+        let scratch = TestScratch::new("watch-subscribe-fail");
+        let served_cwds = served();
+        let conv = serve_conversation(
+            &broker,
+            NoopDeltaSink,
+            "local",
+            "instance-1",
+            &served_cwds,
+            config("conv-b", &scratch),
+            decisions::Conversation::default(),
+        )
+        .await;
+
+        assert!(
+            conv.is_none(),
+            "an unwatchable conversation must not be served"
+        );
+        assert!(served_cwds.read().unwrap().is_empty());
+        let calls = broker.calls.lock().unwrap().clone();
+        assert!(
+            !calls
+                .iter()
+                .any(|c| c == "publish:conv.v2.conv-b.attachment.attached"),
+            "no attached publish when the watch cannot be established: {calls:?}"
+        );
     }
 
     /// Adopt must replay only the conversation record's own changes, never

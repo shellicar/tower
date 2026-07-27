@@ -16,7 +16,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::ids::{MessageId, QueryId, TurnId};
+use crate::ids::{InstanceId, MessageId, QueryId, TurnId, WorldId};
 
 /// The tolerance rule for the *flat* concerns that still carry `type` in the
 /// body (approval v1, and conversation `deltas` via a direct match): try the
@@ -242,6 +242,76 @@ impl ConvChange {
             ConvChange::Revision(c) => &c.ts,
             ConvChange::TipMoved(c) => &c.ts,
             ConvChange::Query(c) => &c.ts,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// conv.v2.{id}.attachment.> — the wire shape of the model agent-spec.md
+// conducts itself by (singular, unconditionally superseding, no fencing;
+// docs/spec/agent-spec.md, Attachment). `world` is required of every
+// compliant publisher but optional here — add-only tolerance for producers
+// that predate this rule (docs/spec/conversation-spec.md, Attachment).
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ConvAttached {
+    pub ts: String,
+    #[serde(rename = "instanceId")]
+    pub instance_id: InstanceId,
+    #[serde(default)]
+    pub world: Option<WorldId>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    /// The conversation's tip at the moment of attachment. Absent and
+    /// explicit `null` both fold as "no tip stated" — the schema's
+    /// `nullable().optional()` exists for a sender's convenience, not to
+    /// distinguish two reader-visible states.
+    #[serde(default)]
+    pub tip: Option<MessageId>,
+    #[serde(default, rename = "intervalS")]
+    pub interval_s: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ConvMoved {
+    pub ts: String,
+    #[serde(rename = "instanceId")]
+    pub instance_id: InstanceId,
+    #[serde(default)]
+    pub world: Option<WorldId>,
+    pub cwd: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ConvDetached {
+    pub ts: String,
+    #[serde(rename = "instanceId")]
+    pub instance_id: InstanceId,
+    #[serde(default)]
+    pub world: Option<WorldId>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConvAttachment {
+    Attached(ConvAttached),
+    Moved(ConvMoved),
+    Detached(ConvDetached),
+}
+
+impl ConvAttachment {
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            ConvAttachment::Attached(_) => "attached",
+            ConvAttachment::Moved(_) => "moved",
+            ConvAttachment::Detached(_) => "detached",
+        }
+    }
+
+    pub fn ts(&self) -> &str {
+        match self {
+            ConvAttachment::Attached(a) => &a.ts,
+            ConvAttachment::Moved(m) => &m.ts,
+            ConvAttachment::Detached(d) => &d.ts,
         }
     }
 }

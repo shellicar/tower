@@ -243,6 +243,7 @@ pub async fn run<B: Broker, D: DeltaSink>(
     requests: B::Subscription,
     config: AgentConfig,
     conversation: Conversation,
+    mut displaced: watch::Receiver<bool>,
 ) {
     let prefix = format!("conv.v2.{}.requests.", config.conv.0);
     let mut requests = requests;
@@ -259,6 +260,22 @@ pub async fn run<B: Broker, D: DeltaSink>(
 
     loop {
         tokio::select! {
+            // Displaced: another instance's `attached` superseded ours
+            // (main.rs's watch_attachment). Signal any live query's own
+            // cancel watch — the same channel a `cancel` request uses — so
+            // the turn stops at its checkpoint and publishes the
+            // cancellation itself; then stop serving. Never an abort: the
+            // spawned query task holds its own broker handle and keeps
+            // publishing independently of this loop's lifetime.
+            _ = displaced.changed() => {
+                if *displaced.borrow_and_update() {
+                    if let Some(tx) = &cancel_tx {
+                        let _ = tx.send(true);
+                    }
+                    eprintln!("bridge[{}]: displaced — standing down", config.conv.0);
+                    break;
+                }
+            }
             // A query finished: fold its outcome into the tree.
             Some((query, end)) = done_rx.recv() => {
                 conversation.on_query_end(query, end);
@@ -1374,12 +1391,14 @@ mod tests {
         });
         let requests = FakeSubscription { queued };
 
+        let (_displaced_tx, displaced_rx) = watch::channel(false);
         run(
             broker.clone(),
             NoopDeltaSink,
             requests,
             config("conv-t", &scratch),
             Conversation::default(),
+            displaced_rx,
         )
         .await;
 

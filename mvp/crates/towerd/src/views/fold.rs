@@ -2,11 +2,13 @@
 //! `ViewEvent` broadcast, one transaction per event. Publish after commit:
 //! subscribers read the db they can now see.
 
+use rusqlite::OptionalExtension;
 use serde_json::Value;
 
 use wire::{
     AgentEvent, AgentKind, AgentTelemetry, ApprovalEvent, ApprovalKind, ApprovalLifecycle,
-    ConvChange, ConvTelemetry, Event, EventKind, WireEvent, parse_ts,
+    ConvAttachment, ConvChange, ConvTelemetry, Event, EventKind, InstanceId, WireEvent, WorldId,
+    parse_ts,
 };
 
 use crate::refs::{Blob, externalise};
@@ -170,12 +172,18 @@ impl Views {
             AgentKind::Telemetry(AgentTelemetry::Attached(a)) => {
                 let ts_ms = parse_ts(&a.ts)
                     .ok_or_else(|| anyhow::anyhow!("attached has unparseable ts {}", a.ts))?;
-                // Re-attach (chdir's new cwd) is last-write-wins in place.
-                tx.execute(
-                    "INSERT OR REPLACE INTO agent_attachments
-                         (world, instance_id, conv, cwd, attached_ts)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    rusqlite::params![world.0, a.instance_id.0, a.conversation_id.0, a.cwd, ts_ms],
+                // Cross-plane supersession, order-independent: a standing
+                // conv-leaf claim (conversation-spec.md, Attachment) is the
+                // one that counts, always — gate rather than one-shot
+                // delete, or a rematerialise replaying the two streams
+                // through independent consumers can land this AFTER the
+                // delete and resurrect a claim the conv leaf already
+                // superseded (the same shape an unmigrated agent's `chdir`
+                // produces live, republishing `attached` on this tree).
+                let conv_leaf_stands: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM conv_attachments WHERE conv = ?1)",
+                    [&a.conversation_id.0],
+                    |r| r.get(0),
                 )?;
                 // Attaching is itself evidence of life, and may carry the
                 // liveness promise a `pulse` would otherwise be the only
@@ -183,6 +191,11 @@ impl Views {
                 // instance that dies before its first pulse read as alive
                 // forever). COALESCE keeps a held interval when this fact
                 // doesn't carry one, rather than clobbering it with NULL.
+                // Unconditional, even when the claim itself is gated below:
+                // this is evidence about the INSTANCE, not this claim — an
+                // instance serving several conversations must not read
+                // stranded on its other, legitimate claims just because one
+                // was superseded on the conv leaf.
                 tx.execute(
                     "INSERT INTO agent_instances (world, instance_id, last_pulse, interval_s)
                      VALUES (?1, ?2, ?3, ?4)
@@ -191,14 +204,31 @@ impl Views {
                          interval_s = COALESCE(excluded.interval_s, agent_instances.interval_s)",
                     rusqlite::params![world.0, a.instance_id.0, ts_ms, a.interval_s],
                 )?;
-                Some(AgentFact::Attached {
-                    world: world.clone(),
-                    instance: a.instance_id.clone(),
-                    ts: ts_ms,
-                    conv: a.conversation_id.clone(),
-                    cwd: a.cwd.clone(),
-                    interval_s: a.interval_s,
-                })
+                if conv_leaf_stands {
+                    None
+                } else {
+                    // Re-attach (chdir's new cwd) is last-write-wins in place.
+                    tx.execute(
+                        "INSERT OR REPLACE INTO agent_attachments
+                             (world, instance_id, conv, cwd, attached_ts)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        rusqlite::params![
+                            world.0,
+                            a.instance_id.0,
+                            a.conversation_id.0,
+                            a.cwd,
+                            ts_ms
+                        ],
+                    )?;
+                    Some(AgentFact::Attached {
+                        world: world.clone(),
+                        instance: a.instance_id.clone(),
+                        ts: ts_ms,
+                        conv: a.conversation_id.clone(),
+                        cwd: a.cwd.clone(),
+                        interval_s: a.interval_s,
+                    })
+                }
             }
             AgentKind::Telemetry(AgentTelemetry::Detached(d)) => {
                 let ts_ms = parse_ts(&d.ts)
@@ -232,8 +262,219 @@ impl Views {
         Ok(())
     }
 
+    /// The conversation-tree attachment fold (conversation-spec.md,
+    /// Attachment; agent-spec.md, Attachment): `attached` unconditionally
+    /// supersedes — one standing row per conv, no precondition. `moved` and
+    /// `detached` apply only under the standing-instance gate: the `(world,
+    /// instance_id)` pair (degraded to bare `instance_id` when either side
+    /// omits `world`) must match the row currently held, or the fact is a
+    /// stale claim about an already-superseded attachment and folds as
+    /// nothing. Never touches `rows`: this is a servicing fact, not
+    /// conversation activity (CLAUDE.md, Rules with teeth).
+    ///
+    /// Compliance (agent-spec.md, Attachment, "The rule, stated once"): an
+    /// instance that publishes a second `attached` for a conversation while
+    /// its own claim on it is still open — no `detached` between — is
+    /// non-compliant, permanently, from that publish on; every fact it
+    /// publishes anywhere, including its own `detached`, is ignored from
+    /// then on. There is no way back: like a crashed process, it is fixed
+    /// by restarting, and a restart is a new instance id — nothing on the
+    /// wire clears the flag. This is the ONE crisp rule the spec states
+    /// outright; the other "violation" (live pulses past a displacement) is
+    /// explicitly never declared, only inferred by a reader — not folded
+    /// into this flag.
+    fn apply_conv_attachment(
+        &mut self,
+        stream_name: &str,
+        seq: u64,
+        conv: &wire::ConversationId,
+        attachment: &ConvAttachment,
+    ) -> anyhow::Result<()> {
+        let tx = self.db.transaction()?;
+        let fact = match attachment {
+            ConvAttachment::Attached(a) => {
+                let ts_ms = parse_ts(&a.ts).ok_or_else(|| {
+                    anyhow::anyhow!("attached {conv} has unparseable ts {}", a.ts)
+                })?;
+                let world = a.world.clone().unwrap_or_else(|| WorldId(String::new()));
+                if is_noncompliant(&tx, &world, &a.instance_id)? {
+                    None
+                } else {
+                    // The rule, stated once: this exact instance already
+                    // holds an open claim on this exact conv (degraded
+                    // match, same as the gate below) — a second `attached`
+                    // with no `detached` between is the violation shape,
+                    // verbatim.
+                    let already_open: bool = tx.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM conv_attachments
+                          WHERE conv = ?1 AND instance_id = ?2
+                            AND (?3 = '' OR world = '' OR world = ?3))",
+                        rusqlite::params![conv.0, a.instance_id.0, world.0],
+                        |r| r.get(0),
+                    )?;
+                    if already_open {
+                        tx.execute(
+                            "INSERT INTO noncompliant_instances (world, instance_id, since_ts)
+                             VALUES (?1, ?2, ?3)
+                             ON CONFLICT(world, instance_id) DO NOTHING",
+                            rusqlite::params![world.0, a.instance_id.0, ts_ms],
+                        )?;
+                        None
+                    } else {
+                        tx.execute(
+                            "INSERT INTO conv_attachments (conv, world, instance_id, cwd, tip, attached_ts)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                             ON CONFLICT(conv) DO UPDATE SET
+                                 world       = excluded.world,
+                                 instance_id = excluded.instance_id,
+                                 cwd         = excluded.cwd,
+                                 tip         = excluded.tip,
+                                 attached_ts = excluded.attached_ts",
+                            rusqlite::params![
+                                conv.0,
+                                world.0,
+                                a.instance_id.0,
+                                a.cwd,
+                                a.tip.as_ref().map(|t| t.0.as_str()),
+                                ts_ms,
+                            ],
+                        )?;
+                        // Supersession crosses planes too: a conv-leaf
+                        // `attached` is the standing claim now, full stop —
+                        // any agent.v1 claim still held for this conv (a
+                        // not-yet-migrated bridge, or one mid-migration) is
+                        // exactly the "whatever attachment stood before it"
+                        // agent-spec.md's Attachment says a new `attached`
+                        // supersedes unconditionally. Without this,
+                        // `agents()` would return two attachments for one
+                        // conversation during mixed operation.
+                        tx.execute("DELETE FROM agent_attachments WHERE conv = ?1", [&conv.0])?;
+                        // Attaching is itself evidence of life (agent-spec.md,
+                        // Liveness is a fold): fold it into the same pair-keyed
+                        // pulse table `pulse` already updates. Only when `world`
+                        // is actually known — agent_instances is keyed on the
+                        // pair.
+                        if let Some(w) = &a.world {
+                            tx.execute(
+                                "INSERT INTO agent_instances (world, instance_id, last_pulse, interval_s)
+                                 VALUES (?1, ?2, ?3, ?4)
+                                 ON CONFLICT(world, instance_id) DO UPDATE SET
+                                     last_pulse = max(agent_instances.last_pulse, excluded.last_pulse),
+                                     interval_s = COALESCE(excluded.interval_s, agent_instances.interval_s)",
+                                rusqlite::params![w.0, a.instance_id.0, ts_ms, a.interval_s],
+                            )?;
+                        }
+                        Some(AgentFact::Attached {
+                            world,
+                            instance: a.instance_id.clone(),
+                            ts: ts_ms,
+                            conv: conv.clone(),
+                            cwd: a.cwd.clone(),
+                            interval_s: a.interval_s,
+                        })
+                    }
+                }
+            }
+            ConvAttachment::Moved(m) => {
+                // Validated but not carried in the fact below — a `moved`
+                // never restarts the claim's own attached_ts.
+                parse_ts(&m.ts)
+                    .ok_or_else(|| anyhow::anyhow!("moved {conv} has unparseable ts {}", m.ts))?;
+                let incoming_world = m.world.clone().unwrap_or_else(|| WorldId(String::new()));
+                if is_noncompliant(&tx, &incoming_world, &m.instance_id)? {
+                    None
+                } else {
+                    // The standing-instance gate, degraded per the doc
+                    // comment above: a bare instanceId match when either
+                    // side omits `world` (empty string, this table's
+                    // stand-in for absent). Read the standing row's OWN
+                    // world/attached_ts first — a degraded match must fan
+                    // out the claim's real identity and start time, never
+                    // the incoming (possibly empty) world or the move's own
+                    // ts, or a client keyed on the pair can never match the
+                    // fact back to the claim it already holds.
+                    let standing = tx
+                        .query_row(
+                            "SELECT world, attached_ts FROM conv_attachments
+                             WHERE conv = ?1 AND instance_id = ?2
+                               AND (?3 = '' OR world = '' OR world = ?3)",
+                            rusqlite::params![conv.0, m.instance_id.0, incoming_world.0],
+                            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+                        )
+                        .optional()?;
+                    match standing {
+                        Some((world, attached_ts)) => {
+                            tx.execute(
+                                "UPDATE conv_attachments SET cwd = ?1 WHERE conv = ?2",
+                                rusqlite::params![m.cwd, conv.0],
+                            )?;
+                            Some(AgentFact::Attached {
+                                world: WorldId(world),
+                                instance: m.instance_id.clone(),
+                                ts: attached_ts,
+                                conv: conv.clone(),
+                                cwd: Some(m.cwd.clone()),
+                                interval_s: None,
+                            })
+                        }
+                        None => None,
+                    }
+                }
+            }
+            ConvAttachment::Detached(d) => {
+                let ts_ms = parse_ts(&d.ts).ok_or_else(|| {
+                    anyhow::anyhow!("detached {conv} has unparseable ts {}", d.ts)
+                })?;
+                let incoming_world = d.world.clone().unwrap_or_else(|| WorldId(String::new()));
+                if is_noncompliant(&tx, &incoming_world, &d.instance_id)? {
+                    None
+                } else {
+                    // Same reasoning as `moved`: capture the standing row's
+                    // own world before it's gone, so a degraded match's
+                    // fact still names the claim that actually held.
+                    let standing_world = tx
+                        .query_row(
+                            "SELECT world FROM conv_attachments
+                             WHERE conv = ?1 AND instance_id = ?2
+                               AND (?3 = '' OR world = '' OR world = ?3)",
+                            rusqlite::params![conv.0, d.instance_id.0, incoming_world.0],
+                            |r| r.get::<_, String>(0),
+                        )
+                        .optional()?;
+                    match standing_world {
+                        Some(world) => {
+                            tx.execute("DELETE FROM conv_attachments WHERE conv = ?1", [&conv.0])?;
+                            Some(AgentFact::Detached {
+                                world: WorldId(world),
+                                instance: d.instance_id.clone(),
+                                ts: ts_ms,
+                                conv: conv.clone(),
+                            })
+                        }
+                        None => None,
+                    }
+                }
+            }
+        };
+        tx.execute(
+            "INSERT INTO cursor (stream_name, seq) VALUES (?1, ?2)
+             ON CONFLICT (stream_name) DO UPDATE SET seq = excluded.seq",
+            rusqlite::params![stream_name, seq as i64],
+        )?;
+        tx.commit()?;
+
+        if let Some(fact) = fact {
+            let _ = self.events.send(ViewEvent::Agent(fact));
+        }
+        Ok(())
+    }
+
     fn apply_conv(&mut self, stream_name: &str, seq: u64, event: &Event) -> anyhow::Result<()> {
         let conv = &event.conv;
+
+        if let EventKind::Attachment(a) = &event.kind {
+            return self.apply_conv_attachment(stream_name, seq, conv, a);
+        }
 
         // Deltas are ephemeral: never stored, no row touch (the wire's own
         // rule — the committed message is the record), just fanned out.
@@ -277,7 +518,9 @@ impl Views {
             EventKind::Telemetry(t) => (t.type_name().to_string(), parse_ts(t.ts())),
             EventKind::Change(c) => (c.type_name().to_string(), parse_ts(c.ts())),
             EventKind::Unknown { label, ts } => (label.clone(), ts.as_deref().and_then(parse_ts)),
-            EventKind::Delta(_) | EventKind::Block(_) => unreachable!("handled above"),
+            EventKind::Attachment(_) | EventKind::Delta(_) | EventKind::Block(_) => {
+                unreachable!("handled above")
+            }
         };
 
         let mut stored_message: Option<ConversationMessage> = None;
@@ -490,6 +733,25 @@ impl Views {
         }
         Ok(())
     }
+}
+
+/// Whether this (world, instance) pair is currently flagged non-compliant
+/// (fold.rs's Compliance doc comment on `apply_conv_attachment`). Degraded
+/// the same way the standing-instance gate is: a bare instanceId match when
+/// either side omits `world` (empty string, this table's stand-in for
+/// absent) — an exact-only match would miss a flagged instance the moment
+/// it published one fact with `world` and the next without it.
+fn is_noncompliant(
+    tx: &rusqlite::Transaction<'_>,
+    world: &WorldId,
+    instance: &InstanceId,
+) -> rusqlite::Result<bool> {
+    tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM noncompliant_instances
+          WHERE instance_id = ?2 AND (?1 = '' OR world = '' OR world = ?1))",
+        rusqlite::params![world.0, instance.0],
+        |r| r.get(0),
+    )
 }
 
 /// Externalise into the open transaction. Content-addressed: an existing id
