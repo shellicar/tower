@@ -992,6 +992,25 @@ fn conv_attachment_moved_fact_keeps_the_standing_attached_ts() {
 }
 
 #[test]
+fn conv_leaf_attached_supersedes_a_standing_agent_v1_claim() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("agent.v1.mac.telemetry.attached",
+        r#"{"ts":"2026-07-27T21:00:00+10:00","instanceId":"inst-old","conversationId":"conv-abc","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-27T21:05:00+10:00","instanceId":"inst-new","world":"vm","cwd":"~/repos/tower"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(
+        attachments.len(),
+        1,
+        "a conv-leaf attached must supersede the agent.v1 claim, not sit beside it: {attachments:?}"
+    );
+    assert_eq!(attachments[0].instance.0, "inst-new");
+}
+
+#[test]
 fn conv_attachment_table_is_derived_and_rematerialises() {
     let (mut views, _rx) = fresh();
     views.apply(

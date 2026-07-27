@@ -29,9 +29,10 @@ use crate::views::ViewQuery;
 /// COST, and diagnostic's 90-day cap silently deletes that forever —
 /// correction, 19 Jul 2026, after exactly that happened once (see
 /// migrate-usage-retention.sh). Retention need, not plane, decided this.
-pub const AUDIT_SUBJECTS: [&str; 4] = [
+pub const AUDIT_SUBJECTS: [&str; 5] = [
     "conv.v1.*.changes",
     "conv.v2.*.changes.>",
+    "conv.v2.*.attachment.>",
     "approval.v1.*.lifecycle",
     "conv.v2.*.telemetry.usage",
 ];
@@ -207,4 +208,47 @@ async fn consume(
         // skipped — the cursor still advances when the next frame lands.
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const STREAM_INIT: &str = include_str!("../../../stream-init.sh");
+
+    /// Pulls one shell assignment's space-separated value out of
+    /// stream-init.sh, e.g. `AUDIT_SUBJECTS='a b c'` -> `["a", "b", "c"]`.
+    /// Panics naming the missing variable if the script's shape ever changes
+    /// under this test — a silent empty list would defeat the point.
+    fn shell_list(var: &str) -> Vec<&str> {
+        let needle = format!("{var}='");
+        let start = STREAM_INIT
+            .find(&needle)
+            .unwrap_or_else(|| panic!("stream-init.sh has no {var} assignment"))
+            + needle.len();
+        let end = STREAM_INIT[start..].find('\'').unwrap() + start;
+        STREAM_INIT[start..end].split_whitespace().collect()
+    }
+
+    /// The header comment on every constant list below says stream-init.sh
+    /// and these lists must never diverge — this is that claim, enforced.
+    /// Each of stream-init.sh's three target lists must be exactly the
+    /// matching Rust constant, as sets (order differs harmlessly between a
+    /// shell string and a Rust array).
+    #[test]
+    fn every_stream_init_subject_is_captured_by_the_matching_consumer_filter() {
+        let cases: [(&str, &[&str]); 3] = [
+            ("AUDIT_SUBJECTS", &AUDIT_SUBJECTS),
+            ("DIAGNOSTIC_SUBJECTS", &DIAGNOSTIC_SUBJECTS),
+            ("EPHEMERAL_SUBJECTS", &EPHEMERAL_SUBJECTS),
+        ];
+        for (var, rust_list) in cases {
+            let shell: std::collections::BTreeSet<&str> = shell_list(var).into_iter().collect();
+            let rust: std::collections::BTreeSet<&str> = rust_list.iter().copied().collect();
+            assert_eq!(
+                shell, rust,
+                "{var}: stream-init.sh and ingest.rs have diverged"
+            );
+        }
+    }
 }

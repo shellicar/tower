@@ -274,6 +274,15 @@ impl Views {
                         ts_ms,
                     ],
                 )?;
+                // Supersession crosses planes too: a conv-leaf `attached` is
+                // the standing claim now, full stop — any agent.v1 claim
+                // still held for this conv (a not-yet-migrated bridge, or
+                // one mid-migration) is exactly the "whatever attachment
+                // stood before it" agent-spec.md's Attachment says a new
+                // `attached` supersedes unconditionally. Without this,
+                // `agents()` would return two attachments for one
+                // conversation during mixed operation.
+                tx.execute("DELETE FROM agent_attachments WHERE conv = ?1", [&conv.0])?;
                 // Attaching is itself evidence of life (agent-spec.md,
                 // Liveness is a fold): fold it into the same pair-keyed
                 // pulse table `pulse` already updates. Only when `world` is
