@@ -3,21 +3,26 @@ name: CI
 # One workflow, gated by event — same shape as docker/compose's ci.yml.
 # Five independently releasable apps, each its own tag/release name:
 # towerd, bridge, helm, tower-svelte, tower-leptos (egui/frontend-rs is a
-# comparison build only, never shipped). A release is created with the tag
-# `<app>@<version>` (e.g. `towerd@1.2.3`, `helm@1.2.3-alpha.1`) — creating it
-# fires this workflow (`release: created`), which builds and publishes only
-# that one app, not the other four.
+# comparison build only, never shipped). Pushing the tag `<app>@<version>`
+# (e.g. `towerd@1.2.3`, `helm@1.2.3-alpha.1`) fires this workflow directly —
+# the tag push trigger is scoped to exactly these five patterns, so a tag
+# outside this set (a `tower@x` suite tag, say) never invokes this workflow
+# at all, not even to skip a job.
 #
 # - pull_request / push to main: build every app (nothing published) so a
 #   broken build is caught before it reaches main.
-# - a release is created: build and publish only the one app its tag names.
+# - one of the five tags is pushed: build and publish only the one app it names.
 on:
   push:
     branches: [main]
+    tags:
+      - 'towerd@*'
+      - 'bridge@*'
+      - 'helm@*'
+      - 'tower-svelte@*'
+      - 'tower-leptos@*'
   pull_request:
     branches: [main]
-  release:
-    types: [created]
 
 jobs:
   # Whole-workspace correctness: test, lint, and format-check every crate
@@ -79,8 +84,9 @@ jobs:
           node scripts/generate-all-changelogs.mts
           git diff --exit-code -- '*/CHANGELOG.md'
 
-  # Splits the release's tag (`<app>@<version>`) into its two halves. Empty
-  # on pull_request/push — nothing here reads its outputs on those triggers.
+  # Splits the pushed tag (`<app>@<version>`) into its two halves. Empty on
+  # pull_request/branch push — nothing here reads its outputs on those
+  # triggers.
   detect:
     runs-on: ubuntu-24.04
     outputs:
@@ -90,8 +96,8 @@ jobs:
       - id: tag
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
             echo "app=${TAG%%@*}" >> "$GITHUB_OUTPUT"
             echo "version=${TAG#*@}" >> "$GITHUB_OUTPUT"
           fi
@@ -99,7 +105,7 @@ jobs:
   # --- towerd / bridge / helm: same build shape, three cargo binaries ------
   binary-towerd:
     needs: detect
-    if: github.event_name != 'release' || needs.detect.outputs.app == 'towerd'
+    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'towerd'
     strategy:
       fail-fast: false
       matrix:
@@ -133,7 +139,7 @@ jobs:
 
   binary-bridge:
     needs: detect
-    if: github.event_name != 'release' || needs.detect.outputs.app == 'bridge'
+    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'bridge'
     strategy:
       fail-fast: false
       matrix:
@@ -167,7 +173,7 @@ jobs:
 
   binary-helm:
     needs: detect
-    if: github.event_name != 'release' || needs.detect.outputs.app == 'helm'
+    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'helm'
     strategy:
       fail-fast: false
       matrix:
@@ -202,7 +208,7 @@ jobs:
   # --- the two web frontends: platform-independent, one build each --------
   frontend-svelte:
     needs: detect
-    if: github.event_name != 'release' || needs.detect.outputs.app == 'tower-svelte'
+    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'tower-svelte'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -224,7 +230,7 @@ jobs:
 
   frontend-leptos:
     needs: detect
-    if: github.event_name != 'release' || needs.detect.outputs.app == 'tower-leptos'
+    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'tower-leptos'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -244,7 +250,7 @@ jobs:
   # --- publish: one job, attaches whichever app's artifacts matched --------
   publish:
     needs: [detect, binary-towerd, binary-bridge, binary-helm, frontend-svelte, frontend-leptos]
-    if: always() && github.event_name == 'release'
+    if: always() && github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
