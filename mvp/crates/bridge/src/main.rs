@@ -1091,6 +1091,120 @@ mod tests {
         handle.await.unwrap();
     }
 
+    /// A displacement landing between our `attached` publish and the
+    /// watcher's subscribe is never seen: the watch must be live before the
+    /// claim is announced, or the window is a silent double-serve.
+    #[tokio::test]
+    async fn attachment_watch_subscribes_before_attached_is_published() {
+        let broker = FakeBroker::default();
+        let scratch = TestScratch::new("watch-ordering");
+        let served_conv = serve_conversation(
+            &broker,
+            NoopDeltaSink,
+            "local",
+            "instance-1",
+            &served(),
+            config("conv-a", &scratch),
+            decisions::Conversation::default(),
+        )
+        .await;
+        let Some((_conv, handle)) = served_conv else {
+            panic!("expected a served conversation");
+        };
+
+        // The watcher runs as its own task; give its subscribe time to land
+        // before reading the order.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let calls = loop {
+            let calls = broker.calls.lock().unwrap().clone();
+            if calls
+                .iter()
+                .any(|c| c == "subscribe:conv.v2.conv-a.attachment.>")
+            {
+                break calls;
+            }
+            if std::time::Instant::now() > deadline {
+                panic!("attachment watch never subscribed: {calls:?}");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        };
+        let watch_at = calls
+            .iter()
+            .position(|c| c == "subscribe:conv.v2.conv-a.attachment.>")
+            .unwrap();
+        let attached_at = calls
+            .iter()
+            .position(|c| c == "publish:conv.v2.conv-a.attachment.attached")
+            .unwrap();
+        assert!(
+            watch_at < attached_at,
+            "watch must be live before the claim is announced: {calls:?}"
+        );
+        handle.await.unwrap();
+    }
+
+    /// Standing down on displacement is more than aborting the servicer:
+    /// the conversation must leave `served`, or a later chdir "succeeds"
+    /// against a claim we no longer hold and a re-adopt collides with the
+    /// stale entry.
+    #[tokio::test]
+    async fn displacement_releases_the_served_entry() {
+        let broker = FakeBroker::default();
+        broker.subscribe_data.lock().unwrap().insert(
+            "conv.v2.conv-a.attachment.>".to_string(),
+            VecDeque::from([BrokerMessage {
+                subject: "conv.v2.conv-a.attachment.attached".to_string(),
+                payload: serde_json::json!({
+                    "ts": "2026-07-26T19:00:00+10:00",
+                    "instanceId": "inst-other",
+                    "world": "vm",
+                    "cwd": "~/repos/tower",
+                })
+                .to_string()
+                .into_bytes()
+                .into(),
+                reply: None,
+            }]),
+        );
+        let scratch = TestScratch::new("displacement-served");
+        let served_cwds = served();
+        let served_conv = serve_conversation(
+            &broker,
+            NoopDeltaSink,
+            "local",
+            "instance-1",
+            &served_cwds,
+            config("conv-a", &scratch),
+            decisions::Conversation::default(),
+        )
+        .await;
+        let Some((_conv, handle)) = served_conv else {
+            panic!("expected a served conversation");
+        };
+
+        // Standing down is observable as the detached publish; wait for it.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let calls = broker.calls.lock().unwrap().clone();
+            if calls
+                .iter()
+                .any(|c| c == "publish:conv.v2.conv-a.attachment.detached")
+            {
+                break;
+            }
+            if std::time::Instant::now() > deadline {
+                panic!("displaced instance never stood down: {calls:?}");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(
+            served_cwds.read().unwrap().is_empty(),
+            "a displaced conversation must leave `served`"
+        );
+        // The servicer was aborted by the watcher; either outcome ends it.
+        let _ = handle.await;
+    }
+
     /// Adopt must replay only the conversation record's own changes, never
     /// widen to `.requests.>` (a live request subject, not a capture-stream
     /// filter) or any other conversation's subjects.

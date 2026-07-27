@@ -17,6 +17,7 @@ type FetchData = Arc<Mutex<std::collections::HashMap<(String, String), Vec<u8>>>
 /// reading as the backlog simply ending.
 pub type FakeReplayFrame = Result<BrokerMessage, String>;
 type ReplayData = Arc<Mutex<std::collections::HashMap<String, VecDeque<FakeReplayFrame>>>>;
+type SubscribeData = Arc<Mutex<std::collections::HashMap<String, VecDeque<BrokerMessage>>>>;
 
 /// The only fake in a test is the Broker (CLAUDE.md's house rule). Records
 /// every subscribe/publish call, in order (`calls`) and every publish's
@@ -37,6 +38,11 @@ pub struct FakeBroker {
     pub subscribe_fails: Arc<AtomicBool>,
     pub replay_data: ReplayData,
     pub fetch_data: FetchData,
+    /// Messages a subscription yields, keyed by the exact subject subscribed
+    /// to. Unlike `replay_data`, an unseeded subject is an ordinary empty
+    /// subscription — live subjects with nothing to say are the norm, not a
+    /// scripting error.
+    pub subscribe_data: SubscribeData,
 }
 
 #[derive(Default)]
@@ -89,7 +95,13 @@ impl Broker for FakeBroker {
                 "scripted subscribe failure",
             ))))
         } else {
-            Ok(FakeSubscription::default())
+            let queued = self
+                .subscribe_data
+                .lock()
+                .unwrap()
+                .remove(&subject)
+                .unwrap_or_default();
+            Ok(FakeSubscription { queued })
         }
     }
 

@@ -906,6 +906,49 @@ fn conv_attachment_liveness_joins_the_pair_against_agent_v1_pulse() {
 }
 
 #[test]
+fn conv_attachment_gate_degrades_to_bare_instance_when_world_is_omitted() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    // A producer that omits `world` still names the standing claim by bare
+    // instanceId — the degraded pair the fold's contract promises when
+    // either side omits `world`.
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.moved",
+        r#"{"ts":"2026-07-25T14:01:00+10:00","instanceId":"inst-1","cwd":"~/repos/tower/mvp"}"#));
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments[0].cwd.as_deref(), Some("~/repos/tower/mvp"));
+
+    views.apply(
+        "conv-approval",
+        3,
+        &event(
+            "conv.v2.conv-abc.attachment.detached",
+            r#"{"ts":"2026-07-25T14:02:00+10:00","instanceId":"inst-1"}"#,
+        ),
+    );
+    let (_, attachments) = views.agents().unwrap();
+    assert!(attachments.is_empty());
+}
+
+#[test]
+fn conv_attachment_moved_fact_keeps_the_standing_attached_ts() {
+    let (mut views, mut rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-25T14:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
+    while rx.try_recv().is_ok() {}
+
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.moved",
+        r#"{"ts":"2026-07-25T14:06:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower/mvp"}"#));
+    let ViewEvent::Agent(AgentFact::Attached { ts, cwd, .. }) = rx.try_recv().unwrap() else {
+        panic!("expected the moved fact");
+    };
+    assert_eq!(cwd.as_deref(), Some("~/repos/tower/mvp"));
+    // A move never restarts the claim: live observers and a fresh snapshot
+    // must agree on when the attachment began.
+    assert_eq!(ts, parse_ts("2026-07-25T14:00:00+10:00").unwrap());
+}
+
+#[test]
 fn conv_attachment_table_is_derived_and_rematerialises() {
     let (mut views, _rx) = fresh();
     views.apply(
