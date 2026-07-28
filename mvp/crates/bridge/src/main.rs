@@ -965,10 +965,40 @@ async fn seed_world_liveness<B: Broker>(
         if age > window {
             continue;
         }
-        let at = std::time::Instant::now() - age;
+        // checked_sub: Instant is monotonic-since-boot on Linux/macOS, so
+        // on a host younger than the frame's age the subtraction would
+        // panic — and a frame older than uptime predates every process on
+        // this machine, so it can't change a verdict; skip it.
+        let Some(at) = std::time::Instant::now().checked_sub(age) else {
+            continue;
+        };
         fold_world_telemetry(&frame.subject, &frame.payload, at, liveness);
     }
     Ok(())
+}
+
+/// Fold every telemetry frame already queued on the subscription, without
+/// awaiting — called before each request is handled, so sustained request
+/// traffic can never starve the map while the biased select keeps the
+/// requests arm continuously ready. Returns true when the subscription has
+/// ended (the caller re-establishes after answering).
+fn drain_ready_telemetry<S: bridge::broker::BrokerSubscription>(
+    sub: &mut S,
+    liveness: &std::sync::Mutex<service::WorldLiveness>,
+) -> bool {
+    use futures::FutureExt;
+    loop {
+        match sub.next().now_or_never() {
+            None => return false,
+            Some(None) => return true,
+            Some(Some(msg)) => fold_world_telemetry(
+                &msg.subject,
+                &msg.payload,
+                std::time::Instant::now(),
+                liveness,
+            ),
+        }
+    }
 }
 
 /// The world's `service` request (agent-spec: Requests, "The premise for
@@ -1152,6 +1182,11 @@ async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D
     };
     let prefix = format!("agent.v1.{}.requests.", host.world);
     eprintln!("bridge: serving {subject}");
+    // Set when a pre-request drain sees the telemetry subscription end:
+    // requests already delivered are still answered, and the select's own
+    // telemetry arm returns the loop for re-establishment as soon as the
+    // requests arm goes pending.
+    let mut telemetry_dead = false;
     loop {
         tokio::select! {
             // Biased: drain pending requests before reading the telemetry
@@ -1166,6 +1201,13 @@ async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D
                     return;
                 }
                 Some(msg) => {
+                    // Fold whatever telemetry is already queued before
+                    // judging any premise: verdicts are read at handle
+                    // time, and the biased select alone would only poll
+                    // the telemetry arm when requests go quiet.
+                    if !telemetry_dead && drain_ready_telemetry(&mut telemetry, &host.liveness) {
+                        telemetry_dead = true;
+                    }
                     let Some(reply_to) = msg.reply.clone() else {
                         continue;
                     };
@@ -2299,6 +2341,72 @@ mod tests {
             .into(),
             reply: None,
         }
+    }
+
+    /// Telemetry already queued on the live subscription folds before each
+    /// request's premise is judged. Distinguishing setup: the seed leaves
+    /// the holder stranded (an old captured pulse, 30s cadence, 100s ago),
+    /// and only the fresh pulse sitting in the live queue makes it alive —
+    /// the biased select alone would judge the premise first and take over.
+    #[tokio::test]
+    async fn queued_telemetry_folds_before_a_requests_premise_is_judged() {
+        let broker = FakeBroker::default();
+        broker.replay_data.lock().unwrap().insert(
+            "agent.v1.mac.telemetry.>".to_string(),
+            VecDeque::from([Ok(pulse_frame("inst-mate", 30, 100))]),
+        );
+        seed_attachment(
+            &broker,
+            "conv-q",
+            vec![attached_frame("conv-q", "inst-mate", "mac")],
+        );
+        broker.subscribe_data.lock().unwrap().insert(
+            "agent.v1.mac.telemetry.>".to_string(),
+            VecDeque::from([BrokerMessage {
+                subject: "agent.v1.mac.telemetry.pulse".to_string(),
+                payload: serde_json::json!({
+                    "ts": epoch_ms_ago(0),
+                    "instanceId": "inst-mate",
+                    "intervalS": 30,
+                })
+                .to_string()
+                .into_bytes()
+                .into(),
+                reply: None,
+            }]),
+        );
+        broker.subscribe_data.lock().unwrap().insert(
+            "agent.v1.mac.requests.>".to_string(),
+            VecDeque::from([BrokerMessage {
+                subject: "agent.v1.mac.requests.service".to_string(),
+                payload: serde_json::json!({ "conversationId": "conv-q" })
+                    .to_string()
+                    .into_bytes()
+                    .into(),
+                reply: Some("_INBOX.q1".to_string()),
+            }]),
+        );
+        let scratch = TestScratch::new("service-queued-telemetry");
+        let host = Arc::new(host(&scratch, broker.clone()));
+
+        super::serve_agent_requests_once(&host).await;
+
+        let published = broker.published.lock().unwrap().clone();
+        let reply = published
+            .iter()
+            .find(|(s, _)| s == "_INBOX.q1")
+            .map(|(_, p)| serde_json::from_slice::<serde_json::Value>(p).unwrap())
+            .expect("the request was answered");
+        assert_eq!(
+            reply,
+            serde_json::json!({ "rejected": true, "reason": "already_attached" })
+        );
+        assert!(
+            !published
+                .iter()
+                .any(|(s, _)| s == "conv.v2.conv-q.attachment.attached"),
+            "a live pulse in the queue must never be outrun by a takeover: {published:?}"
+        );
     }
 
     /// The seed builds the view instead of guessing: a world-mate whose
