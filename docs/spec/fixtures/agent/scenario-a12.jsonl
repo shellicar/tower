@@ -1,0 +1,5 @@
+{"subject":"conv.v2.conv-abc.attachment.attached","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","world":"pc","cwd":"~/repos/tower","intervalS":30}}
+{"subject":"agent.v1.pc.telemetry.pulse","message":{"ts":"2026-07-07T21:00:30+10:00","instanceId":"inst-1a2f","intervalS":30}}
+{"subject":"agent.v1.mac.requests.service","message":{"ts":"2026-07-07T21:00:45+10:00","from":{"kind":"orchestrator"},"conversationId":"conv-abc","cwd":"~/repos/tower"},"reply":{"accepted":true}}
+{"subject":"conv.v2.conv-abc.attachment.attached","message":{"ts":"2026-07-07T21:00:46+10:00","instanceId":"inst-9c4d","world":"mac","cwd":"~/repos/tower","intervalS":30}}
+{"subject":"conv.v2.conv-abc.attachment.detached","message":{"ts":"2026-07-07T21:00:47+10:00","instanceId":"inst-1a2f","world":"pc"}}

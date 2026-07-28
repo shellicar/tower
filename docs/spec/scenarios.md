@@ -273,6 +273,11 @@ presence, not on literal timestamps — silence is represented the way approval
 | a9 — migration/takeover, on the new leaf | `fixtures/agent/scenario-a9.jsonl` |
 | a10 — abandon and re-adopt, on the new leaf | `fixtures/agent/scenario-a10.jsonl` |
 | a11 — chdir, on the new leaf | `fixtures/agent/scenario-a11.jsonl` |
+| a12 — service migrates cross-world | `fixtures/agent/scenario-a12.jsonl` |
+| a13 — service takes over a stranded holder | `fixtures/agent/scenario-a13.jsonl` |
+| a14 — service spawns fresh | `fixtures/agent/scenario-a14.jsonl` |
+| a15 — service adopts a record | `fixtures/agent/scenario-a15.jsonl` |
+| a16 — the rejection vocabulary | `fixtures/agent/scenario-a16.jsonl` |
 
 The concern spans two trees, though a single scenario need not. `ready` and
 `pulse` are the world's own telemetry; `service` and `drain` address the
@@ -280,9 +285,11 @@ world's request tree; the claim on a conversation is the conversation's
 (`conv.v2.{id}.attachment.>`, conversation.md, Attachment).
 
 a1 to a3 carry world telemetry beside the claim, and a2 adds a `drain`
-request. a5's world lines are both `service` requests, which no stream
-captures, so replaying it yields the claim alone. a6 to a11 carry
-conversation lines only.
+request. a5's world lines are two `service` requests, which no stream
+captures, and the holder's `pulse`, so replaying it yields the claim and
+that pulse. a6 to a11 carry conversation lines only. a12 to a15 mix both
+trees, the claim beside the liveness the premise reads; a16 is requests
+alone, so it replays as nothing.
 
 ### a1 — world up, fresh conversation
 
@@ -316,14 +323,21 @@ The instance is serving and pulsing, then goes silent.
 
 ### a5 — resume, then already-attached
 
-The one `service` verb across two calls against the same conversation.
+The one `service` verb across two calls against the same conversation, on
+the merged premise (agent.md, "The premise for `service`"): the first call
+finds no standing attachment and is accepted; the claim lands on the
+conversation's own tree, and the holder pulses. The second call finds a
+standing attachment in this world whose holder is alive —
+`rejected: already_attached`, from any instance in the world.
 
 - Exercises: `service` accepted on the world (history exists, no live
   attachment → fold and re-attach), then `attached` on the conversation with
-  the `tip` it resumed at; a second `service` while attached →
+  the `tip` it resumed at, and a `pulse` making the holder's liveness
+  explicit; a second `service` while attached →
   `rejected: already_attached`.
-- Asserts: the verb dispatches on the record's state, not on the request; the
-  reply confirms the premise (servable / already served), never an outcome.
+- Asserts: the verb dispatches on the record's state joined with the world's
+  liveness fold, not on the request; the reply confirms the premise
+  (servable / already served), never an outcome.
 
 ### a6 — the record a non-conformant publisher leaves
 
@@ -405,3 +419,60 @@ act.
   cwd folds last-write-wins onto the standing claim; and the conversation's
   change stream emits nothing across the move — the proof cwd is never
   conversation state.
+### a12 — service migrates cross-world
+
+A standing attachment in another world (`pc`), its holder demonstrably
+alive, and a `service` addressed to `mac`: accepted and taken over
+unconditionally — asking a different world to serve IS migration, and the
+incumbent's liveness is irrelevant. The superseded instance stands down
+with its own `detached`, which folds as nothing.
+
+- Exercises: `attached` (pc), a live pulse, `service` to mac accepted,
+  `attached` (mac), the stale `detached` (pc).
+- Asserts: the cross-world premise arm, and supersession carrying no
+  precondition.
+
+### a13 — service takes over a stranded holder
+
+A standing attachment in this world whose holder's pulse went silent past
+its own declared threshold: `service` accepted, taken over. A dead holder
+never blocks pickup — the attachment is never a lease.
+
+- Exercises: `attached` + one `pulse`, then silence (nothing follows, the
+  way a3 represents it); a later `service` accepted; the new `attached`.
+- Asserts: the stranded premise arm — the liveness fold, not any declared
+  state, is what lets the takeover through.
+
+### a14 — service spawns fresh
+
+No standing attachment and no history: `service` spawns fresh under the
+requested conversation id. The `attached` carries `tip: null` — an empty
+conversation, existing for observers before its first message.
+
+- Exercises: `service` accepted with nothing prior; `attached` with a null
+  tip.
+- Asserts: the no-attachment, no-history premise arm.
+
+### a15 — service adopts a record
+
+No standing attachment but a committed record: `service` adopts — the
+record outlives the servicer, and the new claim's `tip` names the record's
+last message, proof the record was replayed rather than spawned over.
+
+- Exercises: a committed `message`, then `service` accepted, then `attached`
+  with `tip` naming it.
+- Asserts: the no-attachment, with-history premise arm.
+
+### a16 — the rejection vocabulary
+
+The reply discipline's reject arms, verbatim: a recognised request whose
+body doesn't carry what it needs (`invalid` — here an empty
+`conversationId`), a named environment value the world cannot establish
+(`invalid_cwd` — presence binds, never a silent fallback), an operation the
+world could not undertake (`failed`, the cause riding `detail` — the
+machine-facing token stays coarse), and a leaf this servicer doesn't
+implement (`unsupported` — compliance is answering, not implementing).
+
+- Exercises: four requests, four rejections; no event traffic at all.
+- Asserts: `reason` is the token a caller branches on; `detail` is optional
+  human-facing diagnostics, present on `invalid_cwd` and `failed`.

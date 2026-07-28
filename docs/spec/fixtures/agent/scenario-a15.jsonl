@@ -1,0 +1,3 @@
+{"subject":"conv.v2.conv-abc.changes.message","message":{"ts":"2026-07-07T20:00:00+10:00","id":"m1","queryId":"q1","turnId":"t1","role":"user","content":[{"type":"text","text":"please fix the build"}]}}
+{"subject":"agent.v1.mac.requests.service","message":{"ts":"2026-07-07T21:00:00+10:00","from":{"kind":"orchestrator"},"conversationId":"conv-abc","cwd":"~/repos/tower"},"reply":{"accepted":true}}
+{"subject":"conv.v2.conv-abc.attachment.attached","message":{"ts":"2026-07-07T21:00:01+10:00","instanceId":"inst-1a2f","world":"mac","cwd":"~/repos/tower","tip":"m1","intervalS":30}}

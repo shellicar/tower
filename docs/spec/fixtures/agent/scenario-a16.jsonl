@@ -1,0 +1,4 @@
+{"subject":"agent.v1.mac.requests.service","message":{"ts":"2026-07-07T21:00:00+10:00","from":{"kind":"orchestrator"},"conversationId":""},"reply":{"rejected":true,"reason":"invalid"}}
+{"subject":"agent.v1.mac.requests.service","message":{"ts":"2026-07-07T21:00:01+10:00","from":{"kind":"orchestrator"},"conversationId":"conv-abc","cwd":"/no/such/dir"},"reply":{"rejected":true,"reason":"invalid_cwd","detail":"cwd /no/such/dir does not exist or is unreadable"}}
+{"subject":"agent.v1.mac.requests.service","message":{"ts":"2026-07-07T21:00:02+10:00","from":{"kind":"orchestrator"},"conversationId":"conv-abc"},"reply":{"rejected":true,"reason":"failed","detail":"attachment replay failed: capture stream \"conv-approval\" unavailable"}}
+{"subject":"agent.v1.mac.requests.chdir","message":{"ts":"2026-07-07T21:00:03+10:00","from":{"kind":"orchestrator"},"conversationId":"conv-abc","cwd":"~/repos/tower"},"reply":{"rejected":true,"reason":"unsupported"}}
