@@ -4,10 +4,12 @@
 //! `conv`: v2-style leaf subjects, so no `type` field in the body; `ingest`
 //! selects the struct from the subject leaf and deserialises it.
 //!
-//! Only the telemetry (event) side lives here: `ready`, `pulse`, `attached`,
-//! `detached` are what a reader ingests. The requests (`service`, `drain`,
-//! `chdir`) are the sender's direction and never reach ingest (streams capture
-//! event subjects only) — their encoders land when a sender needs them.
+//! Telemetry (`ready`, `pulse`, `attached`, `detached`) is what a reader
+//! ingests; requests never reach ingest (streams capture event subjects
+//! only). The request side here is the SERVICER'S parse: `parse_agent_request`
+//! turns a `agent.v1.{world}.requests.{leaf}` body into what bridge's request
+//! loop dispatches on — the encoders for a sender land when a sender needs
+//! them.
 //!
 //! The liveness fold itself (alive / released / stranded) is *not* here: it is
 //! time-dependent (stranded = pulse silent past ~3× its interval), so it needs
@@ -95,6 +97,66 @@ impl AgentTelemetry {
     }
 }
 
+/// One inbound `agent.v1.{world}.requests.{leaf}` request, keyed by the
+/// subject leaf (the subject spells the type; the body carries none). The
+/// spec's reply discipline maps each variant to its answer: `Service` is
+/// dispatched on the premise, `Invalid` is a recognised leaf whose body
+/// doesn't carry what it needs (`rejected: invalid`), `Other` is any leaf
+/// this servicer doesn't implement (`rejected: unsupported` — compliance is
+/// answering, not implementing).
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentRequest {
+    Service {
+        conversation_id: ConversationId,
+        cwd: Option<String>,
+        model: Option<String>,
+    },
+    Invalid {
+        leaf: String,
+    },
+    Other {
+        leaf: String,
+    },
+}
+
+pub fn parse_agent_request(leaf: &str, payload: &[u8]) -> AgentRequest {
+    if leaf != "service" {
+        return AgentRequest::Other {
+            leaf: leaf.to_string(),
+        };
+    }
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(payload) else {
+        return AgentRequest::Invalid {
+            leaf: leaf.to_string(),
+        };
+    };
+    // A missing or empty conversationId is `invalid`, not `unsupported`: the
+    // request is recognised, its body just doesn't carry what it needs
+    // (agent-spec, Requests).
+    let conversation_id = match value
+        .get("conversationId")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(id) if !id.is_empty() => ConversationId(id.to_string()),
+        _ => {
+            return AgentRequest::Invalid {
+                leaf: leaf.to_string(),
+            };
+        }
+    };
+    let field = |name: &str| {
+        value
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    };
+    AgentRequest::Service {
+        conversation_id,
+        cwd: field("cwd"),
+        model: field("model"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,6 +182,55 @@ mod tests {
         });
         let a: Attached = serde_json::from_value(v).unwrap();
         assert_eq!(a.interval_s, Some(15));
+    }
+
+    #[test]
+    fn a_service_request_parses_its_named_fields() {
+        let payload = serde_json::to_vec(&json!({
+            "ts": "2026-07-07T21:00:00+10:00", "from": {"kind": "orchestrator"},
+            "conversationId": "conv-abc", "cwd": "~/repos/tower"
+        }))
+        .unwrap();
+        let expected = AgentRequest::Service {
+            conversation_id: ConversationId("conv-abc".into()),
+            cwd: Some("~/repos/tower".into()),
+            model: None,
+        };
+        assert_eq!(parse_agent_request("service", &payload), expected);
+    }
+
+    #[test]
+    fn a_service_request_missing_conversation_id_is_invalid() {
+        let payload = serde_json::to_vec(&json!({ "ts": "2026-07-07T21:00:00+10:00" })).unwrap();
+        let expected = AgentRequest::Invalid {
+            leaf: "service".into(),
+        };
+        assert_eq!(parse_agent_request("service", &payload), expected);
+    }
+
+    #[test]
+    fn a_service_request_with_an_empty_conversation_id_is_invalid() {
+        let payload = serde_json::to_vec(&json!({ "conversationId": "" })).unwrap();
+        let expected = AgentRequest::Invalid {
+            leaf: "service".into(),
+        };
+        assert_eq!(parse_agent_request("service", &payload), expected);
+    }
+
+    #[test]
+    fn an_unimplemented_leaf_parses_as_other() {
+        let expected = AgentRequest::Other {
+            leaf: "drain".into(),
+        };
+        assert_eq!(parse_agent_request("drain", b"{}"), expected);
+    }
+
+    #[test]
+    fn an_unparseable_service_body_is_invalid() {
+        let expected = AgentRequest::Invalid {
+            leaf: "service".into(),
+        };
+        assert_eq!(parse_agent_request("service", b"not json"), expected);
     }
 
     #[test]
