@@ -46,16 +46,26 @@ pub struct FakeBroker {
     /// subscription — live subjects with nothing to say are the norm, not a
     /// scripting error.
     pub subscribe_data: SubscribeData,
+    /// Subjects whose subscription stays open (pending forever) once its
+    /// scripted messages are drained, instead of ending. A real subscription
+    /// with nothing to say is quiet, not dead — a test that must tell the
+    /// two apart marks the subject here.
+    pub open_subjects: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 #[derive(Default)]
 pub struct FakeSubscription {
     pub queued: VecDeque<BrokerMessage>,
+    pub stay_open: bool,
 }
 
 impl BrokerSubscription for FakeSubscription {
     async fn next(&mut self) -> Option<BrokerMessage> {
-        self.queued.pop_front()
+        match self.queued.pop_front() {
+            Some(msg) => Some(msg),
+            None if self.stay_open => std::future::pending().await,
+            None => None,
+        }
     }
 }
 
@@ -104,13 +114,14 @@ impl Broker for FakeBroker {
                 "scripted subscribe failure",
             ))))
         } else {
+            let stay_open = self.open_subjects.lock().unwrap().contains(&subject);
             let queued = self
                 .subscribe_data
                 .lock()
                 .unwrap()
                 .remove(&subject)
                 .unwrap_or_default();
-            Ok(FakeSubscription { queued })
+            Ok(FakeSubscription { queued, stay_open })
         }
     }
 
@@ -140,13 +151,14 @@ impl Broker for FakeBroker {
                 "scripted subscribe failure",
             ))))
         } else {
+            let stay_open = self.open_subjects.lock().unwrap().contains(&subject);
             let queued = self
                 .subscribe_data
                 .lock()
                 .unwrap()
                 .remove(&subject)
                 .unwrap_or_default();
-            Ok(FakeSubscription { queued })
+            Ok(FakeSubscription { queued, stay_open })
         }
     }
 

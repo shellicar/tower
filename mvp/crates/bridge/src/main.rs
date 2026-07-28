@@ -1121,7 +1121,11 @@ async fn handle_service<B: Broker, D: DeltaSink>(
 async fn serve_agent_requests<B: Broker, D: DeltaSink>(host: Arc<Host<B, D>>) {
     let mut delay = 1u64;
     loop {
-        serve_agent_requests_once(&host).await;
+        if serve_agent_requests_once(&host).await {
+            // It served: whatever ended it is fresh trouble, not a
+            // continuation of earlier failures — start the backoff over.
+            delay = 1;
+        }
         eprintln!("bridge: agent request serving interrupted; re-establishing in {delay}s");
         tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
         delay = (delay * 2).min(30);
@@ -1129,12 +1133,12 @@ async fn serve_agent_requests<B: Broker, D: DeltaSink>(host: Arc<Host<B, D>>) {
 }
 
 /// One establishment of the world's request serving: telemetry watch, seed,
-/// requests queue group, then one merged loop over both. Returns when
-/// either subscription ends or cannot be made — the caller re-establishes,
-/// so "the two stand or fall together" holds for the whole life, not just
-/// at startup: a dead telemetry feed never leaves a surviving request loop
-/// answering off a frozen map.
-async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D>>) {
+/// requests queue group, then one merged loop over both. All three stand or
+/// fall together — any of them failing or ending returns for the caller to
+/// re-establish, so a dead telemetry feed or an unseedable map never leaves
+/// a surviving request loop answering off weak verdicts. Returns whether
+/// serving was actually established (the caller resets its backoff on true).
+async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D>>) -> bool {
     // The liveness watch first, and fatally: the premise's alive-vs-
     // stranded read is only honest off a live map, so an instance that
     // cannot watch its world-mates must not answer requests at all.
@@ -1146,13 +1150,16 @@ async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D
                 "bridge: world telemetry subscribe failed ({telemetry_subject}): {:#} — not serving agent requests",
                 anyhow::Error::new(e)
             );
-            return;
+            return false;
         }
     };
     // Subscribe first, then seed — no pulse lands in the gap between the
-    // two reads. The fresh map's warmup clock covers the deployment whose
-    // capture doesn't include telemetry (seed unavailable): until a full
-    // default threshold has elapsed, never-heard reads alive.
+    // two reads. A seed failure is a broken deployment (the capture is
+    // load-bearing for adopt and the premise read alike), not a mode to
+    // serve through: same rule as the telemetry watch, refuse and let the
+    // caller re-establish. The warmup hold covers only what a SUCCESSFUL
+    // seed of zero frames leaves genuinely unknown — a brand-new world's
+    // first minutes.
     *host.liveness.lock().unwrap() = service::WorldLiveness::new(std::time::Instant::now());
     if let Err(e) = seed_world_liveness(
         &host.broker,
@@ -1162,7 +1169,8 @@ async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D
     )
     .await
     {
-        eprintln!("bridge: liveness seed unavailable, holding verdicts through warmup: {e:#}");
+        eprintln!("bridge: liveness seed failed — not serving agent requests: {e:#}");
+        return false;
     }
 
     let subject = format!("agent.v1.{}.requests.>", host.world);
@@ -1177,16 +1185,11 @@ async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D
                 "bridge: agent requests subscribe failed ({subject}): {:#}",
                 anyhow::Error::new(e)
             );
-            return;
+            return false;
         }
     };
     let prefix = format!("agent.v1.{}.requests.", host.world);
     eprintln!("bridge: serving {subject}");
-    // Set when a pre-request drain sees the telemetry subscription end:
-    // requests already delivered are still answered, and the select's own
-    // telemetry arm returns the loop for re-establishment as soon as the
-    // requests arm goes pending.
-    let mut telemetry_dead = false;
     loop {
         tokio::select! {
             // Biased: drain pending requests before reading the telemetry
@@ -1198,17 +1201,19 @@ async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D
             req = requests.next() => match req {
                 None => {
                     eprintln!("bridge: agent requests subscription ended");
-                    return;
+                    return true;
                 }
                 Some(msg) => {
                     // Fold whatever telemetry is already queued before
                     // judging any premise: verdicts are read at handle
                     // time, and the biased select alone would only poll
                     // the telemetry arm when requests go quiet.
-                    if !telemetry_dead && drain_ready_telemetry(&mut telemetry, &host.liveness) {
-                        telemetry_dead = true;
-                    }
+                    let telemetry_ended = drain_ready_telemetry(&mut telemetry, &host.liveness);
                     let Some(reply_to) = msg.reply.clone() else {
+                        if telemetry_ended {
+                            eprintln!("bridge: world telemetry subscription ended");
+                            return true;
+                        }
                         continue;
                     };
                     let leaf = msg.subject.strip_prefix(prefix.as_str()).unwrap_or("");
@@ -1238,12 +1243,22 @@ async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D
                             anyhow::Error::new(e)
                         );
                     }
+                    // A dead feed returns NOW, after the request in hand,
+                    // never deferred to the telemetry arm — under gapless
+                    // request traffic that arm is never polled, and the
+                    // frozen map would age every live holder into a
+                    // takeover. A request already delivered on the dropped
+                    // loop is the sender's retry, not our debt.
+                    if telemetry_ended {
+                        eprintln!("bridge: world telemetry subscription ended");
+                        return true;
+                    }
                 }
             },
             tele = telemetry.next() => match tele {
                 None => {
                     eprintln!("bridge: world telemetry subscription ended");
-                    return;
+                    return true;
                 }
                 Some(msg) => fold_world_telemetry(
                     &msg.subject,
@@ -2250,6 +2265,16 @@ mod tests {
     #[tokio::test]
     async fn the_request_loop_answers_every_leaf_on_the_senders_reply_subject() {
         let broker = FakeBroker::default();
+        broker
+            .replay_data
+            .lock()
+            .unwrap()
+            .insert("agent.v1.mac.telemetry.>".to_string(), VecDeque::new());
+        broker
+            .open_subjects
+            .lock()
+            .unwrap()
+            .insert("agent.v1.mac.telemetry.>".to_string());
         broker.subscribe_data.lock().unwrap().insert(
             "agent.v1.mac.requests.>".to_string(),
             VecDeque::from([
@@ -2292,6 +2317,80 @@ mod tests {
         assert_eq!(
             reply_to("_INBOX.r2"),
             serde_json::json!({ "rejected": true, "reason": "invalid" })
+        );
+    }
+
+    /// An unseedable map is a broken deployment, not a mode to serve
+    /// through: the capture is load-bearing for the premise read too, so
+    /// the loop refuses and the outer retry re-establishes.
+    #[tokio::test]
+    async fn the_request_loop_refuses_to_serve_when_the_seed_fails() {
+        let broker = FakeBroker::default();
+        // No scripted capture for the telemetry filter: replay_since fails.
+        broker
+            .open_subjects
+            .lock()
+            .unwrap()
+            .insert("agent.v1.mac.telemetry.>".to_string());
+        let scratch = TestScratch::new("service-no-seed");
+        let host = Arc::new(host(&scratch, broker.clone()));
+
+        let established = super::serve_agent_requests_once(&host).await;
+
+        assert!(!established);
+        let calls = broker.calls.lock().unwrap().clone();
+        assert!(
+            !calls
+                .iter()
+                .any(|c| c.starts_with("queue_subscribe:agent.v1.mac.requests.>")),
+            "an unseedable instance must not answer requests: {calls:?}"
+        );
+    }
+
+    /// A telemetry feed found dead during a request burst ends serving
+    /// right after the request in hand — never deferred until traffic
+    /// pauses, where a frozen map would age live holders into takeovers.
+    /// Later requests already delivered on the dropped loop go unanswered
+    /// (the sender's retry rides the re-established loop).
+    #[tokio::test]
+    async fn a_dead_feed_ends_serving_after_the_request_in_hand() {
+        let broker = FakeBroker::default();
+        broker
+            .replay_data
+            .lock()
+            .unwrap()
+            .insert("agent.v1.mac.telemetry.>".to_string(), VecDeque::new());
+        // The telemetry subject is NOT marked open: the live subscription
+        // ends as soon as the first drain looks at it.
+        broker.subscribe_data.lock().unwrap().insert(
+            "agent.v1.mac.requests.>".to_string(),
+            VecDeque::from([
+                BrokerMessage {
+                    subject: "agent.v1.mac.requests.drain".to_string(),
+                    payload: b"{}".to_vec().into(),
+                    reply: Some("_INBOX.d1".to_string()),
+                },
+                BrokerMessage {
+                    subject: "agent.v1.mac.requests.drain".to_string(),
+                    payload: b"{}".to_vec().into(),
+                    reply: Some("_INBOX.d2".to_string()),
+                },
+            ]),
+        );
+        let scratch = TestScratch::new("service-dead-feed");
+        let host = Arc::new(host(&scratch, broker.clone()));
+
+        let established = super::serve_agent_requests_once(&host).await;
+
+        assert!(established);
+        let published = broker.published.lock().unwrap().clone();
+        assert!(
+            published.iter().any(|(s, _)| s == "_INBOX.d1"),
+            "the request in hand still gets its reply: {published:?}"
+        );
+        assert!(
+            !published.iter().any(|(s, _)| s == "_INBOX.d2"),
+            "serving must end for re-establishment, not continue on the frozen map: {published:?}"
         );
     }
 
@@ -2386,6 +2485,11 @@ mod tests {
                 reply: Some("_INBOX.q1".to_string()),
             }]),
         );
+        broker
+            .open_subjects
+            .lock()
+            .unwrap()
+            .insert("agent.v1.mac.telemetry.>".to_string());
         let scratch = TestScratch::new("service-queued-telemetry");
         let host = Arc::new(host(&scratch, broker.clone()));
 

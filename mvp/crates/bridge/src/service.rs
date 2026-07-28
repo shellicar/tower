@@ -450,32 +450,34 @@ mod tests {
 
     // --- liveness ---
 
-    /// A map that has already listened for a full default threshold: its
-    /// never-heard verdicts are measured silence, not a cold start.
-    fn warm(t0: Instant) -> WorldLiveness {
-        WorldLiveness::new(t0 - Duration::from_secs(DEFAULT_SILENCE_S + 1))
+    /// A map that has already listened for a full default threshold by the
+    /// returned base instant: its never-heard verdicts are measured
+    /// silence, not a cold start. Built by addition (base after creation),
+    /// never by backdating — Instant is monotonic-since-boot, and
+    /// subtracting from now underflows on a low-uptime host.
+    fn warm_map() -> (WorldLiveness, Instant) {
+        let created = Instant::now();
+        let base = created + Duration::from_secs(DEFAULT_SILENCE_S + 1);
+        (WorldLiveness::new(created), base)
     }
 
     #[test]
     fn an_instance_within_three_of_its_own_intervals_is_alive() {
-        let t0 = Instant::now();
-        let mut world = warm(t0);
+        let (mut world, t0) = warm_map();
         world.on_pulse("inst-1", 30, t0);
         assert!(world.is_alive("inst-1", t0 + Duration::from_secs(89)));
     }
 
     #[test]
     fn an_instance_silent_past_three_of_its_own_intervals_is_not_alive() {
-        let t0 = Instant::now();
-        let mut world = warm(t0);
+        let (mut world, t0) = warm_map();
         world.on_pulse("inst-1", 30, t0);
         assert!(!world.is_alive("inst-1", t0 + Duration::from_secs(91)));
     }
 
     #[test]
     fn no_declared_interval_gets_the_flat_default_threshold_not_a_multiple() {
-        let t0 = Instant::now();
-        let mut world = warm(t0);
+        let (mut world, t0) = warm_map();
         world.on_ready("inst-1", t0);
         assert!(world.is_alive("inst-1", t0 + Duration::from_secs(59)));
         assert!(!world.is_alive("inst-1", t0 + Duration::from_secs(61)));
@@ -483,8 +485,7 @@ mod tests {
 
     #[test]
     fn a_non_positive_declared_interval_folds_as_undeclared_not_a_zero_threshold() {
-        let t0 = Instant::now();
-        let mut world = warm(t0);
+        let (mut world, t0) = warm_map();
         world.on_pulse("inst-1", 0, t0);
         assert!(world.is_alive("inst-1", t0 + Duration::from_secs(59)));
         assert!(!world.is_alive("inst-1", t0 + Duration::from_secs(61)));
@@ -494,8 +495,7 @@ mod tests {
 
     #[test]
     fn attached_telemetry_proves_presence_and_may_declare_the_cadence() {
-        let t0 = Instant::now();
-        let mut world = warm(t0);
+        let (mut world, t0) = warm_map();
         world.on_attached("inst-1", Some(10), t0);
         assert!(world.is_alive("inst-1", t0 + Duration::from_secs(29)));
         assert!(!world.is_alive("inst-1", t0 + Duration::from_secs(31)));
@@ -509,8 +509,7 @@ mod tests {
     /// MAX_SILENCE_S.
     #[test]
     fn a_declared_interval_above_the_cap_is_honoured_only_to_the_cap() {
-        let t0 = Instant::now();
-        let mut world = warm(t0);
+        let (mut world, t0) = warm_map();
         world.on_pulse("inst-1", 86_400, t0);
         assert!(world.is_alive("inst-1", t0 + Duration::from_secs(MAX_SILENCE_S - 1)));
         assert!(!world.is_alive("inst-1", t0 + Duration::from_secs(MAX_SILENCE_S + 1)));
@@ -520,18 +519,17 @@ mod tests {
     /// never drag a fresher live one backwards.
     #[test]
     fn an_older_observation_never_regresses_last_seen() {
-        let t0 = Instant::now();
-        let mut world = warm(t0);
+        let (mut world, t0) = warm_map();
+        let fresh = t0 + Duration::from_secs(200);
+        world.on_pulse("inst-1", 30, fresh);
         world.on_pulse("inst-1", 30, t0);
-        world.on_pulse("inst-1", 30, t0 - Duration::from_secs(200));
-        assert!(world.is_alive("inst-1", t0 + Duration::from_secs(89)));
+        assert!(world.is_alive("inst-1", fresh + Duration::from_secs(89)));
     }
 
     #[test]
     fn never_heard_from_is_not_alive_once_the_map_is_warm() {
-        let now = Instant::now();
-        let world = warm(now);
-        assert!(!world.is_alive("inst-unknown", now));
+        let (world, base) = warm_map();
+        assert!(!world.is_alive("inst-unknown", base));
     }
 
     /// The cold-start hold: a map that hasn't listened for a full default
@@ -558,15 +556,14 @@ mod tests {
 
     #[test]
     fn no_standing_attachment_is_the_fresh_arm() {
-        let liveness = warm(Instant::now());
-        let actual = service_premise(None, "mac", "inst-me", &liveness, Instant::now());
+        let (liveness, now) = warm_map();
+        let actual = service_premise(None, "mac", "inst-me", &liveness, now);
         assert_eq!(actual, ServicePremise::NoAttachment);
     }
 
     #[test]
     fn a_standing_attachment_in_another_world_is_taken_over_regardless_of_liveness() {
-        let now = Instant::now();
-        let mut liveness = warm(now);
+        let (mut liveness, now) = warm_map();
         // Even a demonstrably live holder: cross-world IS migration.
         liveness.on_pulse("inst-far", 30, now);
         let standing = stands("inst-far", Some("pc"));
@@ -576,8 +573,7 @@ mod tests {
 
     #[test]
     fn a_live_holder_in_this_world_means_already_attached() {
-        let now = Instant::now();
-        let mut liveness = warm(now);
+        let (mut liveness, now) = warm_map();
         liveness.on_pulse("inst-mate", 30, now);
         let standing = stands("inst-mate", Some("mac"));
         let actual = service_premise(Some(&standing), "mac", "inst-me", &liveness, now);
@@ -595,8 +591,7 @@ mod tests {
 
     #[test]
     fn a_stranded_holder_in_this_world_is_taken_over() {
-        let t0 = Instant::now();
-        let mut liveness = warm(t0);
+        let (mut liveness, t0) = warm_map();
         liveness.on_pulse("inst-mate", 10, t0);
         let standing = stands("inst-mate", Some("mac"));
         let later = t0 + Duration::from_secs(31);
@@ -606,9 +601,9 @@ mod tests {
 
     #[test]
     fn a_worldless_standing_claim_lands_in_the_cross_world_arm() {
-        let liveness = warm(Instant::now());
+        let (liveness, now) = warm_map();
         let standing = stands("inst-old", None);
-        let actual = service_premise(Some(&standing), "mac", "inst-me", &liveness, Instant::now());
+        let actual = service_premise(Some(&standing), "mac", "inst-me", &liveness, now);
         assert_eq!(actual, ServicePremise::TakeOverCrossWorld);
     }
 }
