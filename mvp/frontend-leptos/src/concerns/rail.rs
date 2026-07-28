@@ -27,11 +27,6 @@ struct Attachment {
     world: String,
     instance_id: String,
     cwd: Option<String>,
-    /// The wire's own `attachedTs` — part of the interim tie-break
-    /// (`last_pulse`, then this, then the world/instance key) until
-    /// supersession (docs/spec/agent-spec.md) makes ties impossible by
-    /// keying attachments on conv alone.
-    attached_ts: Millis,
 }
 
 #[derive(Debug, Clone)]
@@ -109,7 +104,6 @@ impl Rail {
                                 world: a.world.clone(),
                                 instance_id: a.instance_id.clone(),
                                 cwd: a.cwd.clone(),
-                                attached_ts: a.attached_ts,
                             },
                         )
                     })
@@ -177,7 +171,6 @@ impl Rail {
                             world: fact.world.clone(),
                             instance_id: fact.instance_id.clone(),
                             cwd: fact.cwd.clone(),
-                            attached_ts: fact.ts,
                         },
                     );
                 }
@@ -222,41 +215,24 @@ impl Rail {
             .get(&format!("{}/{}", a.world, a.instance_id))
     }
 
-    /// The freshest LIVE attachment's cwd for a conversation — "where is
-    /// this conversation being served", for the open panel's status line.
-    /// Gated on liveness (folded against `now`, agent-spec: a fold, never
+    /// The conversation's live attachment's cwd — "where is this
+    /// conversation being served", for the open panel's status line. Gated
+    /// on liveness (folded against `now`, agent-spec: a fold, never
     /// declared): a stranded agent is not serving anything, so its cwd must
     /// not render as if it were. Not gated on rowlessness like
     /// `attached_only`: an ordinary conversation with a row can still have a
     /// live attachment. `None` when nothing is attached and alive, or the
     /// attachment carries no cwd.
     ///
-    /// Interim tie-break (no spec rule exists yet): `last_pulse`, then
-    /// `attached_ts`, then the world/instance key — total order, so identical
-    /// wire facts always resolve the same winner (unlike a bare
-    /// `HashMap`-iteration tie, proved nondeterministic). This selection
-    /// dissolves once supersession (docs/spec/agent-spec.md) makes a
-    /// conversation's attachment singular by construction.
+    /// No tie to break: attachments are keyed by conv alone (agent-spec.md,
+    /// supersession), so a conversation has at most one.
     pub fn live_cwd(&self, conv: &str, now: Millis) -> Option<&str> {
-        self.attachments
-            .values()
-            .filter(|a| a.conv == conv)
-            .filter_map(|a| {
-                let inst = self
-                    .instances
-                    .get(&format!("{}/{}", a.world, a.instance_id))?;
-                let alive =
-                    liveness_verdict(now, inst.last_pulse, inst.interval_s) == Liveness::Alive;
-                alive.then_some((a, inst.last_pulse))
-            })
-            .max_by_key(|(a, pulse)| {
-                (
-                    *pulse,
-                    a.attached_ts,
-                    format!("{}/{}", a.world, a.instance_id),
-                )
-            })
-            .and_then(|(a, _)| a.cwd.as_deref())
+        let a = self.attachments.get(conv)?;
+        let inst = self
+            .instances
+            .get(&format!("{}/{}", a.world, a.instance_id))?;
+        let alive = liveness_verdict(now, inst.last_pulse, inst.interval_s) == Liveness::Alive;
+        alive.then_some(a.cwd.as_deref()).flatten()
     }
 
     /// Potential conversations: attached, no row yet — served, silent. They
@@ -498,33 +474,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn live_cwd_reads_from_the_freshest_attachment() {
-        let mut rail = Rail::default();
-        rail.apply(&ServerMsg::Agent(WsAgent {
-            kind: "attached".into(),
-            world: "w1".into(),
-            instance_id: "i1".into(),
-            ts: 100_000,
-            conv: Some("a".into()),
-            cwd: Some("/old/path".into()),
-            interval_s: None,
-            host: None,
-        }));
-        rail.apply(&ServerMsg::Agent(WsAgent {
-            kind: "attached".into(),
-            world: "w2".into(),
-            instance_id: "i2".into(),
-            ts: 200_000,
-            conv: Some("a".into()),
-            cwd: Some("/new/path".into()),
-            interval_s: None,
-            host: None,
-        }));
-        assert_eq!(rail.live_cwd("a", 200_000), Some("/new/path"));
-        assert_eq!(rail.live_cwd("unknown", 200_000), None);
-    }
-
     fn attach(rail: &mut Rail, world: &str, ts: i64, cwd: &str) {
         rail.apply(&ServerMsg::Agent(WsAgent {
             kind: "attached".into(),
@@ -539,35 +488,28 @@ mod tests {
     }
 
     #[test]
+    fn live_cwd_reads_the_attachment_replacing_a_prior_one() {
+        // A second `attached` for the same conv supersedes the first
+        // (agent-spec.md); live_cwd must read the survivor, not the ghost.
+        let mut rail = Rail::default();
+        attach(&mut rail, "w1", 100_000, "/old/path");
+        attach(&mut rail, "w2", 200_000, "/new/path");
+
+        assert_eq!(rail.live_cwd("a", 200_000), Some("/new/path"));
+        assert_eq!(rail.live_cwd("unknown", 200_000), None);
+    }
+
+    #[test]
     fn live_cwd_hides_the_cwd_of_a_stranded_attachment() {
         // Attached at t=0, read long after: silence far past the stranded
         // threshold. Liveness is a fold, never declared (agent-spec) — a dead
-        // agent's cwd is not where the conversation is being served, yet
-        // live_cwd has no `now` to fold against.
+        // agent's cwd is not where the conversation is being served.
         let mut rail = Rail::default();
         attach(&mut rail, "w1", 0, "/gone/path");
 
         let actual = rail.live_cwd("a", 1_000_000);
 
         assert_eq!(actual, None);
-    }
-
-    #[test]
-    fn live_cwd_tie_does_not_depend_on_hash_iteration_order() {
-        // No tie rule exists in the ws-spec. Here a pulse tie falls through
-        // to HashMap iteration order, which varies per map instance — the
-        // same wire facts can render either cwd, and can disagree with the
-        // svelte client. Identical inputs must give one answer.
-        let winners: HashSet<String> = (0..64)
-            .map(|_| {
-                let mut rail = Rail::default();
-                attach(&mut rail, "w1", 100_000, "/first");
-                attach(&mut rail, "w2", 100_000, "/second");
-                rail.live_cwd("a", 100_000).unwrap().to_string()
-            })
-            .collect();
-
-        assert_eq!(winners.len(), 1);
     }
 
     #[test]
