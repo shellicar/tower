@@ -32,21 +32,32 @@ pub fn render_markdown(text: &str) -> String {
     let mut unsafe_html = String::new();
     html::push_html(&mut unsafe_html, parser);
 
-    // pulldown-cmark emits plain `<a href="...">`; force target=_blank the
-    // way marked's custom renderer does. `rel` isn't injected here — ammonia
-    // manages that attribute itself (below) and rejects it being also listed
-    // as a plain allowed attribute.
-    let unsafe_html = unsafe_html.replace("<a href=\"", "<a target=\"_blank\" href=\"");
-
-    ammonia::Builder::default()
-        .add_tag_attributes("a", &["target"])
+    let clean = ammonia::Builder::default()
+        // pulldown-cmark's task-list checkboxes (`- [x]`) render as
+        // `<input type="checkbox" disabled checked>`; ammonia's default
+        // tag allowlist has no `<input>` at all, so without this the
+        // checkbox silently disappears and the item renders as a bare
+        // `<li>` — a parity gap against Svelte's GFM task lists.
+        .add_tags(["input"])
+        .add_tag_attributes("input", ["type", "checked", "disabled"])
         // ammonia's own default already stamps every link with this rel
         // value; naming it explicitly keeps the guarantee legible instead
         // of resting on the library default silently matching what marked's
         // renderer forces on the Svelte side.
         .link_rel(Some("noopener noreferrer"))
         .clean(&unsafe_html)
-        .to_string()
+        .to_string();
+
+    // Force target="_blank" on every anchor AFTER sanitizing, not before:
+    // pulldown-cmark passes raw HTML in the source through untouched, so a
+    // pre-sanitize string match has to guess the exact markup a message
+    // author wrote (quote style, attribute order) and misses anything that
+    // doesn't match `<a href="`. Ammonia normalizes every surviving anchor's
+    // output shape, so matching against ITS output instead covers markdown-
+    // syntax links and raw HTML anchors alike, uniformly.
+    clean
+        .replace("<a ", "<a target=\"_blank\" ")
+        .replace("<a>", "<a target=\"_blank\">")
 }
 
 #[cfg(test)]
@@ -88,5 +99,21 @@ mod tests {
         let html = render_markdown("[click me](https://example.com)");
         assert!(html.contains("target=\"_blank\""));
         assert!(html.contains("rel=\"noopener noreferrer\""));
+    }
+
+    #[test]
+    fn keeps_a_task_list_checkbox() {
+        let html = render_markdown("- [x] done\n- [ ] todo");
+        assert!(html.contains("type=\"checkbox\""));
+        assert!(html.contains("checked"));
+    }
+
+    #[test]
+    fn opens_a_raw_html_anchor_in_a_new_tab_regardless_of_quote_style_or_attribute_order() {
+        let single_quoted = render_markdown("<a href='https://example.com'>click</a>");
+        assert!(single_quoted.contains("target=\"_blank\""));
+
+        let attr_before_href = render_markdown("<a class=\"x\" href=\"https://example.com\">click</a>");
+        assert!(attr_before_href.contains("target=\"_blank\""));
     }
 }
