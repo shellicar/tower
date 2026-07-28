@@ -252,8 +252,8 @@ jobs:
   # One stable check name for a branch ruleset to require. The real jobs
   # above carry per-matrix names (binary-towerd (macos-14, darwin-arm64),
   # etc.) that a ruleset can't pin to a fixed list. Passes when every needed
-  # job succeeded or was skipped (a release-only job skipping on a plain PR
-  # is expected); fails only if one actually failed or was cancelled.
+  # job succeeded or was skipped (an app's build job skipping on another
+  # app's tag is expected); fails only if one actually failed or was cancelled.
   gate:
     needs:
       [
