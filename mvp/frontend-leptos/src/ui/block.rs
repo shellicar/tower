@@ -1,11 +1,15 @@
 //! One content block, rendered per type — mirrors mvp/frontend-svelte's
-//! BlockView.svelte: text stands open, everything else (thinking, tool
-//! traffic, unknown blocks) collapses to a summary line via `<details>`, the
-//! primary render lever for per-message collapsing (docs/mvp/tower-v1-design.md,
-//! weight-as-refs note).
+//! BlockView.svelte: text stands open (assistant-role text through markdown,
+//! same split as BlockView's `markdown` prop), tool traffic collapses behind
+//! a plain toggle button (Svelte's shape, ruled by the SC — no disclosure
+//! triangle, one-line ellipsis preview), thinking and unknown blocks fold to
+//! a summary line via `<details>`, the primary render lever for per-message
+//! collapsing (docs/mvp/tower-v1-design.md, weight-as-refs note).
 
 use leptos::prelude::*;
 use serde_json::Value;
+
+use crate::markdown::render_markdown;
 
 use super::refview::{RefView, is_ref};
 use super::truncate;
@@ -35,7 +39,7 @@ fn short(v: &Value, max: usize) -> String {
     truncate(&s, max)
 }
 
-pub fn render_block(block: &Value) -> AnyView {
+pub fn render_block(block: &Value, role: &str) -> AnyView {
     match block.get("type").and_then(Value::as_str) {
         Some("text") => {
             let text = block
@@ -43,7 +47,12 @@ pub fn render_block(block: &Value) -> AnyView {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_owned();
-            view! { <div class="block text">{text}</div> }.into_any()
+            if role == "assistant" {
+                let html = render_markdown(&text);
+                view! { <div class="block markdown-content" inner_html=html></div> }.into_any()
+            } else {
+                view! { <div class="block text">{text}</div> }.into_any()
+            }
         }
         Some("thinking") => {
             let thinking = block
@@ -68,11 +77,21 @@ pub fn render_block(block: &Value) -> AnyView {
             let input = block.get("input").cloned().unwrap_or(Value::Null);
             let preview = short(&input, 120);
             let full = serde_json::to_string_pretty(&input).unwrap_or_default();
+            let expanded = RwSignal::new(false);
             view! {
-                <details class="block tool">
-                    <summary>{format!("⚒ {name}")}" "<span class="dim">{preview}</span></summary>
-                    <pre class="block-body">{full}</pre>
-                </details>
+                <div class="block tool">
+                    <button class="tool-toggle" on:click=move |_| expanded.update(|e| *e = !*e)>
+                        {format!("⚒ {name}")}" "
+                        {
+                            let preview = preview.clone();
+                            move || (!expanded.get()).then(|| view! { <span class="dim tool-preview">{preview.clone()}</span> })
+                        }
+                    </button>
+                    {
+                        let full = full.clone();
+                        move || expanded.get().then(|| view! { <pre class="block-body">{full.clone()}</pre> })
+                    }
+                </div>
             }
             .into_any()
         }
@@ -95,11 +114,21 @@ pub fn render_block(block: &Value) -> AnyView {
                 .as_str()
                 .map(str::to_owned)
                 .unwrap_or_else(|| serde_json::to_string_pretty(&content).unwrap_or_default());
+            let expanded = RwSignal::new(false);
             view! {
-                <details class="block tool">
-                    <summary>{label}" "<span class="dim">{preview}</span></summary>
-                    <pre class="block-body">{full}</pre>
-                </details>
+                <div class="block tool">
+                    <button class="tool-toggle" on:click=move |_| expanded.update(|e| *e = !*e)>
+                        {label}" "
+                        {
+                            let preview = preview.clone();
+                            move || (!expanded.get()).then(|| view! { <span class="dim tool-preview">{preview.clone()}</span> })
+                        }
+                    </button>
+                    {
+                        let full = full.clone();
+                        move || expanded.get().then(|| view! { <pre class="block-body">{full.clone()}</pre> })
+                    }
+                </div>
             }
             .into_any()
         }

@@ -475,7 +475,7 @@ pub fn ConversationView(
                             None => "tool".to_owned(),
                         };
                         let time = format_time(m.ts);
-                        let blocks: Vec<AnyView> = m.content.iter().map(render_block).collect();
+                        let blocks: Vec<AnyView> = m.content.iter().map(|b| render_block(b, &m.role)).collect();
                         let row_id = m.id.clone();
                         let row_ref = NodeRef::<html::Div>::new();
                         // Measures once mounted (mirrors VirtualList.svelte's

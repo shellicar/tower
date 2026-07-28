@@ -34,6 +34,12 @@ describe('renderMarkdown', () => {
     expect(html).toContain('rel="noopener noreferrer"');
   });
 
+  it('opens a raw HTML anchor in a new tab too, not just markdown-syntax links', () => {
+    const html = renderMarkdown('<a href="https://example.com">click</a>');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+  });
+
   it('strips a script tag entirely', () => {
     const html = renderMarkdown('before<script>alert(1)</script>after');
     expect(html).not.toContain('<script');
