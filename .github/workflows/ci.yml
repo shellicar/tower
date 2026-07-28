@@ -1,17 +1,19 @@
 name: CI
 
 # One workflow, gated by event — same shape as docker/compose's ci.yml.
-# Five independently releasable apps, each its own tag/release name:
-# towerd, bridge, helm, tower-svelte, tower-leptos (egui/frontend-rs is a
-# comparison build only, never shipped). Pushing the tag `<app>@<version>`
-# (e.g. `towerd@1.2.3`, `helm@1.2.3-alpha.1`) fires this workflow directly —
-# the tag push trigger is scoped to exactly these five patterns, so a tag
+# Five independently versioned apps, each its own tag name: towerd, bridge,
+# helm, tower-svelte, tower-leptos (egui/frontend-rs is a comparison build
+# only, never shipped). Pushing the tag `<app>@<version>` (e.g.
+# `towerd@1.2.3`, `helm@1.2.3-alpha.1`) fires this workflow directly — the
+# tag push trigger is scoped to exactly these five patterns, so a tag
 # outside this set (a `tower@x` suite tag, say) never invokes this workflow
-# at all, not even to skip a job.
+# at all, not even to skip a job. A tag only builds and uploads that one
+# app's artifact; it never creates a GitHub Release. The only release is
+# the suite release, cut separately by hand from already-tagged versions.
 #
 # - pull_request / push to main: build every app (nothing published) so a
 #   broken build is caught before it reaches main.
-# - one of the five tags is pushed: build and publish only the one app it names.
+# - one of the five tags is pushed: build and upload only the one app it names.
 on:
   push:
     branches: [main]
@@ -38,6 +40,7 @@ jobs:
   # dep-info pass sees, so main still needs one real run against everything
   # to catch what that missed (a build script side effect, say).
   checks:
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -93,6 +96,7 @@ jobs:
       app: ${{ steps.tag.outputs.app }}
       version: ${{ steps.tag.outputs.version }}
     steps:
+      - uses: actions/checkout@v4
       - id: tag
         shell: bash
         run: |
@@ -101,191 +105,80 @@ jobs:
             echo "app=${TAG%%@*}" >> "$GITHUB_OUTPUT"
             echo "version=${TAG#*@}" >> "$GITHUB_OUTPUT"
           fi
-
-  # --- towerd / bridge / helm: same build shape, three cargo binaries ------
-  binary-towerd:
-    needs: detect
-    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'towerd'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14
-            platform: darwin-arm64
-          - runner: ubuntu-24.04
-            platform: linux-x64
-          - runner: windows-2022
-            platform: win32-x64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: mvp
-      - run: cargo build --release -p towerd
-        working-directory: mvp
-      - name: Package
+      - name: Verify the tag's version matches the package's own manifest
+        if: steps.tag.outputs.version != ''
         shell: bash
         run: |
           set -eu
-          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
-          mkdir out
-          cp "mvp/target/release/towerd$ext" out/
-          tar czf "towerd-${{ matrix.platform }}.tar.gz" -C out .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tower-towerd-${{ matrix.platform }}
-          path: towerd-${{ matrix.platform }}.tar.gz
+          APP="${{ steps.tag.outputs.app }}"
+          TAG_VERSION="${{ steps.tag.outputs.version }}"
+          case "$APP" in
+            towerd|bridge|helm)
+              MANIFEST_VERSION=$(grep -m1 '^version' "mvp/crates/$APP/Cargo.toml" | sed -E 's/version *= *"([^"]*)".*/\1/')
+              ;;
+            tower-svelte)
+              MANIFEST_VERSION=$(grep -m1 '"version"' "mvp/frontend-svelte/package.json" | sed -E 's/.*"version": *"([^"]*)".*/\1/')
+              ;;
+            tower-leptos)
+              MANIFEST_VERSION=$(grep -m1 '^version' "mvp/frontend-leptos/Cargo.toml" | sed -E 's/version *= *"([^"]*)".*/\1/')
+              ;;
+            *)
+              echo "Unknown app '$APP'"; exit 1
+              ;;
+          esac
+          if [ "$MANIFEST_VERSION" != "$TAG_VERSION" ]; then
+            echo "Tag $APP@$TAG_VERSION does not match $APP's own manifest version ($MANIFEST_VERSION)"
+            exit 1
+          fi
 
-  binary-bridge:
+  # --- towerd / bridge / helm: same build shape, three cargo binaries,
+  # via the reusable build-rust-binary.yml matrixed over the app ---------
+  binary:
     needs: detect
-    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'bridge'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: macos-14
-            platform: darwin-arm64
-          - runner: ubuntu-24.04
-            platform: linux-x64
-          - runner: windows-2022
-            platform: win32-x64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: mvp
-      - run: cargo build --release -p bridge
-        working-directory: mvp
-      - name: Package
-        shell: bash
-        run: |
-          set -eu
-          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
-          mkdir out
-          cp "mvp/target/release/bridge$ext" out/
-          tar czf "bridge-${{ matrix.platform }}.tar.gz" -C out .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tower-bridge-${{ matrix.platform }}
-          path: bridge-${{ matrix.platform }}.tar.gz
-
-  binary-helm:
-    needs: detect
-    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'helm'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14
-            platform: darwin-arm64
-          - runner: ubuntu-24.04
-            platform: linux-x64
-          - runner: windows-2022
-            platform: win32-x64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: mvp
-      - run: cargo build --release -p helm
-        working-directory: mvp
-      - name: Package
-        shell: bash
-        run: |
-          set -eu
-          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
-          mkdir out
-          cp "mvp/target/release/helm$ext" out/
-          tar czf "helm-${{ matrix.platform }}.tar.gz" -C out .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tower-helm-${{ matrix.platform }}
-          path: helm-${{ matrix.platform }}.tar.gz
+        package: [towerd, bridge, helm]
+    uses: ./.github/workflows/build-rust-binary.yml
+    with:
+      package: ${{ matrix.package }}
+      version: ${{ needs.detect.outputs.version }}
+      should_run: ${{ github.ref_type != 'tag' || needs.detect.outputs.app == matrix.package }}
 
   # --- the two web frontends: platform-independent, one build each --------
   frontend-svelte:
     needs: detect
-    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'tower-svelte'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-        working-directory: mvp/frontend-svelte
-      - run: pnpm build
-        working-directory: mvp/frontend-svelte
-      - run: tar czf tower-svelte.tar.gz -C mvp/frontend-svelte/dist .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tower-tower-svelte
-          path: tower-svelte.tar.gz
+    uses: ./.github/workflows/build-node.yml
+    with:
+      package: frontend-svelte
+      app_name: tower-svelte
+      version: ${{ needs.detect.outputs.version }}
+      should_run: ${{ github.ref_type != 'tag' || needs.detect.outputs.app == 'tower-svelte' }}
 
   frontend-leptos:
     needs: detect
-    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'tower-leptos'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: mvp
-      - run: rustup target add wasm32-unknown-unknown
-      - uses: jetli/trunk-action@v0.5.0
-      - run: trunk build --release
-        working-directory: mvp/frontend-leptos
-      - run: tar czf tower-leptos.tar.gz -C mvp/frontend-leptos/dist .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tower-tower-leptos
-          path: tower-leptos.tar.gz
-
-  # --- publish: one job, attaches whichever app's artifacts matched --------
-  publish:
-    needs: [detect, binary-towerd, binary-bridge, binary-helm, frontend-svelte, frontend-leptos]
-    if: always() && github.ref_type == 'tag'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          # No dash before the star: frontend artifacts have no platform
-          # suffix (tower-tower-svelte), binaries do (tower-towerd-darwin-arm64).
-          pattern: tower-${{ needs.detect.outputs.app }}*
-          merge-multiple: true
-
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*
-          generate_release_notes: true
-          draft: true
-          overwrite_files: false
+    uses: ./.github/workflows/build-rust-wasm.yml
+    with:
+      package: frontend-leptos
+      app_name: tower-leptos
+      version: ${{ needs.detect.outputs.version }}
+      should_run: ${{ github.ref_type != 'tag' || needs.detect.outputs.app == 'tower-leptos' }}
 
   # One stable check name for a branch ruleset to require. The real jobs
-  # above carry per-matrix names (binary-towerd (macos-14, darwin-arm64),
-  # etc.) that a ruleset can't pin to a fixed list. Passes when every needed
-  # job succeeded or was skipped (a release-only job skipping on a plain PR
-  # is expected); fails only if one actually failed or was cancelled.
+  # above carry per-matrix names (binary (towerd) / build (macos-14,
+  # darwin-arm64), etc.) that a ruleset can't pin to a fixed list. Passes
+  # when every needed job succeeded or was skipped (an app's build job
+  # skipping on another app's tag is expected); fails only if one actually
+  # failed or was cancelled.
+
   gate:
     needs:
       [
         checks,
         detect,
-        binary-towerd,
-        binary-bridge,
-        binary-helm,
+        binary,
         frontend-svelte,
         frontend-leptos,
-        publish,
       ]
     if: always()
     runs-on: ubuntu-24.04

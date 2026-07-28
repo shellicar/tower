@@ -1,0 +1,55 @@
+name: Build Rust wasm
+
+# Reusable: builds the one wasm frontend (frontend-leptos) via trunk and
+# uploads it as a version-named artifact. Platform-independent — one build.
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: Directory to build (e.g. frontend-leptos)
+        required: true
+        type: string
+      app_name:
+        description: Name used in the tag/artifact
+        required: true
+        type: string
+      version:
+        description: Version to embed in the artifact filename; falls back to a short commit sha when empty
+        required: false
+        type: string
+        default: ''
+      should_run:
+        description: False skips the build (used to select one app on a tag push)
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  wasm:
+    if: inputs.should_run
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mvp
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: jetli/trunk-action@v0.5.0
+      - run: trunk build --release
+        working-directory: mvp/${{ inputs.package }}
+      - name: Package
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          VERSION="${VERSION:-0.0.0-$(git rev-parse --short HEAD)}"
+          FILE="${{ inputs.app_name }}-$VERSION.tar.gz"
+          tar czf "$FILE" -C mvp/${{ inputs.package }}/dist .
+          if command -v sha256sum >/dev/null 2>&1; then sha256sum "$FILE" > "$FILE.sha256"; else shasum -a 256 "$FILE" > "$FILE.sha256"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tower-${{ inputs.app_name }}
+          path: |
+            ${{ inputs.app_name }}-*.tar.gz
+            ${{ inputs.app_name }}-*.tar.gz.sha256
