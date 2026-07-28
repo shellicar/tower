@@ -1,0 +1,48 @@
+name: Build Node app
+
+# Reusable: builds one pnpm-based frontend and uploads it as a version-named
+# artifact. Platform-independent — one build, one artifact.
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: Directory to build (e.g. frontend-svelte)
+        required: true
+        type: string
+      app_name:
+        description: Name used in the tag/artifact
+        required: true
+        type: string
+      version:
+        description: Version to embed in the artifact filename; falls back to a short commit sha when empty
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: mvp/${{ inputs.package }}
+      - run: pnpm build
+        working-directory: mvp/${{ inputs.package }}
+      - name: Package
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          VERSION="${VERSION:-0.0.0-$(git rev-parse --short HEAD)}"
+          tar czf "${{ inputs.app_name }}-$VERSION.tar.gz" -C mvp/${{ inputs.package }}/dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tower-${{ inputs.app_name }}
+          path: ${{ inputs.app_name }}-*.tar.gz

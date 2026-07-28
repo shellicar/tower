@@ -104,187 +104,55 @@ jobs:
             echo "version=${TAG#*@}" >> "$GITHUB_OUTPUT"
           fi
 
-  # --- towerd / bridge / helm: same build shape, three cargo binaries ------
-  binary-towerd:
+  # --- towerd / bridge / helm: same build shape, three cargo binaries,
+  # via the reusable build-rust.yml (kind: binary) matrixed over the app ---
+  binary:
     needs: detect
-    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'towerd'
+    if: github.ref_type != 'tag' || needs.detect.outputs.app == matrix.package
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: macos-14
-            platform: darwin-arm64
-          - runner: ubuntu-24.04
-            platform: linux-x64
-          - runner: windows-2022
-            platform: win32-x64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: mvp
-      - run: cargo build --release -p towerd
-        working-directory: mvp
-      - name: Package
-        shell: bash
-        env:
-          VERSION: ${{ needs.detect.outputs.version }}
-        run: |
-          set -eu
-          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
-          VERSION="${VERSION:-0.0.0-$(git rev-parse --short HEAD)}"
-          mkdir out
-          cp "mvp/target/release/towerd$ext" out/
-          tar czf "towerd-$VERSION-${{ matrix.platform }}.tar.gz" -C out .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tower-towerd-${{ matrix.platform }}
-          path: towerd-*-${{ matrix.platform }}.tar.gz
-
-  binary-bridge:
-    needs: detect
-    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'bridge'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14
-            platform: darwin-arm64
-          - runner: ubuntu-24.04
-            platform: linux-x64
-          - runner: windows-2022
-            platform: win32-x64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: mvp
-      - run: cargo build --release -p bridge
-        working-directory: mvp
-      - name: Package
-        shell: bash
-        env:
-          VERSION: ${{ needs.detect.outputs.version }}
-        run: |
-          set -eu
-          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
-          VERSION="${VERSION:-0.0.0-$(git rev-parse --short HEAD)}"
-          mkdir out
-          cp "mvp/target/release/bridge$ext" out/
-          tar czf "bridge-$VERSION-${{ matrix.platform }}.tar.gz" -C out .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tower-bridge-${{ matrix.platform }}
-          path: bridge-*-${{ matrix.platform }}.tar.gz
-
-  binary-helm:
-    needs: detect
-    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'helm'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14
-            platform: darwin-arm64
-          - runner: ubuntu-24.04
-            platform: linux-x64
-          - runner: windows-2022
-            platform: win32-x64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: mvp
-      - run: cargo build --release -p helm
-        working-directory: mvp
-      - name: Package
-        shell: bash
-        env:
-          VERSION: ${{ needs.detect.outputs.version }}
-        run: |
-          set -eu
-          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
-          VERSION="${VERSION:-0.0.0-$(git rev-parse --short HEAD)}"
-          mkdir out
-          cp "mvp/target/release/helm$ext" out/
-          tar czf "helm-$VERSION-${{ matrix.platform }}.tar.gz" -C out .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tower-helm-${{ matrix.platform }}
-          path: helm-*-${{ matrix.platform }}.tar.gz
+        package: [towerd, bridge, helm]
+    uses: ./.github/workflows/build-rust.yml
+    with:
+      package: ${{ matrix.package }}
+      app_name: ${{ matrix.package }}
+      kind: binary
+      version: ${{ needs.detect.outputs.version }}
 
   # --- the two web frontends: platform-independent, one build each --------
   frontend-svelte:
     needs: detect
     if: github.ref_type != 'tag' || needs.detect.outputs.app == 'tower-svelte'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-        working-directory: mvp/frontend-svelte
-      - run: pnpm build
-        working-directory: mvp/frontend-svelte
-      - name: Package
-        shell: bash
-        env:
-          VERSION: ${{ needs.detect.outputs.version }}
-        run: |
-          set -eu
-          VERSION="${VERSION:-0.0.0-$(git rev-parse --short HEAD)}"
-          tar czf "tower-svelte-$VERSION.tar.gz" -C mvp/frontend-svelte/dist .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tower-tower-svelte
-          path: tower-svelte-*.tar.gz
+    uses: ./.github/workflows/build-node.yml
+    with:
+      package: frontend-svelte
+      app_name: tower-svelte
+      version: ${{ needs.detect.outputs.version }}
 
   frontend-leptos:
     needs: detect
     if: github.ref_type != 'tag' || needs.detect.outputs.app == 'tower-leptos'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: mvp
-      - run: rustup target add wasm32-unknown-unknown
-      - uses: jetli/trunk-action@v0.5.0
-      - run: trunk build --release
-        working-directory: mvp/frontend-leptos
-      - name: Package
-        shell: bash
-        env:
-          VERSION: ${{ needs.detect.outputs.version }}
-        run: |
-          set -eu
-          VERSION="${VERSION:-0.0.0-$(git rev-parse --short HEAD)}"
-          tar czf "tower-leptos-$VERSION.tar.gz" -C mvp/frontend-leptos/dist .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tower-tower-leptos
-          path: tower-leptos-*.tar.gz
+    uses: ./.github/workflows/build-rust.yml
+    with:
+      package: frontend-leptos
+      app_name: tower-leptos
+      kind: wasm
+      version: ${{ needs.detect.outputs.version }}
 
   # One stable check name for a branch ruleset to require. The real jobs
-  # above carry per-matrix names (binary-towerd (macos-14, darwin-arm64),
-  # etc.) that a ruleset can't pin to a fixed list. Passes when every needed
-  # job succeeded or was skipped (an app's build job skipping on another
-  # app's tag is expected); fails only if one actually failed or was cancelled.
+  # above carry per-matrix names (binary (towerd) / build (macos-14,
+  # darwin-arm64), etc.) that a ruleset can't pin to a fixed list. Passes
+  # when every needed job succeeded or was skipped (an app's build job
+  # skipping on another app's tag is expected); fails only if one actually
+  # failed or was cancelled.
+
   gate:
     needs:
       [
         checks,
         detect,
-        binary-towerd,
-        binary-bridge,
-        binary-helm,
+        binary,
         frontend-svelte,
         frontend-leptos,
       ]
