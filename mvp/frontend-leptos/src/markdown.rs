@@ -113,7 +113,8 @@ mod tests {
         let single_quoted = render_markdown("<a href='https://example.com'>click</a>");
         assert!(single_quoted.contains("target=\"_blank\""));
 
-        let attr_before_href = render_markdown("<a class=\"x\" href=\"https://example.com\">click</a>");
+        let attr_before_href =
+            render_markdown("<a class=\"x\" href=\"https://example.com\">click</a>");
         assert!(attr_before_href.contains("target=\"_blank\""));
     }
 }
