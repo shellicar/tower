@@ -1,1 +1,1 @@
-{"type":"change","category":"added","description":"A world can now be asked to serve a conversation over NATS: bridge answers agent.v1.{world}.requests.service — spawning, adopting, or taking over per the conversation's own attachment record — and rejects every other request leaf honestly."}
+{"type":"change","category":"added","description":"A world can be asked to serve a conversation over NATS: bridge answers agent.v1.{world}.requests.service, spawning, adopting, or taking over per the conversation's own attachment record, and rejects every other request leaf honestly."}
