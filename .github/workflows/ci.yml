@@ -40,6 +40,7 @@ jobs:
   # dep-info pass sees, so main still needs one real run against everything
   # to catch what that missed (a build script side effect, say).
   checks:
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -95,6 +96,7 @@ jobs:
       app: ${{ steps.tag.outputs.app }}
       version: ${{ steps.tag.outputs.version }}
     steps:
+      - uses: actions/checkout@v4
       - id: tag
         shell: bash
         run: |
@@ -102,6 +104,31 @@ jobs:
             TAG="${{ github.ref_name }}"
             echo "app=${TAG%%@*}" >> "$GITHUB_OUTPUT"
             echo "version=${TAG#*@}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Verify the tag's version matches the package's own manifest
+        if: steps.tag.outputs.version != ''
+        shell: bash
+        run: |
+          set -eu
+          APP="${{ steps.tag.outputs.app }}"
+          TAG_VERSION="${{ steps.tag.outputs.version }}"
+          case "$APP" in
+            towerd|bridge|helm)
+              MANIFEST_VERSION=$(grep -m1 '^version' "mvp/crates/$APP/Cargo.toml" | sed -E 's/version *= *"([^"]*)".*/\1/')
+              ;;
+            tower-svelte)
+              MANIFEST_VERSION=$(grep -m1 '"version"' "mvp/frontend-svelte/package.json" | sed -E 's/.*"version": *"([^"]*)".*/\1/')
+              ;;
+            tower-leptos)
+              MANIFEST_VERSION=$(grep -m1 '^version' "mvp/frontend-leptos/Cargo.toml" | sed -E 's/version *= *"([^"]*)".*/\1/')
+              ;;
+            *)
+              echo "Unknown app '$APP'"; exit 1
+              ;;
+          esac
+          if [ "$MANIFEST_VERSION" != "$TAG_VERSION" ]; then
+            echo "Tag $APP@$TAG_VERSION does not match $APP's own manifest version ($MANIFEST_VERSION)"
+            exit 1
           fi
 
   # --- towerd / bridge / helm: same build shape, three cargo binaries,
@@ -121,21 +148,21 @@ jobs:
   # --- the two web frontends: platform-independent, one build each --------
   frontend-svelte:
     needs: detect
-    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'tower-svelte'
     uses: ./.github/workflows/build-node.yml
     with:
       package: frontend-svelte
       app_name: tower-svelte
       version: ${{ needs.detect.outputs.version }}
+      should_run: ${{ github.ref_type != 'tag' || needs.detect.outputs.app == 'tower-svelte' }}
 
   frontend-leptos:
     needs: detect
-    if: github.ref_type != 'tag' || needs.detect.outputs.app == 'tower-leptos'
     uses: ./.github/workflows/build-rust-wasm.yml
     with:
       package: frontend-leptos
       app_name: tower-leptos
       version: ${{ needs.detect.outputs.version }}
+      should_run: ${{ github.ref_type != 'tag' || needs.detect.outputs.app == 'tower-leptos' }}
 
   # One stable check name for a branch ruleset to require. The real jobs
   # above carry per-matrix names (binary (towerd) / build (macos-14,

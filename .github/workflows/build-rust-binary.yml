@@ -51,8 +51,12 @@ jobs:
           VERSION="${VERSION:-0.0.0-$(git rev-parse --short HEAD)}"
           mkdir out
           cp "mvp/target/release/${{ inputs.package }}$ext" out/
-          tar czf "${{ inputs.package }}-$VERSION-${{ matrix.platform }}.tar.gz" -C out .
+          FILE="${{ inputs.package }}-$VERSION-${{ matrix.platform }}.tar.gz"
+          tar czf "$FILE" -C out .
+          if command -v sha256sum >/dev/null 2>&1; then sha256sum "$FILE" > "$FILE.sha256"; else shasum -a 256 "$FILE" > "$FILE.sha256"; fi
       - uses: actions/upload-artifact@v4
         with:
           name: tower-${{ inputs.package }}-${{ matrix.platform }}
-          path: ${{ inputs.package }}-*-${{ matrix.platform }}.tar.gz
+          path: |
+            ${{ inputs.package }}-*-${{ matrix.platform }}.tar.gz
+            ${{ inputs.package }}-*-${{ matrix.platform }}.tar.gz.sha256
