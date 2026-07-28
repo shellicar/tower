@@ -14,12 +14,18 @@ dispatch (`main.rs`, `agent.rs`), the WS spec, helm's module docs, and
 `docs/mvp/frontend-parity.md` for the two frontends. Anything not read is
 marked unverified.
 
-**The lens: bridge is intended as the daily driver at work (node
-projects).** That lens sets the priorities in the scope column. It also
-conflicts with one earlier decision, flagged where it occurs.
+**The lens: bridge started as a side tool; it is now intended as the SC's
+main agent at work (node projects).** This doc exists to state the gap
+accurately so the MVP / nice-to-have call can be made on proper
+information. Earlier documented rulings (the 12 Jul NO list, the parity
+plan's exclusions) were made when bridge was not meant to be the main
+agent: they are historical context, never settled scope, and treating one
+as settled hides exactly the information the decision needs. The only
+standing rulings are the SC's, dated inline.
 
-Scope legend: **must** / **want** / **NO** (deliberate exclusion) /
-**undecided** (needs a ruling; not guessed here). "have" in a CLI/bridge
+Scope legend: **must** / **want** (only where the SC has ruled, dated) /
+**undecided** (needs a ruling; not guessed here) / **historical** (a past
+ruling recorded for context, open for re-decision). "have" in a CLI/bridge
 cell means present and read in code this pass.
 
 ---
@@ -34,7 +40,7 @@ cell means present and read in code this pass.
 | Model default + live switch | `--model`, command-mode selector backed by a model catalog | `BRIDGE_MODEL` + `model` control line (free string, no catalog) | catalog: undecided |
 | max_tokens | config, default 32,000 | fixed 8,192 (`anthropic.rs::MAX_TOKENS`) | undecided (cheap to raise) |
 | Extended thinking | enabled + effort enum (max…low), cycled live from command mode | budget number via `BRIDGE_THINKING_BUDGET` at boot; no live control | undecided |
-| Compaction | opt-in config, default off (`compact.enabled`) | ✗ | NO (carried decision) |
+| Compaction | opt-in config, default off (`compact.enabled`) | ✗ | undecided (historical NO, 12 Jul) |
 | Session persistence / resume | sessions.db + auto-resume, `--resume <id>`, `--no-resume`, recover-by-directory, bound system identity survives resume | the record is JetStream; `adopt` replays any conversation by id | different mechanisms, both continuity; parity n/a |
 | Turn robustness | mid-turn network-drop survival, capped abortable retries, dangling tool_use self-heal (load + request time), cancel shows immediately | cooperative cancel, turn endings always published; retry/self-heal **unverified** | undecided (audit bridge first) |
 | Multi-conversation hosting | one conversation per process | N conversations per instance; supersession per agent spec | bridge has it; CLI side undecided |
@@ -85,17 +91,17 @@ Differences:
 | Tool / behaviour | claude-sdk-cli | bridge | Scope for bridge |
 |---|---|---|---|
 | Paths (explicit-path pipe source) | have | ✗ (Read takes paths directly) | undecided (minor) |
-| Delete | DeleteFile + DeleteDirectory | unified `Delete`, auto-detect, non-recursive | decided (merged shape) |
+| Delete | DeleteFile + DeleteDirectory | unified `Delete`, auto-detect, non-recursive | no gap (bridge's merged shape covers both) |
 | Exec | ExecV3: op-chaining, redirect, cwd/env, `stdin`, `timeout`, `stripAnsi`, `durationMs`, configurable safety rules + blockedCommands, credential-stripping env provider | `Exec`: op-chaining, redirect, cwd/env; no stdin/timeout/stripAnsi/duration; **no safety rules, no credential stripping** | rules/stripping: undecided; field parity: undecided |
-| TS tools (TsDiagnostics/Hover/References/Definition) | have, on-demand tsserver | ✗ | **conflict**: parity plan ruled these out ("bridge serves arbitrary repos"); the daily-driver-node-projects lens points the other way. Needs a ruling. |
-| GitHub PR suite + gh reader/escalated split | have | ✗ | undecided |
-| ADO PR suite (multi-account, cached az sessions) + AzCli/EscalatedAzCli | have | ✗ | undecided |
-| Escalation model (reader by default, holder identity behind approval, certs/tokens from Keychain read per call, never in env) | have | ✗ (no equivalent concept) | undecided |
+| TS tools (TsDiagnostics/Hover/References/Definition) | have, on-demand tsserver | ✗ | **want** (ruled 28 Jul: good, not a deal breaker; the parity plan's exclusion is historical) |
+| GitHub PR suite + gh reader/escalated split | have | ✗ | **must** (ruled 28 Jul) |
+| ADO PR suite (multi-account, cached az sessions) + AzCli/EscalatedAzCli | have | ✗ | **must** (ruled 28 Jul: needed for work) |
+| Escalation model (reader by default, holder identity behind approval, certs/tokens from Keychain read per call, never in env) | have | ✗ (no equivalent concept) | **must** (ruled 28 Jul, with the Az/GitHub suites it carries) |
 | Web search / web fetch (server tools, versioned, ZDR-aware allowedCallers) | have | ✗ | undecided |
 | Advanced tool use (deferred loading via search tool, programmatic tool calls from code execution) | have | ✗ | undecided |
-| Bash (raw shell) | ✗ | kept in-tree, deliberately not offered | decided |
+| Bash (raw shell) | ✗ | kept in-tree, not offered | n/a |
 | MCP servers (mcp-memory/history/typescript/exec expose subsystems to other MCP clients) | have (sibling packages) | ✗ (the wire is bridge's answer) | undecided |
-| Subagent | branch only (see §9) | ✗ | undecided |
+| Subagent | branch only (see §9) | ✗ | **must** (ruled 28 Jul; CLI-side it lives on `feature/subagent-v2`, not main) |
 | Git_* named tools | branch only (see §9) | ✗ | undecided |
 
 ## 4. Approvals and permissions
@@ -106,16 +112,17 @@ Differences:
 | Exec safety | ExecV3 rule config (replace/remove/add named rules) + blockedCommands, validated on its own watch | ✗ (the matrix gates the Exec tool as a whole; **per-command rules absent**) |
 | Wire approvals | approval.v1 raise/answer, local UI races the wire | approval.v1 to all clients |
 | Batch behaviour | concurrent tool batches; batch-cancel and wrong-tool-settled bugs fixed (#480/#482) | per-turn sequential dispatch (**concurrency unverified**) |
-| Auto-approve | zones can approve silently | none, by decision |
+| Auto-approve | zones can approve silently | none (historical ruling, 12 Jul) |
 | Offered-set gate | n/a (registry owns) | tool_use for anything not offered this turn is rejected, not executed |
-| Notifier hook | `hooks.approvalNotify` (command + delay) | ✗ (NO, carried) |
+| Notifier hook | `hooks.approvalNotify` (command + delay) | ✗ (historical NO, 12 Jul) |
 
 In flight: `feature/orchestrate`'s unified Policy resolver (ordered
 first-match rules over tool/input/path, strictest-wins folding, an
 `escalate` operation tier that can never be pre-trusted, live watch with
 notices) replaces both the zone matrix and the rules config on that branch.
-**Which permission model becomes the shared one (Policy, bridge's
-PermissionSet, or both per side) is undecided.**
+**Policy-grade permissions are needed (ruled 28 Jul). How they land in
+bridge (port Policy, grow PermissionSet to match, or share one
+implementation) is undecided.**
 
 ## 5. Model-facing context
 
@@ -209,18 +216,24 @@ auto-externalise, CreateFile/AppendFile/EditFile/Delete, Memory, History,
 Skill + catalogue, permission matrix, per-conversation cwd + chdir, adopt,
 revise, settings, live model.
 
-**Carried NO list** (decided 12 Jul and in the parity plan; nothing read
-this pass reverses them): compaction (CLI's opt-in stays CLI-side),
+**Historical NO list** (12 Jul, made when bridge was a side tool; recorded
+for context, none re-affirmed, each open for re-decision): compaction,
 auto-approve, background bash, plan mode, hooks, ApprovalNotifier, auto
 memory, vim mode, voice, @-file mentions, slash-commands-as-input,
 /memory, /init.
 
-**Undecided, needing a ruling** (the daily-driver-node lens is the
-tiebreaker, not a decision):
+**Ruled 28 Jul (the SC):**
 
-- TS tools in bridge: the standing decision says no, the lens says yes.
-- Platform suites in bridge: GitHub PR, ADO PR, AzCli + the whole
-  reader/escalated credential model.
+- must: the escalated/AzCli credential model and ADO suite (work).
+- must: the GitHub PR suite.
+- must: Subagent.
+- must: Policy (the orchestrate permission/rules model).
+- want: TS tools (good, not a deal breaker).
+
+**Undecided, needing a ruling:**
+
+- How each must lands: ported into bridge, or those conversations served
+  by the CLI over the wire.
 - Exec hardening in bridge: safety rules, blocked commands, credential
   stripping; stdin/timeout/stripAnsi field parity.
 - Model-facing reminders in bridge: clock, cwd, git delta.
@@ -230,6 +243,7 @@ tiebreaker, not a decision):
 - Model catalog in bridge/helm.
 - CLAUDE.md auto-load in bridge vs spawner-owned context.
 - Keychain credential storage in bridge.
+- Everything on the historical NO list, if wanted at all.
 - CLI side: wire-say attachment resolution; the three outstanding
   attachment-spec conformance items (§6).
 - The permission model convergence question (§4).
