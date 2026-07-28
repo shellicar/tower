@@ -1,256 +1,237 @@
-# Feature comparison: claude-sdk-cli vs Claude Code, with MVP and TUI decisions
+# Feature comparison: claude-sdk-cli vs the tower apps
 
-Filled in via a block-by-block walkthrough. See the **Summary** at the end for the consolidated MVP.
+Rewritten 28 Jul 2026, replacing the 12 Jul version (which compared
+claude-sdk-cli against Claude Code and set the original MVP scope; its
+decided NO list carries forward below). The live comparison is now
+claude-sdk-cli against the four tower apps: bridge, towerd, helm, and the
+two frontends.
 
-- **MVP** = the agent
-- **TUI** = the local TUI app
-- **NO** = explicit exclusion (only entries named directly)
-- *(blank)* = not in scope, or designed-for but not v1, or deferred to its own design pass
+Method: read from code, not docs. CLI side: the DI container
+(`setup/container.ts`), the config schema (`cli-config/schema.ts`), the CLI
+flags (`help.ts`), the tool registration (`createAppTools.ts`), and a survey
+of every branch/worktree. Tower side: bridge's control lines and tool
+dispatch (`main.rs`, `agent.rs`), the WS spec, helm's module docs, and
+`docs/mvp/frontend-parity.md` for the two frontends. Anything not read is
+marked unverified.
 
----
+**The lens: bridge is intended as the daily driver at work (node
+projects).** That lens sets the priorities in the scope column. It also
+conflicts with one earlier decision, flagged where it occurs.
 
-## Authentication & startup
-
-| Feature | claude-sdk-cli | Claude Code | MVP | TUI |
-|---------|----------------|-------------|-----|-----|
-| OAuth login flow (interactive) | ✓ PKCE | ✓ | | must |
-| Credential exchange with its own encryption layer (handshake-established, independent of transport) | ✗ | ? | must | must |
-| Token refresh | ✓ | ✓ | must | |
-| API key fallback | ✗ | ✓ | | |
-| Spawn agent with specific config | ✓ via CLI flags | ✓ | must (handshake + initial-message config) | |
-| Settings file (user-level) | ✓ | ✓ | | |
-| Settings file (project-level) | ✓ | ✓ | | |
-| Settings hot reload | ✓ | partial | | |
-| Init config file | ✓ `--init-config` | ✗ | | |
-
-## Session lifecycle
-
-| Feature | claude-sdk-cli | Claude Code | MVP | TUI |
-|---------|----------------|-------------|-----|-----|
-| New session | ✓ | ✓ | | |
-| Resume saved session | ✓ | ✓ | | |
-| Browse session list | ✗ | ✓ | | |
-| Persistent conversation storage | ✓ JSONL | ✓ | | |
-| Manual `/compact` | ✗ | ✓ | NO | NO |
-| Auto-compaction | ✗ (removed) | ✓ | NO | NO |
-| Checkpoint state | ✗ | ✓ | | |
-| Audit log | ✓ | partial | must | |
-
-## Tool surface
-
-| Feature | claude-sdk-cli | Claude Code | MVP | TUI |
-|---------|----------------|-------------|-----|-----|
-| Tool registry | ✓ | ✓ | must | |
-| Dynamic tools (add/remove at runtime) | ✗ | partial | want | |
-| File read (text) | ✓ | ✓ | must | |
-| File read (PDF, images as binary) | ✓ | ✓ | must | |
-| File edit | ✓ | ✓ | must | |
-| File create | ✓ | ✓ | | |
-| File delete | ✓ | partial | | |
-| File find / glob | ✓ | ✓ | must | |
-| File search by content | ✓ | ✓ | must | |
-| Slice / inspect (Head, Tail, Range) | ✓ | partial | | |
-| Shell execution | ✓ | ✓ | must | |
-| Background bash | ✗ | ✓ | NO | NO |
-| Web search | ✓ | ✓ | | |
-| Web fetch | ✓ | ✓ | | |
-| Anthropic code execution server tool | ✓ | partial | | |
-| TypeScript LSP tools | ✓ | ✗ | | |
-| Tool composition (Pipe) | ✓ | ✗ | | |
-| Large-output paging (Ref) | ✓ | ✓ (auto-save to file) | | |
-| Notebook editing | ✗ | ✓ | | |
-| Todo tool | ✗ | ✓ | | |
-| Plan mode | ✗ | ✓ | | |
-| Subagent dispatch | ✗ | ✓ | | |
-| MCP servers | ✗ | ✓ | want | |
-| Agent teams | ✗ | ✓ | | |
-| Computer use | ✗ | ✓ | | |
-
-## Approval & permissions
-
-| Feature | claude-sdk-cli | Claude Code | MVP | TUI |
-|---------|----------------|-------------|-----|-----|
-| Approval flow (request / respond on protocol) | ✓ | ✓ | must | must |
-| Distributed approvals (multi-client coordination) | ✗ | ✗ | | |
-| Zone-based auto-approve | ✓ | partial | | |
-| Permission modes (acceptEdits / plan / bypass) | ✗ | ✓ | | |
-| Per-tool overrides | ✓ (prev CLI) | ✓ | | |
-| Skip permissions for autonomous runs | ✗ | ✓ | | |
-| ApprovalNotifier (process launch on approval) | ✓ | ✓ | NO | NO |
-
-## Input
-
-| Feature | claude-sdk-cli | Claude Code | MVP | TUI |
-|---------|----------------|-------------|-----|-----|
-| Multi-line input | ✓ | ✓ | | must |
-| Editor primitives (cursor, backspace, arrow nav within line) | ✓ | ✓ | | must |
-| Command mode (Ctrl+/ → key shortcut entry) | ✓ | ✗ | | must |
-| Attachments (text / files / images) | ✓ command mode | ✓ @ + paste + drag | must | must |
-| @-file mentions | ✗ | ✓ | | NO |
-| Slash commands (built-in set) | partial via command mode | ✓ | | NO |
-| Custom slash commands | ✓ via command mode | ✓ | | NO |
-| Vim mode | ✗ | ✓ | | |
-| Voice dictation | ✗ | ✓ | | |
-
-## Display & status
-
-| Feature | claude-sdk-cli | Claude Code | MVP | TUI |
-|---------|----------------|-------------|-----|-----|
-| Alt-buffer ANSI rendering | ✓ | ✓ | | must |
-| Text reflow (ANSI-aware, grapheme-aware wrapping) | ✓ via `claude-core/reflow` | ✓ | | must |
-| Window resize handling (re-render on resize, debounced) | ✓ | ✓ | | must |
-| Flicker-free rendering (sync-update / SGR 2026) | ✓ | ✓ (fullscreen mode) | | |
-| Sealed block flushing to scrollback | ✓ | ? | | |
-| Streaming text display | ✓ | ✓ | | must |
-| Streaming thinking display | ✓ (configurable) | ✗ | | |
-| Tool call rendering | ✓ | ✓ | | want |
-| Tool result expansion / collapse (space toggle) | ✓ | partial (recent) | | |
-| Approval flash timer (visual pulse on pending) | ✓ | ✗ | | |
-| Pending approval navigation (arrow keys) | ✓ | ✗ | | |
-| Surrogate / lone-codepoint sanitisation in streaming text | ✓ | ? | | |
-| Status line (model, cost, tokens, CWD) | ✓ | ✓ | | |
-| Customisable status line | ✗ | ✓ | | |
-| Output styles | ✗ | ✓ | | |
-| Cost per turn (marginal annotation) | ✓ | ✓ | | |
-| Cost limits / quotas | ✗ | partial | | |
-| Context-window usage indicator | ✓ | ✓ | | |
-| Mouse support | ✗ | ✓ (fullscreen) | | |
-
-## Context management
-
-| Feature | claude-sdk-cli | Claude Code | MVP | TUI |
-|---------|----------------|-------------|-----|-----|
-| CLAUDE.md auto-loading | ✓ from 4 paths | ✓ | | want |
-| `/memory` (edit from TUI) | ✗ | ✓ | | NO |
-| Auto memory (autonomous append) | ✗ | ✓ | NO | NO |
-| `/init` (bootstrap project CLAUDE.md) | ✗ | ✓ | | NO |
-| `@`-file inline expansion | ✗ | ✓ | | NO |
-| Skills (instructions + tool subset, loaded at init) | ✗ | ✓ | want | |
-| Mission (cross-session shared artefact / context) | ✓ (prev CLI) | ✗ | | |
-| Persistent task list (carry-over todos across /clear, /new) | ✓ (prev CLI) | ✗ | | |
-
-## Slash commands
-
-These are Claude Code's slash commands, kept for comparison. They don't map cleanly to MVP or TUI columns because this is a fundamentally different design. In this architecture they collapse into: uniform config operations (all config is bootstrapped at spawn and dynamically updatable at runtime — model, settings, permissions all use the same primitive), command-mode conveniences in this TUI (`/clear`, `/help`), or Tower concerns (`/agents`). The MVP/TUI columns are left blank intentionally — the capability that matters is "config: bootstrap + dynamic update", not the individual commands.
-
-| Command | claude-sdk-cli | Claude Code | MVP | TUI |
-|---------|----------------|-------------|-----|-----|
-| `/clear` | ✗ | ✓ | | |
-| `/help` | partial | ✓ | | |
-| `/model` | partial | ✓ | | |
-| `/cost` | partial | ✓ | | |
-| `/status` | partial | ✓ | | |
-| `/config` | ✗ | ✓ | | |
-| `/permissions` | ✗ | ✓ | | |
-| `/agents` | ✗ | ✓ | | |
-| `/vim` | ✗ | ✓ | | |
-
-## Extension surface
-
-Most of this block is Claude Code's bolt-on mechanisms for reaching beyond a single-client local session. Because their core is one terminal driving one local session, each way of extending past that is a separate feature: channels push events in via an MCP server, Remote Control hands a local session off to web/mobile, web sessions spin up a fresh cloud sandbox, Slack spawns a session from a mention.
-
-This architecture has one bridge protocol that subsumes all of them — any client can connect, push messages, and receive events. So these aren't features to build; they fall out of the protocol:
-
-| Claude Code mechanism | This architecture |
-|----------------------|-------------------|
-| Channels (push events in via MCP) | a client sending inbound messages |
-| Remote Control (web / mobile handoff) | a Tower client connecting to the agent |
-| Web sessions (fresh cloud) | an agent spawned with a bridge |
-| Slack (spawn from mention) | a client bridging Slack |
-
-Channels in particular: an external system pushing an event is a client sending an inbound message; Claude replying is the agent emitting events the client consumes; the sender allowlist is sender identity plus gating; the permission relay is distributed approvals. All emergent. The MVP/TUI columns stay blank — nothing here is a feature to build. (Plugins are also blank: you own the harness, so a plugin system isn't necessary.)
-
-| Feature | claude-sdk-cli | Claude Code | MVP | TUI |
-|---------|----------------|-------------|-----|-----|
-| Hooks (PreToolUse / PostToolUse / etc.) | partial | ✓ | NO | NO |
-| Plugins | ✗ | ✓ | | |
-| Channels (MCP push events into session) | ✗ | ✓ | | |
-| Scheduled tasks | ✗ | ✓ | | |
-| Remote Control (web / phone continuation) | ✗ | ✓ | | |
-
-## Output modes / bridges
-
-| Feature | claude-sdk-cli | Claude Code | MVP | TUI |
-|---------|----------------|-------------|-----|-----|
-| Stdio bridge (bidirectional) | ✗ | ✓ output-only | must | |
-| HTTP / WebSocket / NATS bridges | ✗ | ✗ | | |
-
-## Architecture & deployment
-
-| Feature | claude-sdk-cli | Claude Code | MVP | TUI |
-|---------|----------------|-------------|-----|-----|
-| Agent runs as standalone process, no embedded UI (clients connect via bridge) | partial (refuses non-TTY) | ✓ Agent SDK | must | |
-| Multiple bridge clients (N clients on one bridge) | ✗ | ✗ | | |
-| Multiple bridges (agent runs N bridges at once) | ✗ | ✗ | | |
-| Multiple agents per process (1 process hosts N agents) | ✗ | ✗ | | |
-| Sandboxed environment (Docker etc.) | ✗ | partial | | |
-| Sandboxed bash tool | partial | ✓ | | |
-| Session portability across processes | ✗ | partial | | |
+Scope legend: **must** / **want** / **NO** (deliberate exclusion) /
+**undecided** (needs a ruling; not guessed here). "have" in a CLI/bridge
+cell means present and read in code this pass.
 
 ---
 
-## Summary
+## 1. Agent core
 
-The MVP is a **single agent process, one stdio bridge, one TUI client, basic approvals**. The multi-client / multi-bridge / distributed capabilities are designed into the protocol but not built in v1 — proving them is a POC, not a blocker.
+| Feature | claude-sdk-cli | bridge | Scope for bridge |
+|---|---|---|---|
+| OAuth token refresh | have | have: same credentials file, refreshed in place, either process picks up the other's refresh | must (done) |
+| API key auth | ✗ (OAuth only) | have: `ANTHROPIC_API_KEY` wins over the file | n/a |
+| Keychain credential storage | have (keychain-native, macOS arm64 optional dep) | ✗ (file only) | undecided |
+| Model default + live switch | `--model`, command-mode selector backed by a model catalog | `BRIDGE_MODEL` + `model` control line (free string, no catalog) | catalog: undecided |
+| max_tokens | config, default 32,000 | fixed 8,192 (`anthropic.rs::MAX_TOKENS`) | undecided (cheap to raise) |
+| Extended thinking | enabled + effort enum (max…low), cycled live from command mode | budget number via `BRIDGE_THINKING_BUDGET` at boot; no live control | undecided |
+| Compaction | opt-in config, default off (`compact.enabled`) | ✗ | NO (carried decision) |
+| Session persistence / resume | sessions.db + auto-resume, `--resume <id>`, `--no-resume`, recover-by-directory, bound system identity survives resume | the record is JetStream; `adopt` replays any conversation by id | different mechanisms, both continuity; parity n/a |
+| Turn robustness | mid-turn network-drop survival, capped abortable retries, dangling tool_use self-heal (load + request time), cancel shows immediately | cooperative cancel, turn endings always published; retry/self-heal **unverified** | undecided (audit bridge first) |
+| Multi-conversation hosting | one conversation per process | N conversations per instance; supersession per agent spec | bridge has it; CLI side undecided |
+| Audit | audit jsonl + AuditStats (incl. subagent-aware rollup on branch) | the JetStream record is the audit | have both |
+| Wake lock during requests | have (caffeinate, opt-out) | ✗ | undecided |
+| Account-limit notice | have | ✗ | undecided |
+| Deployment | SEA single executable, `--verify`, npm platform packages | cargo binary, native Windows support | n/a |
 
-### MVP must (agent)
+## 2. Config and runtime control
 
-- Credential exchange (encrypted, handshake-established)
-- Token refresh
-- Spawn with specific config (handshake + initial-message)
-- Audit log (doubles as persistence)
-- Tool registry + bundled tools: read (text + PDF/images), edit, find/glob, search, exec
-- Approval flow (basic, single-client)
-- Attachments (protocol side)
-- Stdio bridge (bidirectional)
-- Standalone process, no embedded UI
+CLI: one schema'd config file (`sdk-config.json`) with hot reload; an
+independent watch for `tools.rules` so a broken rules edit can't block
+unrelated reloads; `--config` JSON overrides; `--init-config`; generated
+JSON Schema for editor autocomplete. Flags: `--file`, `--name`, `--model`,
+`--prompt`, `--system`, `--claudeMd`, `--system-identity`, `--resume`,
+`--no-resume`, `--config`.
 
-### MVP want (agent)
+Bridge: env vars plus stdio control lines, batched (`-c`) and live, one
+grammar: `spawn`, `adopt`, `skills`, `system`, `context`, `model`, `cwd`,
+`chdir`, `permissions`, `revise`, `settings`. This is the original
+"config: bootstrap + dynamic update" primitive realised.
 
-- Dynamic tools (add/remove at runtime)
-- MCP servers
-- Skills (instructions + tool subset)
-- Runtime model switch
+| Capability | claude-sdk-cli | bridge | Scope for bridge |
+|---|---|---|---|
+| Live config source | file watch + reload notices | control lines | equivalent by design |
+| `disabledTools` (hide tools live) | have, with flip notices | ✗ | undecided |
+| `requiredSkills` (tool gated on a prior Skill load) | have (failed-load fix on branch) | ✗ | undecided |
+| Move a running conversation's cwd | have (command mode cd, re-pointed watches) | have (`chdir`, publishes `moved`) | done |
+| Revise a committed message | ✗ | have (`revise`, append-only record) | bridge-only |
+| Settings snapshot query | effective-config display | `settings` control line | done |
 
-### TUI must
+## 3. Tool surface
 
-- OAuth login flow, credential exchange
-- Multi-line input, editor primitives, command mode
-- Attachments
-- Alt-buffer rendering, text reflow, resize handling, streaming text display
-- Approval render / respond
+Shared and equivalent (both sides read this pass): Pipe with
+Find/Read/Match/Head/Tail/Range stages, ReadFile (PDF/images, sips
+conditioning), EditFile (line + text edits, numbered diff), CreateFile,
+AppendFile, Ref with automatic externalising of oversized outputs (CLI
+50 KB threshold, persistent store; bridge temp-dir store), the five Memory
+tools, SearchHistory/ReadHistory, Skill with catalogue + delta reminders.
 
-### TUI want
+**Memory and history are one store, not two:** bridge defaults to the CLI's
+own `~/.claude/memory.db` and `~/.claude/history.db`, same schema. A memory
+written in either process is visible in the other. (CLI additionally runs a
+jittered background history dedup sweep; bridge doesn't. Minor.)
 
-- CLAUDE.md auto-loading
-- Tool call rendering
+Differences:
 
-### Designed-for, not v1 (POC territory)
+| Tool / behaviour | claude-sdk-cli | bridge | Scope for bridge |
+|---|---|---|---|
+| Paths (explicit-path pipe source) | have | ✗ (Read takes paths directly) | undecided (minor) |
+| Delete | DeleteFile + DeleteDirectory | unified `Delete`, auto-detect, non-recursive | decided (merged shape) |
+| Exec | ExecV3: op-chaining, redirect, cwd/env, `stdin`, `timeout`, `stripAnsi`, `durationMs`, configurable safety rules + blockedCommands, credential-stripping env provider | `Exec`: op-chaining, redirect, cwd/env; no stdin/timeout/stripAnsi/duration; **no safety rules, no credential stripping** | rules/stripping: undecided; field parity: undecided |
+| TS tools (TsDiagnostics/Hover/References/Definition) | have, on-demand tsserver | ✗ | **conflict**: parity plan ruled these out ("bridge serves arbitrary repos"); the daily-driver-node-projects lens points the other way. Needs a ruling. |
+| GitHub PR suite + gh reader/escalated split | have | ✗ | undecided |
+| ADO PR suite (multi-account, cached az sessions) + AzCli/EscalatedAzCli | have | ✗ | undecided |
+| Escalation model (reader by default, holder identity behind approval, certs/tokens from Keychain read per call, never in env) | have | ✗ (no equivalent concept) | undecided |
+| Web search / web fetch (server tools, versioned, ZDR-aware allowedCallers) | have | ✗ | undecided |
+| Advanced tool use (deferred loading via search tool, programmatic tool calls from code execution) | have | ✗ | undecided |
+| Bash (raw shell) | ✗ | kept in-tree, deliberately not offered | decided |
+| MCP servers (mcp-memory/history/typescript/exec expose subsystems to other MCP clients) | have (sibling packages) | ✗ (the wire is bridge's answer) | undecided |
+| Subagent | branch only (see §9) | ✗ | undecided |
+| Git_* named tools | branch only (see §9) | ✗ | undecided |
 
-The protocol supports these; v1 doesn't implement them. Proving they work requires building the feature, so it's a POC exercise rather than MVP.
+## 4. Approvals and permissions
 
-- Distributed approvals
-- Multiple bridge clients (N clients on one bridge)
-- Multiple bridges (agent runs N at once)
-- Multiple agents per process
+| Capability | claude-sdk-cli | bridge |
+|---|---|---|
+| Model | zone matrix: default/outside cwd × read/write/delete → approve/ask/deny | path-scoped `PermissionSet`: allow/deny/ask per action and path, one blob, live repoint |
+| Exec safety | ExecV3 rule config (replace/remove/add named rules) + blockedCommands, validated on its own watch | ✗ (the matrix gates the Exec tool as a whole; **per-command rules absent**) |
+| Wire approvals | approval.v1 raise/answer, local UI races the wire | approval.v1 to all clients |
+| Batch behaviour | concurrent tool batches; batch-cancel and wrong-tool-settled bugs fixed (#480/#482) | per-turn sequential dispatch (**concurrency unverified**) |
+| Auto-approve | zones can approve silently | none, by decision |
+| Offered-set gate | n/a (registry owns) | tool_use for anything not offered this turn is rejected, not executed |
+| Notifier hook | `hooks.approvalNotify` (command + delay) | ✗ (NO, carried) |
 
-### Deferred (own design pass needed)
+In flight: `feature/orchestrate`'s unified Policy resolver (ordered
+first-match rules over tool/input/path, strictest-wins folding, an
+`escalate` operation tier that can never be pre-trusted, live watch with
+notices) replaces both the zone matrix and the rules config on that branch.
+**Which permission model becomes the shared one (Policy, bridge's
+PermissionSet, or both per side) is undecided.**
 
-These have large design ramifications and need their own pass before any decision.
+## 5. Model-facing context
 
-- Session lifecycle: resume, persistence, /clear, new-session semantics
-- Session portability across processes
-- Mission (cross-session shared artefact)
-- Persistent task list (carry-over todos)
+| Capability | claude-sdk-cli | bridge | Scope for bridge |
+|---|---|---|---|
+| CLAUDE.md auto-load | four sources, per-source toggles, cached assembled prefix, `--claudeMd` | ✗; the spawner supplies `context`, committed at birth | undecided: may be deliberate (spawner owns context) |
+| SYSTEM.md / system prompt | file sources + config text + `--system` | `system` control line, read fresh each turn | equivalent |
+| Skills catalogue + per-say delta | have | have | done |
+| Clock stamp on the user's turn | have (persisted, ordering bugs fixed) | ✗ | undecided |
+| Cwd reminder | have | ✗ | undecided |
+| Git delta reminder (incl. ahead/behind) | have (GitStateMonitor) | ✗ | undecided |
+| Injected-marker XML wrapping | have | have (`<system-reminder>` on context/skills) | done |
 
-### NO (deliberate exclusions)
+## 6. Wire contract status (CLI ↔ tower specs)
 
-- Compaction (manual + auto)
-- Auto memory
-- Background bash
-- Plan mode
-- Hooks (PreToolUse / PostToolUse / etc.)
-- ApprovalNotifier (external process launch on approval)
-- Vim mode, voice dictation
-- @-file mentions, slash-commands-as-input
-- /memory, /init
+The CLI conformed to conv v2 + agent v1 on 19 Jul (#445): serves
+say/cancel, raises/answers approvals, speaks ready/pulse/attached/
+service/drain/chdir. The spec moved after that date. All three moves rode
+spec-first PRs (the repo's rule), so this is deliberate sequencing with the
+CLI-side close outstanding, not silent drift:
+
+| Spec change | Tower side | CLI side |
+|---|---|---|
+| Attachment claims moved onto the conversation's own tree (#20, 28 Jul) | bridge publishes on the conv tree | still publishes `agent.v1.{world}.telemetry.attached/detached` — outstanding |
+| Supersession: singular claim, unconditional takeover, exactly-once conduct (#19, 27 Jul) | bridge implements | CLI rejects `service` for a second conversation (`already_attached`) per the older model — outstanding |
+| `moved` as a fact about the standing claim (not a re-`attached`) | bridge publishes `moved` | CLI re-publishes `attached` on cwd change, now the named violation shape — outstanding |
+| Attachment buckets: servicer resolves against the block's named bucket, rejects bucket-less (22 Jul) | bridge resolves and rejects | CLI has **no object-attachment resolution in wire says at all** (no code found in `conv/`); unclear if deferral or gap |
+
+Not drift (verified): the old NATS tap events are retired into the
+conforming bus; `$ref` externalisation is towerd's WS-apply concern and
+deliberately not on the NATS wire (CLAUDE.md names it interim).
+
+## 7. Client surfaces
+
+Three user surfaces against the CLI's TUI. S = frontend-svelte,
+L = frontend-leptos. The S↔L internal gap list (markdown, height
+prediction, visual rulings) lives in `docs/mvp/frontend-parity.md` and is
+not duplicated here.
+
+| Affordance | CLI TUI | helm | frontends |
+|---|---|---|---|
+| Conversations visible | one | one (spawns its own bridge) | the fleet: rail by staleness, tabs, unread view, potential conversations, dismissal |
+| Streaming text | have | have | have |
+| Thinking display | have (configurable) | have (click to expand) | have |
+| Markdown | have, streaming, OSC-8 links | have (pulldown-cmark twin: tables, link href preview in status line) | S: marked+DOMPurify; L: not yet (parity doc #5) |
+| Tool call collapse/expand | have | click on block | have (S shape ruled the standard) |
+| Scrollback | sealed blocks flush to native scrollback (#483) + mouse wheel + a history view over past blocks | alt-buffer only, wheel scroll, exact click hit-map; no history view | virtual list (S windowed+predicted, L windowed) |
+| Approvals | Y/N any phase, flash timer, arrow nav between pending | Ctrl+Y/N oldest; y/n in command mode | dedicated panel + inline card, all conversations |
+| Attachments | paste text/file/image, remove, preview toggle | t/i/f chips, d drop, clipboard image (pngpaste) | upload + send with say |
+| Command mode | attach, preview, cd submode, new session, model submode (catalog selector, thinking/effort cycling) | attach, drop, approval, model (free text), cwd, config JSON editor (any bridge control line rides through) | n/a (direct UI) |
+| Status | model, version, tokens in/out split, cost, ctx %, turns, user/tools/claude time split, conversation id | usage line: tokens, cost, ctx (derived locally from per-turn frames) | usage line + per-model pricing, per-conversation model/name/version |
+| Session ops | new/resume/move-dir live | fresh spawn per run; adopt **unverified** (config passthrough may reach bridge's `adopt`) | open/read/say into any conversation, incl. adopted ones |
+| Title/tag | `--name` label | ✗ | title editing wired; tag editing is dead plumbing both sides (parity doc) |
+| Refs (`$ref`) paging | n/a (Ref tool is model-facing) | n/a (full content arrives over the attach fd) | have (RefView, ranged fetch) |
+| Reconnect | n/a (local) | n/a (child pipes) | S: backoff reconnect; L: fixed (parity doc) |
+
+## 8. towerd (no CLI equivalent)
+
+The serving layer the CLI user simply doesn't have: WS fan-out with
+open-gated content and unconditional row/staleness events (staleness is the
+product), `$ref` externalisation at four fixed nodes with `GET /ref` Range
+paging (the WS never carries megabytes), `POST /attachment` with
+towerd-stamped buckets, unread tracking (readId), layout persistence,
+agent-facts fold (liveness derived client-side, never a verdict column),
+potential conversations, sqlite views + JetStream cursor committed in one
+transaction. The CLI participates on the wire as an agent (#411), so its
+conversations can in principle be towed; nothing here needs porting *into*
+the CLI.
+
+## 9. In-progress work (claude-cli branches, surveyed 28 Jul)
+
+| Branch | State | What it holds |
+|---|---|---|
+| `feature/orchestrate` | ~70 commits, active 28 Jul | Tools V2: orchestrate-core engine (typed streams, lazy stages), V2 ports of essentially the whole tool surface (file tools, Ref, Memory, History, Skill, TS, GitHub/ADO/Az), a `Program` leaf at ExecV3 parity, the unified Policy resolver (§4), `escalate` operation, per-block DI scope replacing blockLifetime. Bypasses V1's registry and permission matrix on its path. The single biggest change in flight. |
+| `feature/subagent-v2` | 12 commits, active 28 Jul | Subagent tool on a DI scope shadowing the root: one-shot, cwd-scoped, approvals through the parent's matrix and the wire, live cost rollup in the parent's status line and transcript. Supersedes `feature/subagent`. |
+| `feature/git-tool` | 13 commits, 22 Jul | Named per-action `Git_*` tools replacing raw git: worktree/merge/cherry-pick/revert/clone/submodule coverage, credential redaction, argument-injection hardening, raw git blocked in ExecV3. Orchestrate notes its Git migration is blocked on this landing. |
+| `feature/advanced-tool-use` | 2 commits | Skill-gate fix: a failed Skill load no longer counts as satisfying `requiredSkills`. Near-mergeable. |
+| `feature/release-1.0.0-beta.24` | 1 commit | Version bump, pending. |
+| `feature/read-only-mode`, `feature/exec-pipe-into-group`, `feature/disable-gh-pr` | worktrees at main, zero commits | Intent markers, no work yet. |
+| merged-PR source branches (`az-auth-hardening` #484, `approvals-eating-inputs` #480, `bad-tool-result` #482, `bad-tool-result-2` #485, `buffer-flush` #483, `system-reminder-corruption`, `azcli-login`) | merged | Pre-squash history only. |
+| `feature/history-search-poc`, `review*`, `docs/*`, pre-June fixes | stale | Superseded or historical. |
+
+Tower side in flight: attachment claims/supersession just landed (#19,
+#20); frontend-parity porting order stands in `docs/mvp/frontend-parity.md`.
+
+## 10. Scope summary
+
+**Done since the 12 Jul doc** (was must/want, now shipped in bridge): token
+refresh, structured Exec, the composable read family, ReadFile, Ref with
+auto-externalise, CreateFile/AppendFile/EditFile/Delete, Memory, History,
+Skill + catalogue, permission matrix, per-conversation cwd + chdir, adopt,
+revise, settings, live model.
+
+**Carried NO list** (decided 12 Jul and in the parity plan; nothing read
+this pass reverses them): compaction (CLI's opt-in stays CLI-side),
+auto-approve, background bash, plan mode, hooks, ApprovalNotifier, auto
+memory, vim mode, voice, @-file mentions, slash-commands-as-input,
+/memory, /init.
+
+**Undecided, needing a ruling** (the daily-driver-node lens is the
+tiebreaker, not a decision):
+
+- TS tools in bridge: the standing decision says no, the lens says yes.
+- Platform suites in bridge: GitHub PR, ADO PR, AzCli + the whole
+  reader/escalated credential model.
+- Exec hardening in bridge: safety rules, blocked commands, credential
+  stripping; stdin/timeout/stripAnsi field parity.
+- Model-facing reminders in bridge: clock, cwd, git delta.
+- Live tool governance in bridge: disabledTools, requiredSkills.
+- max_tokens raise and effort-style thinking control in bridge.
+- Web search/fetch and advanced tool use in bridge.
+- Model catalog in bridge/helm.
+- CLAUDE.md auto-load in bridge vs spawner-owned context.
+- Keychain credential storage in bridge.
+- CLI side: wire-say attachment resolution; the three outstanding
+  attachment-spec conformance items (§6).
+- The permission model convergence question (§4).
+- Turn-robustness audit of bridge (retry/self-heal) before deciding
+  whether there's a gap at all.
