@@ -159,6 +159,11 @@ side by side. Derived from code, not from any prior claim about what's missing.
   truncates visually with ellipsis, so the full id in the DOM costs nothing on screen.
 - [x] **New/attached-only conversations sort to the top.** Leptos's `<ul class="potential">` now renders before
   `<ul class="rows">`, matching Svelte's ordering.
+- [x] **Potential-row selected highlight.** The `27 Jul` pass missed this one: the potential `<li>` never carried
+  `class:selected`, and `style.css` had no `.potential li.selected` rule, so an open attached-only conversation
+  showed no highlight (Svelte's `RowList.svelte` marks it `bg-slate-800`). Fixed: the potential row now tracks
+  `open_convs.contains(&conv)` like the ordinary rows do, and `.potential li.selected { background: #1e293b; }`
+  matches `.rows li.selected`.
 - [x] **Ref-image height cap.** Svelte's `RefView.svelte` loaded-image `<img>` now also caps `max-h-96` (24rem),
   matching Leptos's `.ref-image` CSS rule; previously width-only.
 

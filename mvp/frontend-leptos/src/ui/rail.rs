@@ -298,8 +298,12 @@ pub fn RailView(
                                 let cwd = p.cwd.map(str::to_owned);
                                 let stranded = p.verdict == Some(Liveness::Stranded);
                                 let dot = if stranded { "stranded" } else { "alive" };
+                                let selected = open_convs.with(|c| c.contains(&conv));
                                 view! {
-                                    <li on:click=move |_| on_toggle.run(conv_click.clone())>
+                                    <li
+                                        class:selected=selected
+                                        on:click=move |_| on_toggle.run(conv_click.clone())
+                                    >
                                         <span class="row-main">
                                             <span class=format!("dot {dot}")></span>
                                             <span class="label">{conv.clone()}</span>
