@@ -22,6 +22,17 @@ use wire::ConvAttachment;
 const DEFAULT_SILENCE_S: u64 = 60;
 /// Presumed gone after about three of its own declared intervals of silence.
 const STRANDED_MULTIPLE: u64 = 3;
+/// The slowest heartbeat this consumer honours (a deliberate cap, headed
+/// for the spec): a declared interval above it folds to it, so a bogus
+/// `intervalS: 86400` cannot keep a dead holder "alive" for days and block
+/// service on its conversation. 10 minutes is already extremely generous
+/// against the 30s cadence bridge itself pulses at.
+const MAX_INTERVAL_S: u64 = 600;
+/// The longest silence any instance is ever granted — 3× the capped
+/// interval. Also the exact capture window a boot-time seed needs: a pulse
+/// older than this cannot change any verdict, so replaying further back
+/// buys nothing.
+pub const MAX_SILENCE_S: u64 = STRANDED_MULTIPLE * MAX_INTERVAL_S;
 
 /// An attachment event's identity: the `(world, instanceId)` pair. Two
 /// identities match on the pair; if either side omits `world`, the gate
@@ -149,7 +160,11 @@ impl InstancePulse {
             // A non-positive declared interval is tolerated data with no
             // usable promise in it — folded as undeclared, never as a zero
             // threshold that reads a continuously pulsing holder stranded.
-            Some(i) if i > 0 => Duration::from_secs(i as u64 * STRANDED_MULTIPLE),
+            // Above the cap, the promise is honoured only to the cap
+            // (MAX_INTERVAL_S) — the 3× grace stays uniform for everyone.
+            Some(i) if i > 0 => {
+                Duration::from_secs((i as u64).min(MAX_INTERVAL_S) * STRANDED_MULTIPLE)
+            }
             _ => Duration::from_secs(DEFAULT_SILENCE_S),
         }
     }
@@ -182,37 +197,33 @@ impl WorldLiveness {
 
     /// `ready` restates presence with no cadence declared.
     pub fn on_ready(&mut self, instance_id: &str, now: Instant) {
-        self.instances
-            .entry(instance_id.to_string())
-            .or_insert(InstancePulse {
-                last_seen: now,
-                interval_s: None,
-            })
-            .last_seen = now;
+        self.observe(instance_id, None, now);
     }
 
     pub fn on_pulse(&mut self, instance_id: &str, interval_s: i64, now: Instant) {
-        self.instances.insert(
-            instance_id.to_string(),
-            InstancePulse {
-                last_seen: now,
-                interval_s: Some(interval_s),
-            },
-        );
+        self.observe(instance_id, Some(interval_s), now);
     }
 
     /// `attached`/`detached` telemetry proves the publisher's presence just
     /// as `ready` does (towerd's fold counts it the same way); an
     /// `attached` carrying `intervalS` also declares the cadence.
     pub fn on_attached(&mut self, instance_id: &str, interval_s: Option<i64>, now: Instant) {
+        self.observe(instance_id, interval_s, now);
+    }
+
+    /// One observation, from the live feed or a capture seed. `last_seen`
+    /// never regresses: the live subscription is made before the seed is
+    /// folded (no-gap discipline), so an older replayed frame must never
+    /// overwrite a fresher live one.
+    fn observe(&mut self, instance_id: &str, interval_s: Option<i64>, at: Instant) {
         let entry = self
             .instances
             .entry(instance_id.to_string())
             .or_insert(InstancePulse {
-                last_seen: now,
+                last_seen: at,
                 interval_s,
             });
-        entry.last_seen = now;
+        entry.last_seen = entry.last_seen.max(at);
         if interval_s.is_some() {
             entry.interval_s = interval_s;
         }
@@ -490,6 +501,30 @@ mod tests {
         assert!(!world.is_alive("inst-1", t0 + Duration::from_secs(31)));
         world.on_attached("inst-2", None, t0);
         assert!(world.is_alive("inst-2", t0 + Duration::from_secs(59)));
+    }
+
+    /// The interval cap: a declared cadence above MAX_INTERVAL_S is
+    /// honoured only to the cap, so a bogus day-long promise cannot hold a
+    /// conversation hostage — the longest silence anyone gets is
+    /// MAX_SILENCE_S.
+    #[test]
+    fn a_declared_interval_above_the_cap_is_honoured_only_to_the_cap() {
+        let t0 = Instant::now();
+        let mut world = warm(t0);
+        world.on_pulse("inst-1", 86_400, t0);
+        assert!(world.is_alive("inst-1", t0 + Duration::from_secs(MAX_SILENCE_S - 1)));
+        assert!(!world.is_alive("inst-1", t0 + Duration::from_secs(MAX_SILENCE_S + 1)));
+    }
+
+    /// Seed-after-subscribe safety: an older replayed observation must
+    /// never drag a fresher live one backwards.
+    #[test]
+    fn an_older_observation_never_regresses_last_seen() {
+        let t0 = Instant::now();
+        let mut world = warm(t0);
+        world.on_pulse("inst-1", 30, t0);
+        world.on_pulse("inst-1", 30, t0 - Duration::from_secs(200));
+        assert!(world.is_alive("inst-1", t0 + Duration::from_secs(89)));
     }
 
     #[test]

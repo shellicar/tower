@@ -175,6 +175,35 @@ impl Broker for FakeBroker {
         Ok(FakeReplay { queued })
     }
 
+    /// Unlike `replay`, an unscripted filter here is an ordinary
+    /// `StreamUnavailable`, not a panic: the seed's degrade path (a
+    /// deployment that doesn't capture telemetry) is a real behaviour under
+    /// test, so absence models a missing stream rather than a typo. The
+    /// fake ignores `start` — a test scripts exactly the window it means.
+    async fn replay_since(
+        &self,
+        stream: String,
+        filter_subject: String,
+        _start: std::time::SystemTime,
+    ) -> Result<Self::Replay, BrokerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("replay_since:{stream}:{filter_subject}"));
+        match self.replay_data.lock().unwrap().get(&filter_subject) {
+            Some(queued) => Ok(FakeReplay {
+                queued: queued.clone(),
+            }),
+            None => Err(BrokerError::StreamUnavailable {
+                stream,
+                source: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "no scripted capture for this filter",
+                )),
+            }),
+        }
+    }
+
     async fn fetch_object(&self, bucket: String, id: String) -> Result<Vec<u8>, BrokerError> {
         self.calls
             .lock()

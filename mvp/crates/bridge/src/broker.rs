@@ -132,6 +132,17 @@ pub trait Broker: Clone + Send + Sync + 'static {
         filter_subject: String,
     ) -> impl Future<Output = Result<Self::Replay, BrokerError>> + Send;
 
+    /// Like `replay`, but starting from `start` rather than the beginning
+    /// of the stream (JetStream ByStartTime) — the liveness seed's verb: a
+    /// bounded window of recent telemetry, never the capture's full
+    /// retention.
+    fn replay_since(
+        &self,
+        stream: String,
+        filter_subject: String,
+        start: std::time::SystemTime,
+    ) -> impl Future<Output = Result<Self::Replay, BrokerError>> + Send;
+
     /// Fetch one attachment's bytes from the transit object store
     /// (objects.rs's `fetch_object`/`resolve_history`/`validate_fresh`) —
     /// bucket and id in, bytes out; the caller already knows the media type
@@ -251,6 +262,66 @@ impl Broker for NatsBroker {
         stream: String,
         filter_subject: String,
     ) -> Result<Self::Replay, BrokerError> {
+        self.replay_from(
+            stream,
+            filter_subject,
+            async_nats::jetstream::consumer::DeliverPolicy::All,
+        )
+        .await
+    }
+
+    async fn replay_since(
+        &self,
+        stream: String,
+        filter_subject: String,
+        start: std::time::SystemTime,
+    ) -> Result<Self::Replay, BrokerError> {
+        self.replay_from(
+            stream,
+            filter_subject,
+            async_nats::jetstream::consumer::DeliverPolicy::ByStartTime {
+                start_time: start.into(),
+            },
+        )
+        .await
+    }
+
+    async fn fetch_object(&self, bucket: String, id: String) -> Result<Vec<u8>, BrokerError> {
+        let js = async_nats::jetstream::new(self.client.clone());
+        let store = js.get_object_store(&bucket).await.map_err(|e| {
+            BrokerError::ObjectStoreUnavailable {
+                bucket: bucket.clone(),
+                source: Box::new(e),
+            }
+        })?;
+        let mut object = store
+            .get(&id)
+            .await
+            .map_err(|e| BrokerError::ObjectNotFound {
+                id: id.clone(),
+                bucket: bucket.clone(),
+                source: Box::new(e),
+            })?;
+        use tokio::io::AsyncReadExt;
+        let mut bytes = Vec::new();
+        object
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|source| BrokerError::ObjectReadFailed {
+                id,
+                source: Box::new(source),
+            })?;
+        Ok(bytes)
+    }
+}
+
+impl NatsBroker {
+    async fn replay_from(
+        &self,
+        stream: String,
+        filter_subject: String,
+        deliver_policy: async_nats::jetstream::consumer::DeliverPolicy,
+    ) -> Result<NatsReplay, BrokerError> {
         let js = async_nats::jetstream::new(self.client.clone());
         let handle = js
             .get_stream(&stream)
@@ -262,7 +333,7 @@ impl Broker for NatsBroker {
         let consumer = handle
             .create_consumer(async_nats::jetstream::consumer::pull::Config {
                 filter_subject,
-                deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
+                deliver_policy,
                 // Ephemeral (no durable_name): explicit, not the server
                 // default reached by omission, since this is now a trait
                 // contract — the server reclaims it if a replay is ever
@@ -297,34 +368,6 @@ impl Broker for NatsBroker {
                 Ok(NatsReplay::Batch(Box::new(messages)))
             }
         }
-    }
-
-    async fn fetch_object(&self, bucket: String, id: String) -> Result<Vec<u8>, BrokerError> {
-        let js = async_nats::jetstream::new(self.client.clone());
-        let store = js.get_object_store(&bucket).await.map_err(|e| {
-            BrokerError::ObjectStoreUnavailable {
-                bucket: bucket.clone(),
-                source: Box::new(e),
-            }
-        })?;
-        let mut object = store
-            .get(&id)
-            .await
-            .map_err(|e| BrokerError::ObjectNotFound {
-                id: id.clone(),
-                bucket: bucket.clone(),
-                source: Box::new(e),
-            })?;
-        use tokio::io::AsyncReadExt;
-        let mut bytes = Vec::new();
-        object
-            .read_to_end(&mut bytes)
-            .await
-            .map_err(|source| BrokerError::ObjectReadFailed {
-                id,
-                source: Box::new(source),
-            })?;
-        Ok(bytes)
     }
 }
 

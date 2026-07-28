@@ -505,6 +505,9 @@ struct Host<B: Broker, D: DeltaSink> {
     /// (`BRIDGE_STREAM`), read once at boot — ambient env never reaches a
     /// call site.
     stream: String,
+    /// The ephemeral capture the liveness seed replays world telemetry
+    /// from (`BRIDGE_STREAM_EPHEMERAL`).
+    stream_ephemeral: String,
     /// This world's own liveness map (service.rs), fed by the boot-time
     /// telemetry watch and consulted by the `service` premise.
     liveness: Arc<std::sync::Mutex<service::WorldLiveness>>,
@@ -883,47 +886,89 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
     }
 }
 
-/// Fold this world's own telemetry into the shared liveness map for the
-/// `service` premise's alive-vs-stranded distinction. Takes an already-live
-/// subscription: the request loop makes it before it starts answering, so
-/// the two stand or fall together — an instance whose liveness feed isn't
-/// up must never answer `service` off a permanently empty map.
-async fn feed_world_liveness(
-    mut sub: impl bridge::broker::BrokerSubscription,
-    liveness: Arc<std::sync::Mutex<service::WorldLiveness>>,
+/// Fold one world-telemetry frame into the liveness map, observed `at` —
+/// receipt time for the live feed, a ts-derived instant for a seeded frame.
+fn fold_world_telemetry(
+    subject: &str,
+    payload: &[u8],
+    at: std::time::Instant,
+    liveness: &std::sync::Mutex<service::WorldLiveness>,
 ) {
-    while let Some(msg) = sub.next().await {
-        let Some(leaf) = msg.subject.rsplit('.').next() else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&msg.payload) else {
-            continue;
-        };
-        let Some(instance) = value.get("instanceId").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        let now = std::time::Instant::now();
-        let mut map = liveness.lock().unwrap();
-        match leaf {
-            "pulse" => match value.get("intervalS").and_then(serde_json::Value::as_i64) {
-                Some(interval) => map.on_pulse(instance, interval, now),
-                // A pulse without a cadence still proves presence — folded
-                // like `ready`, under the flat default threshold.
-                None => map.on_ready(instance, now),
-            },
-            "ready" => map.on_ready(instance, now),
-            // Old-tree attachment telemetry proves the publisher's presence
-            // exactly as a pulse does (towerd's fold counts it the same
-            // way); `attached` may also carry the cadence.
-            "attached" => map.on_attached(
-                instance,
-                value.get("intervalS").and_then(serde_json::Value::as_i64),
-                now,
-            ),
-            "detached" => map.on_ready(instance, now),
-            _ => {}
-        }
+    let Some(leaf) = subject.rsplit('.').next() else {
+        return;
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(payload) else {
+        return;
+    };
+    let Some(instance) = value.get("instanceId").and_then(serde_json::Value::as_str) else {
+        return;
+    };
+    let interval = value.get("intervalS").and_then(serde_json::Value::as_i64);
+    let mut map = liveness.lock().unwrap();
+    match leaf {
+        "pulse" => match interval {
+            Some(interval) => map.on_pulse(instance, interval, at),
+            // A pulse without a cadence still proves presence — folded
+            // like `ready`, under the flat default threshold.
+            None => map.on_ready(instance, at),
+        },
+        "ready" => map.on_ready(instance, at),
+        // Old-tree attachment telemetry proves the publisher's presence
+        // exactly as a pulse does (towerd's fold counts it the same way);
+        // `attached` may also carry the cadence.
+        "attached" => map.on_attached(instance, interval, at),
+        "detached" => map.on_ready(instance, at),
+        _ => {}
     }
+}
+
+/// Seed the liveness map from the ephemeral capture: the last
+/// `MAX_SILENCE_S` of this world's telemetry, which is exactly sufficient —
+/// no honoured threshold exceeds it, so an older frame cannot change any
+/// verdict. Built, not guessed: after a seed, never-heard genuinely means
+/// silent past every honoured threshold. A replayed frame's observation
+/// instant derives from its own `ts` (sender wall clock — bounded harm
+/// inside this window, and the fold never regresses a fresher live entry).
+async fn seed_world_liveness<B: Broker>(
+    broker: &B,
+    stream: &str,
+    world: &str,
+    liveness: &std::sync::Mutex<service::WorldLiveness>,
+) -> anyhow::Result<()> {
+    let window = std::time::Duration::from_secs(service::MAX_SILENCE_S);
+    let start = std::time::SystemTime::now() - window;
+    let mut replay = broker
+        .replay_since(
+            stream.to_string(),
+            format!("agent.v1.{world}.telemetry.>"),
+            start,
+        )
+        .await
+        .context("liveness seed needs the telemetry capture")?;
+    while let Some(frame) = replay.next().await {
+        let frame = frame.context("liveness seed read failed")?;
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&frame.payload) else {
+            continue;
+        };
+        let Some(ts_ms) = value
+            .get("ts")
+            .and_then(serde_json::Value::as_str)
+            .and_then(wire::parse_ts)
+        else {
+            continue;
+        };
+        let now_wall_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let age = std::time::Duration::from_millis((now_wall_ms - ts_ms).max(0) as u64);
+        if age > window {
+            continue;
+        }
+        let at = std::time::Instant::now() - age;
+        fold_world_telemetry(&frame.subject, &frame.payload, at, liveness);
+    }
+    Ok(())
 }
 
 /// The world's `service` request (agent-spec: Requests, "The premise for
@@ -1044,12 +1089,27 @@ async fn handle_service<B: Broker, D: DeltaSink>(
 /// and any other leaf is honest `unsupported` — compliance is answering,
 /// not implementing.
 async fn serve_agent_requests<B: Broker, D: DeltaSink>(host: Arc<Host<B, D>>) {
-    // The liveness feed first, and fatally: the premise's alive-vs-stranded
-    // read is only honest off a live map, so an instance that cannot watch
-    // its world-mates must not answer requests at all — the two
-    // subscriptions stand or fall together.
+    let mut delay = 1u64;
+    loop {
+        serve_agent_requests_once(&host).await;
+        eprintln!("bridge: agent request serving interrupted; re-establishing in {delay}s");
+        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+        delay = (delay * 2).min(30);
+    }
+}
+
+/// One establishment of the world's request serving: telemetry watch, seed,
+/// requests queue group, then one merged loop over both. Returns when
+/// either subscription ends or cannot be made — the caller re-establishes,
+/// so "the two stand or fall together" holds for the whole life, not just
+/// at startup: a dead telemetry feed never leaves a surviving request loop
+/// answering off a frozen map.
+async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D>>) {
+    // The liveness watch first, and fatally: the premise's alive-vs-
+    // stranded read is only honest off a live map, so an instance that
+    // cannot watch its world-mates must not answer requests at all.
     let telemetry_subject = format!("agent.v1.{}.telemetry.>", host.world);
-    let telemetry = match host.broker.subscribe(telemetry_subject.clone()).await {
+    let mut telemetry = match host.broker.subscribe(telemetry_subject.clone()).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!(
@@ -1059,11 +1119,21 @@ async fn serve_agent_requests<B: Broker, D: DeltaSink>(host: Arc<Host<B, D>>) {
             return;
         }
     };
-    // The map's warmup clock starts when the feed is actually live — until
-    // a full default threshold has elapsed, never-heard reads alive
-    // (service.rs, WorldLiveness).
+    // Subscribe first, then seed — no pulse lands in the gap between the
+    // two reads. The fresh map's warmup clock covers the deployment whose
+    // capture doesn't include telemetry (seed unavailable): until a full
+    // default threshold has elapsed, never-heard reads alive.
     *host.liveness.lock().unwrap() = service::WorldLiveness::new(std::time::Instant::now());
-    tokio::spawn(feed_world_liveness(telemetry, Arc::clone(&host.liveness)));
+    if let Err(e) = seed_world_liveness(
+        &host.broker,
+        &host.stream_ephemeral,
+        &host.world,
+        &host.liveness,
+    )
+    .await
+    {
+        eprintln!("bridge: liveness seed unavailable, holding verdicts through warmup: {e:#}");
+    }
 
     let subject = format!("agent.v1.{}.requests.>", host.world);
     let mut requests = match host
@@ -1082,39 +1152,66 @@ async fn serve_agent_requests<B: Broker, D: DeltaSink>(host: Arc<Host<B, D>>) {
     };
     let prefix = format!("agent.v1.{}.requests.", host.world);
     eprintln!("bridge: serving {subject}");
-    while let Some(msg) = requests.next().await {
-        let Some(reply_to) = msg.reply.clone() else {
-            continue;
-        };
-        let leaf = msg.subject.strip_prefix(prefix.as_str()).unwrap_or("");
-        eprintln!(
-            "{} bridge: ← agent request {leaf} ({} B)",
-            now_iso(),
-            msg.payload.len()
-        );
-        let response = match wire::parse_agent_request(leaf, &msg.payload) {
-            wire::AgentRequest::Service {
-                conversation_id,
-                cwd,
-                model,
-            } => handle_service(&host, conversation_id.0, cwd, model).await,
-            wire::AgentRequest::Invalid { leaf } => {
-                eprintln!("bridge: invalid agent request {leaf}");
-                wire::encode_rejected("invalid")
-            }
-            wire::AgentRequest::Other { leaf } => {
-                eprintln!("bridge: unsupported agent request {leaf}");
-                wire::encode_rejected("unsupported")
-            }
-        };
-        if let Err(e) = host.broker.publish(reply_to, response).await {
-            eprintln!(
-                "bridge: agent request reply publish failed: {:#}",
-                anyhow::Error::new(e)
-            );
+    loop {
+        tokio::select! {
+            // Biased: drain pending requests before reading the telemetry
+            // arm, so a scripted/finite telemetry source ending never races
+            // ahead of requests already delivered. In production telemetry
+            // frames queue in the subscription and fold between requests;
+            // verdicts are read at handle time.
+            biased;
+            req = requests.next() => match req {
+                None => {
+                    eprintln!("bridge: agent requests subscription ended");
+                    return;
+                }
+                Some(msg) => {
+                    let Some(reply_to) = msg.reply.clone() else {
+                        continue;
+                    };
+                    let leaf = msg.subject.strip_prefix(prefix.as_str()).unwrap_or("");
+                    eprintln!(
+                        "{} bridge: ← agent request {leaf} ({} B)",
+                        now_iso(),
+                        msg.payload.len()
+                    );
+                    let response = match wire::parse_agent_request(leaf, &msg.payload) {
+                        wire::AgentRequest::Service {
+                            conversation_id,
+                            cwd,
+                            model,
+                        } => handle_service(host, conversation_id.0, cwd, model).await,
+                        wire::AgentRequest::Invalid { leaf } => {
+                            eprintln!("bridge: invalid agent request {leaf}");
+                            wire::encode_rejected("invalid")
+                        }
+                        wire::AgentRequest::Other { leaf } => {
+                            eprintln!("bridge: unsupported agent request {leaf}");
+                            wire::encode_rejected("unsupported")
+                        }
+                    };
+                    if let Err(e) = host.broker.publish(reply_to, response).await {
+                        eprintln!(
+                            "bridge: agent request reply publish failed: {:#}",
+                            anyhow::Error::new(e)
+                        );
+                    }
+                }
+            },
+            tele = telemetry.next() => match tele {
+                None => {
+                    eprintln!("bridge: world telemetry subscription ended");
+                    return;
+                }
+                Some(msg) => fold_world_telemetry(
+                    &msg.subject,
+                    &msg.payload,
+                    std::time::Instant::now(),
+                    &host.liveness,
+                ),
+            },
         }
     }
-    eprintln!("bridge: agent requests subscription ended");
 }
 
 /// Parse one control line and hand it to the host. Shared by the -c batch and
@@ -1302,6 +1399,8 @@ async fn main() -> anyhow::Result<()> {
     // the world's own NATS request loop.
     let default_model = Arc::new(RwLock::new(default_model));
     let stream = std::env::var("BRIDGE_STREAM").unwrap_or_else(|_| "conv-approval".into());
+    let stream_ephemeral =
+        std::env::var("BRIDGE_STREAM_EPHEMERAL").unwrap_or_else(|_| "conv-ephemeral".into());
     let liveness = Arc::new(std::sync::Mutex::new(service::WorldLiveness::new(
         std::time::Instant::now(),
     )));
@@ -1329,6 +1428,7 @@ async fn main() -> anyhow::Result<()> {
         thinking_budget,
         permissions: Arc::new(RwLock::new(permissions::PermissionSet::strict_default())),
         stream,
+        stream_ephemeral,
         liveness,
     });
 
@@ -2126,7 +2226,7 @@ mod tests {
         let scratch = TestScratch::new("service-loop");
         let host = Arc::new(host(&scratch, broker.clone()));
 
-        super::serve_agent_requests(host).await;
+        super::serve_agent_requests_once(&host).await;
 
         let calls = broker.calls.lock().unwrap().clone();
         assert!(
@@ -2167,7 +2267,7 @@ mod tests {
         let scratch = TestScratch::new("service-no-feed");
         let host = Arc::new(host(&scratch, broker.clone()));
 
-        super::serve_agent_requests(host).await;
+        super::serve_agent_requests_once(&host).await;
 
         let calls = broker.calls.lock().unwrap().clone();
         assert!(
@@ -2175,6 +2275,86 @@ mod tests {
                 .iter()
                 .any(|c| c.starts_with("queue_subscribe:agent.v1.mac.requests.>")),
             "the two subscriptions stand or fall together: {calls:?}"
+        );
+    }
+
+    fn epoch_ms_ago(secs: u64) -> String {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        wire::format_ts(now_ms - (secs as i64) * 1000)
+    }
+
+    fn pulse_frame(instance: &str, interval_s: i64, ago_secs: u64) -> BrokerMessage {
+        BrokerMessage {
+            subject: "agent.v1.mac.telemetry.pulse".to_string(),
+            payload: serde_json::json!({
+                "ts": epoch_ms_ago(ago_secs),
+                "instanceId": instance,
+                "intervalS": interval_s,
+            })
+            .to_string()
+            .into_bytes()
+            .into(),
+            reply: None,
+        }
+    }
+
+    /// The seed builds the view instead of guessing: a world-mate whose
+    /// last pulse (long cadence included) sits in the capture reads alive
+    /// off its own promise — where an unseeded warm map would call it
+    /// stranded, never having overheard it.
+    #[tokio::test]
+    async fn the_seed_folds_captured_pulses_so_a_long_cadence_mate_reads_alive() {
+        let broker = FakeBroker::default();
+        broker.replay_data.lock().unwrap().insert(
+            "agent.v1.mac.telemetry.>".to_string(),
+            VecDeque::from([Ok(pulse_frame("inst-slow", 300, 400))]),
+        );
+        let scratch = TestScratch::new("service-seed");
+        let host = host(&scratch, broker.clone());
+
+        super::seed_world_liveness(&host.broker, "conv-ephemeral", "mac", &host.liveness)
+            .await
+            .unwrap();
+
+        // 400s of silence against a declared 300s cadence (threshold 900s):
+        // alive by its own promise, which only the capture could know.
+        let now = std::time::Instant::now();
+        assert!(host.liveness.lock().unwrap().is_alive("inst-slow", now));
+        assert!(
+            !host.liveness.lock().unwrap().is_alive("inst-unheard", now),
+            "the map is warm (testsupport backdates it): never-heard stays stranded"
+        );
+    }
+
+    /// A captured frame older than the longest honoured silence cannot
+    /// change any verdict and is skipped.
+    #[tokio::test]
+    async fn the_seed_skips_frames_older_than_the_honoured_window() {
+        let broker = FakeBroker::default();
+        broker.replay_data.lock().unwrap().insert(
+            "agent.v1.mac.telemetry.>".to_string(),
+            VecDeque::from([Ok(pulse_frame(
+                "inst-old",
+                300,
+                crate::service::MAX_SILENCE_S + 60,
+            ))]),
+        );
+        let scratch = TestScratch::new("service-seed-old");
+        let host = host(&scratch, broker.clone());
+
+        super::seed_world_liveness(&host.broker, "conv-ephemeral", "mac", &host.liveness)
+            .await
+            .unwrap();
+
+        assert!(
+            !host
+                .liveness
+                .lock()
+                .unwrap()
+                .is_alive("inst-old", std::time::Instant::now())
         );
     }
 

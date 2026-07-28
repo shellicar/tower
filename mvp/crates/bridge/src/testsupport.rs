@@ -63,6 +63,7 @@ pub(crate) fn host(
             crate::permissions::PermissionSet::strict_default(),
         )),
         stream: "conv-approval".to_string(),
+        stream_ephemeral: "conv-ephemeral".to_string(),
         // Warm: backdated past the default silence threshold, so a test's
         // never-heard holder reads as measured silence (stranded), not a
         // cold start. A test proving the cold-start hold overwrites this.
