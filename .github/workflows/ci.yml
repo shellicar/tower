@@ -128,16 +128,19 @@ jobs:
         working-directory: mvp
       - name: Package
         shell: bash
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
         run: |
           set -eu
           ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          VERSION="${VERSION:-0.0.0-$(git rev-parse --short HEAD)}"
           mkdir out
           cp "mvp/target/release/towerd$ext" out/
-          tar czf "towerd-${{ matrix.platform }}.tar.gz" -C out .
+          tar czf "towerd-$VERSION-${{ matrix.platform }}.tar.gz" -C out .
       - uses: actions/upload-artifact@v4
         with:
           name: tower-towerd-${{ matrix.platform }}
-          path: towerd-${{ matrix.platform }}.tar.gz
+          path: towerd-*-${{ matrix.platform }}.tar.gz
 
   binary-bridge:
     needs: detect
@@ -162,16 +165,19 @@ jobs:
         working-directory: mvp
       - name: Package
         shell: bash
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
         run: |
           set -eu
           ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          VERSION="${VERSION:-0.0.0-$(git rev-parse --short HEAD)}"
           mkdir out
           cp "mvp/target/release/bridge$ext" out/
-          tar czf "bridge-${{ matrix.platform }}.tar.gz" -C out .
+          tar czf "bridge-$VERSION-${{ matrix.platform }}.tar.gz" -C out .
       - uses: actions/upload-artifact@v4
         with:
           name: tower-bridge-${{ matrix.platform }}
-          path: bridge-${{ matrix.platform }}.tar.gz
+          path: bridge-*-${{ matrix.platform }}.tar.gz
 
   binary-helm:
     needs: detect
@@ -196,16 +202,19 @@ jobs:
         working-directory: mvp
       - name: Package
         shell: bash
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
         run: |
           set -eu
           ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          VERSION="${VERSION:-0.0.0-$(git rev-parse --short HEAD)}"
           mkdir out
           cp "mvp/target/release/helm$ext" out/
-          tar czf "helm-${{ matrix.platform }}.tar.gz" -C out .
+          tar czf "helm-$VERSION-${{ matrix.platform }}.tar.gz" -C out .
       - uses: actions/upload-artifact@v4
         with:
           name: tower-helm-${{ matrix.platform }}
-          path: helm-${{ matrix.platform }}.tar.gz
+          path: helm-*-${{ matrix.platform }}.tar.gz
 
   # --- the two web frontends: platform-independent, one build each --------
   frontend-svelte:
@@ -224,11 +233,18 @@ jobs:
         working-directory: mvp/frontend-svelte
       - run: pnpm build
         working-directory: mvp/frontend-svelte
-      - run: tar czf tower-svelte.tar.gz -C mvp/frontend-svelte/dist .
+      - name: Package
+        shell: bash
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
+        run: |
+          set -eu
+          VERSION="${VERSION:-0.0.0-$(git rev-parse --short HEAD)}"
+          tar czf "tower-svelte-$VERSION.tar.gz" -C mvp/frontend-svelte/dist .
       - uses: actions/upload-artifact@v4
         with:
           name: tower-tower-svelte
-          path: tower-svelte.tar.gz
+          path: tower-svelte-*.tar.gz
 
   frontend-leptos:
     needs: detect
@@ -243,11 +259,18 @@ jobs:
       - uses: jetli/trunk-action@v0.5.0
       - run: trunk build --release
         working-directory: mvp/frontend-leptos
-      - run: tar czf tower-leptos.tar.gz -C mvp/frontend-leptos/dist .
+      - name: Package
+        shell: bash
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
+        run: |
+          set -eu
+          VERSION="${VERSION:-0.0.0-$(git rev-parse --short HEAD)}"
+          tar czf "tower-leptos-$VERSION.tar.gz" -C mvp/frontend-leptos/dist .
       - uses: actions/upload-artifact@v4
         with:
           name: tower-tower-leptos
-          path: tower-leptos.tar.gz
+          path: tower-leptos-*.tar.gz
 
   # One stable check name for a branch ruleset to require. The real jobs
   # above carry per-matrix names (binary-towerd (macos-14, darwin-arm64),
