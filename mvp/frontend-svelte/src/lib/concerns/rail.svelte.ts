@@ -190,32 +190,23 @@ export class Rail {
     return a ? (this.#instances.get(`${a.world}/${a.instanceId}`) ?? null) : null;
   }
 
-  /** The freshest LIVE attachment's cwd for a conversation — "where is this
-   *  conversation being served", for the open panel's status line. Gated on
-   *  liveness (folded against the rail's own clock, agent-spec: a fold,
-   *  never declared): a stranded agent is not serving anything, so its cwd
-   *  must not render as if it were. Not gated on rowlessness like
+  /** The conversation's live attachment's cwd — "where is this conversation
+   *  being served", for the open panel's status line. Gated on liveness
+   *  (folded against the rail's own clock, agent-spec: a fold, never
+   *  declared): a stranded agent is not serving anything, so its cwd must
+   *  not render as if it were. Not gated on rowlessness like
    *  `attachedOnly`: an ordinary conversation with a row can still have a
    *  live attachment. undefined when nothing is attached and alive, or the
    *  attachment carries no cwd.
    *
-   *  Interim tie-break (no spec rule exists yet): later-arrived wins on an
-   *  equal pulse (`>=`, not `>`) — the freshest wire fact, not first-come.
-   *  This selection dissolves once supersession (docs/spec/agent-spec.md)
-   *  makes a conversation's attachment singular by construction. */
+   *  No tie to break: attachments are keyed by conv alone (agent-spec.md,
+   *  supersession), so a conversation has at most one. */
   liveCwd(conv: string): string | undefined {
-    let best: AgentAttachment | undefined;
-    let bestPulse = -1;
-    for (const a of this.#attachments.values()) {
-      if (a.conv !== conv) continue;
-      const inst = this.#instances.get(`${a.world}/${a.instanceId}`);
-      if (!inst || livenessVerdict(this.#now, inst.lastPulse, inst.intervalS) !== 'alive') continue;
-      if (inst.lastPulse >= bestPulse) {
-        bestPulse = inst.lastPulse;
-        best = a;
-      }
-    }
-    return best?.cwd;
+    const a = this.#attachments.get(conv);
+    if (!a) return undefined;
+    const inst = this.#instances.get(`${a.world}/${a.instanceId}`);
+    if (!inst || livenessVerdict(this.#now, inst.lastPulse, inst.intervalS) !== 'alive') return undefined;
+    return a.cwd;
   }
 
   /** Potential conversations: attached, no row yet — served, silent. Transient
