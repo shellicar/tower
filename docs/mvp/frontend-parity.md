@@ -24,7 +24,7 @@ side by side. Derived from code, not from any prior claim about what's missing.
 - [x] Concern: conversation (messages, streaming, queryState, pendingSay) — parity, `can_send`/composer gating logic matches
 - [x] Concern: approvals — parity
 - [x] Concern: usage — parity
-- [x] Concern: view (tabs, layout, ViewConfig persistence) — parity
+- [x] Concern: view (tabs, layout, ViewConfig persistence) — gap found (active-tab restore), fixed 26 Jul
 - [x] Component: conversation panel render (blocks, markdown, virtual list, composer, scroll-anchor) — gaps found
 - [x] Component: rail render (RowList vs ui/rail.rs — tag filter/group UI) — parity
 - [x] Component: approvals view — parity
@@ -35,6 +35,25 @@ side by side. Derived from code, not from any prior claim about what's missing.
 - [x] Porting order
 
 ## Gaps found
+
+### View concern — active tab lost across refresh
+
+- [x] **Leptos forgets the selected tab across a page refresh** (always shows tab 0). The previous
+  code-read-level "parity" verdict above looked only at whether `ViewConfig` persistence
+  (`tower.viewConfig.<tab>`) existed on both sides; it missed that `active` (which tab is in front) is a
+  separate, local-only piece of state, persisted under its own key (`tower.activeTab`). Root cause in
+  `frontend-leptos/src/app.rs`: on init it built `View::default()` (exactly one tab) then called
+  `v.switch_tab(load_active())` — `switch_tab`'s own bounds guard (`if i < self.tabs.len()`) silently
+  dropped any persisted index beyond 0, since only the placeholder tab existed at that point. The
+  server's `Layout` snapshot then replaced the tabs later, but `View::apply` only clamps `active` if it's
+  now out of range — it never re-derives it from storage, so the restore was lost for good. Svelte's
+  `view.svelte.ts` never does this two-step dance: `active = $state<number>(readActiveTab())` sets the
+  raw persisted number directly, unclamped, and the `tab` getter (`Math.min(active, tabs.length - 1)`)
+  is what protects reads, with the `layout` fold's own clamp (and re-save) catching a real shrink.
+  Fixed in `frontend-leptos/src/app.rs`: `View { active: load_active(), ..View::default() }` sets the raw
+  index directly instead of going through `switch_tab`, and the `Layout`-fold branch now re-persists
+  `active` via `save_active` after every applied fold (mirroring Svelte's unconditional `saveActiveTab`
+  call in `#fold`), so a clamp from a shrunk tab set survives the next refresh too.
 
 ### Transport / connection lifecycle
 
