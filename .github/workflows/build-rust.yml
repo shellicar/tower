@@ -24,10 +24,15 @@ on:
         required: false
         type: string
         default: ''
+      should_run:
+        description: False skips the build (used to select one app out of a caller's matrix on a tag push, since the caller's job-level `if:` can't see `matrix`)
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   binary:
-    if: inputs.kind == 'binary'
+    if: inputs.kind == 'binary' && inputs.should_run
     strategy:
       fail-fast: false
       matrix:
@@ -63,7 +68,7 @@ jobs:
           path: ${{ inputs.package }}-*-${{ matrix.platform }}.tar.gz
 
   wasm:
-    if: inputs.kind == 'wasm'
+    if: inputs.kind == 'wasm' && inputs.should_run
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

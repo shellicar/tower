@@ -108,7 +108,6 @@ jobs:
   # via the reusable build-rust.yml (kind: binary) matrixed over the app ---
   binary:
     needs: detect
-    if: github.ref_type != 'tag' || needs.detect.outputs.app == matrix.package
     strategy:
       fail-fast: false
       matrix:
@@ -119,6 +118,7 @@ jobs:
       app_name: ${{ matrix.package }}
       kind: binary
       version: ${{ needs.detect.outputs.version }}
+      should_run: ${{ github.ref_type != 'tag' || needs.detect.outputs.app == matrix.package }}
 
   # --- the two web frontends: platform-independent, one build each --------
   frontend-svelte:
