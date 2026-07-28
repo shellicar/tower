@@ -69,6 +69,17 @@ describe('Rail attachments', () => {
 });
 
 describe('liveCwd', () => {
+  it('reads the attachment replacing a prior one', () => {
+    // A second attached for the same conv supersedes the first (agent-spec);
+    // liveCwd must read the survivor, not the ghost.
+    const { rail, emit } = fakeTransport({ now: () => 200_000 });
+    emit(attached('w1', 100_000, '/old/path'));
+    emit(attached('w2', 200_000, '/new/path'));
+
+    expect(rail.liveCwd('a')).toBe('/new/path');
+    expect(rail.liveCwd('unknown')).toBeUndefined();
+  });
+
   it('hides the cwd of a stranded attachment', () => {
     // Attached at t=0, read at t=1000s: silence far past the stranded
     // threshold. Liveness is a fold against the clock (agent-spec); a dead
