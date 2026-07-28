@@ -105,18 +105,16 @@ jobs:
           fi
 
   # --- towerd / bridge / helm: same build shape, three cargo binaries,
-  # via the reusable build-rust.yml (kind: binary) matrixed over the app ---
+  # via the reusable build-rust-binary.yml matrixed over the app ---------
   binary:
     needs: detect
     strategy:
       fail-fast: false
       matrix:
         package: [towerd, bridge, helm]
-    uses: ./.github/workflows/build-rust.yml
+    uses: ./.github/workflows/build-rust-binary.yml
     with:
       package: ${{ matrix.package }}
-      app_name: ${{ matrix.package }}
-      kind: binary
       version: ${{ needs.detect.outputs.version }}
       should_run: ${{ github.ref_type != 'tag' || needs.detect.outputs.app == matrix.package }}
 
@@ -133,11 +131,10 @@ jobs:
   frontend-leptos:
     needs: detect
     if: github.ref_type != 'tag' || needs.detect.outputs.app == 'tower-leptos'
-    uses: ./.github/workflows/build-rust.yml
+    uses: ./.github/workflows/build-rust-wasm.yml
     with:
       package: frontend-leptos
       app_name: tower-leptos
-      kind: wasm
       version: ${{ needs.detect.outputs.version }}
 
   # One stable check name for a branch ruleset to require. The real jobs

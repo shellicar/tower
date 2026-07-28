@@ -1,22 +1,12 @@
-name: Build Rust app
+name: Build Rust binary
 
-# Reusable: builds one Rust app and uploads it as a version-named artifact.
-# `kind: binary` builds a native cargo binary across all three platforms
-# (towerd, bridge, helm); `kind: wasm` builds the one wasm frontend
-# (frontend-leptos) via trunk, once, platform-independent.
+# Reusable: builds one native cargo binary (towerd, bridge, helm) across all
+# three platforms and uploads each as a version-named artifact.
 on:
   workflow_call:
     inputs:
       package:
-        description: Crate name (binary) or directory (wasm) to build
-        required: true
-        type: string
-      app_name:
-        description: Name used in the tag/artifact (matches the crate name for a binary; the app's own name for frontend-leptos)
-        required: true
-        type: string
-      kind:
-        description: 'binary or wasm'
+        description: Crate name to build
         required: true
         type: string
       version:
@@ -32,7 +22,7 @@ on:
 
 jobs:
   binary:
-    if: inputs.kind == 'binary' && inputs.should_run
+    if: inputs.should_run
     strategy:
       fail-fast: false
       matrix:
@@ -64,30 +54,5 @@ jobs:
           tar czf "${{ inputs.package }}-$VERSION-${{ matrix.platform }}.tar.gz" -C out .
       - uses: actions/upload-artifact@v4
         with:
-          name: tower-${{ inputs.app_name }}-${{ matrix.platform }}
+          name: tower-${{ inputs.package }}-${{ matrix.platform }}
           path: ${{ inputs.package }}-*-${{ matrix.platform }}.tar.gz
-
-  wasm:
-    if: inputs.kind == 'wasm' && inputs.should_run
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: mvp
-      - run: rustup target add wasm32-unknown-unknown
-      - uses: jetli/trunk-action@v0.5.0
-      - run: trunk build --release
-        working-directory: mvp/${{ inputs.package }}
-      - name: Package
-        shell: bash
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          set -eu
-          VERSION="${VERSION:-0.0.0-$(git rev-parse --short HEAD)}"
-          tar czf "${{ inputs.app_name }}-$VERSION.tar.gz" -C mvp/${{ inputs.package }}/dist .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tower-${{ inputs.app_name }}
-          path: ${{ inputs.app_name }}-*.tar.gz
