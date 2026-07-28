@@ -1,17 +1,22 @@
 import DOMPurify from 'dompurify';
-import { Marked, Renderer } from 'marked';
+import { Marked } from 'marked';
 
-const renderer = new Renderer();
-renderer.link = function ({ href, title, tokens }) {
-  const titleAttr = title != null ? ` title="${title}"` : '';
-  return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${this.parser.parseInline(tokens)}</a>`;
-};
-const marked = new Marked({ renderer, gfm: true, breaks: true });
+const marked = new Marked({ gfm: true, breaks: true });
 
-// Untrusted message content, sanitized before {@html}. target/rel survive
-// DOMPurify's default attribute allowlist only via ADD_ATTR.
+// Every anchor leaves the sanitizer with the same target/rel, whether it came
+// from markdown syntax or a raw HTML <a> in the source text — a renderer.link
+// override only catches the former, so this runs post-sanitize on the real
+// DOM nodes instead, where the guarantee can't be bypassed by writing raw HTML.
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.tagName === 'A') {
+    node.setAttribute('target', '_blank');
+    node.setAttribute('rel', 'noopener noreferrer');
+  }
+});
+
+// Untrusted message content, sanitized before {@html}.
 export function renderMarkdown(text: string): string {
-  return DOMPurify.sanitize(marked.parse(text, { async: false }), { ADD_ATTR: ['target', 'rel'] });
+  return DOMPurify.sanitize(marked.parse(text, { async: false }));
 }
 
 // Detects whether text uses any markdown construct beyond plain prose, so
