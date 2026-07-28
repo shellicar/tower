@@ -114,6 +114,42 @@ impl Broker for FakeBroker {
         }
     }
 
+    /// Queue-group delivery is the real broker's concern; a fake with one
+    /// subscriber per subject serves the scripted messages the same way,
+    /// recording the group so a test can pin that the queue-group form was
+    /// used (a plain subscribe on a requests subject would make every
+    /// instance a responder).
+    async fn queue_subscribe(
+        &self,
+        subject: String,
+        group: String,
+    ) -> Result<Self::Subscription, BrokerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("queue_subscribe:{subject}:{group}"));
+        if self.subscribe_fails.load(Ordering::SeqCst)
+            || self
+                .subscribe_fail_subjects
+                .lock()
+                .unwrap()
+                .contains(&subject)
+        {
+            Err(BrokerError::Subscribe(Box::new(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                "scripted subscribe failure",
+            ))))
+        } else {
+            let queued = self
+                .subscribe_data
+                .lock()
+                .unwrap()
+                .remove(&subject)
+                .unwrap_or_default();
+            Ok(FakeSubscription { queued })
+        }
+    }
+
     async fn replay(
         &self,
         stream: String,

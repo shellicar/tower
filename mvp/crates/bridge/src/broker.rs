@@ -108,6 +108,17 @@ pub trait Broker: Clone + Send + Sync + 'static {
         subject: String,
     ) -> impl Future<Output = Result<Self::Subscription, BrokerError>> + Send;
 
+    /// Subscribe as one member of a queue group: the broker delivers each
+    /// message to exactly one member. The world's request subjects need this
+    /// (agent-spec, Requests: several instances sharing a world share a
+    /// queue group, so exactly one answers) — a plain subscribe there would
+    /// make every instance a responder.
+    fn queue_subscribe(
+        &self,
+        subject: String,
+        group: String,
+    ) -> impl Future<Output = Result<Self::Subscription, BrokerError>> + Send;
+
     /// Open a JetStream capture stream's backlog, filtered to
     /// `filter_subject`, in stream order — adopt's replay. Bounded: the
     /// returned source yields exactly the backlog pending at consumer
@@ -218,6 +229,18 @@ impl Broker for NatsBroker {
     async fn subscribe(&self, subject: String) -> Result<Self::Subscription, BrokerError> {
         self.client
             .subscribe(subject)
+            .await
+            .map(NatsSubscription)
+            .map_err(|e| BrokerError::Subscribe(Box::new(e)))
+    }
+
+    async fn queue_subscribe(
+        &self,
+        subject: String,
+        group: String,
+    ) -> Result<Self::Subscription, BrokerError> {
+        self.client
+            .queue_subscribe(subject, group)
             .await
             .map(NatsSubscription)
             .map_err(|e| BrokerError::Subscribe(Box::new(e)))
