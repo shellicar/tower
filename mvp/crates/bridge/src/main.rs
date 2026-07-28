@@ -884,25 +884,14 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
 }
 
 /// Fold this world's own telemetry into the shared liveness map for the
-/// `service` premise's alive-vs-stranded distinction. A plain subscription
-/// from boot: an instance never heard from folds as not-alive, the landing
-/// unconditional supersession makes safe (agent-spec, the premise note).
-async fn feed_world_liveness<B: Broker>(
-    broker: B,
-    world: String,
+/// `service` premise's alive-vs-stranded distinction. Takes an already-live
+/// subscription: the request loop makes it before it starts answering, so
+/// the two stand or fall together — an instance whose liveness feed isn't
+/// up must never answer `service` off a permanently empty map.
+async fn feed_world_liveness(
+    mut sub: impl bridge::broker::BrokerSubscription,
     liveness: Arc<std::sync::Mutex<service::WorldLiveness>>,
 ) {
-    let subject = format!("agent.v1.{world}.telemetry.>");
-    let mut sub = match broker.subscribe(subject.clone()).await {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!(
-                "bridge: world telemetry subscribe failed ({subject}): {:#}",
-                anyhow::Error::new(e)
-            );
-            return;
-        }
-    };
     while let Some(msg) = sub.next().await {
         let Some(leaf) = msg.subject.rsplit('.').next() else {
             continue;
@@ -923,6 +912,15 @@ async fn feed_world_liveness<B: Broker>(
                 None => map.on_ready(instance, now),
             },
             "ready" => map.on_ready(instance, now),
+            // Old-tree attachment telemetry proves the publisher's presence
+            // exactly as a pulse does (towerd's fold counts it the same
+            // way); `attached` may also carry the cadence.
+            "attached" => map.on_attached(
+                instance,
+                value.get("intervalS").and_then(serde_json::Value::as_i64),
+                now,
+            ),
+            "detached" => map.on_ready(instance, now),
             _ => {}
         }
     }
@@ -1046,6 +1044,27 @@ async fn handle_service<B: Broker, D: DeltaSink>(
 /// and any other leaf is honest `unsupported` — compliance is answering,
 /// not implementing.
 async fn serve_agent_requests<B: Broker, D: DeltaSink>(host: Arc<Host<B, D>>) {
+    // The liveness feed first, and fatally: the premise's alive-vs-stranded
+    // read is only honest off a live map, so an instance that cannot watch
+    // its world-mates must not answer requests at all — the two
+    // subscriptions stand or fall together.
+    let telemetry_subject = format!("agent.v1.{}.telemetry.>", host.world);
+    let telemetry = match host.broker.subscribe(telemetry_subject.clone()).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "bridge: world telemetry subscribe failed ({telemetry_subject}): {:#} — not serving agent requests",
+                anyhow::Error::new(e)
+            );
+            return;
+        }
+    };
+    // The map's warmup clock starts when the feed is actually live — until
+    // a full default threshold has elapsed, never-heard reads alive
+    // (service.rs, WorldLiveness).
+    *host.liveness.lock().unwrap() = service::WorldLiveness::new(std::time::Instant::now());
+    tokio::spawn(feed_world_liveness(telemetry, Arc::clone(&host.liveness)));
+
     let subject = format!("agent.v1.{}.requests.>", host.world);
     let mut requests = match host
         .broker
@@ -1283,7 +1302,9 @@ async fn main() -> anyhow::Result<()> {
     // the world's own NATS request loop.
     let default_model = Arc::new(RwLock::new(default_model));
     let stream = std::env::var("BRIDGE_STREAM").unwrap_or_else(|_| "conv-approval".into());
-    let liveness = Arc::new(std::sync::Mutex::new(service::WorldLiveness::default()));
+    let liveness = Arc::new(std::sync::Mutex::new(service::WorldLiveness::new(
+        std::time::Instant::now(),
+    )));
     let host = Arc::new(Host {
         broker,
         delta,
@@ -1308,18 +1329,14 @@ async fn main() -> anyhow::Result<()> {
         thinking_budget,
         permissions: Arc::new(RwLock::new(permissions::PermissionSet::strict_default())),
         stream,
-        liveness: Arc::clone(&liveness),
+        liveness,
     });
 
-    // World-mate liveness: the `service` premise's alive-vs-stranded read.
-    tokio::spawn(feed_world_liveness(
-        host.broker.clone(),
-        host.world.clone(),
-        liveness,
-    ));
     // The world's own requests (agent-spec): queue group per world, so
     // exactly one instance answers even with several sharing it. Plain
-    // NATS, never JetStream-captured (nats-spec, Storage).
+    // NATS, never JetStream-captured (nats-spec, Storage). The loop makes
+    // the world-mate liveness feed before it answers anything, and refuses
+    // to serve if that feed cannot be made.
     tokio::spawn(serve_agent_requests(Arc::clone(&host)));
 
     // -c: a batch of control lines run before stdin takes over. Each writes its
@@ -2133,6 +2150,55 @@ mod tests {
         assert_eq!(
             reply_to("_INBOX.r2"),
             serde_json::json!({ "rejected": true, "reason": "invalid" })
+        );
+    }
+
+    /// The request loop must not serve at all when the world-mate liveness
+    /// feed cannot be made: an instance answering off a permanently empty
+    /// map would read every live same-world holder as stranded.
+    #[tokio::test]
+    async fn the_request_loop_refuses_to_serve_without_the_liveness_feed() {
+        let broker = FakeBroker::default();
+        broker
+            .subscribe_fail_subjects
+            .lock()
+            .unwrap()
+            .insert("agent.v1.mac.telemetry.>".to_string());
+        let scratch = TestScratch::new("service-no-feed");
+        let host = Arc::new(host(&scratch, broker.clone()));
+
+        super::serve_agent_requests(host).await;
+
+        let calls = broker.calls.lock().unwrap().clone();
+        assert!(
+            !calls
+                .iter()
+                .any(|c| c.starts_with("queue_subscribe:agent.v1.mac.requests.>")),
+            "the two subscriptions stand or fall together: {calls:?}"
+        );
+    }
+
+    /// A freshly started instance has measured no silence, so a never-heard
+    /// in-world holder reads alive: `already_attached`, and the sender
+    /// retries — never a takeover off a cold map.
+    #[tokio::test]
+    async fn a_cold_liveness_map_never_licenses_a_takeover() {
+        let broker = FakeBroker::default();
+        seed_attachment(
+            &broker,
+            "conv-w",
+            vec![attached_frame("conv-w", "inst-mate", "mac")],
+        );
+        let scratch = TestScratch::new("service-cold-map");
+        let host = host(&scratch, broker.clone());
+        *host.liveness.lock().unwrap() =
+            crate::service::WorldLiveness::new(std::time::Instant::now());
+
+        let reply = super::handle_service(&host, "conv-w".into(), None, None).await;
+
+        assert_eq!(
+            reply_json(&reply),
+            serde_json::json!({ "rejected": true, "reason": "already_attached" })
         );
     }
 

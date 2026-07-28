@@ -63,8 +63,11 @@ pub(crate) fn host(
             crate::permissions::PermissionSet::strict_default(),
         )),
         stream: "conv-approval".to_string(),
-        liveness: Arc::new(std::sync::Mutex::new(
-            crate::service::WorldLiveness::default(),
-        )),
+        // Warm: backdated past the default silence threshold, so a test's
+        // never-heard holder reads as measured silence (stranded), not a
+        // cold start. A test proving the cold-start hold overwrites this.
+        liveness: Arc::new(std::sync::Mutex::new(crate::service::WorldLiveness::new(
+            std::time::Instant::now() - std::time::Duration::from_secs(120),
+        ))),
     }
 }
