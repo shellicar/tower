@@ -222,9 +222,39 @@ authority from it independently.
 
 Not NATS rules — the design posture the spec serves. Recorded here because each
 one directly shaped the structure above, and unrecorded reasoning gets
-relitigated by accident. They crystallised while dismantling the tap-era design
-— run, heartbeats and approvals evicted from the conversation tree — and each
-carries the scenario that forced it.
+relitigated by accident. Most crystallised while dismantling the tap-era
+design — run, heartbeats and approvals evicted from the conversation tree;
+others since. Each carries the scenario that forced it, wherever it happened.
+
+- **A participant does not act on state it has not yet observed.** A fold
+  that has not seen enough of the record to know — a just-booted consumer, a
+  subscription that only just went live, a degraded feed — yields "unknown",
+  and unknown never satisfies a premise. Absence of information is not a
+  finding: never-heard-yet is not stranded, unseen is not absent, an empty
+  map is not an empty world. Without this rule every premise and fold in
+  these specs is meaningless, since any verdict could be an artifact of
+  having just arrived.
+
+  Observation is reading the log. A fold bootstraps by replaying capture from
+  the start (or from wherever it last left off) and then follows the live
+  feed from the point replay reaches — there is no other way to warm up,
+  because there is no peer to warm up from: no discovery, no state transfer,
+  no cooperation protocol between participants. Knowing the current state and
+  having read the captured record are the same fact, not two.
+
+  **Warm, defined:** a position in the log, not a duration. A fold is warm
+  once it has replayed capture up to the moment its live subscription began —
+  the instant it stops reading history and starts reading now. Before that
+  instant it is cold, however long it has technically been running; a feed
+  that stalls or falls behind after going live drops it back to unknown for
+  whatever it lost contact with.
+
+  *Where it came from:* an implementer read agent-spec.md's safety note at
+  the stranded threshold (the premise for `service`) as licensing a verdict
+  from a cold map, and had a live holder taken over by an instance that had
+  not yet observed the standing attachment. That note's own scope
+  (agent-spec.md, the premise for `service`) states the fix in detail; this
+  principle is the general rule it draws on.
 
 - **Work is addressed to the work, never the worker.** A request that changes
   an entity's state is addressed to the entity (`say` speaks to the
