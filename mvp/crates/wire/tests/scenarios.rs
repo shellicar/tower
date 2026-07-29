@@ -62,14 +62,33 @@ fn approval_events(fixture: &str) -> Vec<ApprovalEvent> {
         .collect()
 }
 
-fn agent_events(fixture: &str) -> Vec<AgentEvent> {
-    fixture
+/// The agent scenarios span two trees: the world's own telemetry (ready,
+/// pulse) and the conversation's attachment leaf, where the claim lives.
+fn world_and_conv_events(fixture: &str) -> (Vec<AgentEvent>, Vec<Event>) {
+    let mut world = Vec::new();
+    let mut conv = Vec::new();
+    for w in fixture
         .lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(parse_line)
-        .map(|w| match w {
-            WireEvent::Agent(e) => e,
+    {
+        match w {
+            WireEvent::Agent(e) => world.push(e),
+            WireEvent::Conv(e) => conv.push(e),
             other => panic!("agent fixture produced {other:?}"),
+        }
+    }
+    assert_all_agent_known(&world);
+    assert_all_known(&conv);
+    (world, conv)
+}
+
+fn attachment_kinds(events: &[Event]) -> Vec<&str> {
+    events
+        .iter()
+        .map(|e| match &e.kind {
+            EventKind::Attachment(a) => a.type_name(),
+            other => panic!("expected an attachment event, got {other:?}"),
         })
         .collect()
 }
@@ -299,52 +318,53 @@ fn scenario_6b_holder_died() {
 
 #[test]
 fn agent_a1_world_up_fresh_conversation() {
-    let evs = agent_events(AGENT_A1);
-    assert_all_agent_known(&evs);
-    // ready, pulse, attached — and the attached carries the conversation before
-    // any message exists.
+    // ready and pulse are the world's; the claim is the conversation's, and it
+    // names the conversation before any message exists.
+    let (world, conv) = world_and_conv_events(AGENT_A1);
     assert!(
-        evs.iter()
+        world
+            .iter()
             .any(|e| matches!(&e.kind, AgentKind::Telemetry(AgentTelemetry::Ready(_))))
     );
-    assert!(evs.iter().any(|e| matches!(
-        &e.kind,
-        AgentKind::Telemetry(AgentTelemetry::Attached(a)) if a.conversation_id.0 == "conv-abc"
-    )));
+    assert_eq!(attachment_kinds(&conv), ["attached"]);
+    assert_eq!(conv[0].conv.0, "conv-abc");
 }
 
 #[test]
 fn agent_a2_clean_shutdown_detaches() {
-    let evs = agent_events(AGENT_A2);
-    assert_all_agent_known(&evs);
-    assert!(
-        evs.iter()
-            .any(|e| matches!(&e.kind, AgentKind::Telemetry(AgentTelemetry::Detached(_))))
-    );
+    let expected = ["attached", "detached"];
+
+    let (_world, conv) = world_and_conv_events(AGENT_A2);
+
+    assert_eq!(attachment_kinds(&conv), expected);
 }
 
 #[test]
 fn agent_a3_stranded_is_attached_then_silence() {
-    // Attached + two pulses, then nothing — stranded is the consumer's fold
-    // (pulse silence), never an event. Here we only assert the lines parse.
-    let evs = agent_events(AGENT_A3);
-    assert_all_agent_known(&evs);
-    assert!(
-        evs.iter()
-            .any(|e| matches!(&e.kind, AgentKind::Telemetry(AgentTelemetry::Pulse(_))))
+    // Attached, then pulses that stop — stranded is the consumer's fold (pulse
+    // silence), never an event. Here we only assert the lines parse.
+    let (world, conv) = world_and_conv_events(AGENT_A3);
+    assert_eq!(
+        world
+            .iter()
+            .filter(|e| matches!(&e.kind, AgentKind::Telemetry(AgentTelemetry::Pulse(_))))
+            .count(),
+        2
     );
+    assert_eq!(attachment_kinds(&conv), ["attached"]);
 }
 
 #[test]
-fn agent_a4_chdir_republishes_attached_with_new_cwd() {
-    // The chdir line is a request (filtered); its consequence is the second
-    // `attached` carrying the new cwd, last-write-wins.
-    let evs = agent_events(AGENT_A4);
-    assert_all_agent_known(&evs);
-    let cwds: Vec<_> = evs
+fn agent_a4_chdir_is_answered_by_moved_carrying_the_new_cwd() {
+    // The chdir line is a request (filtered); its consequence is `moved`, a
+    // fact about the claim already open — never a second `attached`.
+    let (_world, conv) = world_and_conv_events(AGENT_A4);
+    assert_eq!(attachment_kinds(&conv), ["attached", "moved"]);
+    let cwds: Vec<&str> = conv
         .iter()
         .filter_map(|e| match &e.kind {
-            AgentKind::Telemetry(AgentTelemetry::Attached(a)) => a.cwd.as_deref(),
+            EventKind::Attachment(ConvAttachment::Attached(a)) => a.cwd.as_deref(),
+            EventKind::Attachment(ConvAttachment::Moved(m)) => Some(m.cwd.as_str()),
             _ => None,
         })
         .collect();
@@ -395,25 +415,13 @@ fn conv_attachment_a9_migration_takeover() {
 fn conv_attachment_a10_abandon_and_readopt() {
     let evs = events(AGENT_A10);
     assert_all_known(&evs);
-    let kinds: Vec<&str> = evs
-        .iter()
-        .map(|e| match &e.kind {
-            EventKind::Attachment(a) => a.type_name(),
-            other => panic!("expected an attachment event, got {other:?}"),
-        })
-        .collect();
-    assert_eq!(kinds, ["attached", "detached", "attached"]);
+    assert_eq!(attachment_kinds(&evs), ["attached", "detached", "attached"]);
 }
 
 #[test]
 fn agent_a5_resume_then_already_attached() {
     // Both `service` lines are requests (filtered); one `attached` event remains.
-    let evs = agent_events(AGENT_A5);
-    assert_all_agent_known(&evs);
-    assert_eq!(
-        evs.iter()
-            .filter(|e| matches!(&e.kind, AgentKind::Telemetry(AgentTelemetry::Attached(_))))
-            .count(),
-        1
-    );
+    let (world, conv) = world_and_conv_events(AGENT_A5);
+    assert!(world.is_empty());
+    assert_eq!(attachment_kinds(&conv), ["attached"]);
 }

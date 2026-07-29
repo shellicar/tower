@@ -1,3 +1,3 @@
-{"subject":"agent.v1.mac.telemetry.attached","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","conversationId":"conv-abc","cwd":"~/repos/tower"}}
-{"subject":"agent.v1.mac.requests.chdir","message":{"ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"conversationId":"conv-abc","cwd":"~/repos/tower-wip"},"reply":{"accepted":true}}
-{"subject":"agent.v1.mac.telemetry.attached","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","conversationId":"conv-abc","cwd":"~/repos/tower-wip"}}
+{"subject":"conv.v2.conv-abc.attachment.attached","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","world":"mac","cwd":"~/repos/tower","intervalS":30}}
+{"subject":"agent.v1.mac.requests.chdir","message":{"ts":"2026-07-07T21:02:00+10:00","from":{"kind":"human","userId":"stephen"},"conversationId":"conv-abc","cwd":"~/repos/tower-wip"},"reply":{"accepted":true}}
+{"subject":"conv.v2.conv-abc.attachment.moved","message":{"ts":"2026-07-07T21:02:01+10:00","instanceId":"inst-1a2f","world":"mac","cwd":"~/repos/tower-wip"}}
