@@ -85,14 +85,14 @@ may choose their own) until a real promise arrives. Found in the field 19 Jul
 reads as alive forever, because "no promise" and "definitely alive" collapsed
 into the same fold outcome.
 
-**An instance that never pulses is permanently open to takeover**, and that is
-deliberate. It has never made the liveness promise, so it is never presumed
-alive beyond the flat default window: its claims fold normally and it serves
-its conversations, but the silence threshold expires and stays expired. A
-silent instance that is working perfectly can therefore be taken over. That
-reads as the design and not a bug — the presumption of life is only ever
-purchased with the promise, and an instance that will not promise does not get
-it for free.
+**An instance that never declares an interval is permanently open to
+takeover**, and that is deliberate. Carrying no `intervalS` on any attachment
+or pulse is making no promise, so the flat default is all it ever gets: its
+claims fold normally and it serves its conversations, but the default window
+expires and stays expired. An instance that is working perfectly can therefore
+be taken over. That reads as the design and not a bug: the presumption of life
+is only ever purchased with the promise, and an instance that will not promise
+does not get it for free.
 
 Environment facts ride `attached` as fields — published when known, never
 fabricated, ignored when unrecognised (full shape: `conversation-spec.md`,
