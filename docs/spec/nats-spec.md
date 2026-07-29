@@ -498,10 +498,11 @@ plane always.
 
 ## Storage
 
-Subjects separate meaning, never storage. Persistence — JetStream or any other
-recorder — is a subscriber's choice, made per deployment: which subjects a
-stream captures and for how long are deployment configuration, not contract. No
-spec may depend on what is recorded.
+Subjects separate meaning, never storage. Persistence (JetStream or any other
+recorder) is a subscriber's concern, and what a deployment configures is
+retention and naming: how far back a stream reaches, and what it is called.
+Which subjects are captured is not a deployment's choice, and neither is
+whether there is a log at all.
 
 One boundary is contract, not configuration: **streams capture event subjects
 only — never a `.requests` subject.** JetStream acknowledges whatever it
