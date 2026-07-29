@@ -750,7 +750,7 @@ async fn run_query<B: Broker, D: DeltaSink>(
         });
 
         if done.stop_reason != "tool_use" {
-            // The query's committal closure (conversation-spec, changes.query).
+            // The query's committal closure (conversation.md, changes.query).
             pubr.event(
                 "changes.query",
                 json!({ "ts": now_iso(), "queryId": query, "reason": "completed" }),
@@ -799,7 +799,7 @@ async fn run_query<B: Broker, D: DeltaSink>(
         let message_id = uuid::Uuid::new_v4().to_string();
         // No `from`: a tool_result is the mechanical delivery of a tool's
         // output, not an utterance — nobody sent it, so nobody is stamped as
-        // having sent it (conversation-spec, 19 Jul correction).
+        // having sent it (conversation.md, 19 Jul correction).
         pubr.message(&message_id, query, &turn_id, "user", None, &results)
             .await;
         history.push(json!({ "role": "user", "content": results.clone() }));
@@ -880,7 +880,7 @@ async fn run_tool_round<B: Broker>(
     for block in content.iter().filter(|b| b["type"] == "tool_use") {
         let id = block["id"].as_str().unwrap_or("");
         let name = block["name"].as_str().unwrap_or("");
-        // The action, observed before it runs (conversation-spec, Telemetry).
+        // The action, observed before it runs (conversation.md, Telemetry).
         pubr.event(
             "telemetry.tool.use",
             json!({

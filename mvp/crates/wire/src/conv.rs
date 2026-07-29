@@ -1,4 +1,4 @@
-//! The conversation concern's message types (docs/spec/conversation-spec.md,
+//! The conversation concern's message types (docs/spec/conversation.md,
 //! "Message schemas — normative"). Serde mirrors the zod: no
 //! `deny_unknown_fields` anywhere (unknown fields pass — add-only), and
 //! unknown message types are a represented state (`EventKind::Unknown` at the
@@ -127,7 +127,7 @@ pub struct Usage {
     pub cache_creation_tokens: i64,
     /// The 5m/1h breakdown of `cache_creation_tokens`, when the service
     /// reported it (message_start's `usage.cache_creation`). Optional per
-    /// conversation-spec: report what you know, fabricate nothing.
+    /// conversation.md: report what you know, fabricate nothing.
     #[serde(rename = "cacheCreation5mTokens", default)]
     pub cache_creation_5m_tokens: Option<i64>,
     #[serde(rename = "cacheCreation1hTokens", default)]
@@ -189,7 +189,7 @@ pub struct Message {
     /// Provenance, verbatim — forwarded, stored, never interpreted. Absent
     /// for a tool_result: it is a mechanical delivery, not an utterance, and
     /// nobody "sent" it — stamping it with a sender was a category error
-    /// (fixed 19 Jul 2026; see docs/spec/conversation-spec.md).
+    /// (fixed 19 Jul 2026; see docs/spec/conversation.md).
     #[serde(default)]
     pub from: Option<Value>,
     pub content: Vec<Value>,
@@ -247,11 +247,11 @@ impl ConvChange {
 }
 
 // ---------------------------------------------------------------------------
-// conv.v2.{id}.attachment.> — the wire shape of the model agent-spec.md
+// conv.v2.{id}.attachment.> — the wire shape of the model agent.md
 // conducts itself by (singular, unconditionally superseding, no fencing;
-// docs/spec/agent-spec.md, Attachment). `world` is required of every
+// docs/spec/agent.md, Attachment). `world` is required of every
 // compliant publisher but optional here — add-only tolerance for producers
-// that predate this rule (docs/spec/conversation-spec.md, Attachment).
+// that predate this rule (docs/spec/conversation.md, Attachment).
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ConvAttached {

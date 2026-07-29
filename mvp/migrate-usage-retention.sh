@@ -1,14 +1,14 @@
 #!/bin/sh
 # Move conv.v2.*.telemetry.usage from the diagnostic stream (90d retention) to
 # the audit stream (unlimited) — usage stays telemetry (the conversation
-# functions fine without publishing it, nats-spec's own test for the plane),
+# functions fine without publishing it, core.md's own test for the plane),
 # but its RETENTION need is audit-grade: it is the only record of what a
 # conversation cost, and diagnostic's 90-day cap silently deletes it.
 #
 # This corrects the same category error migrate-stream-retention.sh made for
 # usage specifically: that script (rightly) treated turn/tool/pulse telemetry
 # as safe to lose after 90 days, and (wrongly) lumped usage in with it. See
-# docs/spec/nats-spec.md's Telemetry section and the 19 Jul incident it wrote
+# docs/spec/core.md's Telemetry section and the 19 Jul incident it wrote
 # up (a conversation's cost history was purged when that script ran, only
 # recovered because the pre-purge backup happened to still exist).
 #

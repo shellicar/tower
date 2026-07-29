@@ -92,7 +92,7 @@ impl Rail {
                     })
                     .collect();
                 // Keyed by conv: the conversation is the identity
-                // (agent-spec.md, Attachment — attachment is singular), never
+                // (agent.md, Attachment — attachment is singular), never
                 // the (world, instance) pair that happened to claim it.
                 self.attachments = attachments
                     .iter()
@@ -154,7 +154,7 @@ impl Rail {
                 // Attaching is itself evidence of life, and may carry the
                 // liveness promise a `pulse` would otherwise be the only
                 // source of — the gap where an instance that dies before its
-                // first pulse read as alive forever (docs/spec/agent-spec.md).
+                // first pulse read as alive forever (docs/spec/agent.md).
                 let held = self.instances.get(&ikey);
                 let instance = Instance {
                     last_pulse: fact.ts.max(held.map(|h| h.last_pulse).unwrap_or(0)),
@@ -203,7 +203,7 @@ impl Rail {
     }
 
     /// The liveness verdict for a conversation — facts in, judgement out
-    /// (agent-spec: a fold, never declared). None = no live attachment.
+    /// (agent.md: a fold, never declared). None = no live attachment.
     pub fn verdict(&self, conv: &str, now: Millis) -> Option<Liveness> {
         self.best_liveness(conv)
             .map(|i| liveness_verdict(now, i.last_pulse, i.interval_s))

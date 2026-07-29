@@ -63,7 +63,7 @@ impl Approvals {
 
     /// Pending asks oldest-first — a waiting Claude burns wall-clock.
     /// Dismissed asks are excluded, same footing as settled: a human's own
-    /// decision, not a claim the ask was answered (docs/spec/agent-spec.md's
+    /// decision, not a claim the ask was answered (docs/spec/agent.md's
     /// "connection is authority" — settled 19 Jul).
     pub fn pending(&self) -> Vec<&WsApproval> {
         let mut asks: Vec<&WsApproval> = self
@@ -151,7 +151,7 @@ pub fn ask_label(a: &WsApproval) -> &str {
 }
 
 /// The ask's raw `input`, rendered compact — the reviewable primitive today
-/// (approval-spec: raw tool input, read against tool knowledge). None when the
+/// (approval.md: raw tool input, read against tool knowledge). None when the
 /// ask carries no input.
 pub fn ask_input(a: &WsApproval) -> Option<String> {
     a.ask

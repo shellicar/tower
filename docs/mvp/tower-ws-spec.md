@@ -112,7 +112,7 @@ as a wire `say`: `text` verbatim, the premise as `precondition: { tip }`
 verbatim — the tip is the *client's* view of the latest message id, because
 the premise belongs to the sender, and towerd never substitutes its own
 fresher knowledge. `tip: null` is the claim "this conversation is empty"
-(conversation-spec: there is no anchor-free case). `from` is stamped
+(conversation.md: there is no anchor-free case). `from` is stamped
 `{ "kind": "human" }` bare — towerd knows a human clicked and, in v1, no more.
 Response: `say_result`. The *answer* to what was said is not in the response —
 it arrives on the conversation's content flow like everything else, which is
@@ -334,11 +334,11 @@ anyway legitimately closes `completed`. `reason` is an open set
 The servicing snapshot, sent once per connection after `approvals`: every
 instance towerd's fold retains, and **the one standing attachment per
 conversation**. A conversation has at most one — no candidate set, nothing
-to select among (conversation-spec.md, Attachment: a new `attached`
+to select among (conversation.md, Attachment: a new `attached`
 unconditionally supersedes whatever stood before it).
 
 Facts only, never verdicts. **Liveness is the client's derivation**
-(agent-spec.md, Attachment: a fold, never declared): an attachment whose
+(agent.md, Attachment: a fold, never declared): an attachment whose
 instance's `lastPulse` lags the client's clock by ~3 of that instance's own
 `intervalS` renders as stranded. A live pulse renders as alive. No
 attachment is ever released here. `intervalS` may be absent — an instance
@@ -365,7 +365,7 @@ One wire fact, one packet. A pulse is one instance fact however many
 conversations the instance serves — it never fans out per conversation.
 
 Upsert into the client's two maps: `(world, instanceId) → pulse`, `conv →
-attachment`. Instance identity is the pair, not bare `instanceId` (agent-spec.md,
+attachment`. Instance identity is the pair, not bare `instanceId` (agent.md,
 The entity) — if either side of a comparison omits `world`, the map keys and
 the gates below fall back to bare `instanceId`: degraded, not broken.
 
@@ -373,7 +373,7 @@ the gates below fall back to bare `instanceId`: degraded, not broken.
   There is exactly one; never a set to merge into.
 - `moved` updates the held attachment's `cwd` **in place**, only when its
   identity matches the one currently held — else it's a no-op
-  (conversation-spec.md, Attachment: a fact about the standing claim, never
+  (conversation.md, Attachment: a fact about the standing claim, never
   a new one).
 - `detached` clears the held attachment only under the same match.
 
@@ -654,13 +654,13 @@ POST /attachment           body = the bytes, Content-Type = the media type
 Upload happens over HTTP — the WS stays light — and eagerly, at attach time:
 the client uploads when the user picks the file, holds the returned reference,
 and includes it in the eventual `say`'s `attachments`. towerd puts the bytes
-into the deployment's **transit** object store (conversation-spec: transit,
+into the deployment's **transit** object store (conversation.md: transit,
 not storage — the servicer fetches at its own edge; ids are opaque and
 short-lived; the store's TTL is the cleanup, so an upload the user abandons
 costs nothing and needs no delete call). The id is minted random — nothing is
 kept long enough for content-addressing to buy anything.
 
-The wire's rule that a block names its own `bucket` (conversation-spec,
+The wire's rule that a block names its own `bucket` (conversation.md,
 `attachments`; a servicer resolves only against the bucket a block names,
 never a guess from its own deployment config) is satisfied by **towerd**,
 not the client: the bucket is a tower storage fact, so towerd stamps it

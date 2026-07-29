@@ -24,7 +24,7 @@ use crate::views::ViewQuery;
 /// (conv-approval by convention, though the name itself is deployment
 /// config — see `run_ingest`'s own doc). `usage` rides here, not in
 /// `DIAGNOSTIC_SUBJECTS` below, despite being telemetry-plane traffic
-/// (nats-spec's own test still holds: the conversation functions fine
+/// (core.md's own test still holds: the conversation functions fine
 /// without publishing it): it is the only record of what a conversation
 /// COST, and diagnostic's 90-day cap silently deletes that forever —
 /// correction, 19 Jul 2026, after exactly that happened once (see
@@ -64,7 +64,7 @@ pub const EPHEMERAL_SUBJECTS: [&str; 5] = [
 ];
 
 /// One ingest loop over one stream. Subjects and which stream name captures
-/// them are both deployment configuration (nats-spec, Storage) — never
+/// them are both deployment configuration (nats.md, Storage) — never
 /// hard-coded past the constant lists above, which exist to keep this file
 /// in sync with `migrate-stream-retention.sh`'s declared split, not to
 /// re-hardcode a stream name. Every event this loop folds is tagged with its

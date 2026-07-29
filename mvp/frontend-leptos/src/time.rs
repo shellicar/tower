@@ -18,12 +18,12 @@ pub enum Liveness {
 /// No declared interval read as "definitely alive" forever, previously — the
 /// gap found in the field 19 Jul 2026: an instance that attaches and dies
 /// before ever pulsing has no promise to break, so it never went stranded.
-/// `attached` now carries `intervalS` too (docs/spec/agent-spec.md), but
+/// `attached` now carries `intervalS` too (docs/spec/agent.md), but
 /// optionally, for producers that haven't caught up; this is the fallback
 /// for exactly that gap, not a replacement for a real declared promise.
 pub const DEFAULT_STRANDED_AFTER_MS: Millis = 60_000;
 
-/// Liveness is a fold, never declared (agent-spec): the facts are the pulse and
+/// Liveness is a fold, never declared (agent.md): the facts are the pulse and
 /// the instance's own declared interval; the verdict is the reader's, against
 /// its own clock. Stranded = silence past ~3 declared intervals; no declared
 /// interval yet uses the flat default threshold above, not an automatic Alive.

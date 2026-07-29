@@ -1,4 +1,4 @@
-//! The `say` request and its reply (conversation-spec, Requests). Encoding is
+//! The `say` request and its reply (conversation.md, Requests). Encoding is
 //! a pure function so the gateway stays an async shell around it.
 
 use serde_json::{Value, json};
@@ -16,7 +16,7 @@ pub struct SayCommand {
     pub conv: ConversationId,
     pub text: String,
     pub tip: Option<MessageId>,
-    /// Reference blocks, verbatim (conversation-spec, `attachments`): bytes
+    /// Reference blocks, verbatim (conversation.md, `attachments`): bytes
     /// never ride a subject; the servicer resolves at its own edge.
     pub attachments: Vec<Value>,
 }
@@ -46,7 +46,7 @@ pub fn encode_say(cmd: &SayCommand, ts: &str) -> Vec<u8> {
 }
 
 /// The wire `cancel`: revoke a running query by its id — the id is the
-/// cancel's premise (conversation-spec, Requests). `from` stamped
+/// cancel's premise (conversation.md, Requests). `from` stamped
 /// `{ kind: "human" }` bare, exactly as `say`. v2: the leaf
 /// (`requests.cancel`) spells the type; the body carries none.
 pub fn encode_cancel(query: &QueryId, ts: &str) -> Vec<u8> {

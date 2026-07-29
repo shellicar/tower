@@ -24,21 +24,25 @@ central plane; `tmux attach` is ssh, and it stays.
 
 The wire contract. One concern per document, structured by the master spec:
 
-- [`docs/spec/nats-spec.md`](docs/spec/nats-spec.md): the master document. Namespacing,
-  message structure, evolution rules, the planes, authority, storage, and the
-  system principles with the reasoning that produced them.
-- [`docs/spec/conversation-spec.md`](docs/spec/conversation-spec.md): the conversation
+- [`docs/spec/README.md`](docs/spec/README.md): the index. What each document
+  governs, and the order to read them in.
+- [`docs/spec/core.md`](docs/spec/core.md): the foundations. The planes,
+  authority, storage, what earns an event, and the system principles with the
+  reasoning that produced them.
+- [`docs/spec/nats.md`](docs/spec/nats.md): how the system uses the bus.
+  Namespacing, message structure, evolution rules.
+- [`docs/spec/conversation.md`](docs/spec/conversation.md): the conversation
   concern. The tree of messages, the committal change stream, telemetry,
   `say`/`cancel` with preconditions.
-- [`docs/spec/approval-spec.md`](docs/spec/approval-spec.md): the approval concern. The
+- [`docs/spec/approval.md`](docs/spec/approval.md): the approval concern. The
   authorization exchange: raise, answer, settle.
-- [`docs/spec/agent-spec.md`](docs/spec/agent-spec.md): the agent concern. Worlds,
+- [`docs/spec/agent.md`](docs/spec/agent.md): the agent concern. Worlds,
   instances, and the servicing facts — ready, pulse, attached, detached —
   that liveness folds from.
 - [`docs/spec/conformance.md`](docs/spec/conformance.md) and
   [`docs/spec/scenarios.md`](docs/spec/scenarios.md): how implementations prove they
   carry the specs, and the fixture scenarios that prove it.
-- [`docs/spec/content-vocabulary.md`](docs/spec/content-vocabulary.md): the standard by
+- [`docs/spec/content.md`](docs/spec/content.md): the standard by
   which a tool's output is presented. Understanding recorded ahead of its
   design pass.
 

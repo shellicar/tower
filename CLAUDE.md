@@ -41,10 +41,11 @@ deviations land in the doc first, then the code.
 - `docs/mvp/tower-v1-design.md` — the architecture: seams, schema, decisions.
 - `docs/mvp/tower-ws-spec.md` — the browser contract. The frontend builds
   against this document alone.
-- `docs/spec/` — the wire contract (nats, conversation, approval, agent,
-  conformance, scenarios). Normative schemas live in the specs as zod.
-  Versions are per concern and coexist: conv is v2, agent and approval are
-  v1 — disjoint subject trees, so old and new towers run side by side.
+- `docs/spec/` — the wire contract (core, nats, conversation, approval,
+  agent, content, conformance, scenarios); `docs/spec/README.md` indexes it.
+  Normative schemas live in the specs as zod. Versions are per concern and
+  coexist: conv is v2, agent and approval are v1 — disjoint subject trees, so
+  old and new towers run side by side.
 - `docs/roadmap.md` — where this sits. `docs/glossary.md` — the vocabulary.
 - `docs/planning/` — the design corpus. NOT mere archive: it holds the answers
   you'd otherwise guess. Reach here BEFORE answering any "gap to
@@ -69,7 +70,7 @@ the right one instead of guessing.
 - `Views` owns sqlite on its dedicated OS thread. Nothing else touches the db
   file. Event rows + JetStream cursor commit in one transaction.
 - Never subscribe to or capture a `.requests` subject with JetStream — the
-  stream becomes a second responder (see nats-spec, Storage).
+  stream becomes a second responder (see nats.md, Storage).
 - A message's type is stated exactly once. Routing axis → the subject leaf
   spells it (`conv.v2.{id}.changes.tip.moved`) and the body carries no
   `type`; a deliberately flat subject (conv `deltas`, approval) keeps its

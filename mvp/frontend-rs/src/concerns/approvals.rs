@@ -141,7 +141,7 @@ pub fn ask_label(a: &WsApproval) -> &str {
 }
 
 /// The ask's raw `input`, rendered compact — the reviewable primitive today
-/// (approval-spec: raw tool input, read against tool knowledge). None when the
+/// (approval.md: raw tool input, read against tool knowledge). None when the
 /// ask carries no input.
 pub fn ask_input(a: &WsApproval) -> Option<String> {
     a.ask

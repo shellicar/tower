@@ -27,7 +27,7 @@ services:
   # is no separate migrate-*.sh to run by hand (mvp/stream-init.sh has the
   # full reasoning). Event subjects only — never a `.requests` subject: a
   # JetStream stream over a request subject answers the request with its own
-  # PubAck, beating the servicer's reply (nats-spec, Storage).
+  # PubAck, beating the servicer's reply (nats.md, Storage).
   stream-init:
     image: natsio/nats-box:latest
     depends_on:

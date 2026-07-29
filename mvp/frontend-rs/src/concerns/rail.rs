@@ -167,7 +167,7 @@ impl Rail {
     }
 
     /// The liveness verdict for a conversation — facts in, judgement out
-    /// (agent-spec: a fold, never declared). None = no live attachment.
+    /// (agent.md: a fold, never declared). None = no live attachment.
     pub fn verdict(&self, conv: &str, now: Millis) -> Option<Liveness> {
         self.best_liveness(conv)
             .map(|i| liveness_verdict(now, i.last_pulse, i.interval_s))

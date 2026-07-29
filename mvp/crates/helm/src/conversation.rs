@@ -59,7 +59,7 @@ pub struct Conversation {
 
 impl Conversation {
     /// Insert in ts order; same id replaces (revisions keep the id, last
-    /// write wins — conversation-spec). Boundary overlap on a reconnect is
+    /// write wins — conversation.md). Boundary overlap on a reconnect is
     /// expected and handled the same way. Ordering compares parsed instants,
     /// never strings: wire timestamps carry mixed offsets and strings
     /// misorder (tower-v1-design, the ts rule); unparseable stamps fall back

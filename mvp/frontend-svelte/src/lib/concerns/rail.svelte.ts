@@ -60,7 +60,7 @@ export class Rail {
       }
       case 'agents':
         this.#instances = new Map(event.instances.map((i) => [`${i.world}/${i.instanceId}`, i]));
-        // Keyed by conv: the conversation is the identity (agent-spec.md,
+        // Keyed by conv: the conversation is the identity (agent.md,
         // Attachment — attachment is singular), never the (world, instance)
         // pair that happened to claim it. A superseded claim must leave the
         // map the instant a new `attached` replaces it, or a connected
@@ -84,7 +84,7 @@ export class Rail {
           // Attaching is itself evidence of life, and may carry the liveness
           // promise a `pulse` would otherwise be the only source of — the gap
           // where an instance that dies before its first pulse read as alive
-          // forever (docs/spec/agent-spec.md).
+          // forever (docs/spec/agent.md).
           const heldInstance = this.#instances.get(ikey);
           const nextInstances = new Map(this.#instances);
           nextInstances.set(ikey, {
@@ -178,7 +178,7 @@ export class Rail {
   }
 
   /** The liveness verdict for a conversation, folded here against the rail's
-   *  own clock — facts in, judgement out (agent-spec: a fold, never declared).
+   *  own clock — facts in, judgement out (agent.md: a fold, never declared).
    *  null = no live attachment (released or never served). */
   verdict(conv: string): 'alive' | 'stranded' | null {
     const best = this.#liveness(conv);

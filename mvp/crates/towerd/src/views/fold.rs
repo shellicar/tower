@@ -37,7 +37,7 @@ impl Views {
         }
     }
 
-    /// The approval fold (approval-spec, The outstanding set): raised inserts
+    /// The approval fold (approval.md, The outstanding set): raised inserts
     /// the candidate, the pulse refreshes `last_pulse`, settled records the
     /// outcome. Idempotent under replay; a raised re-delivered after settled
     /// never erases the settlement (the settled columns are not in the
@@ -118,7 +118,7 @@ impl Views {
         Ok(())
     }
 
-    /// The agent fold (agent-spec, Telemetry): `ready`/`pulse` upsert the
+    /// The agent fold (agent.md, Telemetry): `ready`/`pulse` upsert the
     /// instance's one liveness fact; `attached` upserts, `detached` deletes —
     /// a released attachment is absence. Never touches `rows`: staleness is
     /// conversation activity, and these are facts about the instance.
@@ -173,7 +173,7 @@ impl Views {
                 let ts_ms = parse_ts(&a.ts)
                     .ok_or_else(|| anyhow::anyhow!("attached has unparseable ts {}", a.ts))?;
                 // Cross-plane supersession, order-independent: a standing
-                // conv-leaf claim (conversation-spec.md, Attachment) is the
+                // conv-leaf claim (conversation.md, Attachment) is the
                 // one that counts, always — gate rather than one-shot
                 // delete, or a rematerialise replaying the two streams
                 // through independent consumers can land this AFTER the
@@ -187,7 +187,7 @@ impl Views {
                 )?;
                 // Attaching is itself evidence of life, and may carry the
                 // liveness promise a `pulse` would otherwise be the only
-                // source of (docs/spec/agent-spec.md: the gap where an
+                // source of (docs/spec/agent.md: the gap where an
                 // instance that dies before its first pulse read as alive
                 // forever). COALESCE keeps a held interval when this fact
                 // doesn't carry one, rather than clobbering it with NULL.
@@ -262,8 +262,8 @@ impl Views {
         Ok(())
     }
 
-    /// The conversation-tree attachment fold (conversation-spec.md,
-    /// Attachment; agent-spec.md, Attachment): `attached` unconditionally
+    /// The conversation-tree attachment fold (conversation.md,
+    /// Attachment; agent.md, Attachment): `attached` unconditionally
     /// supersedes — one standing row per conv, no precondition. `moved` and
     /// `detached` apply only under the standing-instance gate: the `(world,
     /// instance_id)` pair (degraded to bare `instance_id` when either side
@@ -272,7 +272,7 @@ impl Views {
     /// nothing. Never touches `rows`: this is a servicing fact, not
     /// conversation activity (CLAUDE.md, Rules with teeth).
     ///
-    /// Compliance (agent-spec.md, Attachment, "The rule, stated once"): an
+    /// Compliance (agent.md, Attachment, "The rule, stated once"): an
     /// instance that publishes a second `attached` for a conversation while
     /// its own claim on it is still open — no `detached` between — is
     /// non-compliant, permanently, from that publish on; every fact it
@@ -344,12 +344,12 @@ impl Views {
                         // any agent.v1 claim still held for this conv (a
                         // not-yet-migrated bridge, or one mid-migration) is
                         // exactly the "whatever attachment stood before it"
-                        // agent-spec.md's Attachment says a new `attached`
+                        // agent.md's Attachment says a new `attached`
                         // supersedes unconditionally. Without this,
                         // `agents()` would return two attachments for one
                         // conversation during mixed operation.
                         tx.execute("DELETE FROM agent_attachments WHERE conv = ?1", [&conv.0])?;
-                        // Attaching is itself evidence of life (agent-spec.md,
+                        // Attaching is itself evidence of life (agent.md,
                         // Liveness is a fold): fold it into the same pair-keyed
                         // pulse table `pulse` already updates. Only when `world`
                         // is actually known — agent_instances is keyed on the

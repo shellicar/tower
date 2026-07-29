@@ -42,7 +42,7 @@ Non-stdio settings are environment variables, unchanged:
 
 There is no attachment-bucket setting. An attachment reference block carries
 its own bucket: an object is `server + bucket + id`, the server is `NATS_URL`,
-and the bucket is a stable route named in the block itself (conversation-spec).
+and the bucket is a stable route named in the block itself (conversation.md).
 The bridge resolves each block against the bucket it names, so nothing binds
 attachment storage to host config.
 
