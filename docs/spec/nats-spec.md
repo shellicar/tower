@@ -268,12 +268,14 @@ others since. Each carries the scenario that forced it, wherever it happened.
   legal. It does not care what you intended.
 
   The one relaxation is migration, and it is not a relaxation of correctness.
-  A consumer may be built to read a superseded shape — an older version's
-  events, a field that has since changed — so a deployment can move from one
-  shape to the next without stopping. Expressed as a union of complete
-  supported schemas: each member is wholly valid in itself, and a message
-  must satisfy one of them entirely. That is support for a known, named,
-  temporary past, decided deliberately and removed when the migration
+  A consumer may be built to read a superseded shape — an older major
+  version's events, on its own tree — so a deployment can move from one
+  version to the next without stopping. Within a version there is no
+  superseded shape to read: evolution is add-only there, and a change that
+  supersedes anything is a new tree (Evolution). Expressed as a union of
+  complete supported schemas: each member is wholly valid in itself, and a
+  message must satisfy one of them entirely. That is support for a known,
+  named, temporary past, decided deliberately and removed when the migration
   completes — removing a version is deleting a union member, a visible act.
   It is never latitude for a message that is invalid under the shape it
   claims to be: within a version, valid or not stands.
