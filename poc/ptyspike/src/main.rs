@@ -242,6 +242,10 @@ async fn run_nats(
                 };
                 log(format!("[ptyspike] injecting say: {text:?}"));
                 let _ = say_tx.send(text.into_bytes());
+                // A burst of bytes reads as a paste to the TUI; a \r inside
+                // the same burst lands as a newline in the input box, not a
+                // submit. Pause so the paste settles, then send enter alone.
+                tokio::time::sleep(Duration::from_millis(300)).await;
                 let _ = say_tx.send(b"\r".to_vec());
                 let accepted = serde_json::json!({ "accepted": true, "id": Uuid::new_v4().to_string() });
                 publish_logged(&client, reply.to_string(), &accepted).await;
