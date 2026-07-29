@@ -101,13 +101,6 @@ axis, so the type stays in the body there as a `type` field. The full map:
 | `say` | `conv.v2.{id}.requests.say` |
 | `cancel` | `conv.v2.{id}.requests.cancel` |
 
-**Which kinds are observations, which are mutations** (nats-spec,
-Conformance: the consequence of breaking conduct follows the class).
-Mutations here are the `changes` kinds — `message`, `revision`, `tip_moved`,
-`query` — and the `attachment` kinds — `attached`, `moved`, `detached`: each
-states something other participants act on. Observations are the `telemetry`
-kinds and `deltas`: remove them and every conversation still functions.
-
 `deltas` stays a single subject, decided not forgotten: nobody filters `delta`
 from `block`, the stream is meaningful only whole and in order, and the
 payloads are deliberately bare — a token per chunk kind fails nats-spec's

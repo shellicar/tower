@@ -38,12 +38,6 @@ the tool having run; denied appears as whatever the agent model commits.
 | `approval.v1.{approvalId}.requests` | requests | the answer |
 | `approval.v1.{approvalId}.telemetry` | events | `heartbeat` — the pending ask's own pulse (~15s while pending) |
 
-**Which kinds are observations, which are mutations** (nats-spec,
-Conformance: the consequence of breaking conduct follows the class). `raised`
-and `settled` are mutations — they open and close a piece of state a reviewer
-acts on. `heartbeat` is observation: remove it and asking, answering and
-settling all still work.
-
 Discovery is the namespace wildcard: `approval.v1.*.lifecycle` — every ask,
 fleet-wide, one subscription. That serves a live watcher (a notifier); the
 late joiner who wants "what is outstanding *right now*" reconstructs it — see
