@@ -199,24 +199,36 @@ and values.
 
 Conformance is also the whole enforcement model. There is no negotiation on
 the wire and no cooperation protocol: the system works because participants
-conform, not because anything makes them. A participant that breaks a
-concern's conduct rules is non-compliant, and what would normally govern it
-no longer does — from then on, nothing it publishes carries authority. This
-is loss of authority, not invisibility: its events stay in the record,
-visible and monitorable — you don't stop watching a submarine because it was
-boarded — but they no longer move the fold; you stop treating its calls as
-commands.
-There is no way back for that identity: like a crashed process, it is fixed
-by restarting, and a restart is a new identity. Each concern's spec defines
-its own conduct rules; the consequence is inherited from here, stated once.
+A participant that breaks a concern's conduct rules is non-compliant, and
+what would normally govern it no longer does — from then on, nothing it
+publishes carries authority. This is loss of authority, not invisibility: its
+events stay in the record, visible and monitorable — you don't stop watching a
+submarine because it was boarded — but they no longer move the fold. There is
+no way back for that identity: like a crashed process, it is fixed by
+restarting, and a restart is a new identity. Each concern's spec defines its
+own conduct rules; the consequence is inherited from here, stated once.
+
+**Compliance is not global state.** Nothing publishes a verdict and nothing
+asks another party for one — a reader derives it from the log it has read,
+like everything else it knows. Two readers with different windows may derive
+differently; neither is coordinating with the other, so there is nothing to
+contradict.
+
+**The consequence is proportionate to the class, decided case by case per
+concern.** An observation that breaks conduct is ignored outright — its
+absence from the fold is already the whole consequence, since nothing else
+was ever going to act on it becoming true. A mutation that breaks conduct
+forfeits the identity's authority — a mutation is a claim other participants
+act on, so a false one has to be disowned, not merely dropped. The
+no-way-back-but-restart consequence above is the mutation case, unchanged; a
+concern's spec states which of its own event kinds fall on which side.
 
 This is a deliberate trade. Leases, fencing, and multi-party release would
 let a violator be reasoned back in, at the price of machinery every correct
 run carries. Instead the happy path is trivially simple, and a violation is
 expensive on purpose: the violator's word stops being authoritative, and the
-deployment restarts it. Nothing on the wire enforces any of this — the
-record shows the violation, and every reader derives the same loss of
-authority from it independently.
+deployment restarts it. Nothing on the wire enforces any of this — the record
+shows the violation, and each reader derives it for itself.
 
 ## System principles
 
