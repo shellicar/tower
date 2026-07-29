@@ -256,6 +256,28 @@ others since. Each carries the scenario that forced it, wherever it happened.
   (agent-spec.md, the premise for `service`) states the fix in detail; this
   principle is the general rule it draws on.
 
+- **Valid or not — there is no partial acceptance.** An event either satisfies
+  its schema or it is not an event. A value outside the valid range makes the
+  whole message invalid, not the field: nothing is clamped to a limit,
+  nothing is salvaged, no part of it folds. Consumers reject at the boundary,
+  immediately — fail fast, and nothing downstream ever sees a half-valid
+  message. This is not harshness for its own sake; it is what keeps the rules
+  simple enough to be followed. The moment a consumer may weigh which fields
+  to keep, or what a publisher probably meant, every reader weighs
+  differently and the schema stops meaning anything. A spec states what is
+  legal. It does not care what you intended.
+
+  The one relaxation is migration, and it is not a relaxation of correctness.
+  A consumer may be built to read a superseded shape — an older version's
+  events, a field that has since changed — so a deployment can move from one
+  shape to the next without stopping. Expressed as a union of complete
+  supported schemas: each member is wholly valid in itself, and a message
+  must satisfy one of them entirely. That is support for a known, named,
+  temporary past, decided deliberately and removed when the migration
+  completes — removing a version is deleting a union member, a visible act.
+  It is never latitude for a message that is invalid under the shape it
+  claims to be: within a version, valid or not stands.
+
 - **Work is addressed to the work, never the worker.** A request that changes
   an entity's state is addressed to the entity (`say` speaks to the
   conversation); which process services it is placement — a decision inside
