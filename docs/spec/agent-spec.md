@@ -61,7 +61,6 @@ The subject spells the type, as in the conversation spec: `telemetry.pulse`,
 | `pulse` | `agent.v1.{world}.telemetry.pulse` |
 | `service` | `agent.v1.{world}.requests.service` |
 | `drain` | `agent.v1.{world}.requests.drain` |
-| `chdir` | `agent.v1.{world}.requests.chdir` |
 
 ## Telemetry
 
@@ -92,7 +91,7 @@ Attachment). Two kinds, kept apart by what they denote (nats-spec, Naming):
 - **About the thing** — `cwd`, and the world's provenance (which host created
   it). Durable and causal: cwd is an input to how the conversation unfolds,
   the way a message's content is. `cwd` is named in the schema because
-  `chdir` operates on it.
+  `chdir` operates on it (conversation-spec.md, Requests).
 - **How to reach the thing** — `pid`, a port, tmux coordinates. An ephemeral,
   incidental handle: it dies with the process and is meaningless without its
   host. Never named in the schema — it rides as an open field for a
@@ -211,7 +210,6 @@ this repo's testing rule.
 |---|---|---|---|
 | `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts; its premise is below. Any named environment value the world cannot establish rejects the request (`invalid_cwd`, for `cwd`); an omitted value falls to the world's own defaults — absence delegates, presence binds, never a silent fallback. Known reasons today: `already_attached`, `at_capacity`, `invalid` (a recognised request whose body doesn't carry what it needs, e.g. a missing or empty `conversationId`), `invalid_cwd`, `failed` (the world could not undertake the operation; the cause rides `detail`), `unsupported` |
 | `drain` | — | `accepted` \| `rejected` + `reason` | stop taking work and detach cleanly: a `detached` per conversation, then silence. Distinguishes a decided shutdown from a crash |
-| `chdir` | `conversationId`, `cwd` | `accepted` \| `rejected` + `reason` | move the working directory of a live attachment — Tower changing where a conversation is served without a Ctrl-C. Accept confirms the premise (this world serves the conversation), not the outcome. The move is observed, not promised: the agent publishes `attachment.moved` (`conversation-spec.md`, Attachment) when the move lands. The agent reconciles the directory and may decline to move. A move that never lands just shows as an unchanged `cwd` — an observed outcome like any other. Known reasons today: `not_found` (this world is not serving that conversation), `unsupported` |
 
 **The premise for `service`.** Four cases, each read off a warm fold — one
 that has replayed capture up to its live subscription (nats-spec, System
@@ -234,14 +232,12 @@ The corollary: an instance does not join the world's queue group until its own f
 **cwd is intrinsic to the harness.** An agent is a harness and a model; the
 model is text-in-text-out and has no filesystem, while the harness runs
 somewhere and touches a directory. So a bridge agent — a harness serving
-conversations over the wire — has a cwd by nature, and `chdir` is a
-first-class operation, not a niche one. The rare harness with no directory
-notion answers `unsupported`, the built-in escape (a harness-less "cloud
-agent" is just a model, and is wrapped in your own harness before it speaks
-this protocol at all). `chdir` is scoped to cwd deliberately: it is the
-move-the-directory operation, reconciling and refusable, not a generic
-"reconfigure" — a different environment change (a model swap) is a different
-operation on its own leaf, never bundled here.
+conversations over the wire — has a cwd by nature, and moving one is a
+first-class operation, not a niche one. It is not a world operation, though:
+`chdir` changes one conversation's state, so it addresses the conversation
+(`conversation-spec.md`, Requests), where only the instance holding that
+conversation is listening. What stays here is the world's own serving
+capacity: `service` and `drain`.
 
 Requests address the world, never an instance; where several instances share
 a world they share a queue group, so exactly one answers. Every request owes
@@ -321,11 +317,10 @@ export const agentTelemetry = {
 export const agentRequest = {
   'service': z.looseObject({ ts, from: sender.optional(), conversationId: z.string(), cwd: z.string().optional(), model: z.string().optional() }),
   'drain': z.looseObject({ ts, from: sender.optional() }),
-  'chdir': z.looseObject({ ts, from: sender.optional(), conversationId: z.string(), cwd: z.string() }),
 };
 
 // Replies (transport truth, never outcome). Known reasons today:
-// already_attached, at_capacity, invalid, invalid_cwd, not_found, failed,
+// already_attached, at_capacity, invalid, invalid_cwd, failed,
 // unsupported. `detail` is optional free-text diagnostics for a human —
 // `reason` is the machine-facing token a caller branches on, `detail` names
 // the step and underlying error; never the other way around.
