@@ -696,7 +696,7 @@ impl Host {
                 }
             }
         } else if let Some(chdir) = value.get("chdir") {
-            // Move one conversation's cwd (agent-spec's `chdir` request).
+            // Move one conversation's cwd (conversation-spec's `chdir` request).
             let Some(conv) = chdir
                 .get("conversationId")
                 .and_then(serde_json::Value::as_str)
