@@ -61,7 +61,6 @@ The subject spells the type, as in the conversation spec: `telemetry.pulse`,
 | `pulse` | `agent.v1.{world}.telemetry.pulse` |
 | `service` | `agent.v1.{world}.requests.service` |
 | `drain` | `agent.v1.{world}.requests.drain` |
-| `chdir` | `agent.v1.{world}.requests.chdir` |
 
 ## Telemetry
 
@@ -72,7 +71,7 @@ map: who serves what, and whether they are alive.
 | Event | Fields | Notes |
 |---|---|---|
 | `ready` | `instanceId`, `host` | a process now serves this world; published once on boot, after its subscriptions are up |
-| `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement the master spec forbids |
+| `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement the master spec forbids. `intervalS` is at most 600 (ten minutes): a longer promise buys three times its own length of presumed life, so stranded detection and takeover stop working exactly where they are needed. The bound is validity, not a cap — a larger value makes the event invalid whole, and nothing is clamped to 600 |
 
 **Liveness is a fold, never declared.** An instance is presumed gone after
 about three of its own declared intervals of silence — judged against its own
@@ -85,6 +84,15 @@ may choose their own) until a real promise arrives. Found in the field 19 Jul
 reads as alive forever, because "no promise" and "definitely alive" collapsed
 into the same fold outcome.
 
+**An instance that never declares an interval is permanently open to
+takeover**, and that is deliberate. Carrying no `intervalS` on any attachment
+or pulse is making no promise, so the flat default is all it ever gets: its
+claims fold normally and it serves its conversations, but the default window
+expires and stays expired. An instance that is working perfectly can therefore
+be taken over. That reads as the design and not a bug: the presumption of life
+is only ever purchased with the promise, and an instance that will not promise
+does not get it for free.
+
 Environment facts ride `attached` as fields — published when known, never
 fabricated, ignored when unrecognised (full shape: `conversation-spec.md`,
 Attachment). Two kinds, kept apart by what they denote (nats-spec, Naming):
@@ -92,7 +100,7 @@ Attachment). Two kinds, kept apart by what they denote (nats-spec, Naming):
 - **About the thing** — `cwd`, and the world's provenance (which host created
   it). Durable and causal: cwd is an input to how the conversation unfolds,
   the way a message's content is. `cwd` is named in the schema because
-  `chdir` operates on it.
+  `chdir` operates on it (conversation-spec.md, Requests).
 - **How to reach the thing** — `pid`, a port, tmux coordinates. An ephemeral,
   incidental handle: it dies with the process and is meaningless without its
   host. Never named in the schema — it rides as an open field for a
@@ -122,7 +130,13 @@ A re-attacher that should not have re-attached is visible in the record instead 
 
 **The rule, stated once.** An instance must not claim a conversation while its own claim on it is open. In the record, that violation looks like: `attached`, `attached` from the same instance, no `detached` between. Nothing else qualifies it; nothing else excuses it.
 
-An instance that breaks the conduct rule — a second `attached` with no `detached` between — is non-compliant, and consumers ignore everything it publishes from then on. There is no way back for the instance: like a crashed process, it is fixed by restarting, and a restart is a new instance id. Nothing on the wire enforces this; the record shows the violation, and every reader derives the same state from it independently.
+An instance that breaks the rule forfeits its authority, at the cost
+nats-spec's Conformance section states.
+
+Compliance drives exactly one decision here. A claim arrives for a
+conversation this instance holds: it looks at its own record. If that claimer
+has a claim it never released, the claim doesn't fold and this instance keeps
+serving. If not, it stands down. Nothing else in the system consults conduct.
 
 After a `detached` closes the standing claim, a new `attached` is an ordinary new claim. It may come from any instance — including the one that just released it. A closed claim leaves nothing behind to reopen, so the wire doesn't care who claims next.
 
@@ -199,7 +213,6 @@ this repo's testing rule.
 |---|---|---|---|
 | `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts; its premise is below. Any named environment value the world cannot establish rejects the request (`invalid_cwd`, for `cwd`); an omitted value falls to the world's own defaults — absence delegates, presence binds, never a silent fallback. Known reasons today: `already_attached`, `at_capacity`, `invalid` (a recognised request whose body doesn't carry what it needs, e.g. a missing or empty `conversationId`), `invalid_cwd`, `failed` (the world could not undertake the operation; the cause rides `detail`), `unsupported` |
 | `drain` | — | `accepted` \| `rejected` + `reason` | stop taking work and detach cleanly: a `detached` per conversation, then silence. Distinguishes a decided shutdown from a crash |
-| `chdir` | `conversationId`, `cwd` | `accepted` \| `rejected` + `reason` | move the working directory of a live attachment — Tower changing where a conversation is served without a Ctrl-C. Accept confirms the premise (this world serves the conversation), not the outcome. The move is observed, not promised: the agent publishes `attachment.moved` (`conversation-spec.md`, Attachment) when the move lands. The agent reconciles the directory and may decline to move. A move that never lands just shows as an unchanged `cwd` — an observed outcome like any other. Known reasons today: `not_found` (this world is not serving that conversation), `unsupported` |
 
 **The premise for `service`.** Four cases, each read off a warm fold — one
 that has replayed capture up to its live subscription (nats-spec, System
@@ -222,14 +235,12 @@ The corollary: an instance does not join the world's queue group until its own f
 **cwd is intrinsic to the harness.** An agent is a harness and a model; the
 model is text-in-text-out and has no filesystem, while the harness runs
 somewhere and touches a directory. So a bridge agent — a harness serving
-conversations over the wire — has a cwd by nature, and `chdir` is a
-first-class operation, not a niche one. The rare harness with no directory
-notion answers `unsupported`, the built-in escape (a harness-less "cloud
-agent" is just a model, and is wrapped in your own harness before it speaks
-this protocol at all). `chdir` is scoped to cwd deliberately: it is the
-move-the-directory operation, reconciling and refusable, not a generic
-"reconfigure" — a different environment change (a model swap) is a different
-operation on its own leaf, never bundled here.
+conversations over the wire — has a cwd by nature, and moving one is a
+first-class operation, not a niche one. It is not a world operation, though:
+`chdir` changes one conversation's state, so it addresses the conversation
+(`conversation-spec.md`, Requests), where only the instance holding that
+conversation is listening. What stays here is the world's own serving
+capacity: `service` and `drain`.
 
 Requests address the world, never an instance; where several instances share
 a world they share a queue group, so exactly one answers. Every request owes
@@ -301,7 +312,7 @@ const sender = z.looseObject({
 // schema lives on the conversation's own tree (conversation-spec.md, Attachment).
 export const agentTelemetry = {
   'ready': z.looseObject({ ts, instanceId: z.string(), host: z.string().optional() }),
-  'pulse': z.looseObject({ ts, instanceId: z.string(), intervalS: z.number().int().positive() }),
+  'pulse': z.looseObject({ ts, instanceId: z.string(), intervalS: z.number().int().positive().max(600) }),
 };
 
 // agent.v1.{world}.requests.> — a leaf not listed is still answered:
@@ -309,11 +320,10 @@ export const agentTelemetry = {
 export const agentRequest = {
   'service': z.looseObject({ ts, from: sender.optional(), conversationId: z.string(), cwd: z.string().optional(), model: z.string().optional() }),
   'drain': z.looseObject({ ts, from: sender.optional() }),
-  'chdir': z.looseObject({ ts, from: sender.optional(), conversationId: z.string(), cwd: z.string() }),
 };
 
 // Replies (transport truth, never outcome). Known reasons today:
-// already_attached, at_capacity, invalid, invalid_cwd, not_found, failed,
+// already_attached, at_capacity, invalid, invalid_cwd, failed,
 // unsupported. `detail` is optional free-text diagnostics for a human —
 // `reason` is the machine-facing token a caller branches on, `detail` names
 // the step and underlying error; never the other way around.

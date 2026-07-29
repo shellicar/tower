@@ -199,24 +199,38 @@ and values.
 
 Conformance is also the whole enforcement model. There is no negotiation on
 the wire and no cooperation protocol: the system works because participants
-conform, not because anything makes them. A participant that breaks a
-concern's conduct rules is non-compliant, and what would normally govern it
-no longer does — from then on, nothing it publishes carries authority. This
-is loss of authority, not invisibility: its events stay in the record,
-visible and monitorable — you don't stop watching a submarine because it was
-boarded — but they no longer move the fold; you stop treating its calls as
-commands.
-There is no way back for that identity: like a crashed process, it is fixed
-by restarting, and a restart is a new identity. Each concern's spec defines
-its own conduct rules; the consequence is inherited from here, stated once.
+conform, not because anything makes them.
+
+There is no global punishment for non-compliance. The spec says what is
+required, and each rule states what breaking that rule costs. Speeding is a
+fine, not amputation. Today two rules carry a cost:
+
+- **An over-limit heartbeat is ignored.** Nothing was waiting on it, and the
+  silence it leaves is already the consequence.
+- **A wrongful claim costs the instance its authority.** Others act on claims,
+  so a false one has to be disowned rather than dropped.
+
+More get stated as they come up.
+
+Forfeiting authority is loss of authority, not invisibility: the identity's
+events stay in the record, visible and monitorable — you don't stop watching a
+submarine because it was boarded — but they no longer move the fold. There is
+no way back for that identity: like a crashed process, it is fixed by
+restarting, and a restart is a new identity. That cost is stated here once,
+and a concern's spec points at it rather than restating it.
+
+**Compliance is not global state.** Nothing publishes a verdict and nothing
+asks another party for one — a reader derives it from the log it has read,
+like everything else it knows. Two readers with different windows may derive
+differently; neither is coordinating with the other, so there is nothing to
+contradict.
 
 This is a deliberate trade. Leases, fencing, and multi-party release would
 let a violator be reasoned back in, at the price of machinery every correct
 run carries. Instead the happy path is trivially simple, and a violation is
 expensive on purpose: the violator's word stops being authoritative, and the
-deployment restarts it. Nothing on the wire enforces any of this — the
-record shows the violation, and every reader derives the same loss of
-authority from it independently.
+deployment restarts it. Nothing on the wire enforces any of this — the record
+shows the violation, and each reader derives it for itself.
 
 ## System principles
 
@@ -255,6 +269,30 @@ others since. Each carries the scenario that forced it, wherever it happened.
   not yet observed the standing attachment. That note's own scope
   (agent-spec.md, the premise for `service`) states the fix in detail; this
   principle is the general rule it draws on.
+
+- **Valid or not — there is no partial acceptance.** An event either satisfies
+  its schema or it is not an event. A value outside the valid range makes the
+  whole message invalid, not the field: nothing is clamped to a limit,
+  nothing is salvaged, no part of it folds. Consumers reject at the boundary,
+  immediately — fail fast, and nothing downstream ever sees a half-valid
+  message. This is not harshness for its own sake; it is what keeps the rules
+  simple enough to be followed. The moment a consumer may weigh which fields
+  to keep, or what a publisher probably meant, every reader weighs
+  differently and the schema stops meaning anything. A spec states what is
+  legal. It does not care what you intended.
+
+  The one relaxation is migration, and it is not a relaxation of correctness.
+  A consumer may be built to read a superseded shape — an older major
+  version's events, on its own tree — so a deployment can move from one
+  version to the next without stopping. Within a version there is no
+  superseded shape to read: evolution is add-only there, and a change that
+  supersedes anything is a new tree (Evolution). Expressed as a union of
+  complete supported schemas: each member is wholly valid in itself, and a
+  message must satisfy one of them entirely. That is support for a known,
+  named, temporary past, decided deliberately and removed when the migration
+  completes — removing a version is deleting a union member, a visible act.
+  It is never latitude for a message that is invalid under the shape it
+  claims to be: within a version, valid or not stands.
 
 - **Work is addressed to the work, never the worker.** A request that changes
   an entity's state is addressed to the entity (`say` speaks to the
@@ -368,8 +406,8 @@ vertical columns, and every message lands in exactly one cell:
 ```
                 conv          approval        agent
              ┌─────────────┬──────────────┬────────────────┐
-operational  │ changes     │ lifecycle    │ service, drain,│
-             │ requests    │ requests     │ chdir requests │
+operational  │ changes     │ lifecycle    │ service, drain │
+             │ requests    │ requests     │ requests       │
              │ deltas      │              │                │
              │ attachment  │              │                │
              ├─────────────┼──────────────┼────────────────┤

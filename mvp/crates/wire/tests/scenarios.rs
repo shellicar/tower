@@ -105,12 +105,12 @@ const SCENARIO_6B: &str = fixture!("scenario-6b.jsonl");
 const AGENT_A1: &str = fixture!("agent/scenario-a1.jsonl");
 const AGENT_A2: &str = fixture!("agent/scenario-a2.jsonl");
 const AGENT_A3: &str = fixture!("agent/scenario-a3.jsonl");
-const AGENT_A4: &str = fixture!("agent/scenario-a4.jsonl");
 const AGENT_A5: &str = fixture!("agent/scenario-a5.jsonl");
 const AGENT_A7: &str = fixture!("agent/scenario-a7.jsonl");
 const AGENT_A8: &str = fixture!("agent/scenario-a8.jsonl");
 const AGENT_A9: &str = fixture!("agent/scenario-a9.jsonl");
 const AGENT_A10: &str = fixture!("agent/scenario-a10.jsonl");
+const AGENT_A11: &str = fixture!("agent/scenario-a11.jsonl");
 
 fn assert_all_known(events: &[Event]) {
     for e in events {
@@ -355,23 +355,6 @@ fn agent_a3_stranded_is_attached_then_silence() {
 }
 
 #[test]
-fn agent_a4_chdir_is_answered_by_moved_carrying_the_new_cwd() {
-    // The chdir line is a request (filtered); its consequence is `moved`, a
-    // fact about the claim already open — never a second `attached`.
-    let (_world, conv) = world_and_conv_events(AGENT_A4);
-    assert_eq!(attachment_kinds(&conv), ["attached", "moved"]);
-    let cwds: Vec<&str> = conv
-        .iter()
-        .filter_map(|e| match &e.kind {
-            EventKind::Attachment(ConvAttachment::Attached(a)) => a.cwd.as_deref(),
-            EventKind::Attachment(ConvAttachment::Moved(m)) => Some(m.cwd.as_str()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(cwds, ["~/repos/tower", "~/repos/tower-wip"]);
-}
-
-#[test]
 fn conv_attachment_a7_ordinary_life() {
     let evs = events(AGENT_A7);
     assert_all_known(&evs);
@@ -416,6 +399,32 @@ fn conv_attachment_a10_abandon_and_readopt() {
     let evs = events(AGENT_A10);
     assert_all_known(&evs);
     assert_eq!(attachment_kinds(&evs), ["attached", "detached", "attached"]);
+}
+
+#[test]
+fn conv_attachment_a11_chdir_is_answered_by_moved() {
+    // The chdir line is a request on the conversation's own tree (filtered);
+    // what lands is `moved` carrying the new cwd — a fact about the claim
+    // already open, never a second `attached`.
+    let evs = events(AGENT_A11);
+    assert_all_known(&evs);
+    let kinds: Vec<&str> = evs
+        .iter()
+        .map(|e| match &e.kind {
+            EventKind::Attachment(a) => a.type_name(),
+            other => panic!("expected an attachment event, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(kinds, ["attached", "moved"]);
+    let cwds: Vec<&str> = evs
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EventKind::Attachment(ConvAttachment::Attached(a)) => a.cwd.as_deref(),
+            EventKind::Attachment(ConvAttachment::Moved(m)) => Some(m.cwd.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(cwds, ["~/repos/tower", "~/repos/tower-wip"]);
 }
 
 #[test]
