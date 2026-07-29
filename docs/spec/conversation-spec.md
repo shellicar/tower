@@ -100,6 +100,7 @@ axis, so the type stays in the body there as a `type` field. The full map:
 | `delta`, `block` | `conv.v2.{id}.deltas` — flat, deliberately |
 | `say` | `conv.v2.{id}.requests.say` |
 | `cancel` | `conv.v2.{id}.requests.cancel` |
+| `chdir` | `conv.v2.{id}.requests.chdir` |
 
 `deltas` stays a single subject, decided not forgotten: nobody filters `delta`
 from `block`, the stream is meaningful only whole and in order, and the
@@ -294,7 +295,7 @@ This section only covers the shape on this tree.
 | Event | Fields | Notes |
 |---|---|---|
 | `attached` | `instanceId`, `world`?, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now. Supersedes whatever attachment stood before it, unconditionally, exactly once per claim (agent-spec.md, Attachment). This is what makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for an empty conversation) — so an observer knows where the conversation stands without replaying the change stream first. `world` is required of every compliant publisher (below); `cwd` and `intervalS` are optional for backward compatibility, and their absence is not a claim the value is empty — only that this attach didn't state it |
-| `moved` | `instanceId`, `world`?, `cwd` | a fact about the standing attachment, not a new claim: the working directory changed under it (the wire outcome of a `chdir` request, agent-spec.md, Requests). Valid only from the instance identity — `(world, instanceId)`, or bare `instanceId` if either side omits `world` — the fold currently holds as standing. Folds last-write-wins onto the held attachment's `cwd` |
+| `moved` | `instanceId`, `world`?, `cwd` | a fact about the standing attachment, not a new claim: the working directory changed under it (the wire outcome of a `chdir` request, this spec, Requests). Valid only from the instance identity — `(world, instanceId)`, or bare `instanceId` if either side omits `world` — the fold currently holds as standing. Folds last-write-wins onto the held attachment's `cwd` |
 | `detached` | `instanceId`, `world`? | released — Ctrl-C, drain, done, or a displaced instance's observable act of standing down (agent-spec.md, Attachment). Changes the fold only when its identity matches the *standing* attachment's, same rule as `moved`. A crash publishes nothing |
 
 **`world` is required of every compliant publisher.** Same tolerance as
@@ -344,6 +345,18 @@ standing from where the message came from.
 |---|---|---|---|
 | `say` | `from`, `text`, `precondition` | `accepted` + `id` \| `rejected` + `reason` | start a new query against a known state; `from` is the sender identity — locally-typed input carries `{ kind: human }` the same way, so no speaker is ever anonymous; the reply acknowledges acceptance only — the answer appears on the change stream like any other turn |
 | `cancel` | `id` | `accepted` \| `rejected` + `reason` | revoke an accepted piece of state by its id — in v1, a running query; whatever kinds acceptance creates later. Its target *is* its premise: never "cancel whatever happens to be running". Rejection reasons are honest: `not_found`, `already_complete`, `unsupported` |
+| `chdir` | `cwd` | `accepted` \| `rejected` + `reason` | this conversation is served at this directory from now on. The request states that effect and never a mechanism: a servicer may move a process, or hold `cwd` as a value per conversation, and both conform. Accept confirms the premise (this servicer holds this conversation), never the outcome — the move is observed on `attachment.moved` when it lands, and one that never lands shows as an unchanged `cwd`, an observed outcome like any other. The servicer reconciles the directory and may decline to move. A harness with no directory notion answers `unsupported`. Known reasons today: `unsupported` |
+
+**Why `chdir` addresses the conversation.** It changes one conversation's
+state, so it goes to the conversation (nats-spec, first principle). On the
+world's tree the queue group hands it to an arbitrary instance, and every
+reply a non-holder could give is false — it cannot accept what it does not
+serve, and its `not_found` says only that *it* isn't serving it. On this
+tree only the holder subscribes, so the request reaches the one party that
+can act, and there is no `not_found` to give: no responder means nobody is
+serving this conversation, the same signal as everywhere else. Operations on
+a world's serving capacity (`service`, `drain`) stay on the world;
+operations on a conversation come here.
 
 **The `say` message, concretely.** It carries text — a plain string — plus
 optionally `attachments` (below), which arrived under add-only exactly as
@@ -636,6 +649,7 @@ export const conversationRequest = {
     precondition: z.looseObject({ tip: z.string().nullable() }),
   }),
   'cancel': z.looseObject({ ts, from: sender.optional(), id: z.string() }),
+  'chdir': z.looseObject({ ts, from: sender.optional(), cwd: z.string() }),
 };
 
 // Replies (transport truth, never outcome). Known reasons today:
@@ -672,6 +686,12 @@ pending:
   `agent.v1.{world}.telemetry.>`. Must move to the conversation subject,
   adopt the exactly-once-per-claim discipline, and publish `moved` on
   `chdir` instead of re-publishing `attached`.
+- **`chdir`'s subject** — nothing answers `chdir` on any wire tree today.
+  bridge answers it over its stdio control protocol, and helm sends it that
+  way, so the work is to implement it on `conv.v2.{id}.requests.chdir` —
+  subscribed by the servicer per conversation it holds, `conversationId`
+  gone from the payload because the subject carries it — and then retire the
+  control line.
 - **claude-sdk-cli's `AgentPresence`** — a third producer, publishing
   `attached` with `cwd` on the old subject today. Needs the same move.
 - **The Examples above** (agent-spec.md, Attachment) — become the
