@@ -1,14 +1,14 @@
 # Agent spec — v1
 
 The agent concern: who is serving conversations, and where. Structure per
-`nats-spec.md`; namespace `agent`. Every message here is *about* one world —
+`nats.md`; namespace `agent`. Every message here is *about* one world —
 the environment conversations are served from — never about a conversation's
 content. Kill the process, restart it: not one conversation wire fact
 changes.
 
 Attachment is which instance serves which conversation. That is a
 conversation fact, not a world fact, so its wire shape lives on the
-conversation's own tree (`conversation-spec.md`, Attachment). This spec
+conversation's own tree (`conversation.md`, Attachment). This spec
 states the model an instance conducts itself by.
 
 ## The entity
@@ -23,7 +23,7 @@ durable names for places; the processes standing in them are disposable.
   conversationId.
 - **agent instance** — a process's presence in a world, identified by the
   pair `(world, instanceId)` — in payloads, never in subjects: address a
-  process and you inherit its lifecycle (nats-spec, "Work is addressed to
+  process and you inherit its lifecycle (core.md, "Work is addressed to
   the work, never the worker").
   `instanceId` is minted fresh per process and unique within its world; the
   pair is then unique everywhere, since worlds are. The format is free — a
@@ -49,7 +49,7 @@ economics (racing servicers waste work), a deployment's choice.
 
 Attachment claims are not here. A conversation's attachment is about the
 conversation, not the world, so it lives on its own tree
-(`conversation-spec.md`, Attachment). This section covers only what is
+(`conversation.md`, Attachment). This section covers only what is
 genuinely about the world: is a process up, and is it still promising to be.
 
 The subject spells the type, as in the conversation spec: `telemetry.pulse`,
@@ -94,13 +94,13 @@ is only ever purchased with the promise, and an instance that will not promise
 does not get it for free.
 
 Environment facts ride `attached` as fields — published when known, never
-fabricated, ignored when unrecognised (full shape: `conversation-spec.md`,
-Attachment). Two kinds, kept apart by what they denote (nats-spec, Naming):
+fabricated, ignored when unrecognised (full shape: `conversation.md`,
+Attachment). Two kinds, kept apart by what they denote (nats.md, Naming):
 
 - **About the thing** — `cwd`, and the world's provenance (which host created
   it). Durable and causal: cwd is an input to how the conversation unfolds,
   the way a message's content is. `cwd` is named in the schema because
-  `chdir` operates on it (conversation-spec.md, Requests).
+  `chdir` operates on it (conversation.md, Requests).
 - **How to reach the thing** — `pid`, a port, tmux coordinates. An ephemeral,
   incidental handle: it dies with the process and is meaningless without its
   host. Never named in the schema — it rides as an open field for a
@@ -131,7 +131,7 @@ A re-attacher that should not have re-attached is visible in the record instead 
 **The rule, stated once.** An instance must not claim a conversation while its own claim on it is open. In the record, that violation looks like: `attached`, `attached` from the same instance, no `detached` between. Nothing else qualifies it; nothing else excuses it.
 
 An instance that breaks the rule forfeits its authority, at the cost
-nats-spec's Conformance section states.
+nats.md's Conformance section states.
 
 Compliance drives exactly one decision here. A claim arrives for a
 conversation this instance holds: it looks at its own record. If that claimer
@@ -142,9 +142,9 @@ After a `detached` closes the standing claim, a new `attached` is an ordinary ne
 
 So one open claim means one `attached`: an instance publishes it once, at the moment it attaches — nothing more until it detaches.
 
-A changed `cwd` is not a new claim. It's a fact about the claim already open, so it gets its own event: `moved` (`conversation-spec.md`, Attachment).
+A changed `cwd` is not a new claim. It's a fact about the claim already open, so it gets its own event: `moved` (`conversation.md`, Attachment).
 
-A compliant instance watches the attachment leaf for every conversation it serves (`conversation-spec.md`, Attachment). When it sees itself displaced — another instanceId's `attached` for a conversation it holds — it stops serving and publishes `detached`.
+A compliant instance watches the attachment leaf for every conversation it serves (`conversation.md`, Attachment). When it sees itself displaced — another instanceId's `attached` for a conversation it holds — it stops serving and publishes `detached`.
 
 That `detached` folds as nothing: the supersession already ended its claim. A `detached` only changes the fold when its identity — the `(world, instanceId)` pair, or bare `instanceId` if either side omits `world` — still matches the standing attachment's. An instance detaching after it's already superseded is stating a fact about its own past claim, not retracting the current one.
 
@@ -169,7 +169,7 @@ differently because they are different.
 ### Examples
 
 These are concrete and orderable on purpose. They become the attachment
-scenario fixtures when implementation lands (`conversation-spec.md`,
+scenario fixtures when implementation lands (`conversation.md`,
 Migration note) — fix lands twice, code and fixture in the same commit, per
 this repo's testing rule.
 
@@ -215,7 +215,7 @@ this repo's testing rule.
 | `drain` | — | `accepted` \| `rejected` + `reason` | stop taking work and detach cleanly: a `detached` per conversation, then silence. Distinguishes a decided shutdown from a crash |
 
 **The premise for `service`.** Four cases, each read off a warm fold — one
-that has replayed capture up to its live subscription (nats-spec, System
+that has replayed capture up to its live subscription (core.md, System
 principles) — and a fifth that closes the list:
 
 - Standing attachment in another world → accept and take over, unconditionally. The incumbent's liveness is irrelevant: asking a different world to serve *is* migration.
@@ -228,7 +228,7 @@ principles) — and a fifth that closes the list:
 
 Two things follow from this, worth saying plainly rather than leaving a reader to derive them. Only a live instance can ever answer a `service` request — queue-group delivery finds whichever instance in the world is up right now — so the liveness question is never about the instance answering, only ever about a different instance that might be holding a stale attachment. And the liveness read at the stranded threshold is safe whichever way it lands: read as alive, the request just comes back `already_attached` and the sender retries later; read as stranded, the request takes over, and unconditional supersession is what makes that landing safe too.
 
-This safety argument is scoped to two *warm* reads straddling the threshold — both readers have observed enough of the record to have a liveness verdict at all, and either verdict is fine. It does not extend to a cold or degraded fold: a just-booted instance, or one whose feed hasn't caught up, has not yet observed the standing attachment and owes no verdict on it (nats-spec.md, System principles). Answering `service` from such a fold — taking over a live holder because the map looked empty — is exactly the unobserved-state action that principle rules out.
+This safety argument is scoped to two *warm* reads straddling the threshold — both readers have observed enough of the record to have a liveness verdict at all, and either verdict is fine. It does not extend to a cold or degraded fold: a just-booted instance, or one whose feed hasn't caught up, has not yet observed the standing attachment and owes no verdict on it (core.md, System principles). Answering `service` from such a fold — taking over a live holder because the map looked empty — is exactly the unobserved-state action that principle rules out.
 
 The corollary: an instance does not join the world's queue group until its own folds are warm. A cold instance is not yet offering to serve, so it must not be the one a `service` request finds. A sender whose request meets no queue-group member gets NATS's own no-responder — and that honestly means the world isn't available to serve this yet, not a rejection with a reason: no new reason token is owed for it, the same way a crashed process owes no reply. The sender retries; the world answers once an instance has warmed into the group.
 
@@ -238,7 +238,7 @@ somewhere and touches a directory. So a bridge agent — a harness serving
 conversations over the wire — has a cwd by nature, and moving one is a
 first-class operation, not a niche one. It is not a world operation, though:
 `chdir` changes one conversation's state, so it addresses the conversation
-(`conversation-spec.md`, Requests), where only the instance holding that
+(`conversation.md`, Requests), where only the instance holding that
 conversation is listening. What stays here is the world's own serving
 capacity: `service` and `drain`.
 
@@ -252,7 +252,7 @@ here, and the conversation's own record — which is why a feasibility problem
 (a directory too unreconciled to move) is not a rejection reason: it is an
 outcome, shown by the fact that never changes, never a reply.
 
-A note with teeth, from nats-spec's Authority: connection is authority, and
+A note with teeth, from core.md's Authority: connection is authority, and
 `service` makes a connected sender able to start work in a world. The
 operational plane's strict-credentials posture is what stands between broker
 access and arbitrary work placement; deployments grade accordingly. World
@@ -267,20 +267,20 @@ access and arbitrary work placement; deployments grade accordingly. World
 - **world creation** — making a place is the layer beneath serving one: a
   host concern, with an authority question (create is code execution) that
   deserves its own pass. It gets its namespace and spec when forced — never
-  by squatting here (nats-spec, Concerns).
+  by squatting here (nats.md, Concerns).
 
 ## What consumers may assume
 
 - Publication order per subject, and per subscription across one wildcard;
   nothing across classes.
 - Liveness, existence, and strandedness are folds. Computed from `ready`,
-  `pulse` (this tree) and `attached`, `detached` (conversation-spec.md,
+  `pulse` (this tree) and `attached`, `detached` (conversation.md,
   Attachment) — never carried as declared state. Names are free to
   generate, never free to remember: what a folding consumer retains of dead
   worlds and instances is its own retention policy, same as a stream's
   capture is its deployment's.
 - Unknown event types, fields, and reason values: the tolerance rules
-  (nats-spec, Evolution).
+  (nats.md, Evolution).
 
 ## Message schemas — normative
 
@@ -306,10 +306,10 @@ const sender = z.looseObject({
 // Leafed classes are keyed by subject leaf: the subject selects the schema, the
 // body carries no `type`. `host` is provenance about the world (a field, never
 // the id); ephemeral reach-handles (pid, port, tmux coords) are not named —
-// they ride as open fields under looseObject (nats-spec, Naming).
+// they ride as open fields under looseObject (nats.md, Naming).
 
 // agent.v1.{world}.telemetry.> — attachment claims are not here; their
-// schema lives on the conversation's own tree (conversation-spec.md, Attachment).
+// schema lives on the conversation's own tree (conversation.md, Attachment).
 export const agentTelemetry = {
   'ready': z.looseObject({ ts, instanceId: z.string(), host: z.string().optional() }),
   'pulse': z.looseObject({ ts, instanceId: z.string(), intervalS: z.number().int().positive().max(600) }),
@@ -333,5 +333,5 @@ export const agentRequestReply = z.union([
 ]);
 ```
 
-Authority is settled in `nats-spec.md`: connection is authority; `from` is
+Authority is settled in `core.md`: connection is authority; `from` is
 provenance, never enforcement.

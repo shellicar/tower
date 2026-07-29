@@ -31,7 +31,7 @@ them as a subsequence per subject, extras allowed (add-only honoured).
 ## The v2 set
 
 `fixtures/v2/` carries the conversation scenarios in the v2 tree
-(conversation-spec, Subjects): leaf subjects spelling each type, and a
+(conversation.md, Subjects): leaf subjects spelling each type, and a
 `query` closure change wherever a query closes — completed in scenarios 1,
 2b, and 3; cancelled in scenario 2. Scenario 5's second query never closes
 (still live when the fixture ends), scenario 7 is one turn's stream
@@ -41,12 +41,12 @@ approval-concern traffic and has no v2 form.
 
 Every v2 change line carries the envelope `instanceId` — required of every
 compliant publisher, optional in the schema only for producers that predate
-the rule (conversation-spec, The change stream). It normalises like any other
+the rule (conversation.md, The change stream). It normalises like any other
 minted id.
 
 The v1 set is not superseded by the v2 set's arrival: it remains the v1
 ingest path's test surface, and retires with the last v1 speaker
-(conversation-spec, The v1 tree).
+(conversation.md, The v1 tree).
 
 ## The two branches
 
@@ -75,7 +75,7 @@ closing round (ends `end_turn`).
   on the `tool_result`, which nobody sent.
 - Asserts: the baseline schemas; the query fold grouping by `queryId` and
   closed by the `query` closure change on `changes` — carried by the v2 twin,
-  since v1 has no closure change (conversation-spec, The v1 tree). An ending
+  since v1 has no closure change (conversation.md, The v1 tree). An ending
   read off `turn_ended` and its verbatim `stopReason` is lawful observation,
   never the fold's authority.
 
@@ -220,7 +220,7 @@ Two captures, same shape as scenario 6's two endings:
 1. **Resolved** (8a) — the block names a bucket the servicer can actually
    fetch from. The say is accepted and the committed message carries the
    reference block **verbatim** — never the resolved bytes; resolution is a
-   model-facing render, not a record fact (conversation-spec).
+   model-facing render, not a record fact (conversation.md).
 2. **Unresolvable** (8b) — the block names no bucket (or one the servicer
    can't reach). The say rejects outright, before anything commits — no
    placeholder, no partial accept. `reason` is the canonical token
@@ -254,7 +254,7 @@ exercises this fixture (declared capability, per the two-branches rule).
 
 ## Agent scenarios
 
-`fixtures/agent/` carries the agent concern (agent-spec): servicing facts and
+`fixtures/agent/` carries the agent concern (agent.md): servicing facts and
 the folds they drive. `mac` is the world, `inst-…` an agent instance,
 `conv-abc` the conversation it serves. As with the conversation set, `ts` and
 minted ids normalise before comparison; the liveness folds turn on order and
@@ -277,7 +277,7 @@ presence, not on literal timestamps — silence is represented the way approval
 The concern spans two trees, though a single scenario need not. `ready` and
 `pulse` are the world's own telemetry; `service` and `drain` address the
 world's request tree; the claim on a conversation is the conversation's
-(`conv.v2.{id}.attachment.>`, conversation-spec, Attachment).
+(`conv.v2.{id}.attachment.>`, conversation.md, Attachment).
 
 a1 to a3 carry world telemetry beside the claim, and a2 adds a `drain`
 request. a5's world lines are both `service` requests, which no stream
@@ -327,9 +327,9 @@ The one `service` verb across two calls against the same conversation.
 
 ### a6 — the record a non-conformant publisher leaves
 
-On the new attachment leaf (conversation-spec, Attachment). inst-1's own
+On the new attachment leaf (conversation.md, Attachment). inst-1's own
 publish sequence: `attached`, `attached`, `detached`. A second `attached`
-with no intervening `detached` — the violation shape, verbatim (agent-spec,
+with no intervening `detached` — the violation shape, verbatim (agent.md,
 Attachment, example e).
 
 A compliant instance knows its own state and owns its own publish order
@@ -348,7 +348,7 @@ the model has to survive.
 
 ### a7 — ordinary life, on the new leaf
 
-agent-spec, Attachment, example (a), verbatim: `attached(inst-1)` → served →
+agent.md, Attachment, example (a), verbatim: `attached(inst-1)` → served →
 `detached(inst-1)`. One claim, opened and closed by the same instance, on
 the conversation's own attachment leaf.
 
@@ -358,7 +358,7 @@ the conversation's own attachment leaf.
 
 ### a8 — crash and failover, on the new leaf
 
-agent-spec, Attachment, example (b): `attached(inst-1)`; its pulses stop and
+agent.md, Attachment, example (b): `attached(inst-1)`; its pulses stop and
 no `detached` ever comes. `attached(inst-2)` supersedes it anyway —
 unconditionally, whether or not a `detached(inst-1)` shows up later.
 
@@ -369,7 +369,7 @@ unconditionally, whether or not a `detached(inst-1)` shows up later.
 
 ### a9 — migration/takeover, on the new leaf
 
-agent-spec, Attachment, example (c): `attached(inst-1)`; while inst-1 still
+agent.md, Attachment, example (c): `attached(inst-1)`; while inst-1 still
 lives, `attached(inst-2)` supersedes it anyway; inst-1 observes its own
 displacement and publishes `detached(inst-1)` — changing nothing in the
 fold, since the claim already moved.
@@ -381,7 +381,7 @@ fold, since the claim already moved.
 
 ### a10 — abandon and re-adopt, on the new leaf
 
-agent-spec, Attachment, example (d): `attached(inst-1)` → `detached(inst-1)`
+agent.md, Attachment, example (d): `attached(inst-1)` → `detached(inst-1)`
 → `attached(inst-1)` again. Legal: a closed claim leaves nothing behind to
 reopen, so the next `attached` is an ordinary new claim, regardless of whose
 instanceId it carries.
@@ -393,7 +393,7 @@ instanceId it carries.
 ### a11 — chdir, on the new leaf
 
 Tower moves a live attachment's working directory. The request addresses the
-conversation being moved (conversation-spec, Requests), so only the instance
+conversation being moved (conversation.md, Requests), so only the instance
 holding it is listening, and the accept comes from the one party that can
 act.
 
