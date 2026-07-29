@@ -264,6 +264,7 @@ presence, not on literal timestamps — silence is represented the way approval
 | a8 — crash and failover, on the new leaf | `fixtures/agent/scenario-a8.jsonl` |
 | a9 — migration/takeover, on the new leaf | `fixtures/agent/scenario-a9.jsonl` |
 | a10 — abandon and re-adopt, on the new leaf | `fixtures/agent/scenario-a10.jsonl` |
+| a11 — chdir, on the new leaf | `fixtures/agent/scenario-a11.jsonl` |
 
 ### a1 — world up, fresh conversation
 
@@ -296,6 +297,10 @@ The instance is serving and pulsing, then goes silent.
 ### a4 — chdir
 
 Tower moves a live attachment's working directory.
+
+This records the superseded shape: `chdir` addressed the world, and the move
+showed as a re-published `attached`. On today's shape the request addresses
+the conversation and the move lands as `moved` — a11.
 
 - Exercises: `attached` at one `cwd`, `chdir` accepted, `attached`
   re-published at the new `cwd`.
@@ -378,3 +383,19 @@ instanceId it carries.
 - Exercises: attach, detach, re-attach, same `(world, instanceId)` pair.
 - Asserts: the re-attach is standing exactly as any other fresh claim — no
   memory of the prior claim blocks or qualifies it.
+
+### a11 — chdir, on the new leaf
+
+Tower moves a live attachment's working directory. The request addresses the
+conversation being moved (conversation-spec, Requests), so only the instance
+holding it is listening, and the accept comes from the one party that can
+act.
+
+- Exercises: `attached` at one `cwd`; `chdir` accepted on
+  `conv.v2.{id}.requests.chdir`, carrying no `conversationId` because the
+  subject carries it; the `moved` that follows at the new `cwd`.
+- Asserts: the move lands as `moved`, a fact about the claim already open —
+  never a second `attached`, which is the violation shape; the attachment's
+  cwd folds last-write-wins onto the standing claim; and the conversation's
+  change stream emits nothing across the move — the proof cwd is never
+  conversation state.
