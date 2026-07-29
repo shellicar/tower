@@ -293,7 +293,7 @@ This section only covers the shape on this tree.
 
 | Event | Fields | Notes |
 |---|---|---|
-| `attached` | `instanceId`, `world`?, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now. Supersedes whatever attachment stood before it, unconditionally, exactly once per claim (agent-spec.md, Attachment). This is what makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for an empty conversation) — so an observer knows where the conversation stands without replaying the change stream first. `world` is required of every compliant publisher (below); `cwd` and `intervalS` are optional for backward compatibility, and their absence is not a claim the value is empty — only that this attach didn't state it |
+| `attached` | `instanceId`, `world`?, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now. Supersedes whatever attachment stood before it, unconditionally, exactly once per claim (agent-spec.md, Attachment). This is what makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for an empty conversation) — so an observer knows where the conversation stands without replaying the change stream first. `world` is required of every compliant publisher (below); `cwd` and `intervalS` are optional for backward compatibility, and their absence is not a claim the value is empty — only that this attach didn't state it. `intervalS`, when carried, is at most 600 (ten minutes), the same liveness promise a pulse makes and bounded for the same reason (agent-spec.md, Telemetry): the bound is validity, not a cap, so a larger value makes the event invalid whole |
 | `moved` | `instanceId`, `world`?, `cwd` | a fact about the standing attachment, not a new claim: the working directory changed under it (the wire outcome of a `chdir` request, agent-spec.md, Requests). Valid only from the instance identity — `(world, instanceId)`, or bare `instanceId` if either side omits `world` — the fold currently holds as standing. Folds last-write-wins onto the held attachment's `cwd` |
 | `detached` | `instanceId`, `world`? | released — Ctrl-C, drain, done, or a displaced instance's observable act of standing down (agent-spec.md, Attachment). Changes the fold only when its identity matches the *standing* attachment's, same rule as `moved`. A crash publishes nothing |
 
@@ -608,7 +608,7 @@ export const conversationChange = {
 // required of every compliant publisher; optional here only for producers
 // that predate this rule.
 export const conversationAttachment = {
-  'attached': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional(), cwd: z.string().optional(), tip: z.string().nullable().optional(), intervalS: z.number().int().positive().optional() }),
+  'attached': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional(), cwd: z.string().optional(), tip: z.string().nullable().optional(), intervalS: z.number().int().positive().max(600).optional() }),
   'moved': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional(), cwd: z.string() }),
   'detached': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional() }),
 };

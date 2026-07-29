@@ -72,7 +72,7 @@ map: who serves what, and whether they are alive.
 | Event | Fields | Notes |
 |---|---|---|
 | `ready` | `instanceId`, `host` | a process now serves this world; published once on boot, after its subscriptions are up |
-| `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement the master spec forbids |
+| `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement the master spec forbids. `intervalS` is at most 600 (ten minutes): a longer promise buys three times its own length of presumed life, so stranded detection and takeover stop working exactly where they are needed. The bound is validity, not a cap — a larger value makes the event invalid whole, and nothing is clamped to 600 |
 
 **Liveness is a fold, never declared.** An instance is presumed gone after
 about three of its own declared intervals of silence — judged against its own
@@ -84,6 +84,15 @@ may choose their own) until a real promise arrives. Found in the field 19 Jul
 2026: without this, an instance that attaches and dies before ever pulsing
 reads as alive forever, because "no promise" and "definitely alive" collapsed
 into the same fold outcome.
+
+**An instance that never pulses is permanently open to takeover**, and that is
+deliberate. It has never made the liveness promise, so it is never presumed
+alive beyond the flat default window: its claims fold normally and it serves
+its conversations, but the silence threshold expires and stays expired. A
+silent instance that is working perfectly can therefore be taken over. That
+reads as the design and not a bug — the presumption of life is only ever
+purchased with the promise, and an instance that will not promise does not get
+it for free.
 
 Environment facts ride `attached` as fields — published when known, never
 fabricated, ignored when unrecognised (full shape: `conversation-spec.md`,
@@ -301,7 +310,7 @@ const sender = z.looseObject({
 // schema lives on the conversation's own tree (conversation-spec.md, Attachment).
 export const agentTelemetry = {
   'ready': z.looseObject({ ts, instanceId: z.string(), host: z.string().optional() }),
-  'pulse': z.looseObject({ ts, instanceId: z.string(), intervalS: z.number().int().positive() }),
+  'pulse': z.looseObject({ ts, instanceId: z.string(), intervalS: z.number().int().positive().max(600) }),
 };
 
 // agent.v1.{world}.requests.> — a leaf not listed is still answered:
