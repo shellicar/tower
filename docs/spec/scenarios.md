@@ -274,10 +274,15 @@ presence, not on literal timestamps — silence is represented the way approval
 | a10 — abandon and re-adopt, on the new leaf | `fixtures/agent/scenario-a10.jsonl` |
 | a11 — chdir, on the new leaf | `fixtures/agent/scenario-a11.jsonl` |
 
-Every scenario here spans two trees, because the concern does: `ready` and
-`pulse` are the world's own telemetry, while the claim on a conversation is
-the conversation's (`conv.v2.{id}.attachment.>`, conversation-spec,
-Attachment). The world's request tree carries `service` and `drain`.
+The concern spans two trees, though a single scenario need not. `ready` and
+`pulse` are the world's own telemetry; `service` and `drain` address the
+world's request tree; the claim on a conversation is the conversation's
+(`conv.v2.{id}.attachment.>`, conversation-spec, Attachment).
+
+a1 to a3 carry world telemetry beside the claim, and a2 adds a `drain`
+request. a5's world lines are both `service` requests, which no stream
+captures, so replaying it yields the claim alone. a6 to a11 carry
+conversation lines only.
 
 ### a1 — world up, fresh conversation
 
