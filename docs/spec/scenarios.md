@@ -39,6 +39,11 @@ mid-query, and scenario 8b never opens a query at all (rejected before
 acceptance), so none of the three carries a closure. Scenario 6 is
 approval-concern traffic and has no v2 form.
 
+Every v2 change line carries the envelope `instanceId` — required of every
+compliant publisher, optional in the schema only for producers that predate
+the rule (conversation-spec, The change stream). It normalises like any other
+minted id.
+
 The v1 set is not superseded by the v2 set's arrival: it remains the v1
 ingest path's test surface, and retires with the last v1 speaker
 (conversation-spec, The v1 tree).
@@ -66,9 +71,13 @@ closing round (ends `end_turn`).
 
 - Exercises: `turn_started` with request inputs, `turn_ended` with verbatim
   `stopReason`, `tool_use` with full payload, `usage` per round, message
-  commits on `changes`, `from` on every message.
+  commits on `changes`, `from` on every message that is an utterance — absent
+  on the `tool_result`, which nobody sent.
 - Asserts: the baseline schemas; the query fold grouping by `queryId` and
-  closing on `end_turn`.
+  closed by the `query` closure change on `changes` — carried by the v2 twin,
+  since v1 has no closure change (conversation-spec, The v1 tree). An ending
+  read off `turn_ended` and its verbatim `stopReason` is lawful observation,
+  never the fold's authority.
 
 Fixture: `fixtures/scenario-1.jsonl`.
 
@@ -265,13 +274,19 @@ presence, not on literal timestamps — silence is represented the way approval
 | a9 — migration/takeover, on the new leaf | `fixtures/agent/scenario-a9.jsonl` |
 | a10 — abandon and re-adopt, on the new leaf | `fixtures/agent/scenario-a10.jsonl` |
 
+Every scenario here spans two trees, because the concern does: `ready` and
+`pulse` are the world's own telemetry, while the claim on a conversation is
+the conversation's (`conv.v2.{id}.attachment.>`, conversation-spec,
+Attachment). The world's request tree carries `service`, `drain` and `chdir`.
+
 ### a1 — world up, fresh conversation
 
 A process boots, promises a cadence, and attaches to a conversation that has
 no messages yet.
 
-- Exercises: `ready`, `pulse`, `attached` carrying `cwd` — no conversation
-  traffic at all.
+- Exercises: `ready` and `pulse` on the world's tree; `attached` on the
+  conversation's, carrying `cwd`, `tip: null` and the promised `intervalS` —
+  no `changes` traffic at all.
 - Asserts: existence-by-attachment — the conversation is a row before its
   first message; the **alive** fold — attached, pulse fresh.
 
@@ -279,7 +294,8 @@ no messages yet.
 
 The instance is serving, then drains.
 
-- Exercises: `drain` accepted; `detached` for the conversation.
+- Exercises: `drain` accepted on the world; `detached` on the conversation it
+  was serving.
 - Asserts: the **released** fold — cleanly detached, a decided fact, distinct
   from silence.
 
@@ -287,8 +303,8 @@ The instance is serving, then drains.
 
 The instance is serving and pulsing, then goes silent.
 
-- Exercises: `attached`, two `pulse`s, then nothing — no `detached`, no
-  further pulse.
+- Exercises: `attached` on the conversation, two `pulse`s on the world, then
+  nothing — no `detached`, no further pulse.
 - Asserts: the **stranded** fold — attached, pulse silent past ~3 × its
   declared `intervalS`. Stranded is inferred from a broken promise, never
   published; it reads differently from a2's released for exactly that reason.
@@ -297,19 +313,22 @@ The instance is serving and pulsing, then goes silent.
 
 Tower moves a live attachment's working directory.
 
-- Exercises: `attached` at one `cwd`, `chdir` accepted, `attached`
-  re-published at the new `cwd`.
-- Asserts: last-write-wins per (instance, conversation) — the attachment's
-  current cwd is the latest `attached`; and that the conversation's change
-  stream emits nothing across the move — the proof cwd is never conversation
-  state.
+- Exercises: `attached` on the conversation at one `cwd`; `chdir` accepted on
+  the world; the `moved` that follows on the conversation, carrying the new
+  `cwd`.
+- Asserts: the move lands as `moved`, a fact about the claim already open —
+  never a second `attached`, which would be the violation shape; the
+  attachment's current cwd folds last-write-wins onto the standing claim; and
+  the conversation's change stream emits nothing across the move — the proof
+  cwd is never conversation state.
 
 ### a5 — resume, then already-attached
 
 The one `service` verb across two calls against the same conversation.
 
-- Exercises: `service` accepted (history exists, no live attachment → fold
-  and re-attach), `attached`; a second `service` while attached →
+- Exercises: `service` accepted on the world (history exists, no live
+  attachment → fold and re-attach), then `attached` on the conversation with
+  the `tip` it resumed at; a second `service` while attached →
   `rejected: already_attached`.
 - Asserts: the verb dispatches on the record's state, not on the request; the
   reply confirms the premise (servable / already served), never an outcome.
