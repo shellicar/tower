@@ -39,6 +39,11 @@ mid-query, and scenario 8b never opens a query at all (rejected before
 acceptance), so none of the three carries a closure. Scenario 6 is
 approval-concern traffic and has no v2 form.
 
+Every v2 change line carries the envelope `instanceId` — required of every
+compliant publisher, optional in the schema only for producers that predate
+the rule (conversation-spec, The change stream). It normalises like any other
+minted id.
+
 The v1 set is not superseded by the v2 set's arrival: it remains the v1
 ingest path's test surface, and retires with the last v1 speaker
 (conversation-spec, The v1 tree).
@@ -66,9 +71,13 @@ closing round (ends `end_turn`).
 
 - Exercises: `turn_started` with request inputs, `turn_ended` with verbatim
   `stopReason`, `tool_use` with full payload, `usage` per round, message
-  commits on `changes`, `from` on every message.
+  commits on `changes`, `from` on every message that is an utterance — absent
+  on the `tool_result`, which nobody sent.
 - Asserts: the baseline schemas; the query fold grouping by `queryId` and
-  closing on `end_turn`.
+  closed by the `query` closure change on `changes` — carried by the v2 twin,
+  since v1 has no closure change (conversation-spec, The v1 tree). An ending
+  read off `turn_ended` and its verbatim `stopReason` is lawful observation,
+  never the fold's authority.
 
 Fixture: `fixtures/scenario-1.jsonl`.
 
@@ -257,7 +266,6 @@ presence, not on literal timestamps — silence is represented the way approval
 | a1 — world up, fresh conversation | `fixtures/agent/scenario-a1.jsonl` |
 | a2 — clean shutdown | `fixtures/agent/scenario-a2.jsonl` |
 | a3 — stranded | `fixtures/agent/scenario-a3.jsonl` |
-| a4 — chdir | `fixtures/agent/scenario-a4.jsonl` |
 | a5 — resume, then already-attached | `fixtures/agent/scenario-a5.jsonl` |
 | a6 — the record a non-conformant publisher leaves | `fixtures/agent/scenario-a6.jsonl` |
 | a7 — ordinary life, on the new leaf | `fixtures/agent/scenario-a7.jsonl` |
@@ -266,13 +274,24 @@ presence, not on literal timestamps — silence is represented the way approval
 | a10 — abandon and re-adopt, on the new leaf | `fixtures/agent/scenario-a10.jsonl` |
 | a11 — chdir, on the new leaf | `fixtures/agent/scenario-a11.jsonl` |
 
+The concern spans two trees, though a single scenario need not. `ready` and
+`pulse` are the world's own telemetry; `service` and `drain` address the
+world's request tree; the claim on a conversation is the conversation's
+(`conv.v2.{id}.attachment.>`, conversation-spec, Attachment).
+
+a1 to a3 carry world telemetry beside the claim, and a2 adds a `drain`
+request. a5's world lines are both `service` requests, which no stream
+captures, so replaying it yields the claim alone. a6 to a11 carry
+conversation lines only.
+
 ### a1 — world up, fresh conversation
 
 A process boots, promises a cadence, and attaches to a conversation that has
 no messages yet.
 
-- Exercises: `ready`, `pulse`, `attached` carrying `cwd` — no conversation
-  traffic at all.
+- Exercises: `ready` and `pulse` on the world's tree; `attached` on the
+  conversation's, carrying `cwd`, `tip: null` and the promised `intervalS` —
+  no `changes` traffic at all.
 - Asserts: existence-by-attachment — the conversation is a row before its
   first message; the **alive** fold — attached, pulse fresh.
 
@@ -280,7 +299,8 @@ no messages yet.
 
 The instance is serving, then drains.
 
-- Exercises: `drain` accepted; `detached` for the conversation.
+- Exercises: `drain` accepted on the world; `detached` on the conversation it
+  was serving.
 - Asserts: the **released** fold — cleanly detached, a decided fact, distinct
   from silence.
 
@@ -288,33 +308,19 @@ The instance is serving, then drains.
 
 The instance is serving and pulsing, then goes silent.
 
-- Exercises: `attached`, two `pulse`s, then nothing — no `detached`, no
-  further pulse.
+- Exercises: `attached` on the conversation, two `pulse`s on the world, then
+  nothing — no `detached`, no further pulse.
 - Asserts: the **stranded** fold — attached, pulse silent past ~3 × its
   declared `intervalS`. Stranded is inferred from a broken promise, never
   published; it reads differently from a2's released for exactly that reason.
-
-### a4 — chdir
-
-Tower moves a live attachment's working directory.
-
-This records the superseded shape: `chdir` addressed the world, and the move
-showed as a re-published `attached`. On today's shape the request addresses
-the conversation and the move lands as `moved` — a11.
-
-- Exercises: `attached` at one `cwd`, `chdir` accepted, `attached`
-  re-published at the new `cwd`.
-- Asserts: last-write-wins per (instance, conversation) — the attachment's
-  current cwd is the latest `attached`; and that the conversation's change
-  stream emits nothing across the move — the proof cwd is never conversation
-  state.
 
 ### a5 — resume, then already-attached
 
 The one `service` verb across two calls against the same conversation.
 
-- Exercises: `service` accepted (history exists, no live attachment → fold
-  and re-attach), `attached`; a second `service` while attached →
+- Exercises: `service` accepted on the world (history exists, no live
+  attachment → fold and re-attach), then `attached` on the conversation with
+  the `tip` it resumed at; a second `service` while attached →
   `rejected: already_attached`.
 - Asserts: the verb dispatches on the record's state, not on the request; the
   reply confirms the premise (servable / already served), never an outcome.

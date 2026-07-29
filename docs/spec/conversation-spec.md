@@ -23,13 +23,16 @@ Its structure:
   bytes: content is revisable (see the change stream). "User-role" covers both
   what a sender said and tool results — which is why every API round is a pair.
 - **turn** — one API round: a user-role message in, an assistant message out.
-  `turnId` groups the pair. A turn ends with a reason; mid-query rounds end
-  `tool_use`, `end_turn` closes the query.
-- **query** — an ordered run of turns, closed by `end_turn` — plus its
-  **parent**: the premise its `say` was accepted against. The parent is the
-  precondition made structural: the tree is the record of accepted premises,
-  and branching exists only where queries attach. Within a query everything is
-  linear, which is why per-message parent pointers would carry no information.
+  `turnId` groups the pair. A turn ends with a reason — `tool_use` for a round
+  that calls a tool, `end_turn` for one that stops — and that reason is
+  observation: the model's own word for why it stopped, never the query's
+  ending.
+- **query** — an ordered run of turns, closed by the `query` change on
+  `changes` (see Query closure) — plus its **parent**: the premise its `say`
+  was accepted against. The parent is the precondition made structural: the
+  tree is the record of accepted premises, and branching exists only where
+  queries attach. Within a query everything is linear, which is why
+  per-message parent pointers would carry no information.
 
 **The conversation is a tree. Messages are its nodes; queries are its
 branches.** Within a query each message's parent is trivially the message
@@ -138,7 +141,7 @@ compute, never something it must.
 | Event | Fields | Notes |
 |---|---|---|
 | `turn_started` | `queryId`, `turnId`, `service`, `model`, `thinking`, `effort`, `maxTokens` | a message begins; fires every round of the loop. Carries the request's inputs as asked — `usage` later carries what was reported back; if they differ (model fallback), the record shows it. `service` names what was called — e.g. the Anthropic Messages API — not which model answered |
-| `turn_ended` | `queryId`, `turnId`, `stopReason` | the model stopped its message; fires every round — mid-loop rounds end `tool_use`, `end_turn` closes the query. `stopReason` is the service's own value, passed through verbatim — never synthesised: a turn that was cancelled or failed did not *end*, and gets its own event below |
+| `turn_ended` | `queryId`, `turnId`, `stopReason` | the model stopped its message; fires every round — mid-loop rounds end `tool_use`, a closing round ends `end_turn`. That is the model's own word for why it stopped, never the query's ending: closure is the `query` change on `changes` (this spec, Query closure), and reading an ending off this event is lawful observation, never authority. `stopReason` is the service's own value, passed through verbatim — never synthesised: a turn that was cancelled or failed did not *end*, and gets its own event below |
 | `turn_cancelled` | `queryId`, `turnId` | the turn was terminated intentionally — a `cancel` was accepted; someone decided |
 | `turn_aborted` | `queryId`, `turnId` | the attempt failed — service error, broken stream; potentially transient. Distinct from `turn_cancelled` because the two imply different follow-ups |
 | `tool_use` | `queryId`, `turnId`, `id`, `name`, `input` | `id` is the opaque tool-use id (`toolu_…`); `input` included — the action is unreviewable without the payload |
@@ -169,7 +172,7 @@ exactly that argument):
 | `message` | `id`, `queryId`, `turnId`, `role`, `from`?, `content` | **utterance** — the dialogue grew. `id` is the message's stable id; `role` is `user` or `assistant`; `from` is the sender identity (`{ kind: human \| agent \| orchestrator }` + id) so two `role: user` messages from different senders read apart — **absent for a `tool_result`**: it is the mechanical delivery of a tool's output, not an utterance, and nobody sent it, so nothing is fabricated to fill the slot (correction, 19 Jul 2026 — it previously carried `from: {kind: agent}`, wrongly); `content` is content blocks |
 | `revision` | `messageId`, `content` | **revision** — the content under a stable id changed: a trim, a resize, or the words themselves rewritten. Carries the resulting content, never the why — the record carries effects, never reasons |
 | `tip_moved` | `to` (a message id) | **tip movement** — the tip pointer moved: rewind, fast-forward. The reflog, as events |
-| `query` | `queryId`, `reason` | **query closure** — the query will grow no further; the record now contains everything it will ever contain. `reason` is the system's own vocabulary, an open set under add-only: `completed` (closed by `end_turn`), `cancelled` (a `cancel` was accepted), `aborted` (the attempt failed and the servicer gave the query up). Committal like every change: published after the closing fact is in the record, never speculatively |
+| `query` | `queryId`, `reason` | **query closure** — the query will grow no further; the record now contains everything it will ever contain. `reason` is the system's own vocabulary, an open set under add-only: `completed` (the servicer ran its last round and chose not to run another), `cancelled` (a `cancel` was accepted), `aborted` (the attempt failed and the servicer gave the query up). Committal like every change: published after the closing fact is in the record, never speculatively |
 
 **Envelope provenance: `instanceId` rides beside `from`, never inside it.**
 Every change event carries the publishing instance's id as envelope

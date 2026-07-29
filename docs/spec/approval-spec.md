@@ -264,11 +264,12 @@ no further design needed:
   pulse are live; the rest display as void. Even without replay, every live
   ask self-announces within one interval of joining.
 
-Whether replay is *available* is deployment configuration, per the master
-spec's storage rule: a deployment that captures `lifecycle` gets late-joiner
-discovery as a JetStream read; one that captures nothing has live-watching
-only, and made that choice. The spec defines the fold; it never depends on the
-capture.
+The record `lifecycle` leaves is captured — that is the system's substrate,
+not a deployment's option (nats-spec, Storage). What a deployment configures
+is retention: how far back the replay reaches, and therefore how much history
+a late joiner recovers, never whether there is anything to replay. A joiner
+that replays a window shorter than an ask's life sees fewer candidates, and
+the pulse still confirms what is live within one interval.
 
 The sliver that stays open: historical liveness — "was that candidate live
 *at 14:02*" needs pulses from that moment, and pulses are telemetry a
