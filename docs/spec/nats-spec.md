@@ -336,10 +336,10 @@ Visualised: the two traffic planes are horizontal rows, the concerns are
 vertical columns, and every message lands in exactly one cell:
 
 ```
-                conv          approval        agent (future)
+                conv          approval        agent
              ┌─────────────┬──────────────┬────────────────┐
-operational  │ changes     │ lifecycle    │ (spawn/config  │
-             │ requests    │ requests     │  requests …)   │
+operational  │ changes     │ lifecycle    │ service, drain,│
+             │ requests    │ requests     │ chdir requests │
              │ deltas      │              │                │
              │ attachment  │              │                │
              ├─────────────┼──────────────┼────────────────┤
