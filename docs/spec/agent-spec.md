@@ -133,16 +133,10 @@ A re-attacher that should not have re-attached is visible in the record instead 
 An instance that breaks the rule forfeits its authority, at the cost
 nats-spec's Conformance section states.
 
-Compliance is not global state. Nothing publishes a verdict and nothing asks
-another party for one — a reader derives it from the log it has read, like
-everything else it knows. Two readers with different windows may derive
-differently; neither is coordinating with the other, so there is nothing to
-contradict.
-
-It drives exactly one decision. A claim arrives for a conversation this
-instance holds: it looks at its own record. If that claimer has a claim it
-never released, the claim doesn't fold and this instance keeps serving. If
-not, it stands down. Nothing else in the system consults conduct.
+Compliance drives exactly one decision here. A claim arrives for a
+conversation this instance holds: it looks at its own record. If that claimer
+has a claim it never released, the claim doesn't fold and this instance keeps
+serving. If not, it stands down. Nothing else in the system consults conduct.
 
 After a `detached` closes the standing claim, a new `attached` is an ordinary new claim. It may come from any instance — including the one that just released it. A closed claim leaves nothing behind to reopen, so the wire doesn't care who claims next.
 
