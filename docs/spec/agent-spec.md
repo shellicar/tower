@@ -74,6 +74,14 @@ map: who serves what, and whether they are alive.
 | `ready` | `instanceId`, `host` | a process now serves this world; published once on boot, after its subscriptions are up |
 | `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement the master spec forbids |
 
+**Which kinds are observations, which are mutations** (nats-spec,
+Conformance: the consequence of breaking conduct follows the class). Every
+event on this tree is observation — `ready` and `pulse` — which is why a
+broken one costs only itself: it doesn't fold, and nothing was waiting on it
+to become true. The claim an instance conducts itself by is a mutation, and
+it lives on the conversation's tree (`conversation-spec.md`, Attachment),
+which is why the attachment violation costs the instance's authority instead.
+
 **Liveness is a fold, never declared.** An instance is presumed gone after
 about three of its own declared intervals of silence — judged against its own
 promise, nobody else's; the spec mandates no cadence. **No declared interval
@@ -122,7 +130,22 @@ A re-attacher that should not have re-attached is visible in the record instead 
 
 **The rule, stated once.** An instance must not claim a conversation while its own claim on it is open. In the record, that violation looks like: `attached`, `attached` from the same instance, no `detached` between. Nothing else qualifies it; nothing else excuses it.
 
-An instance that breaks the conduct rule — a second `attached` with no `detached` between — is non-compliant, and consumers ignore everything it publishes from then on. There is no way back for the instance: like a crashed process, it is fixed by restarting, and a restart is a new instance id. Nothing on the wire enforces this; the record shows the violation, and every reader derives the same state from it independently.
+An instance that breaks the rule is non-compliant, and forfeits its
+authority: the claim is a mutation, so nothing it publishes moves a fold from
+then on (nats-spec, Conformance). There is no way back for the instance: like
+a crashed process, it is fixed by restarting, and a restart is a new instance
+id.
+
+Compliance is not global state. Nothing publishes a verdict and nothing asks
+another party for one — a reader derives it from the log it has read, like
+everything else it knows. Two readers with different windows may derive
+differently; neither is coordinating with the other, so there is nothing to
+contradict.
+
+It drives exactly one decision. A claim arrives for a conversation this
+instance holds: it looks at its own record. If that claimer has a claim it
+never released, the claim doesn't fold and this instance keeps serving. If
+not, it stands down. Nothing else in the system consults conduct.
 
 After a `detached` closes the standing claim, a new `attached` is an ordinary new claim. It may come from any instance — including the one that just released it. A closed claim leaves nothing behind to reopen, so the wire doesn't care who claims next.
 
