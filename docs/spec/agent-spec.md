@@ -211,6 +211,10 @@ this repo's testing rule.
 
 Two things follow from this, worth saying plainly rather than leaving a reader to derive them. Only a live instance can ever answer a `service` request — queue-group delivery finds whichever instance in the world is up right now — so the liveness question is never about the instance answering, only ever about a different instance that might be holding a stale attachment. And the liveness read at the stranded threshold is safe whichever way it lands: read as alive, the request just comes back `already_attached` and the sender retries later; read as stranded, the request takes over, and unconditional supersession is what makes that landing safe too.
 
+This safety argument is scoped to two *warm* reads straddling the threshold — both readers have observed enough of the record to have a liveness verdict at all, and either verdict is fine. It does not extend to a cold or degraded fold: a just-booted instance, or one whose feed hasn't caught up, has not yet observed the standing attachment and owes no verdict on it (nats-spec.md, System principles). Answering `service` from such a fold — taking over a live holder because the map looked empty — is exactly the unobserved-state action that principle rules out.
+
+The corollary: an instance does not join the world's queue group until its own folds are warm. A cold instance is not yet offering to serve, so it must not be the one a `service` request finds. A sender whose request meets no queue-group member gets NATS's own no-responder — and that honestly means the world isn't available to serve this yet, not a rejection with a reason: no new reason token is owed for it, the same way a crashed process owes no reply. The sender retries; the world answers once an instance has warmed into the group.
+
 **cwd is intrinsic to the harness.** An agent is a harness and a model; the
 model is text-in-text-out and has no filesystem, while the harness runs
 somewhere and touches a directory. So a bridge agent — a harness serving
