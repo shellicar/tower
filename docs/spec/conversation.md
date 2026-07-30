@@ -313,7 +313,7 @@ join and the standing-instance gate compare the pair. An `attached` without
 conversation gives every `attached` claim a total order: whichever
 `attached` published last on this subject is standing. That holds from any
 world, any instance, with no cross-world timestamp comparison needed
-(nats.md, What consumers may assume). This is why attachment could not
+(agent.md, What consumers may assume). This is why attachment could not
 stay on the world's tree — two worlds' clocks are not one order.
 
 That ordering only settles who is standing. It doesn't make `moved` and
