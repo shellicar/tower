@@ -22,11 +22,12 @@ use wire::ConvAttachment;
 const DEFAULT_SILENCE_S: u64 = 60;
 /// Presumed gone after about three of its own declared intervals of silence.
 const STRANDED_MULTIPLE: u64 = 3;
-/// The slowest heartbeat this consumer honours (a deliberate cap, headed
-/// for the spec): a declared interval above it folds to it, so a bogus
-/// `intervalS: 86400` cannot keep a dead holder "alive" for days and block
-/// service on its conversation. 10 minutes is already extremely generous
-/// against the 30s cadence bridge itself pulses at.
+/// The slowest heartbeat the spec allows (agent.md, Telemetry): a declared
+/// interval above it makes the event invalid whole, so a bogus
+/// `intervalS: 86400` is dropped rather than honoured — it cannot keep a
+/// dead holder "alive" for days and block service on its conversation. 10
+/// minutes is already extremely generous against the 30s cadence bridge
+/// itself pulses at.
 const MAX_INTERVAL_S: u64 = 600;
 /// The longest silence any instance is ever granted — 3× the capped
 /// interval. Also the exact capture window a boot-time seed needs: a pulse
@@ -176,27 +177,26 @@ fn valid_interval(interval_s: i64) -> Option<u64> {
 
 /// This world's own liveness map, folded from `agent.v1.{world}.telemetry.>`
 /// as heard — instance ids are already world-scoped, so keys are bare.
-/// Time is data: `since` is when the feed went live, every entry carries
-/// the receipt instant the caller passes in, and verdicts are judged
-/// against a `now` the caller passes in, so the fold itself never reads a
-/// clock.
-#[derive(Debug)]
+/// Time is data: every entry carries the receipt instant the caller passes
+/// in, and verdicts are judged against a `now` the caller passes in, so the
+/// fold itself never reads a clock.
+///
+/// The map carries no cold-start hold, because the honest answer to a cold
+/// fold is not a verdict at all. An instance joins the world's queue group
+/// only once this map is warm (agent.md, "The premise for `service`"), so a
+/// sender that arrives first meets no queue-group member and gets NATS's
+/// own no-responder — "the world isn't available to serve this yet", which
+/// it can retry. Holding never-heard as alive instead turned that into
+/// `already_attached`: a refusal, and a wrong one when the named holder is
+/// long dead.
+#[derive(Debug, Default)]
 pub struct WorldLiveness {
-    /// When the telemetry subscription went live. Stranded is measured
-    /// silence, and a map that hasn't listened for a full default threshold
-    /// has measured nothing — until then, never-heard reads alive, so a
-    /// freshly started instance answers `already_attached` (the sender
-    /// retries) instead of displacing a live world-mate off a cold map.
-    since: Instant,
     instances: std::collections::HashMap<String, InstancePulse>,
 }
 
 impl WorldLiveness {
-    pub fn new(since: Instant) -> Self {
-        Self {
-            since,
-            instances: std::collections::HashMap::new(),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// `ready` restates presence with no cadence declared.
@@ -250,14 +250,13 @@ impl WorldLiveness {
     }
 
     /// Alive = heard from within its own silence threshold. Never heard
-    /// from reads alive until the map has listened for a full default
-    /// threshold (`since`), and not-alive after — only then is the silence
-    /// measured rather than merely unobserved.
+    /// from is not alive: this map is only ever read once warm, and a warm
+    /// map that has not heard an instance has measured its silence rather
+    /// than merely failed to observe it.
     pub fn is_alive(&self, instance_id: &str, now: Instant) -> bool {
-        match self.instances.get(instance_id) {
-            Some(p) => now.duration_since(p.last_seen) < p.silence_threshold(),
-            None => now.duration_since(self.since) < Duration::from_secs(DEFAULT_SILENCE_S),
-        }
+        self.instances
+            .get(instance_id)
+            .is_some_and(|p| now.duration_since(p.last_seen) < p.silence_threshold())
     }
 }
 
@@ -470,34 +469,30 @@ mod tests {
 
     // --- liveness ---
 
-    /// A map that has already listened for a full default threshold by the
-    /// returned base instant: its never-heard verdicts are measured
-    /// silence, not a cold start. Built by addition (base after creation),
-    /// never by backdating — Instant is monotonic-since-boot, and
-    /// subtracting from now underflows on a low-uptime host.
-    fn warm_map() -> (WorldLiveness, Instant) {
-        let created = Instant::now();
-        let base = created + Duration::from_secs(DEFAULT_SILENCE_S + 1);
-        (WorldLiveness::new(created), base)
+    /// A fold and the instant its tests reason from. Warmth is no longer a
+    /// property of the map — it is the gate on joining the queue group — so
+    /// there is nothing to age here.
+    fn map() -> (WorldLiveness, Instant) {
+        (WorldLiveness::new(), Instant::now())
     }
 
     #[test]
     fn an_instance_within_three_of_its_own_intervals_is_alive() {
-        let (mut world, t0) = warm_map();
+        let (mut world, t0) = map();
         world.on_pulse("inst-1", Some(30), t0);
         assert!(world.is_alive("inst-1", t0 + Duration::from_secs(89)));
     }
 
     #[test]
     fn an_instance_silent_past_three_of_its_own_intervals_is_not_alive() {
-        let (mut world, t0) = warm_map();
+        let (mut world, t0) = map();
         world.on_pulse("inst-1", Some(30), t0);
         assert!(!world.is_alive("inst-1", t0 + Duration::from_secs(91)));
     }
 
     #[test]
     fn no_declared_interval_gets_the_flat_default_threshold_not_a_multiple() {
-        let (mut world, t0) = warm_map();
+        let (mut world, t0) = map();
         world.on_ready("inst-1", t0);
         assert!(world.is_alive("inst-1", t0 + Duration::from_secs(59)));
         assert!(!world.is_alive("inst-1", t0 + Duration::from_secs(61)));
@@ -508,7 +503,7 @@ mod tests {
     /// nothing — not even the presence a bare `ready` would prove.
     #[test]
     fn a_missing_or_non_positive_interval_makes_the_pulse_invalid_so_it_lands_as_nothing() {
-        let (mut world, t0) = warm_map();
+        let (mut world, t0) = map();
         world.on_pulse("inst-1", Some(0), t0);
         world.on_pulse("inst-2", Some(-5), t0);
         world.on_pulse("inst-3", None, t0);
@@ -519,7 +514,7 @@ mod tests {
 
     #[test]
     fn attached_telemetry_proves_presence_and_may_declare_the_cadence() {
-        let (mut world, t0) = warm_map();
+        let (mut world, t0) = map();
         world.on_attached("inst-1", Some(10), t0);
         assert!(world.is_alive("inst-1", t0 + Duration::from_secs(29)));
         assert!(!world.is_alive("inst-1", t0 + Duration::from_secs(31)));
@@ -533,7 +528,7 @@ mod tests {
     /// never heard from.
     #[test]
     fn a_declared_interval_above_the_limit_makes_the_event_invalid_not_clamped() {
-        let (mut world, t0) = warm_map();
+        let (mut world, t0) = map();
         world.on_pulse("inst-1", Some(86_400), t0);
         assert!(!world.is_alive("inst-1", t0));
         // The same bound on the other event that may declare a cadence.
@@ -549,29 +544,20 @@ mod tests {
     /// never drag a fresher live one backwards.
     #[test]
     fn an_older_observation_never_regresses_last_seen() {
-        let (mut world, t0) = warm_map();
+        let (mut world, t0) = map();
         let fresh = t0 + Duration::from_secs(200);
         world.on_pulse("inst-1", Some(30), fresh);
         world.on_pulse("inst-1", Some(30), t0);
         assert!(world.is_alive("inst-1", fresh + Duration::from_secs(89)));
     }
 
+    /// The map is only ever read once warm, so a never-heard instance has
+    /// been measured silent, not merely unobserved. There is no hold that
+    /// would report it alive.
     #[test]
-    fn never_heard_from_is_not_alive_once_the_map_is_warm() {
-        let (world, base) = warm_map();
-        assert!(!world.is_alive("inst-unknown", base));
-    }
-
-    /// The cold-start hold: a map that hasn't listened for a full default
-    /// threshold has measured no silence, so never-heard reads alive — a
-    /// fresh instance must answer `already_attached` rather than displace a
-    /// live world-mate it simply hasn't heard yet.
-    #[test]
-    fn never_heard_from_reads_alive_while_the_map_is_still_cold() {
-        let t0 = Instant::now();
-        let world = WorldLiveness::new(t0);
-        assert!(world.is_alive("inst-unknown", t0 + Duration::from_secs(59)));
-        assert!(!world.is_alive("inst-unknown", t0 + Duration::from_secs(61)));
+    fn never_heard_from_is_not_alive() {
+        let (world, now) = map();
+        assert!(!world.is_alive("inst-unknown", now));
     }
 
     // --- the four cases ---
@@ -586,14 +572,14 @@ mod tests {
 
     #[test]
     fn no_standing_attachment_is_the_fresh_arm() {
-        let (liveness, now) = warm_map();
+        let (liveness, now) = map();
         let actual = service_premise(None, "mac", "inst-me", &liveness, now);
         assert_eq!(actual, ServicePremise::NoAttachment);
     }
 
     #[test]
     fn a_standing_attachment_in_another_world_is_taken_over_regardless_of_liveness() {
-        let (mut liveness, now) = warm_map();
+        let (mut liveness, now) = map();
         // Even a demonstrably live holder: cross-world IS migration.
         liveness.on_pulse("inst-far", Some(30), now);
         let standing = stands("inst-far", Some("pc"));
@@ -603,7 +589,7 @@ mod tests {
 
     #[test]
     fn a_live_holder_in_this_world_means_already_attached() {
-        let (mut liveness, now) = warm_map();
+        let (mut liveness, now) = map();
         liveness.on_pulse("inst-mate", Some(30), now);
         let standing = stands("inst-mate", Some("mac"));
         let actual = service_premise(Some(&standing), "mac", "inst-me", &liveness, now);
@@ -613,7 +599,7 @@ mod tests {
     #[test]
     fn our_own_standing_claim_is_already_attached_without_consulting_pulses() {
         // A cold map: our own claim never consults the fold at all.
-        let liveness = WorldLiveness::new(Instant::now());
+        let liveness = WorldLiveness::new();
         let standing = stands("inst-me", Some("mac"));
         let actual = service_premise(Some(&standing), "mac", "inst-me", &liveness, Instant::now());
         assert_eq!(actual, ServicePremise::AlreadyAttached);
@@ -621,7 +607,7 @@ mod tests {
 
     #[test]
     fn a_stranded_holder_in_this_world_is_taken_over() {
-        let (mut liveness, t0) = warm_map();
+        let (mut liveness, t0) = map();
         liveness.on_pulse("inst-mate", Some(10), t0);
         let standing = stands("inst-mate", Some("mac"));
         let later = t0 + Duration::from_secs(31);
@@ -631,7 +617,7 @@ mod tests {
 
     #[test]
     fn a_worldless_standing_claim_lands_in_the_cross_world_arm() {
-        let (liveness, now) = warm_map();
+        let (liveness, now) = map();
         let standing = stands("inst-old", None);
         let actual = service_premise(Some(&standing), "mac", "inst-me", &liveness, now);
         assert_eq!(actual, ServicePremise::TakeOverCrossWorld);

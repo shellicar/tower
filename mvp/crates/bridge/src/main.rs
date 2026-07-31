@@ -1232,20 +1232,22 @@ async fn handle_service<B: Broker, D: DeltaSink>(
 async fn serve_agent_requests<B: Broker, D: DeltaSink>(host: Arc<Host<B, D>>) {
     let mut delay = 1u64;
     loop {
-        let started = std::time::Instant::now();
-        let established = serve_agent_requests_once(&host).await;
-        if established {
+        match serve_agent_requests_once(&host).await {
             // Establishing is the attempt; staying up is the evidence. A
             // feed that dies the moment it is made would otherwise reset
             // the backoff every time and re-seed a MAX_SILENCE_S window
-            // once a second, forever. Only a run that lasted longer than
-            // the longest backoff proves the trouble had actually passed.
-            if started.elapsed() >= std::time::Duration::from_secs(MAX_BACKOFF_S) {
-                delay = 1;
+            // once a second, forever. The run is measured from when
+            // serving actually began, so a slow establish never passes for
+            // a healthy run.
+            Some(serving_since) => {
+                if serving_since.elapsed() >= std::time::Duration::from_secs(MAX_BACKOFF_S) {
+                    delay = 1;
+                }
+                eprintln!("bridge: agent request serving interrupted; re-establishing in {delay}s");
             }
-            eprintln!("bridge: agent request serving interrupted; re-establishing in {delay}s");
-        } else {
-            eprintln!("bridge: agent request serving not established; retrying in {delay}s");
+            None => {
+                eprintln!("bridge: agent request serving not established; retrying in {delay}s")
+            }
         }
         tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
         delay = (delay * 2).min(MAX_BACKOFF_S);
@@ -1256,9 +1258,13 @@ async fn serve_agent_requests<B: Broker, D: DeltaSink>(host: Arc<Host<B, D>>) {
 /// requests queue group, then one merged loop over both. All three stand or
 /// fall together — any of them failing or ending returns for the caller to
 /// re-establish, so a dead telemetry feed or an unseedable map never leaves
-/// a surviving request loop answering off weak verdicts. Returns whether
-/// serving was actually established (the caller resets its backoff on true).
-async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D>>) -> bool {
+/// a surviving request loop answering off weak verdicts. Returns when
+/// serving actually began, or `None` if it never did — the caller measures
+/// the run from that instant, so establishing costs are never counted as
+/// time spent serving.
+async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(
+    host: &Arc<Host<B, D>>,
+) -> Option<std::time::Instant> {
     // The liveness watch first, and fatally: the premise's alive-vs-
     // stranded read is only honest off a live map, so an instance that
     // cannot watch its world-mates must not answer requests at all.
@@ -1270,17 +1276,15 @@ async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D
                 "bridge: world telemetry subscribe failed ({telemetry_subject}): {:#} — not serving agent requests",
                 anyhow::Error::new(e)
             );
-            return false;
+            return None;
         }
     };
     // Subscribe first, then seed — no pulse lands in the gap between the
     // two reads. A seed failure is a broken deployment (the capture is
     // load-bearing for adopt and the premise read alike), not a mode to
     // serve through: same rule as the telemetry watch, refuse and let the
-    // caller re-establish. The warmup hold covers only what a SUCCESSFUL
-    // seed of zero frames leaves genuinely unknown — a brand-new world's
-    // first minutes.
-    *host.liveness.lock().unwrap() = service::WorldLiveness::new(std::time::Instant::now());
+    // caller re-establish.
+    *host.liveness.lock().unwrap() = service::WorldLiveness::new();
     if let Err(e) = seed_world_liveness(
         &host.broker,
         &host.stream_ephemeral,
@@ -1290,9 +1294,15 @@ async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D
     .await
     {
         eprintln!("bridge: liveness seed failed — not serving agent requests: {e:#}");
-        return false;
+        return None;
     }
 
+    // Warm, and only now joining: an instance does not offer to serve until
+    // its own fold can answer the premise (agent.md, "The premise for
+    // `service`"). A sender arriving before this point meets no queue-group
+    // member at all and gets NATS's own no-responder — honestly "not
+    // available yet", which it retries — rather than a wrong verdict read
+    // off a fold that has measured nothing.
     let subject = format!("agent.v1.{}.requests.>", host.world);
     let mut requests = match host
         .broker
@@ -1305,9 +1315,14 @@ async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D
                 "bridge: agent requests subscribe failed ({subject}): {:#}",
                 anyhow::Error::new(e)
             );
-            return false;
+            return None;
         }
     };
+    // Serving starts here, so this is where the run's clock starts: the
+    // subscribe and seed above are the cost of establishing, and counting
+    // them would let a slow seed followed by an instantly dead feed read as
+    // a healthy run.
+    let serving_since = std::time::Instant::now();
     let prefix = format!("agent.v1.{}.requests.", host.world);
     eprintln!("bridge: serving {subject}");
     loop {
@@ -1321,7 +1336,7 @@ async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D
             req = requests.next() => match req {
                 None => {
                     eprintln!("bridge: agent requests subscription ended");
-                    return true;
+                    return Some(serving_since);
                 }
                 Some(msg) => {
                     // Fold whatever telemetry is already queued before
@@ -1332,7 +1347,7 @@ async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D
                     let Some(reply_to) = msg.reply.clone() else {
                         if telemetry_ended {
                             eprintln!("bridge: world telemetry subscription ended");
-                            return true;
+                            return Some(serving_since);
                         }
                         continue;
                     };
@@ -1371,14 +1386,14 @@ async fn serve_agent_requests_once<B: Broker, D: DeltaSink>(host: &Arc<Host<B, D
                     // loop is the sender's retry, not our debt.
                     if telemetry_ended {
                         eprintln!("bridge: world telemetry subscription ended");
-                        return true;
+                        return Some(serving_since);
                     }
                 }
             },
             tele = telemetry.next() => match tele {
                 None => {
                     eprintln!("bridge: world telemetry subscription ended");
-                    return true;
+                    return Some(serving_since);
                 }
                 Some(msg) => fold_world_telemetry(
                     &msg.subject,
@@ -1578,9 +1593,7 @@ async fn main() -> anyhow::Result<()> {
     let stream = std::env::var("BRIDGE_STREAM").unwrap_or_else(|_| "conv-approval".into());
     let stream_ephemeral =
         std::env::var("BRIDGE_STREAM_EPHEMERAL").unwrap_or_else(|_| "conv-ephemeral".into());
-    let liveness = Arc::new(std::sync::Mutex::new(service::WorldLiveness::new(
-        std::time::Instant::now(),
-    )));
+    let liveness = Arc::new(std::sync::Mutex::new(service::WorldLiveness::new()));
     let host = Arc::new(Host {
         broker,
         delta,
@@ -2464,7 +2477,7 @@ mod tests {
 
         let established = super::serve_agent_requests_once(&host).await;
 
-        assert!(!established);
+        assert!(established.is_none());
         let calls = broker.calls.lock().unwrap().clone();
         assert!(
             !calls
@@ -2509,7 +2522,7 @@ mod tests {
 
         let established = super::serve_agent_requests_once(&host).await;
 
-        assert!(established);
+        assert!(established.is_some());
         let published = broker.published.lock().unwrap().clone();
         assert!(
             published.iter().any(|(s, _)| s == "_INBOX.d1"),
@@ -2694,30 +2707,6 @@ mod tests {
                 .lock()
                 .unwrap()
                 .is_alive("inst-old", std::time::Instant::now())
-        );
-    }
-
-    /// A freshly started instance has measured no silence, so a never-heard
-    /// in-world holder reads alive: `already_attached`, and the sender
-    /// retries — never a takeover off a cold map.
-    #[tokio::test]
-    async fn a_cold_liveness_map_never_licenses_a_takeover() {
-        let broker = FakeBroker::default();
-        seed_attachment(
-            &broker,
-            "conv-w",
-            vec![attached_frame("conv-w", "inst-mate", "mac")],
-        );
-        let scratch = TestScratch::new("service-cold-map");
-        let host = host(&scratch, broker.clone());
-        *host.liveness.lock().unwrap() =
-            crate::service::WorldLiveness::new(std::time::Instant::now());
-
-        let reply = super::handle_service(&host, "conv-w".into(), None, None).await;
-
-        assert_eq!(
-            reply_json(&reply),
-            serde_json::json!({ "rejected": true, "reason": "already_attached" })
         );
     }
 

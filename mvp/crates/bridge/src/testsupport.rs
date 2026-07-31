@@ -66,16 +66,6 @@ pub(crate) fn host(
         )),
         stream: "conv-approval".to_string(),
         stream_ephemeral: "conv-ephemeral".to_string(),
-        // Warm: backdated past the default silence threshold, so a test's
-        // never-heard holder reads as measured silence (stranded), not a
-        // cold start. A test proving the cold-start hold overwrites this.
-        // checked_sub because Instant is monotonic-since-boot: backdating
-        // is only possible on a host that has been up this long, and a
-        // clear panic beats a silent underflow panic deep in std.
-        liveness: Arc::new(std::sync::Mutex::new(crate::service::WorldLiveness::new(
-            std::time::Instant::now()
-                .checked_sub(std::time::Duration::from_secs(120))
-                .expect("test host uptime under 120s: cannot backdate the liveness map"),
-        ))),
+        liveness: Arc::new(std::sync::Mutex::new(crate::service::WorldLiveness::new())),
     })
 }
