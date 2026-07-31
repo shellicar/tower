@@ -68,6 +68,42 @@ describe('Rail attachments', () => {
   });
 });
 
+describe('detached gating', () => {
+  function detached(world: string, instanceId: string): ServerMsg {
+    return { type: 'agent', kind: 'detached', world, instanceId, ts: 300_000, conv: 'a' } as ServerMsg;
+  }
+
+  // Each clock sits inside the stranded threshold, so a cleared cwd is the
+  // gate's doing and never liveness quietly hiding a surviving attachment.
+  it('ignores a displaced instance releasing its own past claim', () => {
+    const { rail, emit } = fakeTransport({ now: () => 220_000 });
+    emit(attached('w1', 100_000, '/old/path'));
+    emit({ ...attached('w2', 200_000, '/new/path'), instanceId: 'inst-2' } as ServerMsg);
+
+    emit(detached('w1', 'inst-1'));
+
+    expect(rail.liveCwd('a')).toBe('/new/path');
+  });
+
+  it('clears on the standing instance releasing', () => {
+    const { rail, emit } = fakeTransport({ now: () => 120_000 });
+    emit(attached('w1', 100_000, '/old/path'));
+
+    emit(detached('w1', 'inst-1'));
+
+    expect(rail.liveCwd('a')).toBeUndefined();
+  });
+
+  it('degrades to bare instanceId when the fact omits world', () => {
+    const { rail, emit } = fakeTransport({ now: () => 120_000 });
+    emit(attached('w1', 100_000, '/old/path'));
+
+    emit(detached('', 'inst-1'));
+
+    expect(rail.liveCwd('a')).toBeUndefined();
+  });
+});
+
 describe('liveCwd', () => {
   it('reads the attachment replacing a prior one', () => {
     // A second attached for the same conv supersedes the first (agent-spec);

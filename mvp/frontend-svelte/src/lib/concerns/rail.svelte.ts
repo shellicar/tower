@@ -10,6 +10,18 @@ import { type Clock, approvalVoid, livenessVerdict, systemClock } from '../core/
 import type { Transport } from '../core/transport.svelte';
 import type { AgentAttachment, AgentInstance, Millis, RowState, ServerMsg } from '../types';
 
+/** Instance identity is the (world, instanceId) pair (agent.md, The entity).
+ *  An empty `world` is the wire's stand-in for absent, so a comparison with
+ *  one missing either side falls back to bare `instanceId`: degraded, not
+ *  broken. */
+function sameInstance(
+  held: { world: string; instanceId: string },
+  fact: { world: string; instanceId: string },
+): boolean {
+  if (held.instanceId !== fact.instanceId) return false;
+  return !held.world || !fact.world || held.world === fact.world;
+}
+
 export class Rail {
   #rows = $state<Map<string, RowState>>(new Map());
   #tagKeys = $state<Record<string, string>>({});
@@ -107,9 +119,18 @@ export class Rail {
           });
           this.#attachments = next;
         } else if (event.kind === 'detached' && event.conv) {
-          const next = new Map(this.#attachments);
-          next.delete(event.conv);
-          this.#attachments = next;
+          // Only the STANDING instance's release clears the attachment
+          // (ws-spec, agent): a displaced instance publishes `detached` as
+          // its own act of compliance, and that is a fact about its past
+          // claim, not a retraction of the one that replaced it. Identity is
+          // the (world, instanceId) pair, degrading to bare instanceId when
+          // either side omits world.
+          const held = this.#attachments.get(event.conv);
+          if (held && sameInstance(held, event)) {
+            const next = new Map(this.#attachments);
+            next.delete(event.conv);
+            this.#attachments = next;
+          }
         }
         break;
       }
