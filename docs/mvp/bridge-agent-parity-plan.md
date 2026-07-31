@@ -31,7 +31,7 @@ simple together.
 | Phase | # | Commit | Why here | Gate |
 |---|---|---|---|---|
 | 1 | ✅ | Token refresh | Done (`01bab20`). `anthropic.rs`: `Auth` reads `expiresAt`, refreshes + rewrites credentials on expiry | n/a |
-| 1 | — | ~~`fts5` on rusqlite~~ | Resolved as a non-issue: `libsqlite3-sys`'s bundled build sets `-DSQLITE_ENABLE_FTS5` unconditionally (`build.rs:129`), no cargo feature gates it. No commit needed. | n/a |
+| 1 | - | ~~`fts5` on rusqlite~~ | Resolved as a non-issue: `libsqlite3-sys`'s bundled build sets `-DSQLITE_ENABLE_FTS5` unconditionally (`build.rs:129`), no cargo feature gates it. No commit needed. | n/a |
 | 2.1 Exec | 1 | `Exec` core | Schema (`program`/`args`/`cwd`/`env`), single-command run, structured result. Reuses `Bash`'s existing process machinery (group-kill, pipe draining, cancellation); the new part is the structured shape, not process handling. | same as `Bash` |
 | 2.1 Exec | 2 | Forward-`op` chaining | `;`/`&&`/`\|\|`/`\|`, `redirect`, genuinely separable from "run one program safely": a flat list joined by an operator. | same as `Bash` |
 | 2.2 Read family | 3 | `Find` + engine plumbing | Simplest tool, a pure `SOURCE` (args→`File[]`), no stream input to accept, so it defines the engine's shape (stream types, source/stage/terminal roles, `pipe` `in`/`out`) while being useful standalone. Nothing else can build without this. | none |
@@ -47,7 +47,7 @@ simple together.
 | 3 Mutation | 13 | Merged `Delete` | Design already settled (auto-detect file/dir, non-recursive, ordered, per-item results, no wildcards; see Decisions above). | same as `Bash`/`Exec` |
 | 4 Memory | 14 | Shared-db engine | Port `SqliteMemoryEngine`'s schema/FTS5/migrations, open `~/.claude/memory.db` (already multi-process safe: WAL, `busy_timeout`, shared with the CLI). No tool value without this existing first. | n/a |
 | 4 Memory | 15 | The five `Memory` tools | `WriteMemory`/`ReadMemory`/`SearchMemory`/`DeleteMemory`/`MemoryTypes`, wired to the engine from 14. | write ops mutating, read ops none |
-| 4 History | — | Not committable yet | **Blocked on a design question**: bridge has no local session log; either it ingests its own conversations into `history.db` like the CLI does, or `History` becomes a request to towerd. Tower-architecture decision, not a tool port. | n/a |
+| 4 History | - | Not committable yet | **Blocked on a design question**: bridge has no local session log; either it ingests its own conversations into `history.db` like the CLI does, or `History` becomes a request to towerd. Tower-architecture decision, not a tool port. | n/a |
 
 ## Out of scope
 

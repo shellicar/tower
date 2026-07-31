@@ -212,7 +212,7 @@ this repo's testing rule.
 | Request | Fields | Reply | Notes |
 |---|---|---|---|
 | `service` | `conversationId`, environment (`cwd`, `model`, …, an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover: the servicer reads the conversation's record and reacts; its premise is below. Any named environment value the world cannot establish rejects the request (`invalid_cwd`, for `cwd`); an omitted value falls to the world's own defaults: absence delegates, presence binds, never a silent fallback. Known reasons today: `already_attached`, `at_capacity`, `invalid` (a recognised request whose body doesn't carry what it needs, e.g. a missing or empty `conversationId`), `invalid_cwd`, `failed` (the world could not undertake the operation; the cause rides `detail`), `unsupported` |
-| `drain` | — | `accepted` \| `rejected` + `reason` | stop taking work and detach cleanly: a `detached` per conversation, then silence. Distinguishes a decided shutdown from a crash |
+| `drain` | - | `accepted` \| `rejected` + `reason` | stop taking work and detach cleanly: a `detached` per conversation, then silence. Distinguishes a decided shutdown from a crash |
 
 **The premise for `service`.** Four cases, each read off a warm fold, one
 that has replayed capture up to its live subscription (core.md, System
