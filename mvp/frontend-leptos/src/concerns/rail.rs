@@ -49,6 +49,14 @@ pub struct Rail {
     stale: HashSet<String>,
 }
 
+/// Instance identity is the (world, instanceId) pair (agent.md, The entity).
+/// An empty `world` is the wire's stand-in for absent, so a comparison with
+/// one missing either side falls back to bare `instanceId`: degraded, not
+/// broken.
+fn same_instance(held: (&str, &str), fact: (&str, &str)) -> bool {
+    held.1 == fact.1 && (held.0.is_empty() || fact.0.is_empty() || held.0 == fact.0)
+}
+
 impl Rail {
     pub fn apply(&mut self, event: &ServerMsg) {
         match event {
@@ -176,7 +184,17 @@ impl Rail {
                 }
             }
             "detached" => {
-                if let Some(conv) = &fact.conv {
+                // Only the STANDING instance's release clears the attachment
+                // (ws-spec, agent): a displaced instance publishes `detached`
+                // as its own act of compliance, and that is a fact about its
+                // past claim, not a retraction of the one that replaced it.
+                if let Some(conv) = &fact.conv
+                    && let Some(held) = self.attachments.get(conv)
+                    && same_instance(
+                        (&held.world, &held.instance_id),
+                        (&fact.world, &fact.instance_id),
+                    )
+                {
                     self.attachments.remove(conv);
                 }
             }
@@ -485,6 +503,61 @@ mod tests {
             interval_s: None,
             host: None,
         }));
+    }
+
+    fn detach(rail: &mut Rail, world: &str, instance_id: &str) {
+        rail.apply(&ServerMsg::Agent(WsAgent {
+            kind: "detached".into(),
+            world: world.into(),
+            instance_id: instance_id.into(),
+            ts: 300_000,
+            conv: Some("a".into()),
+            cwd: None,
+            interval_s: None,
+            host: None,
+        }));
+    }
+
+    // Each `now` below sits inside the stranded threshold, so a cleared cwd
+    // is the gate's doing and never liveness quietly hiding a survivor.
+    #[test]
+    fn a_displaced_instance_detaching_leaves_the_standing_attachment() {
+        let mut rail = Rail::default();
+        attach(&mut rail, "w1", 100_000, "/old/path");
+        rail.apply(&ServerMsg::Agent(WsAgent {
+            kind: "attached".into(),
+            world: "w2".into(),
+            instance_id: "i2".into(),
+            ts: 200_000,
+            conv: Some("a".into()),
+            cwd: Some("/new/path".into()),
+            interval_s: None,
+            host: None,
+        }));
+
+        detach(&mut rail, "w1", "i1");
+
+        assert_eq!(rail.live_cwd("a", 220_000), Some("/new/path"));
+    }
+
+    #[test]
+    fn the_standing_instance_detaching_clears_the_attachment() {
+        let mut rail = Rail::default();
+        attach(&mut rail, "w1", 100_000, "/old/path");
+
+        detach(&mut rail, "w1", "i1");
+
+        assert_eq!(rail.live_cwd("a", 120_000), None);
+    }
+
+    #[test]
+    fn a_detached_without_a_world_degrades_to_the_bare_instance_id() {
+        let mut rail = Rail::default();
+        attach(&mut rail, "w1", 100_000, "/old/path");
+
+        detach(&mut rail, "", "i1");
+
+        assert_eq!(rail.live_cwd("a", 120_000), None);
     }
 
     #[test]
