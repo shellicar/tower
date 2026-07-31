@@ -419,6 +419,7 @@ act.
   cwd folds last-write-wins onto the standing claim; and the conversation's
   change stream emits nothing across the move — the proof cwd is never
   conversation state.
+
 ### a12 — service migrates cross-world
 
 A standing attachment in another world (`pc`), its holder demonstrably
