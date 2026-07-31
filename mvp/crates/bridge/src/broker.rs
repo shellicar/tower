@@ -110,7 +110,7 @@ pub trait Broker: Clone + Send + Sync + 'static {
 
     /// Subscribe as one member of a queue group: the broker delivers each
     /// message to exactly one member. The world's request subjects need this
-    /// (agent-spec, Requests: several instances sharing a world share a
+    /// (agent.md, Requests: several instances sharing a world share a
     /// queue group, so exactly one answers) — a plain subscribe there would
     /// make every instance a responder.
     fn queue_subscribe(

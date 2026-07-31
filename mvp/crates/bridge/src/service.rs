@@ -1,4 +1,4 @@
-//! The `service` verb's premise (agent-spec, "The premise for `service`"):
+//! The `service` verb's premise (agent.md, "The premise for `service`"):
 //! two pure folds and the four-case decision built on them. No I/O here —
 //! the request loop in main.rs feeds these from the Broker seam.
 //!
@@ -6,7 +6,7 @@
 //!   capture into the standing claim, applying the spec's full fold rules:
 //!   unconditional supersession, the standing-instance gate for `moved`/
 //!   `detached`, and loss of authority (a violator's post-violation events
-//!   do not fold — nats-spec, Conformance).
+//!   do not fold — nats.md, Conformance).
 //! - `WorldLiveness` folds this world's own telemetry (`ready`/`pulse`)
 //!   into the alive-vs-stranded verdict, judged against each instance's own
 //!   declared cadence.
@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use wire::ConvAttachment;
 
 /// No promise yet is not the same as alive: an instance that never declared
-/// a cadence gets this flat threshold (agent-spec's suggested default), not
+/// a cadence gets this flat threshold (agent.md's suggested default), not
 /// a multiple of a promise it never made.
 const DEFAULT_SILENCE_S: u64 = 60;
 /// Presumed gone after about three of its own declared intervals of silence.
@@ -37,7 +37,7 @@ pub const MAX_SILENCE_S: u64 = STRANDED_MULTIPLE * MAX_INTERVAL_S;
 /// An attachment event's identity: the `(world, instanceId)` pair. Two
 /// identities match on the pair; if either side omits `world`, the gate
 /// falls back to bare `instanceId` — degraded, not broken
-/// (conversation-spec, Attachment).
+/// (conversation.md, Attachment).
 fn same_identity(
     a_world: Option<&str>,
     a_instance: &str,
@@ -67,7 +67,7 @@ pub struct Standing {
 /// `attached` lands while its own claim is open (no own `detached` between)
 /// is non-compliant from that event on — the violating `attached` does not
 /// fold, and nothing that identity publishes afterward folds either,
-/// including a `detached` (agent-spec, Attachment, example e).
+/// including a `detached` (agent.md, Attachment, example e).
 pub fn fold_attachment<'a>(
     events: impl IntoIterator<Item = &'a ConvAttachment>,
 ) -> Option<Standing> {
@@ -259,7 +259,7 @@ pub enum ServicePremise {
     NoAttachment,
 }
 
-/// The four cases, exactly (agent-spec, "The premise for `service`").
+/// The four cases, exactly (agent.md, "The premise for `service`").
 /// A standing claim that names no world can't be placed in this world, so
 /// it lands in the cross-world arm — takeover, the landing unconditional
 /// supersession makes safe — unless its bare instanceId is this very

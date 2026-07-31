@@ -1001,7 +1001,7 @@ fn drain_ready_telemetry<S: bridge::broker::BrokerSubscription>(
     }
 }
 
-/// The world's `service` request (agent-spec: Requests, "The premise for
+/// The world's `service` request (agent.md: Requests, "The premise for
 /// `service`"). The premise is read off the conversation's own attachment
 /// record (the capture replayed and folded) plus this world's liveness map,
 /// then dispatched on the four cases exactly. The reply confirms the
@@ -1114,7 +1114,7 @@ async fn handle_service<B: Broker, D: DeltaSink>(
 /// world-level counterpart of the per-conversation `.requests.>` loop. One
 /// queue group per world, so exactly one instance answers; plain NATS,
 /// never JetStream — a `.requests` subject is never stream-captured
-/// (nats-spec, Storage). Every request owes a reply: `service` is
+/// (nats.md, Storage). Every request owes a reply: `service` is
 /// dispatched on its premise, a recognised-but-malformed body is `invalid`,
 /// and any other leaf is honest `unsupported` — compliance is answering,
 /// not implementing.
@@ -1489,9 +1489,9 @@ async fn main() -> anyhow::Result<()> {
         liveness,
     });
 
-    // The world's own requests (agent-spec): queue group per world, so
+    // The world's own requests (agent.md): queue group per world, so
     // exactly one instance answers even with several sharing it. Plain
-    // NATS, never JetStream-captured (nats-spec, Storage). The loop makes
+    // NATS, never JetStream-captured (nats.md, Storage). The loop makes
     // the world-mate liveness feed before it answers anything, and refuses
     // to serve if that feed cannot be made.
     tokio::spawn(serve_agent_requests(Arc::clone(&host)));
@@ -1996,7 +1996,7 @@ mod tests {
         );
     }
 
-    // --- the world's `service` request (agent-spec, "The premise for
+    // --- the world's `service` request (agent.md, "The premise for
     // `service`") — every premise arm, plus reply shape and environment
     // strictness, scripted through the FakeBroker. ---
 

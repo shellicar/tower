@@ -176,7 +176,7 @@ pub fn encode_rejected(reason: &str) -> Vec<u8> {
 
 /// `reason` is the machine-facing token a caller branches on; `detail` names
 /// the step and underlying error for a human — never the other way around
-/// (agent-spec, Message schemas).
+/// (agent.md, Message schemas).
 pub fn encode_rejected_detailed(reason: &str, detail: &str) -> Vec<u8> {
     serde_json::to_vec(&json!({ "rejected": true, "reason": reason, "detail": detail }))
         .expect("json! of plain values cannot fail")

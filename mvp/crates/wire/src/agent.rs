@@ -132,7 +132,7 @@ pub fn parse_agent_request(leaf: &str, payload: &[u8]) -> AgentRequest {
     };
     // A missing or empty conversationId is `invalid`, not `unsupported`: the
     // request is recognised, its body just doesn't carry what it needs
-    // (agent-spec, Requests).
+    // (agent.md, Requests).
     let conversation_id = match value
         .get("conversationId")
         .and_then(serde_json::Value::as_str)
