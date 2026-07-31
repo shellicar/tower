@@ -22,25 +22,25 @@ central plane; `tmux attach` is ssh, and it stays.
 
 ## The specs
 
-The wire contract. One concern per document, structured by the master spec:
+The wire contract. One concern per document, indexed by
+[`docs/spec/README.md`](docs/spec/README.md):
 
-- [`docs/spec/nats-spec.md`](docs/spec/nats-spec.md): the master document. Namespacing,
-  message structure, evolution rules, the planes, authority, storage, and the
-  system principles with the reasoning that produced them.
-- [`docs/spec/conversation-spec.md`](docs/spec/conversation-spec.md): the conversation
-  concern. The tree of messages, the committal change stream, telemetry,
-  `say`/`cancel` with preconditions.
-- [`docs/spec/approval-spec.md`](docs/spec/approval-spec.md): the approval concern. The
-  authorization exchange: raise, answer, settle.
-- [`docs/spec/agent-spec.md`](docs/spec/agent-spec.md): the agent concern. Worlds,
-  instances, and the servicing facts — ready, pulse, attached, detached —
-  that liveness folds from.
-- [`docs/spec/conformance.md`](docs/spec/conformance.md) and
-  [`docs/spec/scenarios.md`](docs/spec/scenarios.md): how implementations prove they
-  carry the specs, and the fixture scenarios that prove it.
-- [`docs/spec/content-vocabulary.md`](docs/spec/content-vocabulary.md): the standard by
-  which a tool's output is presented. Understanding recorded ahead of its
-  design pass.
+- [`docs/spec/core.md`](docs/spec/core.md): how the system thinks. Authority,
+  the planes, what earns an event, and the principles the rest is built on.
+- [`docs/spec/nats.md`](docs/spec/nats.md): how the system uses the bus.
+  Namespacing, message structure, evolution, storage.
+- [`docs/spec/conversation.md`](docs/spec/conversation.md): the conversation
+  itself. What was said, and what changed it.
+- [`docs/spec/agent.md`](docs/spec/agent.md): who is serving conversations,
+  and where.
+- [`docs/spec/approval.md`](docs/spec/approval.md): asking permission, and
+  answering.
+- [`docs/spec/content.md`](docs/spec/content.md): how a tool's output is
+  presented. The vocabulary, and the surface an agent renders it into.
+- [`docs/spec/conformance.md`](docs/spec/conformance.md): how an implementation
+  proves it carries the specs.
+- [`docs/spec/scenarios.md`](docs/spec/scenarios.md): the fixture scenarios it
+  proves that against.
 
 ## The design docs
 

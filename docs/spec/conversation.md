@@ -1,6 +1,6 @@
 # Conversation spec — v2
 
-The conversation concern. Structure per `nats-spec.md`; namespace `conv`. Every
+The conversation concern. Structure per `nats.md`; namespace `conv`. Every
 message here is *about* one conversation — traffic about anything else does not
 belong in this tree.
 
@@ -76,10 +76,10 @@ attaching, detaching, migrating — is not history, and must never touch the
 history/staleness stream `changes` drives.
 
 It's deliberately not called `telemetry` either. This is a claim with
-consequences (agent-spec.md, Attachment), not observation a consumer may
+consequences (agent.md, Attachment), not observation a consumer may
 discard.
 
-**The subject spells the type** (nats-spec, Namespacing): a message's type is
+**The subject spells the type** (nats.md, Namespacing): a message's type is
 the subject tokens after the class — underscores become token boundaries — so
 the body does not repeat it. The one exception is `deltas`: a flat subject
 carrying two shapes (`delta`, `block`) that share every policy, not a routing
@@ -107,7 +107,7 @@ axis, so the type stays in the body there as a `type` field. The full map:
 
 `deltas` stays a single subject, decided not forgotten: nobody filters `delta`
 from `block`, the stream is meaningful only whole and in order, and the
-payloads are deliberately bare — a token per chunk kind fails nats-spec's
+payloads are deliberately bare — a token per chunk kind fails nats.md's
 token-depth test.
 
 ## Telemetry and commit
@@ -128,8 +128,8 @@ could only attempt what it had already committed could never act.
 
 ## Telemetry — `telemetry`
 
-Envelope per the master spec: `type`, `ts`. The table lists the fields each
-event adds.
+Envelope per nats.md: `type`, `ts`. The table lists the fields each event
+adds.
 
 Events stand alone — the NATS grain: subject filtering and retention mean no
 consumer can be required to fold from history, so every event carries the ids
@@ -187,7 +187,7 @@ Required of every compliant publisher. The schema marks it `.optional()`
 only for producers that predate this rule — add-only tolerance, not
 licence: a new publisher carries it.
 
-A zombie instance publishing after it was superseded (agent-spec.md,
+A zombie instance publishing after it was superseded (agent.md,
 Attachment) still carries a legitimate `from` — a human really did say
 it — but a wrong `instanceId`. For a producer that carries the field, this
 is what makes the two-agents case reconstructible from the record instead
@@ -291,21 +291,21 @@ terminal appears on the change stream the same as one that arrived over
 ## Attachment — `attachment`
 
 Who is serving this conversation, now. This is the wire shape of the claim
-agent-spec.md's Attachment section conducts itself by — read that section
+agent.md's Attachment section conducts itself by — read that section
 first for the model (singular, unconditionally superseding, no fencing).
 This section only covers the shape on this tree.
 
 | Event | Fields | Notes |
 |---|---|---|
-| `attached` | `instanceId`, `world`?, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now. Supersedes whatever attachment stood before it, unconditionally, exactly once per claim (agent-spec.md, Attachment). This is what makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for an empty conversation) — so an observer knows where the conversation stands without replaying the change stream first. `world` is required of every compliant publisher (below); `cwd` and `intervalS` are optional for backward compatibility, and their absence is not a claim the value is empty — only that this attach didn't state it. `intervalS`, when carried, is at most 600 (ten minutes), the same liveness promise a pulse makes and bounded for the same reason (agent-spec.md, Telemetry): the bound is validity, not a cap, so a larger value makes the event invalid whole |
+| `attached` | `instanceId`, `world`?, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now. Supersedes whatever attachment stood before it, unconditionally, exactly once per claim (agent.md, Attachment). This is what makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for an empty conversation) — so an observer knows where the conversation stands without replaying the change stream first. `world` is required of every compliant publisher (below); `cwd` and `intervalS` are optional for backward compatibility, and their absence is not a claim the value is empty — only that this attach didn't state it. `intervalS`, when carried, is at most 600 (ten minutes), the same liveness promise a pulse makes and bounded for the same reason (agent.md, Telemetry): the bound is validity, not a cap, so a larger value makes the event invalid whole |
 | `moved` | `instanceId`, `world`?, `cwd` | a fact about the standing attachment, not a new claim: the working directory changed under it (the wire outcome of a `chdir` request, this spec, Requests). Valid only from the instance identity — `(world, instanceId)`, or bare `instanceId` if either side omits `world` — the fold currently holds as standing. Folds last-write-wins onto the held attachment's `cwd` |
-| `detached` | `instanceId`, `world`? | released — Ctrl-C, drain, done, or a displaced instance's observable act of standing down (agent-spec.md, Attachment). Changes the fold only when its identity matches the *standing* attachment's, same rule as `moved`. A crash publishes nothing |
+| `detached` | `instanceId`, `world`? | released — Ctrl-C, drain, done, or a displaced instance's observable act of standing down (agent.md, Attachment). Changes the fold only when its identity matches the *standing* attachment's, same rule as `moved`. A crash publishes nothing |
 
 **`world` is required of every compliant publisher.** Same tolerance as
 envelope `instanceId` (this spec, The change stream): the schema marks it
 `.optional()` only for producers that predate this rule — add-only
 tolerance, not licence. Reason: instance identity is the pair
-`(world, instanceId)` (agent-spec.md, The entity), so both the liveness
+`(world, instanceId)` (agent.md, The entity), so both the liveness
 join and the standing-instance gate compare the pair. An `attached` without
 `world` names only half an identity.
 
@@ -313,7 +313,7 @@ join and the standing-instance gate compare the pair. An `attached` without
 conversation gives every `attached` claim a total order: whichever
 `attached` published last on this subject is standing. That holds from any
 world, any instance, with no cross-world timestamp comparison needed
-(nats-spec, What consumers may assume). This is why attachment could not
+(agent.md, What consumers may assume). This is why attachment could not
 stay on the world's tree — two worlds' clocks are not one order.
 
 That ordering only settles who is standing. It doesn't make `moved` and
@@ -351,20 +351,21 @@ standing from where the message came from.
 | `chdir` | `cwd` | `accepted` \| `rejected` + `reason` | this conversation is served at this directory from now on. The request states that effect and never a mechanism: a servicer may move a process, or hold `cwd` as a value per conversation, and both conform. Accept confirms the premise (this servicer holds this conversation), never the outcome — the move is observed on `attachment.moved` when it lands, and one that never lands shows as an unchanged `cwd`, an observed outcome like any other. The servicer reconciles the directory and may decline to move. A harness with no directory notion answers `unsupported`. Known reasons today: `unsupported` |
 
 **Why `chdir` addresses the conversation.** It changes one conversation's
-state, so it goes to the conversation (nats-spec, first principle). On the
-world's tree the queue group hands it to an arbitrary instance, and every
-reply a non-holder could give is false — it cannot accept what it does not
-serve, and its `not_found` says only that *it* isn't serving it. On this
-tree only the holder subscribes, so the request reaches the one party that
-can act, and there is no `not_found` to give: no responder means nobody is
-serving this conversation, the same signal as everywhere else. Operations on
-a world's serving capacity (`service`, `drain`) stay on the world;
-operations on a conversation come here.
+state, so it goes to the conversation (core.md, "Work is addressed to the
+work, never the worker"). On the world's tree the queue group hands it to an
+arbitrary instance, and every reply a non-holder could give is false — it
+cannot accept what it does not serve, and its `not_found` says only that
+*it* isn't serving it. On this tree only the holder subscribes, so the
+request reaches the one party that can act, and there is no `not_found` to
+give: no responder means nobody is serving this conversation, the same
+signal as everywhere else. Operations on a world's serving capacity
+(`service`, `drain`) stay on the world; operations on a conversation come
+here.
 
 **The `say` message, concretely.** It carries text — a plain string — plus
 optionally `attachments` (below), which arrived under add-only exactly as
 promised; fully general rich content still waits on the content vocabulary
-(`content-vocabulary.md`) design pass. The committed `message` on the change
+(`content.md`) design pass. The committed `message` on the change
 stream carries full content blocks — the record holds what the conversation
 actually contains. The premise is encoded exactly as the preconditions
 section writes it: one key naming the kind.
@@ -508,7 +509,7 @@ for every reader; the `query` closure says when the answer is complete.
 
 - Traffic for one conversation arrives in publication order per subject, and
   in publication order across one subscription: a single `changes.>`
-  subscription sees all change kinds in order (nats-spec, Subscription
+  subscription sees all change kinds in order (nats.md, Subscription
   discipline). Fold consumers subscribe `{class}.>`, never a set of sibling
   leaves — a partial change stream is corrupted state, and a sibling-set
   subscriber is silently blind to leaves added later.
@@ -573,7 +574,7 @@ const openEnum = <T extends readonly [string, ...string[]]>(values: T) => z.enum
 /** Sender identity. `userId` appears only when the publisher actually knows
  *  it — never fabricated. A local CLI knows a human typed, not which human:
  *  it publishes `{ kind: 'human' }` bare. `from` is provenance, never
- *  enforcement (nats-spec). */
+ *  enforcement (core.md). */
 const sender = z.looseObject({
   kind: openEnum(['human', 'agent', 'orchestrator']),
   userId: z.string().optional(),
@@ -618,9 +619,9 @@ export const conversationChange = {
 };
 
 // conv.v2.{conversationId}.attachment.> — the wire shape of the model
-// agent-spec.md conducts (singular, unconditionally superseding). world is
+// agent.md conducts (singular, unconditionally superseding). world is
 // provenance, never address, exactly like instanceId — but together they
-// are the instance identity (agent-spec.md, The entity), so world is
+// are the instance identity (agent.md, The entity), so world is
 // required of every compliant publisher; optional here only for producers
 // that predate this rule.
 export const conversationAttachment = {
@@ -697,7 +698,7 @@ pending:
   control line.
 - **claude-sdk-cli's `AgentPresence`** — a third producer, publishing
   `attached` with `cwd` on the old subject today. Needs the same move.
-- **The Examples above** (agent-spec.md, Attachment) — become the
+- **The Examples above** (agent.md, Attachment) — become the
   conformance fixtures for the exactly-once rule and its fold, alongside
   the existing `docs/spec/fixtures/agent/` set. Fix lands twice: code and
   fixture, same commit.
@@ -712,7 +713,7 @@ the payload's `type` alone, and no `query` closure change. Every other
 message shape is identical to v2.
 
 v1 speakers remain lawful for as long as they exist — a breaking change is a
-new tree and migration is unhurried (nats-spec, Evolution). Skew is absorbed
+new tree and migration is unhurried (nats.md, Evolution). Skew is absorbed
 by the single-instance component: a reader serving both trees subscribes to
 both, normalises at ingest (subject tokens where the tree is deep, payload
 `type` where it is flat — the same discriminator either way), and answers
@@ -743,5 +744,5 @@ retires — they retire with v1, not with v2's arrival.
   differ exactly when things change, which is why the type is real data; wire
   encoding unruled.
 
-Authority is settled in `nats-spec.md`: connection is authority; `from` is
+Authority is settled in `core.md`: connection is authority; `from` is
 provenance, never enforcement.

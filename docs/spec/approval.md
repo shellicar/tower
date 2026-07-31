@@ -1,6 +1,6 @@
 # Approval spec — v1
 
-The approval concern. Structure per `nats-spec.md`; namespace `approval`. An
+The approval concern. Structure per `nats.md`; namespace `approval`. An
 approval is an **authorization exchange**: a bridge agent, about to act, asks
 whatever holds authority over it — *may I do this?* — and waits.
 
@@ -24,7 +24,7 @@ Two definitional boundaries, both about what a consumer may assume:
   agent declares its model by what it publishes. A dead holder answers
   nothing; `not_found` and silence are honest outcomes.
 
-Approvals are **not conversation traffic** (see `conversation-spec.md`): the
+Approvals are **not conversation traffic** (see `conversation.md`): the
 same tool call raises an ask under one permissions regime and none under
 another, while the conversation stays byte-identical. Consequences reach the
 conversation the only way anything does — as content: approved is implicit in
@@ -166,7 +166,7 @@ the reviewer happens to know the tool — a file list under DeleteFile reads as
 agent's own, unknowable to a renderer written independently. Raw input is the
 degraded view, accepted knowingly.
 
-The currently intended direction is `content-vocabulary.md`'s split: **input
+The currently intended direction is `content.md`'s split: **input
 → tool → surface → renderer**. The tool produces a *surface* — a
 self-sufficient artifact (content, content type, operation) — and the
 renderer implements the standard per type, never knowing the tool: a file
@@ -179,7 +179,7 @@ under add-only — no change to this spec's structure.
 ## Message schemas — normative
 
 The exchange above narrates; this section defines. Required and optional is
-exactly what the schema says. Same conventions as `conversation-spec.md`'s
+exactly what the schema says. Same conventions as `conversation.md`'s
 schema section: zod (v4), conformance JSON Schemas generated via
 `z.toJSONSchema`, `z.looseObject` as the add-only tolerance rule, `reason`
 strings an open set. As there, the unions are strict about known types;
@@ -250,7 +250,7 @@ specified:
 - whether pending asks survive a restart;
 - what an approval or denial means for the tool's execution.
 
-Who may answer is authority, settled in `nats-spec.md`: connection is
+Who may answer is authority, settled in `core.md`: connection is
 authority; `from` is provenance, never enforcement.
 
 ## The outstanding set
@@ -265,7 +265,7 @@ no further design needed:
   ask self-announces within one interval of joining.
 
 The record `lifecycle` leaves is captured — that is the system's substrate,
-not a deployment's option (nats-spec, Storage). What a deployment configures
+not a deployment's option (core.md, Storage). What a deployment configures
 is retention: how far back the replay reaches, and therefore how much history
 a late joiner recovers, never whether there is anything to replay. A joiner
 that replays a window shorter than an ask's life sees fewer candidates, and

@@ -86,7 +86,7 @@ const MIGRATIONS: &[&str] = &[
          colour TEXT NOT NULL
      );",
     // 6 — agent liveness: two tables, never one (the pulse is one fact per
-    // instance; per-conversation copies are the restatement agent-spec
+    // instance; per-conversation copies are the restatement agent.md
     // forbids). Derived from agent.v1.*.telemetry.> — in the rematerialise
     // truncation set. No verdict column: alive/released/stranded is the
     // client's derivation.
@@ -124,7 +124,7 @@ const MIGRATIONS: &[&str] = &[
          context_tokens        INTEGER NOT NULL,
          model                 TEXT NOT NULL
      );",
-    // 8 — the 5m/1h split of cache_creation (conversation-spec's optional
+    // 8 — the 5m/1h split of cache_creation (conversation.md's optional
     // cacheCreation{5m,1h}Tokens). Added after 7 shipped, so ALTER not edit;
     // default 0 covers rows and producers that never carried the split.
     "ALTER TABLE usage ADD COLUMN cache_creation_5m_tokens INTEGER NOT NULL DEFAULT 0;
@@ -180,7 +180,7 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE cursor_v2 RENAME TO cursor;
      ALTER TABLE stream_v2 RENAME TO stream;",
     // 12 — `sender` becomes nullable: a tool_result carries no `from` at all
-    // (conversation-spec, 19 Jul correction — it is a mechanical delivery,
+    // (conversation.md, 19 Jul correction — it is a mechanical delivery,
     // not an utterance, so stamping it with a sender was a category error).
     // SQLite has no DROP NOT NULL, so recreate: existing rows carry over
     // verbatim, including the stale sender JSON already committed on old
@@ -216,8 +216,8 @@ const MIGRATIONS: &[&str] = &[
          unread  INTEGER NOT NULL,
          stale   INTEGER NOT NULL
      );",
-    // 14 - the conversation-tree attachment leaf (conversation-spec.md,
-    // Attachment; agent-spec.md, Attachment): singular, unconditionally
+    // 14 - the conversation-tree attachment leaf (conversation.md,
+    // Attachment; agent.md, Attachment): singular, unconditionally
     // superseding, so PRIMARY KEY(conv) alone - there is never more than one
     // standing claim. `world` defaults to '' for a producer that omits it
     // (add-only tolerance; the pair then degrades to bare instance_id, per
@@ -233,7 +233,7 @@ const MIGRATIONS: &[&str] = &[
          tip         TEXT,
          attached_ts INTEGER NOT NULL
      );",
-    // 15 — compliance (agent-spec.md, Attachment, "The rule, stated once"):
+    // 15 — compliance (agent.md, Attachment, "The rule, stated once"):
     // an instance that publishes a second `attached` for a conversation
     // while its own claim on it is still open — no `detached` between — is
     // non-compliant, permanently, from that publish on. Every fact it

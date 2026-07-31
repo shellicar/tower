@@ -77,7 +77,7 @@ activity on the wire, idle derived (quiet since the last event), JetStream
 retaining what nobody heard. *Record now, analyse later* became real.
 
 Superseded: the tap's contract was replaced wholesale by the concern specs —
-`spec/nats-spec.md`, `spec/conversation-spec.md`, `spec/approval-spec.md` — in the design
+`spec/nats.md`, `spec/conversation.md`, `spec/approval.md` — in the design
 pass that dismantled "run", evicted approvals from the conversation, and split
 telemetry from the committal change stream. The shipped tap still publishes
 the retired contract; conforming the CLI is stage 2's work.
@@ -175,9 +175,9 @@ gets its own document when it is real.
 
 - The scenario-spec language (stage 3 starts with the smallest thing that is data).
 - The agent concern, environment, and transfer mechanics — the process-layer
-  design pass (`spec/nats-spec.md` records the boundaries and what is parked where).
+  design pass (`spec/core.md` records the boundaries and what is parked where).
   The conversation's own record model is no longer deferred: it is
-  `spec/conversation-spec.md`.
+  `spec/conversation.md`.
 - Whether the orchestration logic is ultimately a program, a spec, or a Claude — the
   protocol carries all three (`planning/orchestration-layer.md`), and stage 3 deliberately does
   not foreclose it.

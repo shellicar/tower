@@ -23,14 +23,14 @@
 //! subjects until the process ends. No persistence: v0 conversations die
 //! with the host (a deliberate cut, not a gap).
 //!
-//! The process is one agent instance in a world (agent-spec): `ready` on
+//! The process is one agent instance in a world (agent.md): `ready` on
 //! boot, a `pulse` every PULSE_INTERVAL_S, on agent.v1 (unchanged by the
 //! attachment migration — only Attachment moved off that tree). The world
 //! is deployer-chosen (`BRIDGE_WORLD`, default `local`); the instance id is
 //! generated per process, so a restart is a new instance in the same world.
 //!
 //! Attachment claims ride the CONVERSATION's own tree now
-//! (conversation-spec.md, Attachment; agent-spec.md, Attachment): `attached`
+//! (conversation.md, Attachment; agent.md, Attachment): `attached`
 //! exactly once per spawn/adopt, `moved` on `chdir` (never a re-published
 //! `attached` — that is now the violation shape), and each servicer watches
 //! its own conversations' attachment leaves so a displacement (another
@@ -167,7 +167,7 @@ fn fold_replay(raw: &[BrokerMessage]) -> Vec<decisions::Message> {
 
 /// Replay a conversation's committed messages from the capture stream, in
 /// stream order (= commit order), with every revision folded in —
-/// conversation-spec: "the state of a message is its latest revision"
+/// conversation.md: "the state of a message is its latest revision"
 /// (last-write-wins per id; every prior revision, like every message,
 /// remains in the record, but replay only ever hands the servicer the
 /// current state). Telemetry, deltas and tip movements stay observation,
@@ -230,8 +230,8 @@ async fn publish_agent<B: Broker>(broker: &B, world: &str, leaf: &str, payload: 
 }
 
 /// The attachment claim, on the conversation's own tree now
-/// (conversation-spec.md, Attachment): `attached`, `moved`, `detached`
-/// carry the full `(world, instanceId)` pair, per agent-spec.md's Attachment.
+/// (conversation.md, Attachment): `attached`, `moved`, `detached`
+/// carry the full `(world, instanceId)` pair, per agent.md's Attachment.
 async fn publish_conv_attachment<B: Broker>(
     broker: &B,
     conv: &str,
@@ -254,7 +254,7 @@ async fn publish_conv_attachment<B: Broker>(
 }
 
 /// Watch this conversation's own attachment leaf for a displacement: another
-/// instance's `attached` superseding ours (agent-spec.md, Attachment — "a
+/// instance's `attached` superseding ours (agent.md, Attachment — "a
 /// compliant instance watches the attachment leaf for every conversation it
 /// serves"). On seeing one, stop serving — signal the servicer's own
 /// `displaced` watch (never an `AbortHandle`: aborting the outer loop drops
@@ -364,7 +364,7 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
     // subscribes before anything is published, same discipline as `requests`
     // above.
     // Watching for a displacement is a compliance requirement of serving
-    // (agent-spec.md, Attachment), not an optional extra: an instance that
+    // (agent.md, Attachment), not an optional extra: an instance that
     // cannot watch can never see itself superseded, so it must not claim in
     // the first place — same discipline as the `requests` subscribe above.
     let attachment_watch = match broker
@@ -407,7 +407,7 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
     // The attachment is what makes the conversation exist for observers
     // before its first message. cwd is causal (an input to how the
     // conversation unfolds). Rides the conversation's own tree now
-    // (conversation-spec.md, Attachment), carrying the full identity pair.
+    // (conversation.md, Attachment), carrying the full identity pair.
     let own_ts = now_iso();
     let attached = serde_json::json!({
         "ts": own_ts,
@@ -420,7 +420,7 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
     publish_conv_attachment(broker, &conv, "attached", attached).await;
     // One instance per claim, watching its own conversation: a displacement
     // (another instance's `attached` superseding ours) is observed and
-    // answered with `detached` (agent-spec.md, Attachment).
+    // answered with `detached` (agent.md, Attachment).
     tokio::spawn(watch_attachment(
         broker.clone(),
         attachment_watch,
@@ -696,7 +696,7 @@ impl Host {
                 }
             }
         } else if let Some(chdir) = value.get("chdir") {
-            // Move one conversation's cwd (conversation-spec's `chdir` request).
+            // Move one conversation's cwd (conversation.md's `chdir` request).
             let Some(conv) = chdir
                 .get("conversationId")
                 .and_then(serde_json::Value::as_str)
@@ -717,7 +717,7 @@ impl Host {
                     eprintln!("bridge[{conv}]: cwd → {now}");
                     // A changed cwd is a fact about the standing claim, not
                     // a new one — `moved`, never a re-published `attached`
-                    // (agent-spec.md, Attachment: that is now the violation
+                    // (agent.md, Attachment: that is now the violation
                     // shape).
                     publish_conv_attachment(
                         &self.broker,
@@ -760,7 +760,7 @@ impl Host {
             println!("{}", serde_json::json!({ "context": "set" }));
         } else if let Some(revise) = value.get("revise") {
             // Correct a committed message's content under its stable id
-            // (conversation-spec: revision) — a trim, a resize, or a bug fix
+            // (conversation.md: revision) — a trim, a resize, or a bug fix
             // in how the content was built the first time. Never mutates the
             // original event: the record is append-only, and replay folds
             // this as the message's new latest state (last-write-wins per
@@ -1319,7 +1319,7 @@ mod tests {
     }
 
     /// Watching the attachment leaf is a compliance requirement of serving
-    /// (agent-spec.md, Attachment): if the watch can't be established, the
+    /// (agent.md, Attachment): if the watch can't be established, the
     /// claim must be released — same discipline as a `requests` subscribe
     /// failure — not served unwatched, where a displacement is never seen.
     #[tokio::test]

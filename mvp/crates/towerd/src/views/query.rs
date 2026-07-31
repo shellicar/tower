@@ -234,7 +234,7 @@ impl Views {
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
-        // The conversation-tree leaf (conversation-spec.md, Attachment): the
+        // The conversation-tree leaf (conversation.md, Attachment): the
         // same snapshot, folded from a different subject. Same dismissal
         // discipline as the agent.v1 table above — both feed one `agents`
         // answer so a client never has to know which wire path a claim rode.

@@ -154,11 +154,11 @@ CREATE TABLE refs (
 - `ts` parsed once to UTC millis: wire timestamps carry mixed offsets; strings misorder.
 - PK `(conv, message_id)` + `INSERT OR REPLACE` = idempotent replay; at-least-once delivery is safe.
 - `sender`/`content` opaque JSON; tower renders, never interprets. Deltas are not stored.
-- Two agent tables, never one: the pulse is one fact per instance (agent-spec —
+- Two agent tables, never one: the pulse is one fact per instance (agent.md —
   restating it per conversation is the forbidden restatement). `attached`
   upserts an attachment row; `detached` deletes it — a released attachment is
   absence, and what a fold retains of dead instances is its own retention
-  policy (agent-spec, What consumers may assume). No verdict column exists:
+  policy (agent.md, What consumers may assume). No verdict column exists:
   alive/released/stranded is never stored, because stored liveness is false
   the moment it is written.
 - Heavy values are externalised at apply time into `refs` (content-addressed,
@@ -296,7 +296,7 @@ async fn main() -> anyhow::Result<()> {
   tree can never lose a message the wire has, and the
   cancel-after-completion ordering (scenario 2b) is a deterministic unit
   test, not a timing accident. The say rides PENDING until the first turn
-  commits (conversation-spec's recommended declaration): a cancel before
+  commits (conversation.md's recommended declaration): a cancel before
   then revokes the say itself — record untouched, tip unmoved, the same
   message re-sendable against the premise the sender already knew.
 
@@ -343,7 +343,7 @@ waiting for a fresh sitting to build:
 - Deferred-retire ("retire when done") is a different verb, add-only, no
   use case yet.
 
-Building this is conversation-spec surgery (a state change kind + the
+Building this is conversation.md surgery (a state change kind + the
 retire request) before any code.
 
 ## Out of scope v1

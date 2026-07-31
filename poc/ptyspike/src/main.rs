@@ -1,10 +1,10 @@
 //! POC demo: a real interactive `claude` session, pty-wrapped, mirrored onto
 //! NATS/Tower and addressable via `conv.v2.{id}.requests.say`.
 //!
-//! Scoped deliberately narrow — see docs/spec/{agent,conversation}-spec.md
+//! Scoped deliberately narrow — see docs/spec/{agent,conversation}.md
 //! for what's skipped: no precondition/tip enforcement (always accept), no
 //! turn/tool/usage telemetry, no `cancel`/`chdir`/`drain`, no `detached` on
-//! exit (a crash is lawful per agent-spec — the pulse going silent is what
+//! exit (a crash is lawful per agent.md — the pulse going silent is what
 //! observers fold). Just: does it show up, and can Tower talk into it.
 //!
 //! Run: `cargo run -p ptyspike -- <cwd-to-run-claude-in>`
@@ -78,7 +78,7 @@ fn wait_for_session_info() -> anyhow::Result<(String, std::path::PathBuf)> {
 
 /// Tail the transcript JSONL, publishing each `user`/`assistant` entry as a
 /// `conv.v2.{id}.changes.message`. Everything else (mode switches, system
-/// lines, attachments) is unknown-type and skipped, per nats-spec tolerance.
+/// lines, attachments) is unknown-type and skipped, per nats.md tolerance.
 fn tail_transcript(
     handle: tokio::runtime::Handle,
     client: async_nats::Client,

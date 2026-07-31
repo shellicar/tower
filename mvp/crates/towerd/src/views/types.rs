@@ -99,7 +99,7 @@ pub enum AgentFact {
         conv: ConversationId,
         cwd: Option<String>,
         /// The liveness promise, optionally carried on attach too (docs/spec/
-        /// agent-spec.md) — absent for a producer that hasn't been updated;
+        /// agent.md) — absent for a producer that hasn't been updated;
         /// the reader's fold applies its own default threshold then.
         interval_s: Option<i64>,
     },
@@ -179,7 +179,7 @@ pub struct ConversationMessage {
     pub query: QueryId,
     pub turn: TurnId,
     pub role: String,
-    /// Absent for a tool_result — it carries no sender (conversation-spec:
+    /// Absent for a tool_result — it carries no sender (conversation.md:
     /// a mechanical delivery is not an utterance).
     pub from: Option<Value>,
     pub content: Vec<Value>,

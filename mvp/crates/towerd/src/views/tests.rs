@@ -819,8 +819,8 @@ fn a_gated_agent_v1_attached_still_feeds_the_instances_liveness_fold() {
     assert_eq!(gated.interval_s, Some(30));
 }
 
-// The conversation-tree attachment leaf (conversation-spec.md, Attachment;
-// agent-spec.md, Attachment, Examples a-e). agent.v1's fold above is
+// The conversation-tree attachment leaf (conversation.md, Attachment;
+// agent.md, Attachment, Examples a-e). agent.v1's fold above is
 // untouched; these exercise the new leaf's own fold and its gate.
 
 #[test]
@@ -1072,7 +1072,7 @@ fn a_reattach_with_no_detached_between_marks_the_instance_permanently_noncomplia
     let (mut views, _rx) = fresh();
     views.apply("conv-approval", 1, &event("conv.v2.conv-abc.attachment.attached",
         r#"{"ts":"2026-07-27T22:00:00+10:00","instanceId":"inst-1","world":"mac","cwd":"~/repos/tower"}"#));
-    // The violation shape, verbatim (agent-spec.md, Attachment, example e):
+    // The violation shape, verbatim (agent.md, Attachment, example e):
     // the SAME instance claims the SAME conversation again, no detached
     // between. Must be ignored — the first claim still stands.
     views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.attached",
@@ -1092,7 +1092,7 @@ fn a_reattach_with_no_detached_between_marks_the_instance_permanently_noncomplia
         "a non-compliant instance's attached elsewhere must be ignored: {attachments:?}"
     );
 
-    // There is no way back: its own `detached` is ALSO ignored (agent-spec.md,
+    // There is no way back: its own `detached` is ALSO ignored (agent.md,
     // Attachment — recovery is a restart, a new instance id, never a
     // detached). The original claim on conv-abc still stands, untouched.
     views.apply(

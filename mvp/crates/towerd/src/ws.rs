@@ -575,7 +575,7 @@ fn request_id(text: &str) -> String {
 /// The bucket is towerd's own storage fact. The client sends only the object
 /// id it uploaded; towerd stamps the transit bucket into each object source
 /// before the say goes onto the wire, so the block names its store
-/// (conversation-spec: a servicer resolves only against the bucket a block
+/// (conversation.md: a servicer resolves only against the bucket a block
 /// names) without the browser ever knowing or carrying it.
 fn stamp_bucket(attachments: &mut [Value], bucket: &str) {
     for attachment in attachments {

@@ -14,7 +14,7 @@ pub enum Liveness {
     Stranded,
 }
 
-/// Liveness is a fold, never declared (agent-spec): the facts are the pulse and
+/// Liveness is a fold, never declared (agent.md): the facts are the pulse and
 /// the instance's own declared interval; the verdict is the reader's, against
 /// its own clock. Stranded = silence past ~3 declared intervals; no declared
 /// interval yet = no verdict to pass (Alive).

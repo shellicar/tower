@@ -151,7 +151,7 @@
 
   // There is no "busy": a say is always accepted and queued, the same
   // semantics as typing while Claude is still running locally
-  // (conversation-spec design: acceptance creates state, processed when
+  // (conversation.md design: acceptance creates state, processed when
   // the conversation gets to it). The input is never locked on query
   // liveness — uploading is the only thing that legitimately blocks a send.
 

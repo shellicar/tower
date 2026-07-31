@@ -1,4 +1,4 @@
-//! Attachment resolution at the servicer's edge (conversation-spec, say
+//! Attachment resolution at the servicer's edge (conversation.md, say
 //! `attachments`): the record and the wire carry reference blocks; the
 //! bytes live in the deployment's transit object store, fetched here and
 //! inlined only into the model-facing request. A reference block names its

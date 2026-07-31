@@ -1,4 +1,4 @@
-//! The agent concern's telemetry types (docs/spec/agent-spec.md, "Message
+//! The agent concern's telemetry types (docs/spec/agent.md, "Message
 //! schemas — normative"). Servicing facts — who serves which conversation,
 //! and whether they are alive — keyed by world on the wire. Same discipline as
 //! `conv`: v2-style leaf subjects, so no `type` field in the body; `ingest`
@@ -53,7 +53,7 @@ pub struct Attached {
     /// optional for backward compatibility with producers that don't send it
     /// yet. Absent = no promise; the reader's fold applies its own default
     /// silence threshold rather than reading absence as "definitely alive"
-    /// (docs/spec/agent-spec.md, Liveness is a fold, never declared).
+    /// (docs/spec/agent.md, Liveness is a fold, never declared).
     #[serde(default, rename = "intervalS")]
     pub interval_s: Option<i64>,
 }

@@ -63,7 +63,7 @@ pub struct Conversation {
 
 impl Conversation {
     /// Adoption: seed the tree from the record's committed messages. This is
-    /// the recovery reconciliation (conversation-spec, the committal-grain
+    /// the recovery reconciliation (conversation.md, the committal-grain
     /// open question): recovered behind the published record, reconcile up
     /// to it. No validity check - a record ending broken (a dangling
     /// tool_use) is served as it is; the next turn's outcome says so.

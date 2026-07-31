@@ -1,10 +1,9 @@
 # Conformance
 
-How implementations prove they carry the specs — `nats-spec.md`,
-`conversation-spec.md`, `approval-spec.md`, `agent-spec.md`. This is testing,
-not contract: the specs say what the wire carries; this says how an
-implementation proves it.
-The fixture set lives in `scenarios.md`.
+How implementations prove they carry the specs — `nats.md`, `conversation.md`,
+`approval.md`, `agent.md`. This is testing, not contract: the specs say what
+the wire carries; this says how an implementation proves it. The fixture set
+lives in `scenarios.md`.
 
 ## The problem
 
@@ -56,7 +55,7 @@ Three roles:
   latest revision per message, the reachable set from the tip, queries grouped
   by `queryId` and closed by the `query` closure change on `changes` (a
   telemetry-derived ending is observation, never authority —
-  conversation-spec, Query closure), the approval outstanding set
+  conversation.md, Query closure), the approval outstanding set
   (raised + pulse = pending, silence = void, settled = done).
 - **Servicers**: scripted request/reply exchanges asserting the reply
   discipline — `say` accepted with an id; a stale premise rejected `stale`;

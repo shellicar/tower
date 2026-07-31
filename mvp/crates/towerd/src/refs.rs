@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn attachment_reference_sources_stay_inline() {
-        // The transit-attachment reference block (conversation-spec, say
+        // The transit-attachment reference block (conversation.md, say
         // attachments): no bytes, nothing to externalise.
         let mut content = vec![json!({
             "type": "image",

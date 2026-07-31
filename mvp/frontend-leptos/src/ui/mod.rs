@@ -13,7 +13,7 @@ pub mod tabs;
 pub mod unread;
 
 /// Cap a long value for a compact display — the raw input is the interim
-/// reviewable primitive (approval-spec); the content vocabulary is later.
+/// reviewable primitive (approval.md); the content vocabulary is later.
 pub fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_owned()

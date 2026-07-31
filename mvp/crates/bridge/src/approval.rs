@@ -1,4 +1,4 @@
-//! The bridge as approval holder (approval-spec): raise the ask, pulse it
+//! The bridge as approval holder (approval.md): raise the ask, pulse it
 //! while pending (~15s; raised + pulse = pending, pulse silence displays as
 //! void), take the first valid answer off `.requests`, settle with the
 //! answerer's provenance echoed verbatim.

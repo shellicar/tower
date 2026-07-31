@@ -1,4 +1,4 @@
-//! The approval concern's message types (docs/spec/approval-spec.md,
+//! The approval concern's message types (docs/spec/approval.md,
 //! "Message schemas — normative"). Same tolerance discipline as `conv`:
 //! no `deny_unknown_fields`, unknown lifecycle types are represented, and
 //! `ask`/`correlation`/`by` stay `serde_json::Value` — tower renders,
