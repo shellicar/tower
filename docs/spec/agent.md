@@ -64,14 +64,14 @@ The subject spells the type, as in the conversation spec: `telemetry.pulse`,
 
 ## Telemetry
 
-Observation, per the master spec's severability test: remove it and every
+Observation, per core.md's severability test: remove it and every
 conversation still functions — says land, commits flow. What goes dark is the
 map: who serves what, and whether they are alive.
 
 | Event | Fields | Notes |
 |---|---|---|
 | `ready` | `instanceId`, `host` | a process now serves this world; published once on boot, after its subscriptions are up |
-| `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement the master spec forbids. `intervalS` is at most 600 (ten minutes): a longer promise buys three times its own length of presumed life, so stranded detection and takeover stop working exactly where they are needed. The bound is validity, not a cap — a larger value makes the event invalid whole, and nothing is clamped to 600 |
+| `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement core.md forbids. `intervalS` is at most 600 (ten minutes): a longer promise buys three times its own length of presumed life, so stranded detection and takeover stop working exactly where they are needed. The bound is validity, not a cap — a larger value makes the event invalid whole, and nothing is clamped to 600 |
 
 **Liveness is a fold, never declared.** An instance is presumed gone after
 about three of its own declared intervals of silence — judged against its own
@@ -104,8 +104,8 @@ Attachment). Two kinds, kept apart by what they denote (nats.md, Naming):
 - **How to reach the thing** — `pid`, a port, tmux coordinates. An ephemeral,
   incidental handle: it dies with the process and is meaningless without its
   host. Never named in the schema — it rides as an open field for a
-  deployment that wants click-to-CLI, exactly as the master spec's
-  Environment section allows, and `instanceId` already carries identity.
+  deployment that wants click-to-CLI, exactly as core.md's Environment
+  section allows, and `instanceId` already carries identity.
 
 The world id itself is a stable, meaningless handle: it denotes a place
 consistently and carries nothing about it. Provenance and host are fields, so

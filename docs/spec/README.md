@@ -1,22 +1,27 @@
 # The spec
 
-The wire contract, one document per thing it governs. This file is the index:
-what each document is for, and the order to read them in.
+The wire contract, one document per thing it governs.
 
-## Read in this order
+## The documents
 
-1. `core.md` — the foundations every other document stands on.
-2. `nats.md` — how the system uses the bus.
-3. The concerns, each owning a namespace in the subject tree and read in any
-   order:
-   - `conversation.md` (`conv`) — the conversation concern.
-   - `agent.md` (`agent`) — the agent concern: who is serving conversations,
-     and where.
-   - `approval.md` (`approval`) — the approval concern.
-4. `content.md` — the standard by which a tool's output is presented.
-5. `conformance.md` and `scenarios.md` — how an implementation proves it
-   carries the specs, and the fixtures it proves that against. The fixtures
-   themselves are in `fixtures/`.
+- `core.md` — how the system thinks: authority, the planes, what earns an
+  event, and the principles the rest is built on.
+- `nats.md` — how the system uses the bus: namespacing, message structure,
+  evolution, storage.
+- `conversation.md` (`conv`) — the conversation itself: what was said, and
+  what changed it.
+- `agent.md` (`agent`) — who is serving conversations, and where.
+- `approval.md` (`approval`) — asking permission, and answering.
+- `content.md` — how a tool's output is presented: the vocabulary and the
+  surface an agent renders it into.
+- `conformance.md` — how an implementation proves it carries the specs.
+- `scenarios.md` — the fixture scenarios it proves that against; the fixtures
+  are in `fixtures/`.
+
+## Where to start
+
+`core.md`, then `nats.md`. The concerns after that, in any order - each owns a
+namespace in the subject tree and stands alone.
 
 ## How they relate
 

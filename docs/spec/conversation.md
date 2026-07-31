@@ -128,8 +128,8 @@ could only attempt what it had already committed could never act.
 
 ## Telemetry — `telemetry`
 
-Envelope per the master spec: `type`, `ts`. The table lists the fields each
-event adds.
+Envelope per nats.md: `type`, `ts`. The table lists the fields each event
+adds.
 
 Events stand alone — the NATS grain: subject filtering and retention mean no
 consumer can be required to fold from history, so every event carries the ids
