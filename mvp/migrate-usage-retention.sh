@@ -8,9 +8,9 @@
 # This corrects the same category error migrate-stream-retention.sh made for
 # usage specifically: that script (rightly) treated turn/tool/pulse telemetry
 # as safe to lose after 90 days, and (wrongly) lumped usage in with it. See
-# docs/spec/core.md's Telemetry section and the 19 Jul incident it wrote
-# up (a conversation's cost history was purged when that script ran, only
-# recovered because the pre-purge backup happened to still exist).
+# docs/spec/core.md's Telemetry section. A conversation's cost history was
+# purged when that script ran, only recovered because the pre-purge backup
+# happened to still exist.
 #
 # Dry run by default: prints the plan, touches nothing. Pass --apply to
 # actually run it. NATS_URL overrides the default local broker.
