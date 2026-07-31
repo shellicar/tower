@@ -154,7 +154,7 @@ side by side. Derived from code, not from any prior claim about what's missing.
   the alive/green class unless the verdict is `Stranded`, matching Svelte.
 - [x] **Untitled-conversation fallback shows the full id.** Fixed in the rail row, the potential-conversation
   row, the approvals view's conversation link, and the conversation panel header title (a single label
-  expression in `ui/conversation.rs` — touched, but nothing else in that file). `ui/mod.rs`'s `short()` helper
+  expression in `ui/conversation.rs`, touched, but nothing else in that file). `ui/mod.rs`'s `short()` helper
   is now unused everywhere and was deleted; CSS (`.label`, `.conv-link`, `.conversation-header .title`) already
   truncates visually with ellipsis, so the full id in the DOM costs nothing on screen.
 - [x] **New/attached-only conversations sort to the top.** Leptos's `<ul class="potential">` now renders before
