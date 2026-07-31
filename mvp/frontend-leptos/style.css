@@ -64,6 +64,7 @@ html, body {
   cursor: pointer;
 }
 .potential li:hover { background: #171717; }
+.potential li.selected { background: #1e293b; }
 .potential .cwd { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #525252; }
 .potential .dismiss { padding: 0 6px; cursor: pointer; }
 

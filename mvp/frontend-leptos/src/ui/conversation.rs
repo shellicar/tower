@@ -40,7 +40,7 @@ use crate::concerns::usage::Usage;
 use crate::pricing::{format_tokens, format_usd, parse_model_name, price_usage};
 use crate::time::{Millis, age, format_time};
 use crate::ui::block::render_block;
-use crate::ui::{short, truncate};
+use crate::ui::truncate;
 use crate::uploads;
 
 /// Fallback row height (px) for a message never yet measured — ported from
@@ -410,7 +410,7 @@ pub fn ConversationView(
                     } else {
                         let label = conv.with_value(|c| {
                             rail.with(|r| r.row(c).and_then(|row| row.title.clone()))
-                                .unwrap_or_else(|| short(c))
+                                .unwrap_or_else(|| c.to_owned())
                         });
                         view! {
                             <button class="title" on:click=move |_| start_title_edit.run(())>{label}</button>

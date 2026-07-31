@@ -22,8 +22,3 @@ pub fn truncate(s: &str, max: usize) -> String {
         format!("{head}\u{2026}")
     }
 }
-
-/// The staleness id, shortened for the rail. Titled rows never reach here.
-pub fn short(conv: &str) -> String {
-    conv.chars().take(8).collect()
-}
