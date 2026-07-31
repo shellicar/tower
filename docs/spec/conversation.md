@@ -355,12 +355,12 @@ state, so it goes to the conversation (core.md, "Work is addressed to the
 work, never the worker"). On the world's tree the queue group hands it to an
 arbitrary instance, and every reply a non-holder could give is false — it
 cannot accept what it does not serve, and its `not_found` says only that
-*it* isn't serving it. On this
-tree only the holder subscribes, so the request reaches the one party that
-can act, and there is no `not_found` to give: no responder means nobody is
-serving this conversation, the same signal as everywhere else. Operations on
-a world's serving capacity (`service`, `drain`) stay on the world;
-operations on a conversation come here.
+*it* isn't serving it. On this tree only the holder subscribes, so the
+request reaches the one party that can act, and there is no `not_found` to
+give: no responder means nobody is serving this conversation, the same
+signal as everywhere else. Operations on a world's serving capacity
+(`service`, `drain`) stay on the world; operations on a conversation come
+here.
 
 **The `say` message, concretely.** It carries text — a plain string — plus
 optionally `attachments` (below), which arrived under add-only exactly as

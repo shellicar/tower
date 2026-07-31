@@ -9,10 +9,9 @@ what each document rules on, and the order to read them in.
    produced them, authority, the planes, what earns an event, telemetry's
    severability test, environment, and the substrate claim about storage. None
    of it depends on the transport being NATS.
-2. `nats.md` — the master document for how the system uses the bus. The
-   shared structure every concern's traffic follows: namespacing, message
-   structure, evolution, naming, conformance, retention. It defines no
-   concern's subjects.
+2. `nats.md` — how the system uses the bus. The shared structure every
+   concern's traffic follows: namespacing, message structure, evolution,
+   naming, conformance, retention. It defines no concern's subjects.
 3. The concerns, each owning a namespace in the subject tree and read in any
    order:
    - `conversation.md` (`conv`) — the tree of messages, the committal change
