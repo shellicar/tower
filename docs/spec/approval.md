@@ -1,8 +1,8 @@
-# Approval spec — v1
+# Approval spec: v1
 
 The approval concern. Structure per `nats.md`; namespace `approval`. An
 approval is an **authorization exchange**: a bridge agent, about to act, asks
-whatever holds authority over it — *may I do this?* — and waits.
+whatever holds authority over it, *may I do this?*, and waits.
 
 ## The entity
 
@@ -13,12 +13,12 @@ It is raised by the agent's own permission model and belongs to it.
 Two definitional boundaries, both about what a consumer may assume:
 
 - **Identity is its own.** The approval id is minted by the agent's approval
-  model. It *may* coincide with a tool-use id — an agent whose model maps one
-  tool call to one decision can lawfully mint them equal — but it is defined
+  model. It *may* coincide with a tool-use id, since an agent whose model maps one
+  tool call to one decision can lawfully mint them equal, but it is defined
   independently, and a consumer treats any coincidence as coincidence. The
   granularity of asking is the model's: one tool call may raise several asks
   (a pipeline whose delete step asks while its read steps pass), or none.
-- **Lifetime is its own.** An approval may in practice die with its process —
+- **Lifetime is its own.** An approval may in practice die with its process,
   or the agent may persist it and re-raise under the same id after a restart.
   Both are lawful; the id is defined independently of any process, and the
   agent declares its model by what it publishes. A dead holder answers
@@ -27,32 +27,32 @@ Two definitional boundaries, both about what a consumer may assume:
 Approvals are **not conversation traffic**: the same tool call raises an ask
 under one permissions regime and none under another, while the conversation
 stays byte-identical. Consequences reach the
-conversation the only way anything does — as content: approved is implicit in
+conversation the only way anything does, as content: approved is implicit in
 the tool having run; denied appears as whatever the agent model commits.
 
 ## Subjects
 
 | Subject | Traffic | Carries |
 |---|---|---|
-| `approval.v1.{approvalId}.lifecycle` | events | `raised`, `settled` — the exchange itself; operational, not telemetry |
+| `approval.v1.{approvalId}.lifecycle` | events | `raised`, `settled`: the exchange itself; operational, not telemetry |
 | `approval.v1.{approvalId}.requests` | requests | the answer |
-| `approval.v1.{approvalId}.telemetry` | events | `heartbeat` — the pending ask's own pulse (~15s while pending) |
+| `approval.v1.{approvalId}.telemetry` | events | `heartbeat`: the pending ask's own pulse (~15s while pending) |
 
-Discovery is the namespace wildcard: `approval.v1.*.lifecycle` — every ask,
+Discovery is the namespace wildcard, `approval.v1.*.lifecycle`: every ask,
 fleet-wide, one subscription. That serves a live watcher (a notifier); the
-late joiner who wants "what is outstanding *right now*" reconstructs it — see
+late joiner who wants "what is outstanding *right now*" reconstructs it; see
 **The outstanding set** below.
 
 The pulse passes the severability test, which is why it is telemetry: remove
-it and answering, settlement, and the record all still work — only the passive
+it and answering, settlement, and the record all still work; only the passive
 watcher's staleness inference goes dark. A watcher folds one subscription:
 *raised + pulse = pending; pulse silence = stale, display as void; settled =
-done.* The ask asserts its own liveness, whoever holds it — an agent that
+done.* The ask asserts its own liveness, whoever holds it: an agent that
 persists asks across a restart resumes pulsing the same id, and watchers never
 know the holder changed.
 
 **Liveness is never inferred from broker interest.** A NATS request to a
-dead holder's `requests` subject may fail fast as *no responders* — but that
+dead holder's `requests` subject may fail fast as *no responders*, but that
 reflects subject interest, not the holder's presence, and any legitimate
 observer subscribed across `.requests` destroys the signal. Observation must
 never change semantics. The answerer's transport truths are a reply or a
@@ -61,28 +61,28 @@ timeout; the watcher's staleness signal is the pulse; nothing finer exists.
 Two amortisations were considered and declined for v1, knowingly:
 
 - **One heartbeat per process** (the old run model): every ask would carry its
-  holder's id and every watcher would join two concerns to read one — the
-  cross-subject dependence the NATS grain forbids — and the inference lies in
+  holder's id and every watcher would join two concerns to read one, the
+  cross-subject dependence the NATS grain forbids, and the inference lies in
   exactly the case the definitions above make legal: a persisted ask surviving
   a restart reads as void when its old holder goes silent. The saving is
-  negligible at any realistic scale — pendings are handfuls, minutes long.
+  negligible at any realistic scale: pendings are handfuls, minutes long.
 - **One heartbeat per group** (`approval.v1.{groupId}.{approvalId}`):
-  amortisation inside the concern, no cross-concern join — the honest middle.
+  amortisation inside the concern, no cross-concern join: the honest middle.
   It adds a subject level, which moves every token after it and breaks every
-  existing wildcard — so adopting it later is a new tree, which the versioning
+  existing wildcard, so adopting it later is a new tree, which the versioning
   model handles unhurriedly. Not needed at v1 traffic.
 
 ## The exchange
 
 The raise is an event; the answer is the request/response; the settlement is
-an event. Nothing is held open on the bus — the waiting is the agent's own
+an event. Nothing is held open on the bus: the waiting is the agent's own
 state, so an ask can pend for an hour at no cost to anything.
 
-**`raised`** — the ask. Carries a human-reviewable payload (an ask is
+**`raised`**, the ask. Carries a human-reviewable payload (an ask is
 unreviewable without it) and correlation to the work it interrupts. The ask
-has its own `type` — the discriminator of what kind of ask this is, and so of
+has its own `type`, the discriminator of what kind of ask this is, and so of
 the fields it carries: a `tool_use` ask carries `name` and `input`; future
-kinds carry their own. Ask types are an open set under add-only — a reviewer
+kinds carry their own. Ask types are an open set under add-only: a reviewer
 that does not know a type still shows the raise and its correlation:
 
 ```json
@@ -114,7 +114,7 @@ that does not know a type still shows the raise and its correlation:
 Correlation fields appear when they apply; an ask outside any tool call
 carries what it has.
 
-**`answer`** — the RPC. The verdict is the request's content; the reply is
+**`answer`**, the RPC. The verdict is the request's content; the reply is
 transport truth, never verdict:
 
 ```json
@@ -132,17 +132,17 @@ transport truth, never verdict:
 //       | { "rejected": true, "reason": "already_settled" | "not_found" }
 ```
 
-`from` — and `by` on `settled` — is pass-through provenance, same rule as the
+`from`, and `by` on `settled`, is pass-through provenance, same rule as the
 conversation spec: the answerer supplies what it actually knows, the holder
 echoes it and never authors it. `{ "kind": "human" }` alone is valid; the
 `userId` in the examples is illustrative, not required.
 
 First valid answer wins; `already_settled` is first-wins made honest.
-`not_found` means the holder does not know the id — it died and its model
+`not_found` means the holder does not know the id: it died and its model
 dropped pendings, or the id never existed; either way the answer has nowhere
 to land, and the reply says so.
 
-**`settled`** — the outcome, carrying who acted, so every other reviewer's
+**`settled`**, the outcome, carrying who acted, so every other reviewer's
 view clears and shows whose decision it was:
 
 ```json
@@ -157,26 +157,26 @@ view clears and shows whose decision it was:
 }
 ```
 
-## Intentionally simple — the surface is the intended direction
+## Intentionally simple: the surface is the intended direction
 
 The ask's payload is deliberately primitive so this spec is implementable
 today: a `tool_use` ask ships the raw tool input. That reads well exactly when
-the reviewer happens to know the tool — a file list under DeleteFile reads as
+the reviewer happens to know the tool: a file list under DeleteFile reads as
 "these will die" only through tool knowledge, and tools are each bridge
 agent's own, unknowable to a renderer written independently. Raw input is the
 degraded view, accepted knowingly.
 
 The currently intended direction is `content.md`'s split: **input
-→ tool → surface → renderer**. The tool produces a *surface* — a
-self-sufficient artifact (content, content type, operation) — and the
+→ tool → surface → renderer**. The tool produces a *surface*, a
+self-sufficient artifact (content, content type, operation), and the
 renderer implements the standard per type, never knowing the tool: a file
 list typed as files renders as files (links, even); an edit's surface is its
-diff. The ask then carries the surface like any other occasion that shows one
-— approval being the occasion where faithful rendering matters most, not a
+diff. The ask then carries the surface like any other occasion that shows one,
+with approval being the occasion where faithful rendering matters most, not a
 different kind of rendering. Richer ask payloads arrive as new ask types
-under add-only — no change to this spec's structure.
+under add-only, with no change to this spec's structure.
 
-## Message schemas — normative
+## Message schemas: normative
 
 The exchange above narrates; this section defines. Required and optional is
 exactly what the schema says. Same conventions as `conversation.md`'s
@@ -184,7 +184,7 @@ schema section: zod (v4), conformance JSON Schemas generated via
 `z.toJSONSchema`, `z.looseObject` as the add-only tolerance rule, `reason`
 strings an open set. As there, the unions are strict about known types;
 skipping unknown `type`s is the harness's routing rule, never a catch-all
-schema member — a catch-all would let misshaped known messages pass. (The
+schema member; a catch-all would let misshaped known messages pass. (The
 `ask` union's `unknownAsk` is different on purpose: ask types are add-only
 *data inside* a known message, so an unknown ask must validate.)
 
@@ -197,7 +197,7 @@ const ts = z.iso.datetime({ offset: true });
  *  defined today; an unknown value still validates. */
 const openEnum = <T extends readonly [string, ...string[]]>(values: T) => z.enum(values).or(z.string());
 
-/** Sender identity — same shape and same rule as the conversation spec:
+/** Sender identity: same shape and same rule as the conversation spec:
  *  `userId` only when actually known, never fabricated. */
 const sender = z.looseObject({
   kind: openEnum(['human', 'agent', 'orchestrator']),
@@ -232,7 +232,7 @@ export const approvalTelemetry = z.looseObject({ type: z.literal('heartbeat'), t
 // approval.v1.{approvalId}.requests
 export const approvalRequest = z.looseObject({ type: z.literal('answer'), ts, from: sender, approved: z.boolean() });
 
-// Reply — transport truth, never verdict. Known reasons today:
+// Reply: transport truth, never verdict. Known reasons today:
 // already_settled, not_found.
 export const answerReply = z.union([
   z.looseObject({ accepted: z.literal(true) }),
@@ -240,7 +240,7 @@ export const answerReply = z.union([
 ]);
 ```
 
-## The approval model is the agent's — deliberately not contract
+## The approval model is the agent's, deliberately not contract
 
 The spec carries asks, answers, and settlements. Everything else belongs to
 the agent's own approval model, declared by what it publishes rather than
@@ -255,23 +255,23 @@ authority; `from` is provenance, never enforcement.
 
 ## The outstanding set
 
-A late joiner reconstructs what is pending with machinery already defined —
+A late joiner reconstructs what is pending with machinery already defined:
 no further design needed:
 
-- **The fold**: replay `lifecycle` — raised without settled is the candidate
+- **The fold**: replay `lifecycle`, where raised without settled is the candidate
   set. Replay alone cannot tell pending from pending-whose-holder-died, so:
-- **The pulse confirms**: listen one heartbeat interval — candidates that
+- **The pulse confirms**: listen one heartbeat interval, and candidates that
   pulse are live; the rest display as void. Even without replay, every live
   ask self-announces within one interval of joining.
 
-The record `lifecycle` leaves is captured — that is the system's substrate,
+The record `lifecycle` leaves is captured, and that is the system's substrate,
 not a deployment's option (core.md, Storage). What a deployment configures
 is retention: how far back the replay reaches, and therefore how much history
 a late joiner recovers, never whether there is anything to replay. A joiner
 that replays a window shorter than an ask's life sees fewer candidates, and
 the pulse still confirms what is live within one interval.
 
-The sliver that stays open: historical liveness — "was that candidate live
+The sliver that stays open: historical liveness, or "was that candidate live
 *at 14:02*" needs pulses from that moment, and pulses are telemetry a
 deployment typically leaves uncaptured. Forensics-grade; nobody's use case
 today.

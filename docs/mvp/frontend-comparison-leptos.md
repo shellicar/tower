@@ -14,13 +14,13 @@ fold logic as `frontend-rs`: same `apply(&mut self, &ServerMsg)` signature, same
 copied and compiling unmodified. That itself is the first finding, not a preamble to
 one: the isolation architecture is provably render-framework-agnostic within Rust, not
 just language-agnostic across Rust/TypeScript. `time.rs` is identical too, since neither
-build has ever touched a real clock — both take `now` as an argument.
+build has ever touched a real clock: both take `now` as an argument.
 
-## Axis 1: enforcement — moves from compile-time to run-time, still a hard failure
+## Axis 1: enforcement moves from compile-time to run-time, still a hard failure
 
 egui's `apply(&mut self, &ServerMsg)` makes a cross-concern reach a type error: a
 concern is never handed a reference to a sibling, so the violation cannot be written.
-Leptos signals break that. `RwSignal<Rail>` is `Copy` and interior-mutable — any
+Leptos signals break that. `RwSignal<Rail>` is `Copy` and interior-mutable, so any
 closure that captures it can read or write it from anywhere, including from inside
 another concern's code, and it **compiles**. The isolation in this build is a *module
 convention* (concerns/rail.rs never imports concerns/approvals.rs), the same category
@@ -28,7 +28,7 @@ the Svelte rearchitecture relies on, not the category egui's ownership forces.
 
 What Leptos gives back is a different, later backstop: a re-entrant borrow (writing to
 a signal already borrowed on the call stack, e.g. from inside an `Effect` reading the
-same signal) panics at runtime, in the browser console, immediately and loudly — not a
+same signal) panics at runtime, in the browser console, immediately and loudly, not a
 silent stale read. That happened once while building this: an early draft of the
 composer's `Effect` wrote `draft` from inside a closure that also read it un-tracked in
 the same tick, and Leptos's `BorrowMutError` pointed at the exact line. So the failure
@@ -38,32 +38,32 @@ Svelte's shared store. Leptos sits between the other two, not at either end.
 Verdict: the thesis (Axis 1) does **not** hold the same way here. egui's ownership
 model is what bought the compile-time guarantee, not "writing the render in Rust." A
 DOM-capable Rust renderer with a signal graph reopens the god-store risk the whole
-architecture exists to close — contained today only by the same discipline Svelte
+architecture exists to close, contained today only by the same discipline Svelte
 leans on, with a faster failure mode as consolation, not a replacement.
 
-## Axis 2: shared wire types — confirmed, a non-finding as predicted
+## Axis 2: shared wire types, confirmed as a non-finding, as predicted
 
 `ws-types` dropped in as an unmodified path dependency, exactly like `frontend-rs`. No
-`ClientMsg`/`ServerMsg`/`WsRow`/etc. needed touching. This is not surprising — it is
-towerd's Rust-ness that buys it, not the render layer — and the plan predicted exactly
+`ClientMsg`/`ServerMsg`/`WsRow`/etc. needed touching. This is not surprising, since it
+is towerd's Rust-ness that buys it, not the render layer, and the plan predicted exactly
 this, calling it out only if it turned out otherwise. It didn't.
 
-## Axis 3: render surface — the axis this build exists to move, and it moved
+## Axis 3: render surface, the axis this build exists to move, and it moved
 
 This is the real result. A genuine DOM:
 - Browser find (Cmd/Ctrl-F), right-click, text selection, and link handling all work,
   because the messages are real `<p>` text nodes, not painted glyphs.
-- The tofu-glyph problem egui hit on the rail's status dots does not exist — `"◆"`,
+- The tofu-glyph problem egui hit on the rail's status dots does not exist: `"◆"`,
   `"⚠"`, `"●"` are just characters in a `<span>`, rendered by the browser's own font
   stack.
 - The DOM is inspectable with devtools like any other web page.
 
 Idle cost is qualitatively the Svelte shape, not egui's: Leptos's reactive graph
 updates only the DOM nodes whose signal dependencies changed (fine-grained, like Svelte
-5 runes — no vdom diff, no per-frame repaint loop). There is no `request_repaint_after`
+5 runes, with no vdom diff and no per-frame repaint loop). There is no `request_repaint_after`
 equivalent needed for redraw; the one polling loop in this build (`set_interval`, 1s) is
 there only because two verdicts (liveness, approval-void) are pure functions of wall
-clock against held facts, not wire events — the same reason `frontend-rs` re-evaluates
+clock against held facts, not wire events, the same reason `frontend-rs` re-evaluates
 every frame and Svelte used to (`heat`/`liveness` interval-boxes). Nothing else ticks.
 
 Measured, not just predicted: all three tabs open side by side against the same live
@@ -77,7 +77,7 @@ towerd, idle (task manager sample, one connected conversation each, no active st
 
 Leptos lands where the structural argument said it would: within striking distance of
 Svelte (62.3 MB vs 55.6 MB, both near-zero idle CPU), nowhere near egui's continuous
-repaint cost (128 MB and, more tellingly, 28.8% CPU at idle — the `request_repaint_after`
+repaint cost (128 MB and, more tellingly, 28.8% CPU at idle, from the `request_repaint_after`
 loop actually painting every ~100ms whether anything changed or not). The CPU gap is the
 sharper number: egui pays a standing tax just to exist on screen; Leptos and Svelte pay
 nothing until a signal actually changes.
@@ -85,7 +85,7 @@ nothing until a signal actually changes.
 Verdict: Axis 3 moves as predicted, and now confirmed, not just argued from structure.
 egui's cost was egui's, not Rust's.
 
-## Axis 4: survival under careless extension — the same build-in-sequence method
+## Axis 4: survival under careless extension, by the same build-in-sequence method
 
 Conversation, then approvals, then upload were added in sequence, each as "a fold + a
 render block + wiring in the composition root." What recurred:
@@ -93,7 +93,7 @@ render block + wiring in the composition root." What recurred:
 - **The native/wasm check gap is identical to egui's.** `app.rs` and `uploads.rs` are
   `#[cfg(target_arch = "wasm32")]`; native `cargo test`/`cargo clippy` compile and pass
   cleanly (27 tests, zero warnings) without ever touching the render or the upload
-  path. Only `trunk build` exercises them. This is not a Leptos-specific trap — it's the
+  path. Only `trunk build` exercises them. This is not a Leptos-specific trap: it's the
   same wasm-only-module trap `frontend-comparison.md` already named for egui, confirmed
   to recur regardless of render framework.
 - **The borrow-checker friction moved from render-time to render-macro-time, and got
@@ -102,7 +102,7 @@ render block + wiring in the composition root." What recurred:
   passed to `.map()`/`.collect_view()` inside a `view!` block silently need to *own*,
   not borrow, their data, because the returned `View` can outlive the closure that built
   it. Borrowing `&Vec<WsMessage>` out of a `.with()` closure and iterating with `.iter()`
-  fails with "returns a value referencing data owned by the current function" — not
+  fails with "returns a value referencing data owned by the current function", not
   because of a real dangling reference (the underlying `RwSignal` outlives everything),
   but because the borrow checker can't see through `.with()`'s closure boundary into a
   `view!` macro's expansion. The fix both times in this build was the same: clone out of
@@ -111,25 +111,25 @@ render block + wiring in the composition root." What recurred:
   it is a harder error to read (a lifetime error inside macro-expanded code) than egui's
   (a plain borrow-checker complaint at the call site).
 - **The upload path lost its concurrency-boundary purity, mildly.** `frontend-rs`'s
-  upload is spawned once and returns over an `mpsc` channel, drained each egui frame —
+  upload is spawned once and returns over an `mpsc` channel, drained each egui frame;
   the maxim (share by communicating) applied cleanly. This build's `uploads::pick_and_upload`
   takes an `on_done` callback instead of a channel, because there is no per-frame drain
-  loop to poll one — Leptos is push-based, so the natural shape is "call me back," which
+  loop to poll one. Leptos is push-based, so the natural shape is "call me back," which
   then closes over `conversations` (a signal) directly. That is still communicating, not
   a shared mutable write across an await (no `$state`-across-`await` freeze is possible:
   the callback fires as a discrete reactive update, same as any signal `.set()`), but
-  it is a callback closing over a signal, not a message drained on a boundary — a softer
+  it is a callback closing over a signal, not a message drained on a boundary: a softer
   version of the channel discipline than either other build uses.
 
 Verdict: careless extension does not fail as loudly as egui's. It fails either at
 compile time (borrow errors, but harder to diagnose through the macro) or at runtime
 (a `BorrowMutError` panic, immediate but late). The wasm-only check gap is real and
-identical to egui's — worth the same warning to future work here.
+identical to egui's, and worth the same warning to future work here.
 
 ## The finding that wasn't on the list: the render macro is a lifetime boundary
 
 Neither the Svelte control nor the egui twin has anything like `view!`'s
-closure-capturing-into-a-macro behavior — Svelte has no macro, egui's `Ui::label` etc.
+closure-capturing-into-a-macro behavior: Svelte has no macro, egui's `Ui::label` etc.
 take arguments immediately, not deferred closures. Leptos's fine-grained reactivity
 requires deferring "how to render this" into closures the reactive graph can re-run
 later, and that deferral is exactly where borrowed data stops working. This is a real
@@ -144,7 +144,7 @@ What Leptos bought over egui, holding the architecture constant:
 - A real DOM (Axis 3): browser find/select/right-click, no tofu glyphs, an inspectable
   tree. This is the axis the plan set out to move, and it moved.
 - Idle cost within reach of Svelte's (62.3 MB / 0.1% CPU vs 55.6 MB / 0.0%) and far
-  below egui's (128 MB / 28.8% CPU) — measured, not just argued from construction.
+  below egui's (128 MB / 28.8% CPU), measured rather than just argued from construction.
 - The wire-type sharing win (Axis 2) carries over unchanged, as expected.
 
 What it cost, against egui:
@@ -154,11 +154,11 @@ What it cost, against egui:
   boundaries) plus a runtime panic as a late backstop, not a compile error.
 - A harder-to-read class of borrow error, inside `view!`'s macro expansion, that costs
   more ceremony to work around (clone-before-view) than egui's deferred-action pattern.
-- The wasm-only native-check gap recurs unchanged — this is a lesson about any
+- The wasm-only native-check gap recurs unchanged, so this is a lesson about any
   trunk/wasm Rust frontend, not this framework specifically.
 
 What stays open: whether the `view!` ergonomics are a Leptos 0.8 rough edge or inherent
-to fine-grained-reactive Rust — worth revisiting against `leptos_dom`'s own
+to fine-grained-reactive Rust, worth revisiting against `leptos_dom`'s own
 `COMMON_BUGS.md` if this build continues.
 
 ## Running it
@@ -173,7 +173,7 @@ cd frontend-leptos && trunk serve       # http://127.0.0.1:8080, proxies /ws and
 ## Postscript: the fuller build (tabs, usage, tags, attachments, dismiss)
 
 Everything above was written against the narrow slice (rail, one conversation
-panel, approvals) that answers the plan's question 1 — does a DOM-based Rust
+panel, approvals) that answers the plan's question 1: does a DOM-based Rust
 renderer keep Axes 1 and 2 while fixing Axis 3. The plan's question 2 (is
 Leptos a real candidate to replace Svelte) needed the current Svelte feature
 set, and that has since landed here too: `concerns/usage.rs` and
@@ -182,31 +182,31 @@ set, and that has since landed here too: `concerns/usage.rs` and
 `concerns/rail.rs`/`ui/rail.rs`, and attachment dismiss. `trunk build` is
 clean and all 58 tests pass.
 
-No new axis-relevant finding came out of it — each addition is the same
+No new axis-relevant finding came out of it: each addition is the same
 `apply(&mut self, &ServerMsg)` fold plus a render block, so it confirms the
 four verdicts above rather than changing any of them:
 
 - **Enforcement (Axis 1):** unchanged. `Usage`, `View`'s tab list, and the
   rail's tag/filter state are more `RwSignal`s a closure could in principle
-  reach across concerns — module-boundary convention still does the actual
+  reach across concerns; module-boundary convention still does the actual
   isolating, same as before.
 - **Shared wire types (Axis 2):** unchanged. `WsUsage` and `WsTab` came from
-  `ws-types` like everything else — still a non-finding.
+  `ws-types` like everything else, still a non-finding.
 - **Render surface (Axis 3):** unchanged, and if anything reinforced. Tags
   render as real coloured `<span>` chips and the facet-filter UI as ordinary
-  buttons/selects — nothing here would have been materially harder in egui,
+  buttons/selects; nothing here would have been materially harder in egui,
   but the DOM gives browser find/select/inspect over all of it for free,
   same as the original finding.
 - **Survival under careless extension (Axis 4):** unchanged. The `view!`
   clone-before-list trap recurred (`ui/rail.rs`'s grouped-sections rendering
   clones `WsRow`s out of the signal before building views, same pattern as
-  the original build); the wasm-only native-check gap is unchanged — `usage.rs`,
+  the original build); the wasm-only native-check gap is unchanged: `usage.rs`,
   `view.rs`, and the tag-filter logic in `rail.rs` are all plain structs that
   test natively, but their render blocks in `ui/` are wasm-only, same split
   as before.
 
 One thing worth naming precisely because it's easy to miss: `View`'s tabs are
-*more* complete here than Svelte's, not less — this build never had a
+*more* complete here than Svelte's, not less: this build never had a
 localStorage-tabs predecessor to migrate off, so `concerns/view.rs` is
 simpler than `view.svelte.ts` (no `readLegacyLocalTabs`/migration path),
 while still landing on the same server-owned-tabs, locally-owned-`active`

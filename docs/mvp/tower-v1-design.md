@@ -1,4 +1,4 @@
-# Tower v1 — design
+# Tower v1: design
 
 Web UI: conversations ordered by last event; open one; read; say.
 Backend Rust (`towerd`), frontend Svelte, coupling = NATS concern specs + `tower-ws-spec.md` (to write).
@@ -154,23 +154,23 @@ CREATE TABLE refs (
 - `ts` parsed once to UTC millis: wire timestamps carry mixed offsets; strings misorder.
 - PK `(conv, message_id)` + `INSERT OR REPLACE` = idempotent replay; at-least-once delivery is safe.
 - `sender`/`content` opaque JSON; tower renders, never interprets. Deltas are not stored.
-- Two agent tables, never one: the pulse is one fact per instance (agent.md —
+- Two agent tables, never one: the pulse is one fact per instance (agent.md:
   restating it per conversation is the forbidden restatement). `attached`
-  upserts an attachment row; `detached` deletes it — a released attachment is
+  upserts an attachment row; `detached` deletes it: a released attachment is
   absence, and what a fold retains of dead instances is its own retention
   policy. No verdict column exists:
   alive/released/stranded is never stored, because stored liveness is false
   the moment it is written.
 - Heavy values are externalised at apply time into `refs` (content-addressed,
-  deduped) and replaced in place by `{ "$ref": id, "size", "hint" }` — an
+  deduped) and replaced in place by `{ "$ref": id, "size", "hint" }`, an
   opaque id, never a URL (routes are the client's; ids are the data's).
   **v1 applies this at four fixed nodes**: `image.source`, `document.source`
   (base64, wherever the block nests), `tool_result.content`, and string
-  values inside `tool_use.input` over a threshold (~16 KB — input is
+  values inside `tool_use.input` over a threshold (~16 KB, because input is
   arbitrary JSON and unbounded; a large generated document is legitimately
   all input). The mechanism itself is position-agnostic; new nodes are add-only.
   Stored form = shipped form; `GET /ref/{id}` (Range for paging) serves the
-  bytes. Ids, ordering, and the tip are untouched. Interim — the real split
+  bytes. Ids, ordering, and the tip are untouched. Interim: the real split
   lands at the CLI level (content vocabulary).
 
 ## Gateway
@@ -234,11 +234,11 @@ async fn main() -> anyhow::Result<()> {
 - Reconnect = fresh session. The client re-opens its conversation with `after` = the
   latest `ts` it holds; full history travels once, ever. Boundary overlap deduped by
   `message_id`. The list is refetched whole (small).
-- The viewed thing is a **Conversation** — no second noun. "Room" does not exist.
+- The viewed thing is a **Conversation**, with no second noun. "Room" does not exist.
 - Materialise continuously, every conversation. Opening one reads the warm view.
 - Views own sqlite; event rows + JetStream cursor written in one transaction.
 - Schema changes = numbered migrations (`user_version`, the CLI's migrate pattern).
-  Delete-db-and-replay is manual recovery only — replay rebuilds no further back than
+  Delete-db-and-replay is manual recovery only, because replay rebuilds no further back than
   stream retention, so the db outgrows "cache" as soon as it is older than retention.
 - Views loop on a dedicated OS thread, not the tokio pool.
 - Ingest reads through the stream only (consumer from cursor+1). Restart = reconnect = same path.
@@ -246,10 +246,10 @@ async fn main() -> anyhow::Result<()> {
   beside the cursor. A recreated stream restarts sequences at 1, and a cursor
   resumed against it waits forever, silently. On every consumer build ingest
   asks the views to reconcile: same incarnation → resume from cursor+1;
-  different → the views rematerialise (truncate the derived tables — rows,
-  messages, refs — cursor to 0; annotations are not derived and survive) and
+  different → the views rematerialise (truncate the derived tables, meaning
+  rows, messages and refs, cursor to 0; annotations are not derived and survive) and
   replay starts from 1. A db from before this scheme adopts the current
-  stream as-is — no wipe on upgrade. Blips cannot trigger this: connection
+  stream as-is, with no wipe on upgrade. Blips cannot trigger this: connection
   errors never change a stream's `created`; only genuine recreation does.
 - Startup order in `main`: open db → read cursor → build consumer → spawn loops.
 - Say premise = the browser's tip, forwarded verbatim. `from` = `{ kind: "human" }` bare (no auth in v1).
@@ -258,46 +258,46 @@ async fn main() -> anyhow::Result<()> {
 - History depth = replay + everything folded since. `history` request stays parked.
 - **Approvals** are consumed like conversations: ingest also folds
   `approval.v1.*.lifecycle` and `.telemetry` into a derived `approvals` table
-  (in the rematerialise truncation set — fully rebuildable from replay).
+  (in the rematerialise truncation set, fully rebuildable from replay).
   The outstanding-set fold is the approval spec's: raised without settled is
   the candidate; the pulse confirms; **void is derived client-side** from
-  `lastPulse` against the clock (~3 missed pulses) — no time-driven state in
+  `lastPulse` against the clock (~3 missed pulses), with no time-driven state in
   the Views loop, and a void ask is greyed, never deleted. `answer` goes
   through the gateway as `say`'s sibling: `from` stamped `{ kind: "human" }`
   bare, no retry, transport silence folds to unreachable, `already_settled`
-  shown honestly (first answer wins — losing the race to the terminal is
+  shown honestly (first answer wins, and losing the race to the terminal is
   information, not an error).
 
 - **Agent liveness** is consumed like approvals: ingest folds
   `agent.v1.*.telemetry.>` into the two derived agent tables (both in the
-  rematerialise truncation set — fully rebuildable from replay). **The verdict
+  rematerialise truncation set, fully rebuildable from replay). **The verdict
   is the client's**: alive/released/stranded derives from `lastPulse` against
-  the client's own clock, ~3 of the instance's own declared `intervalS` — the
+  the client's own clock, ~3 of the instance's own declared `intervalS`, the
   approval-void pattern; no time-driven state in the Views loop, no server
   tick. Agent facts never touch `rows`: staleness stays honestly "last
-  conversation activity", and each wire fact ships as exactly one WS packet —
+  conversation activity", and each wire fact ships as exactly one WS packet:
   a pulse is one instance fact, never a fan-out per served conversation.
   **Existence is a client union**: an attached-but-message-less conversation
-  is a *potential* conversation — ready to receive, transient. It appears in
+  is a *potential* conversation, ready to receive and transient. It appears in
   the rail while its attachment lives and vanishes with it; its first
   committed message births the ordinary row. The rows table never hears agent
   events, so short-lived attach/detach cycles (spawn probes, quick tasks)
   leave no tombstone rows behind.
 
-- **Cancellation is cooperative** — no hard abort, ever. The bridge's
+- **Cancellation is cooperative**: no hard abort, ever. The bridge's
   decisions live in a pure `Conversation` fold (`on_say`, `on_cancel`,
-  `on_query_end` — no I/O, the ws.rs `Session` pattern; decisions.rs); the
+  `on_query_end`, no I/O, the ws.rs `Session` pattern; decisions.rs); the
   select loop is plumbing. The cancel arm only signals (a `watch` flip) and replies
-  `accepted` — a reply confirms acceptance, never outcome (the wire's own
+  `accepted`: a reply confirms acceptance, never outcome (the wire's own
   rule; a settled reply would just wait for what the change stream already
   delivers). The query task winds down at its next safe point, publishes its
   own ending (`turn_cancelled` with the real turn id, then the
-  `changes.query` closure), and always completes its `done` report — so the
+  `changes.query` closure), and always completes its `done` report, so the
   tree can never lose a message the wire has, and the
   cancel-after-completion ordering (scenario 2b) is a deterministic unit
   test, not a timing accident. The say rides PENDING until the first turn
   commits (conversation.md's recommended declaration): a cancel before
-  then revokes the say itself — record untouched, tip unmoved, the same
+  then revokes the say itself: record untouched, tip unmoved, the same
   message re-sendable against the premise the sender already knew.
 
 ## Testing
@@ -310,7 +310,7 @@ async fn main() -> anyhow::Result<()> {
 
 ## Known debts
 
-- _(none currently — the bridge's untestable-decisions debt was paid by the
+- _(none currently: the bridge's untestable-decisions debt was paid by the
   `Conversation` fold; see Decisions, Cancellation is cooperative.)_
 
 ## Open: retirement and the warden (designed in conversation, unbuilt)
@@ -320,14 +320,14 @@ attachment) needs a way to say "don't". The shape settled with the SC,
 waiting for a fresh sitting to build:
 
 - **Retired is conversation truth, in the record**: a committal state
-  change committed by the state owner. Tower tags can't serve here — a
+  change committed by the state owner. Tower tags can't serve here, because a
   warden reading another concern's private view state is the cross-concern
   join the specs forbid. Hiding/dimming retired rows stays tower-local
   (tags, filters); truth and preference are different jobs.
-- **`requests.retire`, no precondition** — deliberately unlike cancel. A
+- **`requests.retire`, no precondition**, deliberately unlike cancel. A
   precondition protects an intent whose meaning depends on state (cancel,
   eyes closed, must name its query). Retire's intent is state-invariant:
-  idle, mid-query, sleeping — "be done" means the same thing, so there is
+  idle, mid-query, sleeping: "be done" means the same thing, so there is
   nothing to protect. Ctrl-C/Alt-F4, not escape. Idempotent; anyone
   connected may retire (connection is authority, as for answer).
 - **The implied sequence**: signal the live query down (its `cancelled`

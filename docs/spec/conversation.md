@@ -1,10 +1,10 @@
-# Conversation spec — v2
+# Conversation spec: v2
 
 The conversation concern. Structure per `nats.md`; namespace `conv`. Every
-message here is *about* one conversation — traffic about anything else does not
+message here is *about* one conversation; traffic about anything else does not
 belong in this tree.
 
-v2 is the current tree. v1 — one flat subject per class, no `query` closure —
+v2 is the current tree. v1, one flat subject per class with no `query` closure,
 is superseded but still spoken; the differences and the migration posture are
 at the end (The v1 tree).
 
@@ -12,23 +12,23 @@ at the end (The v1 tree).
 
 The **conversation** is the durable entity the agent model prescribes: the
 state the agent holds, keys its audit by, and returns to on resume.
-`conversationId` is the identity on the wire — pre-generatable by the creator,
+`conversationId` is the identity on the wire, pre-generatable by the creator,
 surviving resume. What serves a conversation, and how that changes over time,
 is not this spec's concern.
 
 Its structure:
 
-- **message** — one user-role or assistant message; the atomic unit. A
+- **message**: one user-role or assistant message; the atomic unit. A
   message's id is stable and names the *occurrence in the dialogue*, not the
   bytes: content is revisable (see the change stream). "User-role" covers both
-  what a sender said and tool results — which is why every API round is a pair.
-- **turn** — one API round: a user-role message in, an assistant message out.
-  `turnId` groups the pair. A turn ends with a reason — `tool_use` for a round
-  that calls a tool, `end_turn` for one that stops — and that reason is
+  what a sender said and tool results, which is why every API round is a pair.
+- **turn**: one API round: a user-role message in, an assistant message out.
+  `turnId` groups the pair. A turn ends with a reason (`tool_use` for a round
+  that calls a tool, `end_turn` for one that stops), and that reason is
   observation: the model's own word for why it stopped, never the query's
   ending.
-- **query** — an ordered run of turns, closed by the `query` change on
-  `changes` (see Query closure) — plus its **parent**: the premise its `say`
+- **query**: an ordered run of turns, closed by the `query` change on
+  `changes` (see Query closure), plus its **parent**: the premise its `say`
   was accepted against. The parent is the precondition made structural: the
   tree is the record of accepted premises, and branching exists only where
   queries attach. Within a query everything is linear, which is why
@@ -36,23 +36,23 @@ Its structure:
 
 **The conversation is a tree. Messages are its nodes; queries are its
 branches.** Within a query each message's parent is trivially the message
-before it — queries are linear segments, which is why per-message parent
+before it: queries are linear segments, which is why per-message parent
 pointers carry no information. The one parent that carries information is the
 **query's**: where its segment attaches, which can be *any* message in the
-tree — the premise its `say` was accepted against (today a message id, the tip
+tree, the premise its `say` was accepted against (today a message id, the tip
 the sender saw; whether a parent may instead name a turn or a query is an open
-question below). A rewind-then-say is a new query attached mid-tree — changing "file X" to
+question below). A rewind-then-say is a new query attached mid-tree: changing "file X" to
 "file Y" is exactly that: rewind to the parent, then say the new message.
 There is no "edit" operation; the tree moving is a rewind and a say. The
-tree is not stored as extra structure and never travels as one — it is
+tree is not stored as extra structure and never travels as one: it is
 derivable by any consumer from the change stream: messages plus tip movements,
 the accumulated record of accepted premises.
 
 The store is a log: every message and revision ever minted, append-only. Ids
 are never invalidated; *unreachable is not deleted* (a log-structured table,
 not a mutable document). The **live conversation** is the reachable set from
-the current **tip**. The tip's own movements are themselves recorded changes —
-the reflog — which is what makes rewind undoable: fast-forward returns to a
+the current **tip**. The tip's own movements are themselves recorded changes,
+the reflog, which is what makes rewind undoable: fast-forward returns to a
 node unreachable from the live tree, findable only because the tip's history
 was kept.
 
@@ -60,9 +60,9 @@ was kept.
 
 | Subject | Traffic | Carries |
 |---|---|---|
-| `conv.v2.{conversationId}.telemetry.>` | events | observation: turns, tools, usage — never authority |
+| `conv.v2.{conversationId}.telemetry.>` | events | observation: turns, tools, usage, never authority |
 | `conv.v2.{conversationId}.changes.>` | events | the committal change stream: messages, revisions, tip movements, query closures |
-| `conv.v2.{conversationId}.attachment.>` | events | who is serving this conversation, now — see Attachment |
+| `conv.v2.{conversationId}.attachment.>` | events | who is serving this conversation, now; see Attachment |
 | `conv.v2.{conversationId}.deltas` | events | the in-progress message, chunk by chunk |
 | `conv.v2.{conversationId}.requests.>` | requests | inbound: address the conversation |
 
@@ -71,8 +71,8 @@ named as functionality: the claim *does* something (it says who serves this
 conversation), the same way `changes` and `requests` are named for what
 they do.
 
-It's deliberately not folded under `changes`. Agent ephemera — a process
-attaching, detaching, migrating — is not history, and must never touch the
+It's deliberately not folded under `changes`. Agent ephemera, a process
+attaching, detaching or migrating, is not history, and must never touch the
 history/staleness stream `changes` drives.
 
 It's deliberately not called `telemetry` either. This is a claim with
@@ -80,7 +80,7 @@ consequences (agent.md, Attachment), not observation a consumer may
 discard.
 
 **The subject spells the type**: a message's type is
-the subject tokens after the class — underscores become token boundaries — so
+the subject tokens after the class (underscores become token boundaries) so
 the body does not repeat it. The one exception is `deltas`: a flat subject
 carrying two shapes (`delta`, `block`) that share every policy, not a routing
 axis, so the type stays in the body there as a `type` field. The full map:
@@ -100,19 +100,19 @@ axis, so the type stays in the body there as a `type` field. The full map:
 | `attached` | `conv.v2.{id}.attachment.attached` |
 | `moved` | `conv.v2.{id}.attachment.moved` |
 | `detached` | `conv.v2.{id}.attachment.detached` |
-| `delta`, `block` | `conv.v2.{id}.deltas` — flat, deliberately |
+| `delta`, `block` | `conv.v2.{id}.deltas`, flat, deliberately |
 | `say` | `conv.v2.{id}.requests.say` |
 | `cancel` | `conv.v2.{id}.requests.cancel` |
 | `chdir` | `conv.v2.{id}.requests.chdir` |
 
 `deltas` stays a single subject, decided not forgotten: nobody filters `delta`
 from `block`, the stream is meaningful only whole and in order, and the
-payloads are deliberately bare — a token per chunk kind fails nats.md's
+payloads are deliberately bare: a token per chunk kind fails nats.md's
 token-depth test.
 
 ## Telemetry and commit
 
-Two streams, two natures — the WAL is not the table:
+Two streams, two natures; the WAL is not the table:
 
 - **`telemetry` is observation.** In flight, possibly ahead of the
   truth. Nothing on it constitutes state; "sending m7 to the API" is an
@@ -120,63 +120,63 @@ Two streams, two natures — the WAL is not the table:
 - **The change stream is committal.** An entry means one thing: the state
   owner has persisted this; the conversation now contains it. Published after
   the fact, never speculatively. Appearance here *is* the definition of "in
-  the conversation" — the record constitutes the state, and only this record.
+  the conversation": the record constitutes the state, and only this record.
 
-The two may legitimately disagree in the moment — a cancelled turn leaves a
+The two may legitimately disagree in the moment: a cancelled turn leaves a
 full telemetry trail and zero commits. That gap is necessary: a system that
 could only attempt what it had already committed could never act.
 
-## Telemetry — `telemetry`
+## Telemetry: `telemetry`
 
 Envelope per nats.md: `type`, `ts`. The table lists the fields each event
 adds.
 
-Events stand alone — the NATS grain: subject filtering and retention mean no
+Events stand alone, per the NATS grain: subject filtering and retention mean no
 consumer can be required to fold from history, so every event carries the ids
 that place it. `queryId` names the query (the id `say` returned, or one the
 implementation mints for locally-typed input); `turnId` names the turn within
-it. Derived state — the query fold, idle — is something a consumer *may*
+it. Derived state, the query fold and idle, is something a consumer *may*
 compute, never something it must.
 
 | Event | Fields | Notes |
 |---|---|---|
-| `turn_started` | `queryId`, `turnId`, `service`, `model`, `thinking`, `effort`, `maxTokens` | a message begins; fires every round of the loop. Carries the request's inputs as asked — `usage` later carries what was reported back; if they differ (model fallback), the record shows it. `service` names what was called — e.g. the Anthropic Messages API — not which model answered |
-| `turn_ended` | `queryId`, `turnId`, `stopReason` | the model stopped its message; fires every round — mid-loop rounds end `tool_use`, a closing round ends `end_turn`. That is the model's own word for why it stopped, never the query's ending: closure is the `query` change on `changes` (this spec, Query closure), and reading an ending off this event is lawful observation, never authority. `stopReason` is the service's own value, passed through verbatim — never synthesised: a turn that was cancelled or failed did not *end*, and gets its own event below |
-| `turn_cancelled` | `queryId`, `turnId` | the turn was terminated intentionally — a `cancel` was accepted; someone decided |
-| `turn_aborted` | `queryId`, `turnId` | the attempt failed — service error, broken stream; potentially transient. Distinct from `turn_cancelled` because the two imply different follow-ups |
-| `tool_use` | `queryId`, `turnId`, `id`, `name`, `input` | `id` is the opaque tool-use id (`toolu_…`); `input` included — the action is unreviewable without the payload |
-| `usage` | `queryId`, `turnId`, `service`, `model`, `inputTokens`, `cacheCreationTokens`, `cacheReadTokens`, `outputTokens` (+ optional: `cacheCreation5mTokens`, `cacheCreation1hTokens`, `thinkingTokens`, `serverToolUse`, `costUsd`) | **per usage frame, not per turn** — a turn may report usage more than once (the service reports at message start and again in the closing delta, and the two legitimately differ); each event carries what its frame reported, never a synthesis of frames. Optional fields appear when the frame reported them — report what you know, fabricate nothing. `costUsd` is derived by the publisher, not reported by the service; it appears when computed, and consumers summing cost must not assume one row per turn |
+| `turn_started` | `queryId`, `turnId`, `service`, `model`, `thinking`, `effort`, `maxTokens` | a message begins; fires every round of the loop. Carries the request's inputs as asked; `usage` later carries what was reported back; if they differ (model fallback), the record shows it. `service` names what was called, e.g. the Anthropic Messages API, not which model answered |
+| `turn_ended` | `queryId`, `turnId`, `stopReason` | the model stopped its message; fires every round, where mid-loop rounds end `tool_use`, a closing round ends `end_turn`. That is the model's own word for why it stopped, never the query's ending: closure is the `query` change on `changes` (this spec, Query closure), and reading an ending off this event is lawful observation, never authority. `stopReason` is the service's own value, passed through verbatim, never synthesised: a turn that was cancelled or failed did not *end*, and gets its own event below |
+| `turn_cancelled` | `queryId`, `turnId` | the turn was terminated intentionally: a `cancel` was accepted; someone decided |
+| `turn_aborted` | `queryId`, `turnId` | the attempt failed: service error, broken stream; potentially transient. Distinct from `turn_cancelled` because the two imply different follow-ups |
+| `tool_use` | `queryId`, `turnId`, `id`, `name`, `input` | `id` is the opaque tool-use id (`toolu_…`); `input` included, because the action is unreviewable without the payload |
+| `usage` | `queryId`, `turnId`, `service`, `model`, `inputTokens`, `cacheCreationTokens`, `cacheReadTokens`, `outputTokens` (+ optional: `cacheCreation5mTokens`, `cacheCreation1hTokens`, `thinkingTokens`, `serverToolUse`, `costUsd`) | **per usage frame, not per turn**: a turn may report usage more than once (the service reports at message start and again in the closing delta, and the two legitimately differ); each event carries what its frame reported, never a synthesis of frames. Optional fields appear when the frame reported them: report what you know, fabricate nothing. `costUsd` is derived by the publisher, not reported by the service; it appears when computed, and consumers summing cost must not assume one row per turn |
 
 **Tool approvals are not conversation traffic.** An approval is an
 authorization exchange between the serving process and whatever holds
-authority over it — a property of the process's policy regime, not of the
+authority over it, a property of the process's policy regime, not of the
 dialogue (change the permissions, restart, and the same tool call raises no
 approval; the conversation is byte-identical). It belongs to the process
 concern, designed in its own pass. Its consequences reach the conversation the
-only way anything does — as content: an approved tool is implicit (the tool
+only way anything does, as content: an approved tool is implicit (the tool
 ran, so it was not denied); a denied tool appears as whatever the agent model
 commits so the model can see it. The conversation is stateless: nothing is
-signalled to the model by event, ever — it is put into the conversation. Which
+signalled to the model by event, ever: it is put into the conversation. Which
 is why "does it go into the conversation" classifies nothing: it measures
 where consequences land, not what owns the thing.
 
-## The change stream — `changes`
+## The change stream: `changes`
 
-Four kinds of change — a closed set of kinds, an open set of operations
+Four kinds of change: a closed set of kinds, an open set of operations
 within them. A change that cannot be expressed as one of these is the signal
 something genuinely new needs the argument (the fourth, `query`, arrived by
 exactly that argument):
 
 | Change | Fields | Notes |
 |---|---|---|
-| `message` | `id`, `queryId`, `turnId`, `role`, `from`?, `content` | **utterance** — the dialogue grew. `id` is the message's stable id; `role` is `user` or `assistant`; `from` is the sender identity (`{ kind: human \| agent \| orchestrator }` + id) so two `role: user` messages from different senders read apart — **absent for a `tool_result`**: it is the mechanical delivery of a tool's output, not an utterance, and nobody sent it, so nothing is fabricated to fill the slot (correction, 19 Jul 2026 — it previously carried `from: {kind: agent}`, wrongly); `content` is content blocks |
-| `revision` | `messageId`, `content` | **revision** — the content under a stable id changed: a trim, a resize, or the words themselves rewritten. Carries the resulting content, never the why — the record carries effects, never reasons |
-| `tip_moved` | `to` (a message id) | **tip movement** — the tip pointer moved: rewind, fast-forward. The reflog, as events |
-| `query` | `queryId`, `reason` | **query closure** — the query will grow no further; the record now contains everything it will ever contain. `reason` is the system's own vocabulary, an open set under add-only: `completed` (the servicer ran its last round and chose not to run another), `cancelled` (a `cancel` was accepted), `aborted` (the attempt failed and the servicer gave the query up). Committal like every change: published after the closing fact is in the record, never speculatively |
+| `message` | `id`, `queryId`, `turnId`, `role`, `from`?, `content` | **utterance**: the dialogue grew. `id` is the message's stable id; `role` is `user` or `assistant`; `from` is the sender identity (`{ kind: human \| agent \| orchestrator }` + id) so two `role: user` messages from different senders read apart. **Absent for a `tool_result`**: it is the mechanical delivery of a tool's output, not an utterance, and nobody sent it, so nothing is fabricated to fill the slot (correction, 19 Jul 2026: it previously carried `from: {kind: agent}`, wrongly); `content` is content blocks |
+| `revision` | `messageId`, `content` | **revision**: the content under a stable id changed: a trim, a resize, or the words themselves rewritten. Carries the resulting content, never the why: the record carries effects, never reasons |
+| `tip_moved` | `to` (a message id) | **tip movement**: the tip pointer moved: rewind, fast-forward. The reflog, as events |
+| `query` | `queryId`, `reason` | **query closure**: the query will grow no further; the record now contains everything it will ever contain. `reason` is the system's own vocabulary, an open set under add-only: `completed` (the servicer ran its last round and chose not to run another), `cancelled` (a `cancel` was accepted), `aborted` (the attempt failed and the servicer gave the query up). Committal like every change: published after the closing fact is in the record, never speculatively |
 
 **Envelope provenance: `instanceId` rides beside `from`, never inside it.**
 Every change event carries the publishing instance's id as envelope
-metadata — the same standing as `ts`, not a content field.
+metadata, the same standing as `ts`, not a content field.
 
 `from` is who said it, forwarded verbatim from the sender. `instanceId` is
 which agent instance published the change, always the servicer's own,
@@ -184,12 +184,12 @@ never forwarded. The two answer different questions and must not collapse
 into one.
 
 Required of every compliant publisher. The schema marks it `.optional()`
-only for producers that predate this rule — add-only tolerance, not
+only for producers that predate this rule: add-only tolerance, not
 licence: a new publisher carries it.
 
 A zombie instance publishing after it was superseded (agent.md,
-Attachment) still carries a legitimate `from` — a human really did say
-it — but a wrong `instanceId`. For a producer that carries the field, this
+Attachment) still carries a legitimate `from`, since a human really did say
+it, but a wrong `instanceId`. For a producer that carries the field, this
 is what makes the two-agents case reconstructible from the record instead
 of merely suspected. A producer that omits it leaves that reconstruction
 undone, same as any other fact never stated.
@@ -199,32 +199,32 @@ The folds:
 - The state of a message is its **latest revision** (last-write-wins per id);
   every prior revision remains in the record because each was an occurrence.
 - The state of the conversation is the latest revision of every message
-  **reachable from the tip**. A snapshot (`history`) emits exactly that — two
+  **reachable from the tip**. A snapshot (`history`) emits exactly that: two
   folds composed. Live watchers folding as they go and late joiners asking for
   a snapshot converge on the same state, by construction.
 
-### Query closure — why it is a change
+### Query closure: why it is a change
 
 Whether a query is finished is a fact only the state owner holds: it decides
 not to run another round, or accepts the cancel, or gives the attempt up.
-Consumers could previously only *derive* closure from telemetry — branching
+Consumers could previously only *derive* closure from telemetry, branching
 on a verbatim, open-set `stopReason`, on the observation plane, with no
 signal at all on the cancelled and aborted paths. The `query` change is that
 fact published once, where the answer already lives: a sender that said
 something and wants the reply subscribes `changes.>`, collects its query's
-messages, and is done when the closure arrives — one subscription, every
+messages, and is done when the closure arrives: one subscription, every
 ending covered.
 
 **Revision and tip movement are two orthogonal mechanisms, not two
 categories the spec assigns.** `revision` changes the content under a stable
-id; `tip_moved` moves the tip. A change may do one, the other, or both — and
+id; `tip_moved` moves the tip. A change may do one, the other, or both, and
 nothing on the wire distinguishes "trimming a tool result" from "going back
 and rewriting what was said." Both are the same operation: new content under
 the same id. The difference is the reviser's reason, and reason is not on the
-wire — the spec cannot enforce one reading over another, and does not try.
+wire: the spec cannot enforce one reading over another, and does not try.
 
 What this means for a reader: fold the revision. The conversation *is* what
-the record says after folding — there is no "what was really said" outside
+the record says after folding; there is no "what was really said" outside
 the store to be true or false against (the record constitutes the state). A
 reader working from a stale copy answers from a word that is no longer there,
 confidently and wrongly; the only defence is to read the current record, not
@@ -234,25 +234,25 @@ under a conversation that now holds a new one.
 
 A **cancelled turn**'s assistant message never commits: it existed only as
 deltas and never enters the store; `turn_cancelled` on telemetry is its
-trace. The user-role half — the `say` that opened the query — is the
+trace. The user-role half, the `say` that opened the query, is the
 implementation's declaration: commit it or not, the record is the answer (see
 Implementation details). **Not committing it is the recommended declaration**:
-a cancel revokes the say, not just the turn it started — committing the user
+a cancel revokes the say, not just the turn it started: committing the user
 half leaves a message its sender revoked in the conversation and moves the
 tip under them, so the released premise is no longer the tip they knew.
 Scenario 2's fixture captures the recommended shape. The *query* it ended,
-though, closed — and closure is committal: a `query` change with reason
+though, closed, and closure is committal: a `query` change with reason
 `cancelled` records it.
 
 | Event | Subject | Fields | Notes |
 |---|---|---|---|
-| `delta` | `deltas` | `text` | a chunk of whatever the stream is currently emitting; superseded by the committed `message`, which is the record. Deliberately bare — no correlation ids: deltas are purely ephemeral, and the metadata would outweigh the data by orders of magnitude |
-| `block` | `deltas` | `blockType` | the stream changed character: the deltas that follow are `thinking`, `text`, or `tool_use` — an open set, mirroring the committed message's content block types. As bare as the deltas it introduces |
+| `delta` | `deltas` | `text` | a chunk of whatever the stream is currently emitting; superseded by the committed `message`, which is the record. Deliberately bare, with no correlation ids: deltas are purely ephemeral, and the metadata would outweigh the data by orders of magnitude |
+| `block` | `deltas` | `blockType` | the stream changed character: the deltas that follow are `thinking`, `text`, or `tool_use`, an open set mirroring the committed message's content block types. As bare as the deltas it introduces |
 
 **Why a marker, not typed deltas.** The assistant emits *one* token stream,
-in order; the blocks are transitions marked within it — markup over a single
-stream, not parallel channels. A delta is therefore always the same thing —
-the next chunk of that stream — and the only additional fact is what the
+in order; the blocks are transitions marked within it, markup over a single
+stream rather than parallel channels. A delta is therefore always the same
+thing, the next chunk of that stream, and the only additional fact is what the
 stream is currently emitting, which changes at block boundaries, not per
 chunk. Order carries the structure: traffic for one conversation arrives in
 publication order per subject (see What consumers may assume), so a `block`
@@ -260,7 +260,7 @@ marker always precedes the deltas it describes. No index, no per-chunk type:
 the evidence on the wire is strictly sequential blocks, and anything more is
 machinery for an interleave that does not occur.
 
-Worked stream — a turn that thinks, speaks, then calls a tool (the
+Worked stream, a turn that thinks, speaks, then calls a tool (the
 `tool_use` deltas stream the input JSON as it forms, fragment by fragment,
 exactly as the service emits it):
 
@@ -278,17 +278,17 @@ exactly as the service emits it):
 
 Tolerance does the compatibility work in both directions: a consumer that
 predates `block` skips it (unknown type) and sees exactly what it saw before
-— text deltas; a consumer that joins mid-turn renders deltas as text until
-the first marker corrects it — an acceptable imperfection for an ephemeral
+as text deltas; a consumer that joins mid-turn renders deltas as text until
+the first marker corrects it, an acceptable imperfection for an ephemeral
 display the committed message supersedes. A producer that never emits
 `block` (today's) remains compliant: the marker is additive.
 
 A delta is how a message looks *while it is happening*; the committed message
 is what happened. Locally-entered input commits too: a message typed at the
 terminal appears on the change stream the same as one that arrived over
-`requests` — half a chat is not a chat.
+`requests`: half a chat is not a chat.
 
-## Attachment — `attachment`
+## Attachment: `attachment`
 
 Who is serving this conversation, now. The wire shape of the claim agent.md's
 Attachment section conducts itself by: read that section first for the model
@@ -296,38 +296,38 @@ Attachment section conducts itself by: read that section first for the model
 
 | Event | Fields | Notes |
 |---|---|---|
-| `attached` | `instanceId`, `world`?, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now. Supersedes whatever attachment stood before it, unconditionally, exactly once per claim (agent.md, Attachment). This is what makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for an empty conversation) — so an observer knows where the conversation stands without replaying the change stream first. `world` is required of every compliant publisher (below); `cwd` and `intervalS` are optional for backward compatibility, and their absence is not a claim the value is empty — only that this attach didn't state it. `intervalS`, when carried, is at most 600 (ten minutes), the same liveness promise a pulse makes and bounded for the same reason (agent.md, Telemetry): the bound is validity, not a cap, so a larger value makes the event invalid whole |
-| `moved` | `instanceId`, `world`?, `cwd` | a fact about the standing attachment, not a new claim: the working directory changed under it (the wire outcome of a `chdir` request, this spec, Requests). Valid only from the instance identity — `(world, instanceId)`, or bare `instanceId` if either side omits `world` — the fold currently holds as standing. Folds last-write-wins onto the held attachment's `cwd` |
-| `detached` | `instanceId`, `world`? | released — Ctrl-C, drain, done, or a displaced instance's observable act of standing down. Changes the fold only when its identity matches the *standing* attachment's, same rule as `moved`. A crash publishes nothing |
+| `attached` | `instanceId`, `world`?, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now. Supersedes whatever attachment stood before it, unconditionally, exactly once per claim (agent.md, Attachment). This is what makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's tip at the moment of attachment, the same shape as a say's own premise (`z.string().nullable()`, `null` for an empty conversation), so an observer knows where the conversation stands without replaying the change stream first. `world` is required of every compliant publisher (below); `cwd` and `intervalS` are optional for backward compatibility, and their absence is not a claim the value is empty, only that this attach didn't state it. `intervalS`, when carried, is at most 600 (ten minutes), the same liveness promise a pulse makes and bounded for the same reason (agent.md, Telemetry): the bound is validity, not a cap, so a larger value makes the event invalid whole |
+| `moved` | `instanceId`, `world`?, `cwd` | a fact about the standing attachment, not a new claim: the working directory changed under it (the wire outcome of a `chdir` request, this spec, Requests). Valid only from the instance identity, `(world, instanceId)` or bare `instanceId` if either side omits `world`, that the fold currently holds as standing. Folds last-write-wins onto the held attachment's `cwd` |
+| `detached` | `instanceId`, `world`? | released: Ctrl-C, drain, done, or a displaced instance's observable act of standing down. Changes the fold only when its identity matches the *standing* attachment's, same rule as `moved`. A crash publishes nothing |
 
 **`world` is required of every compliant publisher.** Same tolerance as
 envelope `instanceId` (this spec, The change stream): the schema marks it
-`.optional()` only for producers that predate this rule — add-only
+`.optional()` only for producers that predate this rule: add-only
 tolerance, not licence. Reason: instance identity is the pair
 `(world, instanceId)` (agent.md, The entity), so both the liveness
 join and the standing-instance gate compare the pair. An `attached` without
 `world` names only half an identity.
 
-**Two mechanisms, two guarantees — keep them apart.** One subject per
+**Two mechanisms, two guarantees; keep them apart.** One subject per
 conversation gives every `attached` claim a total order: whichever
 `attached` published last on this subject is standing. That holds from any
 world, any instance, with no cross-world timestamp comparison needed
 (agent.md, What consumers may assume). This is why attachment could not
-stay on the world's tree — two worlds' clocks are not one order.
+stay on the world's tree: two worlds' clocks are not one order.
 
 That ordering only settles who is standing. It doesn't make `moved` and
-`detached` safe to fold — that's the standing-instance gate's job (the
+`detached` safe to fold; that's the standing-instance gate's job (the
 Event table above). Each carries its own identity, the `(world,
 instanceId)` pair; a fold applies it only when that pair matches the one
 currently held. If either side omits `world`, the gate falls back to bare
 `instanceId`: degraded, not broken.
 
 A `moved` or `detached` from any other instance is a stale fact about a
-superseded claim. It's harmless because the gate discards it — not because
+superseded claim. It's harmless because the gate discards it, not because
 the subject ordered it correctly.
 
 **`world` and `instanceId` are provenance fields, never address.** Neither
-names this subject — the conversation does. A consumer that wants to know
+names this subject; the conversation does. A consumer that wants to know
 which world or instance holds the standing attachment reads it off the
 latest `attached` fact, the same way it reads `cwd`. It never derives
 standing from where the message came from.
@@ -341,18 +341,18 @@ standing from where the message came from.
 { "ts": "2026-07-25T14:10:00+10:00", "instanceId": "inst-1a2f", "world": "mac" }
 ```
 
-## Requests — `requests`
+## Requests: `requests`
 
 | Request | Fields | Reply | Notes |
 |---|---|---|---|
-| `say` | `from`, `text`, `precondition` | `accepted` + `id` \| `rejected` + `reason` | start a new query against a known state; `from` is the sender identity — locally-typed input carries `{ kind: human }` the same way, so no speaker is ever anonymous; the reply acknowledges acceptance only — the answer appears on the change stream like any other turn |
-| `cancel` | `id` | `accepted` \| `rejected` + `reason` | revoke an accepted piece of state by its id — in v1, a running query; whatever kinds acceptance creates later. Its target *is* its premise: never "cancel whatever happens to be running". Rejection reasons are honest: `not_found`, `already_complete`, `unsupported` |
-| `chdir` | `cwd` | `accepted` \| `rejected` + `reason` | this conversation is served at this directory from now on. The request states that effect and never a mechanism: a servicer may move a process, or hold `cwd` as a value per conversation, and both conform. Accept confirms the premise (this servicer holds this conversation), never the outcome — the move is observed on `attachment.moved` when it lands, and one that never lands shows as an unchanged `cwd`, an observed outcome like any other. The servicer reconciles the directory and may decline to move. A harness with no directory notion answers `unsupported`. Known reasons today: `unsupported` |
+| `say` | `from`, `text`, `precondition` | `accepted` + `id` \| `rejected` + `reason` | start a new query against a known state; `from` is the sender identity, and locally-typed input carries `{ kind: human }` the same way, so no speaker is ever anonymous; the reply acknowledges acceptance only, and the answer appears on the change stream like any other turn |
+| `cancel` | `id` | `accepted` \| `rejected` + `reason` | revoke an accepted piece of state by its id: in v1, a running query; whatever kinds acceptance creates later. Its target *is* its premise: never "cancel whatever happens to be running". Rejection reasons are honest: `not_found`, `already_complete`, `unsupported` |
+| `chdir` | `cwd` | `accepted` \| `rejected` + `reason` | this conversation is served at this directory from now on. The request states that effect and never a mechanism: a servicer may move a process, or hold `cwd` as a value per conversation, and both conform. Accept confirms the premise (this servicer holds this conversation), never the outcome: the move is observed on `attachment.moved` when it lands, and one that never lands shows as an unchanged `cwd`, an observed outcome like any other. The servicer reconciles the directory and may decline to move. A harness with no directory notion answers `unsupported`. Known reasons today: `unsupported` |
 
 **Why `chdir` addresses the conversation.** It changes one conversation's
 state, so it goes to the conversation (core.md, "Work is addressed to the
 work, never the worker"). On the world's tree the queue group hands it to an
-arbitrary instance, and every reply a non-holder could give is false — it
+arbitrary instance, and every reply a non-holder could give is false: it
 cannot accept what it does not serve, and its `not_found` says only that
 *it* isn't serving it. On this tree only the holder subscribes, so the
 request reaches the one party that can act, and there is no `not_found` to
@@ -361,11 +361,11 @@ signal as everywhere else. Operations on a world's serving capacity
 (`service`, `drain`) stay on the world; operations on a conversation come
 here.
 
-**The `say` message, concretely.** It carries text — a plain string — plus
+**The `say` message, concretely.** It carries text, a plain string, plus
 optionally `attachments` (below), which arrived under add-only exactly as
 promised; fully general rich content still waits on the content vocabulary
 (`content.md`) design pass. The committed `message` on the change
-stream carries full content blocks — the record holds what the conversation
+stream carries full content blocks: the record holds what the conversation
 actually contains. The premise is encoded exactly as the preconditions
 section writes it: one key naming the kind.
 
@@ -388,13 +388,13 @@ section writes it: one key naming the kind.
 
 **`from` is pass-through provenance.** The sender supplies it; a servicer
 echoes what the sender sent and never authors it. Everything except `kind` is
-optional — a publisher states only what it actually knows, and fabricating the
+optional: a publisher states only what it actually knows, and fabricating the
 rest is non-compliant. `{ "kind": "human" }` alone is valid: it is exactly what
-a terminal that knows a human typed — but not which human — publishes. The
+a terminal that knows a human typed, but not which human, publishes. The
 worked example above shows a sender that did know its `userId`; that field is
 illustrative, not required.
 
-**`attachments`** — optional; files riding with the say. Bytes never travel
+**`attachments`**: optional; files riding with the say. Bytes never travel
 on a subject (the broker's payload limit alone forbids it): the sender puts
 them in the deployment's transit object store first and the say carries
 reference blocks, API-shaped with an `object` source:
@@ -414,23 +414,23 @@ reference blocks, API-shaped with an `object` source:
 
 The servicer resolves at request-build: fetch the object at its own edge,
 inline the bytes for the model. The **committed message carries the
-reference block verbatim, never the bytes** — the record stays light and
+reference block verbatim, never the bytes**: the record stays light and
 wire-legal. The store is transit, not storage: ids are opaque and
 short-lived, and bytes are the servicer's private state once fetched.
-`source.bucket` names the store the object actually landed in — the block
+`source.bucket` names the store the object actually landed in: the block
 carries it, not deployment config, so a servicer never has to guess which
 bucket a sender it doesn't control used; a block minted before this field
 existed falls back to the servicer's own configured default.
 
 Failure means two different things depending on when it happens. An object
-that no longer resolves while **replaying already-committed history** — an
-adopted conversation past the transit window — is expected ageing, and
+that no longer resolves while **replaying already-committed history**, such as
+an adopted conversation past the transit window, is expected ageing, and
 renders in the request as a stated placeholder (media type and size, from
 the block itself); the record still holds the block, and the repair is
 re-attaching. Unknown `source.type` values get the same placeholder
-treatment — source kinds are an open set (`base64` beside `object` would be
+treatment: source kinds are an open set (`base64` beside `object` would be
 add-only). But an attachment that fails to resolve among the **fresh
-blocks riding THIS say** is never ageing — it means the object the sender
+blocks riding THIS say** is never ageing: it means the object the sender
 just referenced genuinely isn't there. That is not a placeholder case: the
 say itself rejects, same reply shape as a stale precondition, rather than
 let the model see a placeholder in place of what the sender actually
@@ -438,45 +438,45 @@ attached.
 
 Two candidates follow from this design and are named, not designed:
 
-- `revise` — the trim operation generalised: any bridge agent revisable over
+- `revise`: the trim operation generalised: any bridge agent revisable over
   the wire, same preconditions and reply discipline; the policy (what to trim,
   thresholds, protected tail) stays with the requester.
-- `history` — the snapshot as an optimisation of the fold, for late joiners
+- `history`: the snapshot as an optimisation of the fold, for late joiners
   and transfer; its reply shape is per-model-kind (the architecture's
   `HistorySnapshot`).
 
 ### Preconditions
 
 Every operation is decided against a known state, and carries that state as a
-typed premise — **required**, not optional. An unanchored mutation is
+typed premise, **required** and not optional. An unanchored mutation is
 timing-dependent nondeterminism: a delayed "hello world" arriving after five
 queries have finished means something nobody said. One premise kind in v1:
 
-- `{ tip: messageId | null }` — my premise is a position: that node is the tip
-  I saw. `null` is the position "nothing exists yet" — the first message of a
+- `{ tip: messageId | null }`: my premise is a position, that node is the tip
+  I saw. `null` is the position "nothing exists yet", the first message of a
   new conversation states it explicitly rather than omitting the premise.
   Valid while it is still the tip.
 
 A premise that no longer holds is rejected with reason `stale`, and the sender
-re-decides with current knowledge — the wire's version of "actually, wait—".
+re-decides with current knowledge, the wire's version of "actually, wait".
 Operations premised on incompatible worlds are never merged or sequenced: the
 first commit moves the tree; the rest are refused with an explanation. There is
 no anchor-free case: even the first message of a new conversation carries its
-premise — `{ tip: null }`, the claim that nothing exists — and it is enforced
+premise, `{ tip: null }`, the claim that nothing exists, and it is enforced
 like any other: a `tip: null` say against a non-empty conversation is `stale`.
 
 **The spec never requires acceptance; it limits it.** Rejecting everything is
-lawful — internal state is the servicer's, which is the whole point. What a
+lawful: internal state is the servicer's, which is the whole point. What a
 compliant servicer must not do:
 
 - accept an operation whose premise does not hold (`stale`);
-- hold more than one **live** acceptance against the same premise — accepting
+- hold more than one **live** acceptance against the same premise: accepting
   two says premised on the same tip is the two-sender fabrication the premise
   exists to kill, and the rule covers the accepted-but-uncommitted window that
   stale-checking alone cannot. A cancelled or aborted acceptance releases its
   premise.
 
-**Queueing is deliberately not in v1** — and the complexity is not the queue,
+**Queueing is deliberately not in v1**, and the complexity is not the queue,
 it is that this is *chat*. Queued messages have conversational semantics:
 consecutive user messages merge or stay distinct (and the render already
 flattens them for the API, so which happened must stay visible in the record);
@@ -487,21 +487,21 @@ conversation *is*, not a scheduling detail. So v1's affordance is
 cancel-then-send, exactly the local TUI's semantics: a `say` against the tip
 while a query runs is rejected (that premise has a live acceptance); cancel
 the query and the premise frees. Queueing, if ever wanted, arrives as a new
-premise kind under add-only — a real design pass, not a side effect.
+premise kind under add-only: a real design pass, not a side effect.
 
 An accepted premise does not evaporate: it becomes the new query's **parent**.
 The tree is the accumulation of accepted premises.
 
 Acceptance creates state, and state gets an id: every `accepted` reply carries
 the `id` of what was accepted, which is what makes it cancellable. There is no
-blanket cancel — in a distributed system that is a different concept (*stop*:
+blanket cancel; in a distributed system that is a different concept (*stop*:
 stop everything), and it is not conversation traffic; it belongs to whatever
 owns the thing being stopped.
 
 Every request owes a reply; an implementation that does not support an
-operation replies `rejected` with reason `unsupported` — compliance is
+operation replies `rejected` with reason `unsupported`: compliance is
 answering, not implementing. The reply confirms acceptance, never outcome. A
-sender that wants the answer subscribes to the change stream — one mechanism
+sender that wants the answer subscribes to the change stream: one mechanism
 for every reader; the `query` closure says when the answer is complete.
 
 ## What consumers may assume
@@ -510,52 +510,52 @@ for every reader; the `query` closure says when the answer is complete.
   in publication order across one subscription: a single `changes.>`
   subscription sees all change kinds in order (nats.md, Subscription
   discipline). Fold consumers subscribe `{class}.>`, never a set of sibling
-  leaves — a partial change stream is corrupted state, and a sibling-set
+  leaves: a partial change stream is corrupted state, and a sibling-set
   subscriber is silently blind to leaves added later.
 - **No ordering across classes**: telemetry and commits interleave without
   guarantee; a consumer must never infer state from their relative arrival.
 - The query fold groups by `queryId`; its committal end is the `query`
   closure on `changes`. Deriving an ending from telemetry (`turn_ended` +
   verbatim `stopReason`) remains lawful observation, never authority. Idle is
-  derived — quiet since the last event — never declared.
+  derived, quiet since the last event, never declared.
 
-## Implementation details — deliberately not contract
+## Implementation details: deliberately not contract
 
-The boundary: the conversation is what the change stream says it is — not what
+The boundary: the conversation is what the change stream says it is, not what
 the implementation happens to do. The conversation is a generic structure that
 can be committed to: it *influences* behaviour, it does not define it. An
-agent that finds a broken position at its tip — an unanswered tool_use, an
-incomplete turn — decides for itself what to do about it (re-execute, roll
+agent that finds a broken position at its tip, an unanswered tool_use or an
+incomplete turn, decides for itself what to do about it (re-execute, roll
 back, refuse), and declares the outcome by what it commits. These are each
 implementation's own, made visible by its commits rather than specified:
 
 - Whether the user-role half of a cancelled turn is committed. The
   implementation declares by committing or not; the record is the answer, and
-  no one has to read its source to know. Not committing is recommended — the
+  no one has to read its source to know. Not committing is recommended: the
   cancel revokes the say, not just the turn (see The change stream).
 - What is actually sent to the model. The request is a *rendering* of the
-  reachable state — what the builder ships, and any presentation-time
+  reachable state: what the builder ships, and any presentation-time
   transformation, is between the agent and its model.
-- Revision policy — what gets trimmed, when, by what thresholds. The change
+- Revision policy: what gets trimmed, when, by what thresholds. The change
   stream carries effects, never reasons.
 
-## Message schemas — normative
+## Message schemas: normative
 
 The tables above narrate; this section defines. Every message on this concern's
-subjects must validate against its schema here — required and optional is
+subjects must validate against its schema here; required and optional is
 exactly what the schema says (`.optional()` and nothing else). Written as zod
 (v4); the conformance JSON Schema artifacts are generated from these via
 `z.toJSONSchema`, so prose and artifact cannot drift. `z.looseObject`
 throughout is the tolerance rule as code: unknown fields pass (add-only).
-`reason` strings are an open set — the values named are the ones defined
+`reason` strings are an open set: the values named are the ones defined
 today; consumers tolerate others.
 
-Each schema is strict about its own fields — a misshaped known message must
+Each schema is strict about its own fields: a misshaped known message must
 fail. Routing is by subject, not a `type` member: the leaf selects the schema
 (the keyed records below), and a leaf not listed is skipped, never failed
 (conformance.md). `deltas` is the one flat subject, so its two shapes are a
-`type`-discriminated union — the discriminator lives in the body there, the
-single place the subject does not spell it. Do not add a catch-all schema — a
+`type`-discriminated union: the discriminator lives in the body there, the
+single place the subject does not spell it. Do not add a catch-all schema; a
 misshaped known message would slide into it and pass, the
 leniency-conceals-divergence bug in schema form.
 
@@ -567,11 +567,11 @@ const ts = z.iso.datetime({ offset: true });
 
 /** The tolerance rule for enums: the listed values are the ones defined
  *  today; an unknown value still validates (a closed enum here would make
- *  every addition a breaking change — the POC's closed-enum defect). */
+ *  every addition a breaking change, the POC's closed-enum defect). */
 const openEnum = <T extends readonly [string, ...string[]]>(values: T) => z.enum(values).or(z.string());
 
 /** Sender identity. `userId` appears only when the publisher actually knows
- *  it — never fabricated. A local CLI knows a human typed, not which human:
+ *  it, never fabricated. A local CLI knows a human typed, not which human:
  *  it publishes `{ kind: 'human' }` bare. `from` is provenance, never
  *  enforcement (core.md). */
 const sender = z.looseObject({
@@ -598,7 +598,7 @@ export const conversationTelemetry = {
   'usage': z.looseObject({
     ts, ...turnRef, service: z.string(), model: z.string(),
     inputTokens: z.number().int(), cacheCreationTokens: z.number().int(), cacheReadTokens: z.number().int(), outputTokens: z.number().int(),
-    // Per-frame extras — present when the frame reported them, never synthesised:
+    // Per-frame extras, present when the frame reported them, never synthesised:
     cacheCreation5mTokens: z.number().int().optional(),
     cacheCreation1hTokens: z.number().int().optional(),
     thinkingTokens: z.number().int().optional(),
@@ -608,7 +608,7 @@ export const conversationTelemetry = {
   }),
 };
 
-// conv.v2.{conversationId}.changes.> — instanceId is envelope metadata
+// conv.v2.{conversationId}.changes.>: instanceId is envelope metadata
 // (beside from, never inside it): which agent instance published the change.
 export const conversationChange = {
   'message': z.looseObject({ ts, instanceId: z.string().optional(), id: z.string(), ...turnRef, role: openEnum(['user', 'assistant']), from: sender.optional(), content: contentBlocks }),
@@ -617,9 +617,9 @@ export const conversationChange = {
   'query': z.looseObject({ ts, instanceId: z.string().optional(), queryId: z.string(), reason: openEnum(['completed', 'cancelled', 'aborted']) }),
 };
 
-// conv.v2.{conversationId}.attachment.> — the wire shape of the model
+// conv.v2.{conversationId}.attachment.>: the wire shape of the model
 // agent.md conducts (singular, unconditionally superseding). world is
-// provenance, never address, exactly like instanceId — but together they
+// provenance, never address, exactly like instanceId, but together they
 // are the instance identity (agent.md, The entity), so world is
 // required of every compliant publisher; optional here only for producers
 // that predate this rule.
@@ -629,21 +629,21 @@ export const conversationAttachment = {
   'detached': z.looseObject({ ts, instanceId: z.string(), world: z.string().optional() }),
 };
 
-// conv.v2.{conversationId}.deltas — the one flat subject: `delta` and `block`
+// conv.v2.{conversationId}.deltas: the one flat subject, `delta` and `block`
 // share it, so the type lives in the body here, the single place the subject
-// does not spell it. `ts` is waived — deltas are ephemeral and the metadata
+// does not spell it. `ts` is waived: deltas are ephemeral and the metadata
 // would outweigh the data.
 export const conversationDelta = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('delta'), text: z.string() }),
   z.looseObject({ type: z.literal('block'), blockType: openEnum(['thinking', 'text', 'tool_use']) }),
 ]);
 
-// conv.v2.{conversationId}.requests.> — a leaf not listed is still answered:
+// conv.v2.{conversationId}.requests.>: a leaf not listed is still answered:
 // `rejected` with reason `unsupported`. Compliance is answering, not implementing.
 export const conversationRequest = {
   'say': z.looseObject({
     ts, from: sender, text: z.string(),
-    // Reference blocks only — bytes never ride a subject. source.type is an
+    // Reference blocks only; bytes never ride a subject. source.type is an
     // open set; unresolvable sources render as stated placeholders.
     attachments: z.array(z.looseObject({
       type: z.string(),
@@ -665,81 +665,81 @@ export const requestReply = z.union([
 
 One deliberate asymmetry, so it is not read as an omission: `cancel.from` is
 optional because provenance travels when known; the `id` is the cancel's
-premise and is always required. `say.precondition` has no such asymmetry — it
+premise and is always required. `say.precondition` has no such asymmetry: it
 is always required; the first message of a new conversation states
 `{ tip: null }` rather than omitting it.
 
 ## Migration note
 
-This spec's attachment model — the leaf, the exactly-once rule, `moved` —
+This spec's attachment model, the leaf, the exactly-once rule and `moved`,
 isn't implemented anywhere yet. Here's the full surface it touches,
 pending:
 
-- **Stream capture** (`mvp/stream-init.sh`) — `conv.v2.*.attachment.>` is a
+- **Stream capture** (`mvp/stream-init.sh`): `conv.v2.*.attachment.>` is a
   new leaf. Existing capture config does not hold it, because the leaf
   didn't exist when that config was last converged.
-- **towerd's fold** — reads `agent.v1.*.telemetry.attached`/`detached`
+- **towerd's fold**: reads `agent.v1.*.telemetry.attached`/`detached`
   today. Must move to the conversation tree, add the standing-instance gate
   (this section), and fold `moved`.
-- **Both frontends** (`frontend-svelte`, `frontend-leptos`) — read towerd's
+- **Both frontends** (`frontend-svelte`, `frontend-leptos`): read towerd's
   `agents`/`agent` frames (`tower-ws-spec.md`). Their folds need the same
   gate and the `moved` handling, per this repo's parity rule: a
   wire-visible change lands in both, same piece of work.
-- **bridge's publisher** — currently publishes `attached`/`detached` on
+- **bridge's publisher**: currently publishes `attached`/`detached` on
   `agent.v1.{world}.telemetry.>`. Must move to the conversation subject,
   adopt the exactly-once-per-claim discipline, and publish `moved` on
   `chdir` instead of re-publishing `attached`.
-- **`chdir`'s subject** — nothing answers `chdir` on any wire tree today.
+- **`chdir`'s subject**: nothing answers `chdir` on any wire tree today.
   bridge answers it over its stdio control protocol, and helm sends it that
-  way, so the work is to implement it on `conv.v2.{id}.requests.chdir` —
+  way, so the work is to implement it on `conv.v2.{id}.requests.chdir`,
   subscribed by the servicer per conversation it holds, `conversationId`
-  gone from the payload because the subject carries it — and then retire the
+  gone from the payload because the subject carries it, and then retire the
   control line.
-- **claude-sdk-cli's `AgentPresence`** — a third producer, publishing
+- **claude-sdk-cli's `AgentPresence`**: a third producer, publishing
   `attached` with `cwd` on the old subject today. Needs the same move.
-- **The Examples above** (agent.md, Attachment) — become the
+- **The Examples above** (agent.md, Attachment): become the
   conformance fixtures for the exactly-once rule and its fold, alongside
   the existing `docs/spec/fixtures/agent/` set. Fix lands twice: code and
   fixture, same commit.
 
 None of this is implied by the spec landing. Each is separate, later work.
 
-## The v1 tree — superseded, still spoken
+## The v1 tree: superseded, still spoken
 
 v1 differs in shape, not vocabulary: one flat subject per class
 (`conv.v1.{id}.changes`, `.telemetry`, `.deltas`, `.requests`), routing by
 the payload's `type` alone, and no `query` closure change. Every other
 message shape is identical to v2.
 
-v1 speakers remain lawful for as long as they exist — a breaking change is a
+v1 speakers remain lawful for as long as they exist: a breaking change is a
 new tree and migration is unhurried (nats.md, Evolution). Skew is absorbed
 by the single-instance component: a reader serving both trees subscribes to
 both, normalises at ingest (subject tokens where the tree is deep, payload
-`type` where it is flat — the same discriminator either way), and answers
+`type` where it is flat, the same discriminator either way), and answers
 each conversation's requests on the tree its traffic arrives on. The v1
 fixtures remain the v1 ingest path's test surface until the last v1 speaker
-retires — they retire with v1, not with v2's arrival.
+retires: they retire with v1, not with v2's arrival.
 
 ## Open questions
 
 - **The committal grain of tool results: message or content.** A turn ending
-  in ten parallel tool_uses settles piecewise — five results exist while five
-  still run — and the `message` change can only commit the settled whole (a
+  in ten parallel tool_uses settles piecewise, since five results exist while
+  five still run, and the `message` change can only commit the settled whole (a
   half-answered results message is as invalid as a bare tool_use). A finer
-  change kind — content blocks committed into a message id incrementally —
+  change kind, content blocks committed into a message id incrementally,
   would emit each result when known. Either way this is a **durability**
   question, not correctness, which is why the finer grain would be optional:
   the servicer owns local conversation state, and recovery is a
   reconciliation against the published record with two shapes. Recovered
-  *ahead* of what was published: publish what you know — the record catches
+  *ahead* of what was published: publish what you know, and the record catches
   up. Recovered *behind* what was published: either reconcile local state up
   to the record, or fix the record (a tip movement, a revision) to where you
   actually are. Both are lawful today; the grain only changes how large the
   gap can grow. Resolve when a parallel-tool implementation forces it.
 - **The parent's wire type.** A follow-up after an interrupted query could
-  anchor on a message (an exact node — but revisable, and possibly the interior
-  of an incomplete turn), a turn (an outcome — but a cancelled turn's outcome
-  is nothing), or a query (the episode — surviving its internal changes). They
+  anchor on a message (an exact node, but revisable and possibly the interior
+  of an incomplete turn), a turn (an outcome, but a cancelled turn's outcome
+  is nothing), or a query (the episode, surviving its internal changes). They
   differ exactly when things change, which is why the type is real data; wire
   encoding unruled.
 
