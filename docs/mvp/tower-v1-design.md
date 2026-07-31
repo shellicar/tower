@@ -158,7 +158,7 @@ CREATE TABLE refs (
   restating it per conversation is the forbidden restatement). `attached`
   upserts an attachment row; `detached` deletes it — a released attachment is
   absence, and what a fold retains of dead instances is its own retention
-  policy (agent.md, What consumers may assume). No verdict column exists:
+  policy. No verdict column exists:
   alive/released/stranded is never stored, because stored liveness is false
   the moment it is written.
 - Heavy values are externalised at apply time into `refs` (content-addressed,

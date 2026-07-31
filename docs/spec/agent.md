@@ -95,7 +95,7 @@ does not get it for free.
 
 Environment facts ride `attached` as fields — published when known, never
 fabricated, ignored when unrecognised (full shape: `conversation.md`,
-Attachment). Two kinds, kept apart by what they denote (nats.md, Naming):
+Attachment). Two kinds, kept apart by what they denote:
 
 - **About the thing** — `cwd`, and the world's provenance (which host created
   it). Durable and causal: cwd is an input to how the conversation unfolds,
@@ -144,7 +144,7 @@ So one open claim means one `attached`: an instance publishes it once, at the mo
 
 A changed `cwd` is not a new claim. It's a fact about the claim already open, so it gets its own event: `moved` (`conversation.md`, Attachment).
 
-A compliant instance watches the attachment leaf for every conversation it serves (`conversation.md`, Attachment). When it sees itself displaced — another instanceId's `attached` for a conversation it holds — it stops serving and publishes `detached`.
+A compliant instance watches the attachment leaf for every conversation it serves. When it sees itself displaced — another instanceId's `attached` for a conversation it holds — it stops serving and publishes `detached`.
 
 That `detached` folds as nothing: the supersession already ended its claim. A `detached` only changes the fold when its identity — the `(world, instanceId)` pair, or bare `instanceId` if either side omits `world` — still matches the standing attachment's. An instance detaching after it's already superseded is stating a fact about its own past claim, not retracting the current one.
 

@@ -273,7 +273,7 @@ control plane: a participant, not a row —
 ```
 
 `conv`'s `attachment` sits in the operational row, not observability. It is
-a decided claim with consequences (agent.md, Attachment) — not
+a decided claim with consequences, not
 something a layer merely functions without. Removing it changes who is
 being served, which fails the Telemetry section's own severability test.
 

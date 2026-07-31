@@ -179,7 +179,7 @@ side by side. Derived from code, not from any prior claim about what's missing.
 
 ## Porting order
 
-Ordered by what blocks what, not by size. Each item names the gap it closes (see above for the full description).
+Ordered by what blocks what, not by size. Each item names the gap it closes.
 
 1. **Fix the Svelte attachment `bucket` bug** (verify live first). Cheapest item on the list, independent of
    everything else, and possibly an active correctness bug in production use today — fixing a live bug outranks

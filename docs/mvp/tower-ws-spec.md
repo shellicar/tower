@@ -334,13 +334,13 @@ anyway legitimately closes `completed`. `reason` is an open set
 The servicing snapshot, sent once per connection after `approvals`: every
 instance towerd's fold retains, and **the one standing attachment per
 conversation**. A conversation has at most one — no candidate set, nothing
-to select among (conversation.md, Attachment: a new `attached`
-unconditionally supersedes whatever stood before it).
+to select among: a new `attached` unconditionally supersedes whatever stood
+before it.
 
-Facts only, never verdicts. **Liveness is the client's derivation**
-(agent.md, Attachment: a fold, never declared): an attachment whose
-instance's `lastPulse` lags the client's clock by ~3 of that instance's own
-`intervalS` renders as stranded. A live pulse renders as alive. No
+Facts only, never verdicts. **Liveness is the client's derivation**, a fold and
+never a declaration: an attachment whose instance's `lastPulse` lags the
+client's clock by ~3 of that instance's own `intervalS` renders as stranded. A
+live pulse renders as alive. No
 attachment is ever released here. `intervalS` may be absent — an instance
 that has published `ready` but no pulse yet.
 
@@ -365,16 +365,15 @@ One wire fact, one packet. A pulse is one instance fact however many
 conversations the instance serves — it never fans out per conversation.
 
 Upsert into the client's two maps: `(world, instanceId) → pulse`, `conv →
-attachment`. Instance identity is the pair, not bare `instanceId` (agent.md,
-The entity) — if either side of a comparison omits `world`, the map keys and
-the gates below fall back to bare `instanceId`: degraded, not broken.
+attachment`. Instance identity is the pair, not bare `instanceId`. If either
+side of a comparison omits `world`, the map keys and the gates below fall back
+to bare `instanceId`: degraded, not broken.
 
 - `attached` **replaces the held attachment for that `conv` wholesale**.
   There is exactly one; never a set to merge into.
 - `moved` updates the held attachment's `cwd` **in place**, only when its
-  identity matches the one currently held — else it's a no-op
-  (conversation.md, Attachment: a fact about the standing claim, never
-  a new one).
+  identity matches the one currently held, else it's a no-op: `moved` is a
+  fact about the standing claim, never a new one.
 - `detached` clears the held attachment only under the same match.
 
 A `detached` or `moved` from an instance that isn't the standing one is a
@@ -660,10 +659,10 @@ short-lived; the store's TTL is the cleanup, so an upload the user abandons
 costs nothing and needs no delete call). The id is minted random — nothing is
 kept long enough for content-addressing to buy anything.
 
-The wire's rule that a block names its own `bucket` (conversation.md,
-`attachments`; a servicer resolves only against the bucket a block names,
-never a guess from its own deployment config) is satisfied by **towerd**,
-not the client: the bucket is a tower storage fact, so towerd stamps it
+The wire's rule that a block names its own `bucket` (a servicer resolves only
+against the bucket a block names, never a guess from its own deployment
+config) is satisfied by **towerd**, not the client: the bucket is a tower
+storage fact, so towerd stamps it
 into each object source when it forwards the say onto the wire. The client
 sends only `{ type, id, mediaType, size }` — it neither receives nor
 carries a bucket, and nothing client-side may depend on one.
