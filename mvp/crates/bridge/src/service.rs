@@ -151,23 +151,27 @@ struct InstancePulse {
     last_seen: Instant,
     /// `None` until a cadence is actually declared — distinct from both
     /// "declared 0" and "definitely alive".
-    interval_s: Option<i64>,
+    interval_s: Option<u64>,
 }
 
 impl InstancePulse {
     fn silence_threshold(&self) -> Duration {
         match self.interval_s {
-            // A non-positive declared interval is tolerated data with no
-            // usable promise in it — folded as undeclared, never as a zero
-            // threshold that reads a continuously pulsing holder stranded.
-            // Above the cap, the promise is honoured only to the cap
-            // (MAX_INTERVAL_S) — the 3× grace stays uniform for everyone.
-            Some(i) if i > 0 => {
-                Duration::from_secs((i as u64).min(MAX_INTERVAL_S) * STRANDED_MULTIPLE)
-            }
-            _ => Duration::from_secs(DEFAULT_SILENCE_S),
+            // Only a valid promise is ever stored, so the multiple applies
+            // to it as declared.
+            Some(i) => Duration::from_secs(i * STRANDED_MULTIPLE),
+            None => Duration::from_secs(DEFAULT_SILENCE_S),
         }
     }
+}
+
+/// The declared cadence is bounded at both ends (agent.md, Telemetry;
+/// conversation.md, Attachment): a value outside it makes the event invalid
+/// whole. The bound is validity, not a cap — nothing is clamped, and an
+/// event carrying a bad promise is dropped rather than honoured to the
+/// limit, because a promise nobody can be held to is not a weaker promise.
+fn valid_interval(interval_s: i64) -> Option<u64> {
+    (interval_s > 0 && interval_s <= MAX_INTERVAL_S as i64).then_some(interval_s as u64)
 }
 
 /// This world's own liveness map, folded from `agent.v1.{world}.telemetry.>`
@@ -200,22 +204,38 @@ impl WorldLiveness {
         self.observe(instance_id, None, now);
     }
 
-    pub fn on_pulse(&mut self, instance_id: &str, interval_s: i64, now: Instant) {
-        self.observe(instance_id, Some(interval_s), now);
+    /// A heartbeat states a cadence: `intervalS` is required, and a missing
+    /// or out-of-range one makes the event invalid whole. An invalid pulse
+    /// is not a weaker pulse, it is not a pulse — it proves nothing, not
+    /// even presence, so it is dropped rather than folded as bare presence.
+    pub fn on_pulse(&mut self, instance_id: &str, interval_s: Option<i64>, now: Instant) {
+        let Some(interval) = interval_s.and_then(valid_interval) else {
+            return;
+        };
+        self.observe(instance_id, Some(interval), now);
     }
 
     /// `attached`/`detached` telemetry proves the publisher's presence just
     /// as `ready` does (towerd's fold counts it the same way); an
-    /// `attached` carrying `intervalS` also declares the cadence.
+    /// `attached` carrying `intervalS` also declares the cadence. Carrying
+    /// none is lawful (the field is optional there); carrying a bad one is
+    /// not, and invalidates the whole event, presence included.
     pub fn on_attached(&mut self, instance_id: &str, interval_s: Option<i64>, now: Instant) {
-        self.observe(instance_id, interval_s, now);
+        let interval = match interval_s {
+            None => None,
+            Some(i) => match valid_interval(i) {
+                Some(v) => Some(v),
+                None => return,
+            },
+        };
+        self.observe(instance_id, interval, now);
     }
 
     /// One observation, from the live feed or a capture seed. `last_seen`
     /// never regresses: the live subscription is made before the seed is
     /// folded (no-gap discipline), so an older replayed frame must never
     /// overwrite a fresher live one.
-    fn observe(&mut self, instance_id: &str, interval_s: Option<i64>, at: Instant) {
+    fn observe(&mut self, instance_id: &str, interval_s: Option<u64>, at: Instant) {
         let entry = self
             .instances
             .entry(instance_id.to_string())
@@ -464,14 +484,14 @@ mod tests {
     #[test]
     fn an_instance_within_three_of_its_own_intervals_is_alive() {
         let (mut world, t0) = warm_map();
-        world.on_pulse("inst-1", 30, t0);
+        world.on_pulse("inst-1", Some(30), t0);
         assert!(world.is_alive("inst-1", t0 + Duration::from_secs(89)));
     }
 
     #[test]
     fn an_instance_silent_past_three_of_its_own_intervals_is_not_alive() {
         let (mut world, t0) = warm_map();
-        world.on_pulse("inst-1", 30, t0);
+        world.on_pulse("inst-1", Some(30), t0);
         assert!(!world.is_alive("inst-1", t0 + Duration::from_secs(91)));
     }
 
@@ -483,14 +503,18 @@ mod tests {
         assert!(!world.is_alive("inst-1", t0 + Duration::from_secs(61)));
     }
 
+    /// Malformed is invalid, and invalid is not a heartbeat: a pulse with a
+    /// missing or non-positive `intervalS` never happened, so it proves
+    /// nothing — not even the presence a bare `ready` would prove.
     #[test]
-    fn a_non_positive_declared_interval_folds_as_undeclared_not_a_zero_threshold() {
+    fn a_missing_or_non_positive_interval_makes_the_pulse_invalid_so_it_lands_as_nothing() {
         let (mut world, t0) = warm_map();
-        world.on_pulse("inst-1", 0, t0);
-        assert!(world.is_alive("inst-1", t0 + Duration::from_secs(59)));
-        assert!(!world.is_alive("inst-1", t0 + Duration::from_secs(61)));
-        world.on_pulse("inst-2", -5, t0);
-        assert!(world.is_alive("inst-2", t0 + Duration::from_secs(59)));
+        world.on_pulse("inst-1", Some(0), t0);
+        world.on_pulse("inst-2", Some(-5), t0);
+        world.on_pulse("inst-3", None, t0);
+        assert!(!world.is_alive("inst-1", t0));
+        assert!(!world.is_alive("inst-2", t0));
+        assert!(!world.is_alive("inst-3", t0));
     }
 
     #[test]
@@ -503,16 +527,22 @@ mod tests {
         assert!(world.is_alive("inst-2", t0 + Duration::from_secs(59)));
     }
 
-    /// The interval cap: a declared cadence above MAX_INTERVAL_S is
-    /// honoured only to the cap, so a bogus day-long promise cannot hold a
-    /// conversation hostage — the longest silence anyone gets is
-    /// MAX_SILENCE_S.
+    /// The bound is validity, not a cap: a day-long promise is not honoured
+    /// to MAX_INTERVAL_S, it makes the event invalid whole. Nothing is
+    /// clamped and nothing is observed — the instance reads exactly as one
+    /// never heard from.
     #[test]
-    fn a_declared_interval_above_the_cap_is_honoured_only_to_the_cap() {
+    fn a_declared_interval_above_the_limit_makes_the_event_invalid_not_clamped() {
         let (mut world, t0) = warm_map();
-        world.on_pulse("inst-1", 86_400, t0);
-        assert!(world.is_alive("inst-1", t0 + Duration::from_secs(MAX_SILENCE_S - 1)));
-        assert!(!world.is_alive("inst-1", t0 + Duration::from_secs(MAX_SILENCE_S + 1)));
+        world.on_pulse("inst-1", Some(86_400), t0);
+        assert!(!world.is_alive("inst-1", t0));
+        // The same bound on the other event that may declare a cadence.
+        world.on_attached("inst-2", Some(MAX_INTERVAL_S as i64 + 1), t0);
+        assert!(!world.is_alive("inst-2", t0));
+        // The limit itself is lawful.
+        world.on_pulse("inst-3", Some(MAX_INTERVAL_S as i64), t0);
+        assert!(world.is_alive("inst-3", t0 + Duration::from_secs(MAX_SILENCE_S - 1)));
+        assert!(!world.is_alive("inst-3", t0 + Duration::from_secs(MAX_SILENCE_S + 1)));
     }
 
     /// Seed-after-subscribe safety: an older replayed observation must
@@ -521,8 +551,8 @@ mod tests {
     fn an_older_observation_never_regresses_last_seen() {
         let (mut world, t0) = warm_map();
         let fresh = t0 + Duration::from_secs(200);
-        world.on_pulse("inst-1", 30, fresh);
-        world.on_pulse("inst-1", 30, t0);
+        world.on_pulse("inst-1", Some(30), fresh);
+        world.on_pulse("inst-1", Some(30), t0);
         assert!(world.is_alive("inst-1", fresh + Duration::from_secs(89)));
     }
 
@@ -565,7 +595,7 @@ mod tests {
     fn a_standing_attachment_in_another_world_is_taken_over_regardless_of_liveness() {
         let (mut liveness, now) = warm_map();
         // Even a demonstrably live holder: cross-world IS migration.
-        liveness.on_pulse("inst-far", 30, now);
+        liveness.on_pulse("inst-far", Some(30), now);
         let standing = stands("inst-far", Some("pc"));
         let actual = service_premise(Some(&standing), "mac", "inst-me", &liveness, now);
         assert_eq!(actual, ServicePremise::TakeOverCrossWorld);
@@ -574,7 +604,7 @@ mod tests {
     #[test]
     fn a_live_holder_in_this_world_means_already_attached() {
         let (mut liveness, now) = warm_map();
-        liveness.on_pulse("inst-mate", 30, now);
+        liveness.on_pulse("inst-mate", Some(30), now);
         let standing = stands("inst-mate", Some("mac"));
         let actual = service_premise(Some(&standing), "mac", "inst-me", &liveness, now);
         assert_eq!(actual, ServicePremise::AlreadyAttached);
@@ -592,7 +622,7 @@ mod tests {
     #[test]
     fn a_stranded_holder_in_this_world_is_taken_over() {
         let (mut liveness, t0) = warm_map();
-        liveness.on_pulse("inst-mate", 10, t0);
+        liveness.on_pulse("inst-mate", Some(10), t0);
         let standing = stands("inst-mate", Some("mac"));
         let later = t0 + Duration::from_secs(31);
         let actual = service_premise(Some(&standing), "mac", "inst-me", &liveness, later);
