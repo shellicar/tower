@@ -172,7 +172,7 @@ exactly that argument):
 | `message` | `id`, `queryId`, `turnId`, `role`, `from`?, `content` | **utterance** — the dialogue grew. `id` is the message's stable id; `role` is `user` or `assistant`; `from` is the sender identity (`{ kind: human \| agent \| orchestrator }` + id) so two `role: user` messages from different senders read apart — **absent for a `tool_result`**: it is the mechanical delivery of a tool's output, not an utterance, and nobody sent it, so nothing is fabricated to fill the slot (correction, 19 Jul 2026 — it previously carried `from: {kind: agent}`, wrongly); `content` is content blocks |
 | `revision` | `messageId`, `content` | **revision** — the content under a stable id changed: a trim, a resize, or the words themselves rewritten. Carries the resulting content, never the why — the record carries effects, never reasons |
 | `tip_moved` | `to` (a message id) | **tip movement** — the tip pointer moved: rewind, fast-forward. The reflog, as events |
-| `query` | `queryId`, `reason` | **query closure** — the query will grow no further; the record now contains everything it will ever contain. `reason` is the system's own vocabulary, an open set under add-only: `completed` (the servicer ran its last round and chose not to run another), `cancelled` (a `cancel` was accepted), `aborted` (the attempt failed and the servicer gave the query up). Committal like every change: published after the closing fact is in the record, never speculatively |
+| `query` | `queryId`, `reason` | **query closure** — the query will grow no further; the record now contains everything it will ever contain. `reason` is the system's own vocabulary, an open set under add-only: `completed` (the servicer ran its last round and chose not to run another), `cancelled` (a `cancel` was accepted), `aborted` (the servicer gave the query up — the attempt failed, or the servicer was displaced and will carry it no further). Committal like every change: published after the closing fact is in the record, never speculatively |
 
 **Envelope provenance: `instanceId` rides beside `from`, never inside it.**
 Every change event carries the publishing instance's id as envelope
@@ -214,6 +214,57 @@ fact published once, where the answer already lives: a sender that said
 something and wants the reply subscribes `changes.>`, collects its query's
 messages, and is done when the closure arrives — one subscription, every
 ending covered.
+
+**The closure is owed by the servicer that ran the query.** It is an obligation
+on that servicer, not a guarantee to the consumer. That instance ran the query
+and holds the fact that it ended; no other participant holds it, so the
+publishing falls to that one and to nobody else.
+
+**The obligation does not depend on the claim still standing.** An instance
+that has been superseded (agent.md, Attachment) still ran that query, still
+holds the fact that it ended, and is still the only participant that can state
+it — so it publishes the closure even though it no longer serves the
+conversation. This is the general form of a rule the attachment leaf already
+states for one event: a displaced instance publishes `detached` anyway, stating
+a fact about its own past claim rather than retracting the current one. The
+`queryId` was minted by that instance and no other participant will ever use
+it, so a closure naming it cannot conflict with anything the new servicer does.
+`aborted` is the reason: a displaced servicer has given the query up.
+
+**A closure is not assured, and a consumer must tolerate one that never
+arrives.** A process that dies mid-query publishes nothing, and no other
+participant can repair that — nobody else holds the fact, so nobody else can
+state it. The waiting described above is waiting on an obligation, and a crash
+discharges it by silence. A sender must be able to stop waiting on its own
+terms; one that blocks forever on the closure has read an obligation as a
+promise.
+
+**No order is defined between `detached` and the closure, and none may be
+relied on.** `detached` rides the conversation's attachment leaf and the
+closure rides the change stream, and a derivation reads per-subject publication
+order only, never arrival order across subjects (core.md). Neither fold needs
+the pairing: the closure names a `queryId` no other participant will ever use,
+so it stands alone.
+
+`detached` first is nonetheless the expected shape, and a valid one. A
+displaced instance owes its `detached` promptly, because a superseded instance
+still pulsing with no `detached` in the record is exactly what agent.md reads
+as a conduct violation, and an instance winding down is still alive and still
+pulsing. The closure, by contrast, waits on the work actually ending, which may
+be later. So the ordinary case is `detached`, then the closure. Expected is not
+required: a consumer that branches on having seen one before the other is
+reading a delivery accident.
+
+Two things are each product's own — decided here, not overlooked:
+
+- **How much of the work in flight a displaced servicer abandons** — stopping
+  at once, stopping after the tool that is running, or stopping at the end of
+  the turn. None of it can commit, so no consumer can tell these apart from the
+  record, and the spec does not choose between them.
+- **Whether a displaced servicer keeps publishing deltas and turn telemetry
+  while it winds down.** Neither carries authority (this spec, Telemetry and
+  commit), so neither changes what the record means, and either way is
+  conformant.
 
 **Revision and tip movement are two orthogonal mechanisms, not two
 categories the spec assigns.** `revision` changes the content under a stable
@@ -503,7 +554,9 @@ Every request owes a reply; an implementation that does not support an
 operation replies `rejected` with reason `unsupported` — compliance is
 answering, not implementing. The reply confirms acceptance, never outcome. A
 sender that wants the answer subscribes to the change stream — one mechanism
-for every reader; the `query` closure says when the answer is complete.
+for every reader; the `query` closure says when the answer is complete — a
+closure the sender waits for without depending on it, since a servicer that
+dies mid-query never publishes one (this spec, Query closure).
 
 ## What consumers may assume
 
@@ -516,7 +569,11 @@ for every reader; the `query` closure says when the answer is complete.
 - **No ordering across classes**: telemetry and commits interleave without
   guarantee; a consumer must never infer state from their relative arrival.
 - The query fold groups by `queryId`; its committal end is the `query`
-  closure on `changes`. Deriving an ending from telemetry (`turn_ended` +
+  closure on `changes` — owed by the servicer that ran the query, and never
+  assured: a servicer that dies mid-query publishes nothing, and no other
+  participant can state the ending for it, so a fold must tolerate a query that
+  never closes (this spec, Query closure). Deriving an ending from telemetry
+  (`turn_ended` +
   verbatim `stopReason`) remains lawful observation, never authority. Idle is
   derived — quiet since the last event — never declared.
 
