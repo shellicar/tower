@@ -10,8 +10,8 @@ conversation tree; others since. Each carries the scenario that forced it,
 wherever it happened.
 
 - **A participant does not act on state it has not yet observed.** A fold
-  that has not seen enough of the record to know, whether a just-booted consumer, a
-  subscription that only just went live, or a degraded feed, yields "unknown",
+  that has not seen enough of the record to know (a just-booted consumer, a
+  subscription that only just went live, a degraded feed) yields "unknown",
   and unknown never satisfies a premise. Absence of information is not a
   finding: never-heard-yet is not stranded, unseen is not absent, an empty
   map is not an empty world. Without this rule every premise and fold in
@@ -266,8 +266,8 @@ observability│ telemetry   │ telemetry    │ ready,         │
              │  usage)     │              │                │
              └─────────────┴──────────────┴────────────────┘
 
-control plane: a participant, not a row,
-  reads the observability row across every column,
+control plane: a participant, not a row.
+  Reads the observability row across every column,
   acts on the operational row (spawns, configures, delivers),
   and its own traffic lives in the agent column like anyone else's.
 ```

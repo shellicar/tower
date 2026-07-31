@@ -69,7 +69,7 @@ Node is never fixed, only vacated. The capabilities node blocks (images, persist
 distribution) land on the Rust side where they are trivial, at the stage where they
 belong. The protocol is the only coupling between stages.
 
-### Stage 1, See: delivered, then superseded
+### Stage 1. See: delivered, then superseded
 
 Delivered: the tap shipped in the node CLI (pure-JS NATS client, no new native
 dependencies) and the fleet became visible: turn, tool, and per-turn usage
@@ -88,7 +88,7 @@ deployment convention (tmux server/session/window) into what is in practice
 spec.*
 *Retires: window-hopping as monitoring.*
 
-### Stage 2, Speak: delivered
+### Stage 2. Speak: delivered
 
 Delivered (claude-cli PR #411): the concern specs implemented in the node CLI,
 and something speaks. Three pieces, all landed:
@@ -120,7 +120,7 @@ declared, not guessed; send-keys as transport and the screen-scraping approval
 worker both begin dying.*
 *Retires: capture-pane-and-classify.*
 
-### Stage 3, The orchestrator
+### Stage 3. The orchestrator
 
 Tower is the plane (bus, record, visibility) and privileges nobody. The
 orchestrator is a client *of* it: the one place the fleet logic lives. It
@@ -136,7 +136,7 @@ interaction removed.*
 *Retires: Claude-as-Router for the mechanical hop (the transport migrates; the
 judgement stays wherever it lives).*
 
-### Stage 4, The real agent
+### Stage 4. The real agent
 
 The POC agent grows into the architecture docs' headless agent: real Messages API,
 auth, tools, audit. Persistence lands here (bundled SQLite, no ABI pain); images stop
@@ -147,7 +147,7 @@ subjects until they drain.
 grief end structurally, not by workaround.*
 *Retires: the node wrapper double-processes.*
 
-### Stage 5, The Rust TUI
+### Stage 5. The Rust TUI
 
 The POC TUI grows against the real agent, implementing the tui-architecture doc's
 layer contract (the cell grid; the ghost class impossible by construction). A single
@@ -156,7 +156,7 @@ static binary: the distributable client app exists.
 *Value: node independence for anything installed on someone else's machine.*
 *Retires: the node CLI as the human-facing client.*
 
-### Stage 6, Tower proper
+### Stage 6. Tower proper
 
 The daemon takes over spawning from tmux (control plane). Missions become first-class
 in the dashboard: queue and activity views, verdict routing, and the review surface,

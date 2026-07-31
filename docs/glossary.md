@@ -4,7 +4,7 @@ Terms that are **overloaded**: they mean different things at different layers or
 
 ## client
 
-- **Bridge client** (protocol level): consumes a bridge's protocol, subscribing to events and sending requests. Lives outside the agent.
+- **Bridge client** (protocol level): something that consumes a bridge's protocol, subscribing to events and sending requests. Lives outside the agent.
 - **Transport client** (transport level): something that initiates a transport connection (calls `connect()`). For OS pipes, neither side (inherited via spawn).
 
 They can align (a WebSocket browser is both) or not (with NATS, both the agent's bridge and a peer are transport clients of the broker; only one is the bridge client).

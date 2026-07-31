@@ -453,7 +453,7 @@ timing-dependent nondeterminism: a delayed "hello world" arriving after five
 queries have finished means something nobody said. One premise kind in v1:
 
 - `{ tip: messageId | null }`: my premise is a position, that node is the tip
-  I saw. `null` is the position "nothing exists yet", the first message of a
+  I saw. `null` is the position "nothing exists yet". The first message of a
   new conversation states it explicitly rather than omitting the premise.
   Valid while it is still the tip.
 
