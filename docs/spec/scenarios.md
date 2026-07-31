@@ -273,6 +273,7 @@ presence, not on literal timestamps — silence is represented the way approval
 | a9 — migration/takeover, on the new leaf | `fixtures/agent/scenario-a9.jsonl` |
 | a10 — abandon and re-adopt, on the new leaf | `fixtures/agent/scenario-a10.jsonl` |
 | a11 — chdir, on the new leaf | `fixtures/agent/scenario-a11.jsonl` |
+| a12 — a displaced servicer closes its query | `fixtures/agent/scenario-a12.jsonl` |
 
 The concern spans two trees, though a single scenario need not. `ready` and
 `pulse` are the world's own telemetry; `service` and `drain` address the
@@ -281,7 +282,7 @@ world's request tree; the claim on a conversation is the conversation's
 
 a1 to a3 carry world telemetry beside the claim, and a2 adds a `drain`
 request. a5's world lines are both `service` requests, which no stream
-captures, so replaying it yields the claim alone. a6 to a11 carry
+captures, so replaying it yields the claim alone. a6 to a12 carry
 conversation lines only.
 
 ### a1 — world up, fresh conversation
@@ -405,3 +406,19 @@ act.
   cwd folds last-write-wins onto the standing claim; and the conversation's
   change stream emits nothing across the move — the proof cwd is never
   conversation state.
+
+### a12 — a displaced servicer closes its query
+
+a9's displacement with a query running through it. inst-1 attaches and
+accepts a say; inst-2's `attached` supersedes the claim; inst-1 stands down
+with `detached` and publishes the query's closure anyway, `aborted`, carrying
+its own `instanceId` (conversation.md, Query closure).
+
+- Exercises: a `changes.query` published by an instance whose claim no longer
+  stands, beside the `detached` that acknowledged the displacement.
+- Asserts: the closure is owed by the servicer that ran the query, not by
+  whoever holds the conversation now — a consumer waiting on q1 is answered by
+  the instance that no longer serves it; and the two subjects are unordered
+  against each other. The required entries are a subsequence per subject, so a
+  capture with the closure ahead of the `detached` conforms exactly as this one
+  does.
