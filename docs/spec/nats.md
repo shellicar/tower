@@ -241,7 +241,7 @@ differently uses the model as designed; this one does not, knowingly.
 
 ## Storage
 
-What a deployment may not choose is in core; this is what it does configure,
+Storage's substrate claim is in core; this is what a deployment configures,
 and the one boundary it may not cross.
 
 Persistence (JetStream or any other recorder) is a subscriber's concern, and
