@@ -1,10 +1,9 @@
 # NATS spec — how the system uses the bus
 
-The master document: the shared structure every concern's traffic follows —
-namespacing, message shape, evolution rules. It deliberately defines **no**
-concern's subjects or events; each concern has its own spec document beside this
-one. If this document ever needs to know a concern's details, the split has
-failed.
+The shared structure every concern's traffic follows — namespacing, message
+shape, evolution rules. It deliberately defines **no** concern's subjects or
+events; each concern has its own spec document beside this one. If this
+document ever needs to know a concern's details, the split has failed.
 
 ## Concerns
 
@@ -216,6 +215,9 @@ deployment restarts it. Nothing on the wire enforces any of this — the record
 shows the violation, and each reader derives it for itself.
 
 ## Telemetry
+
+Telemetry and the planes are defined in core; this is what they cost a
+deployment to run.
 
 The reason the planes are separate channels is trust, not tidiness. Telemetry
 is publish-only from the agent's side and nothing acts on it: the worst case

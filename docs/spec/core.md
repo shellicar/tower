@@ -160,8 +160,8 @@ enforcement, it lives at the application layer — broker accounts, ACLs, the
 deployment's own boundary — never in individual agents: an agent deciding who
 may address it would be every agent re-implementing policy locally, and
 wrongly. Decided knowingly for v0; the broker is the trust boundary — graded
-per plane if the deployment chooses (see Telemetry), strict on the operational
-plane always.
+per plane if the deployment chooses (nats.md, Telemetry), strict on the
+operational plane always.
 
 ## What earns an event
 

@@ -351,10 +351,11 @@ standing from where the message came from.
 | `chdir` | `cwd` | `accepted` \| `rejected` + `reason` | this conversation is served at this directory from now on. The request states that effect and never a mechanism: a servicer may move a process, or hold `cwd` as a value per conversation, and both conform. Accept confirms the premise (this servicer holds this conversation), never the outcome — the move is observed on `attachment.moved` when it lands, and one that never lands shows as an unchanged `cwd`, an observed outcome like any other. The servicer reconciles the directory and may decline to move. A harness with no directory notion answers `unsupported`. Known reasons today: `unsupported` |
 
 **Why `chdir` addresses the conversation.** It changes one conversation's
-state, so it goes to the conversation (core.md, first principle). On the
-world's tree the queue group hands it to an arbitrary instance, and every
-reply a non-holder could give is false — it cannot accept what it does not
-serve, and its `not_found` says only that *it* isn't serving it. On this
+state, so it goes to the conversation (core.md, "Work is addressed to the
+work, never the worker"). On the world's tree the queue group hands it to an
+arbitrary instance, and every reply a non-holder could give is false — it
+cannot accept what it does not serve, and its `not_found` says only that
+*it* isn't serving it. On this
 tree only the holder subscribes, so the request reaches the one party that
 can act, and there is no `not_found` to give: no responder means nobody is
 serving this conversation, the same signal as everywhere else. Operations on
