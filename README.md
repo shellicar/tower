@@ -25,18 +25,18 @@ central plane; `tmux attach` is ssh, and it stays.
 The wire contract. One concern per document, indexed by
 [`docs/spec/README.md`](docs/spec/README.md):
 
-- [`docs/spec/core.md`](docs/spec/core.md): how the system thinks — authority,
+- [`docs/spec/core.md`](docs/spec/core.md): how the system thinks. Authority,
   the planes, what earns an event, and the principles the rest is built on.
-- [`docs/spec/nats.md`](docs/spec/nats.md): how the system uses the bus —
-  namespacing, message structure, evolution, storage.
+- [`docs/spec/nats.md`](docs/spec/nats.md): how the system uses the bus.
+  Namespacing, message structure, evolution, storage.
 - [`docs/spec/conversation.md`](docs/spec/conversation.md): the conversation
-  itself — what was said, and what changed it.
+  itself. What was said, and what changed it.
 - [`docs/spec/agent.md`](docs/spec/agent.md): who is serving conversations,
   and where.
 - [`docs/spec/approval.md`](docs/spec/approval.md): asking permission, and
   answering.
 - [`docs/spec/content.md`](docs/spec/content.md): how a tool's output is
-  presented — the vocabulary and the surface an agent renders it into.
+  presented. The vocabulary, and the surface an agent renders it into.
 - [`docs/spec/conformance.md`](docs/spec/conformance.md): how an implementation
   proves it carries the specs.
 - [`docs/spec/scenarios.md`](docs/spec/scenarios.md): the fixture scenarios it
