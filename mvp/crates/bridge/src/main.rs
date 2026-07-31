@@ -83,6 +83,10 @@ use cwd::{ChdirError, ServedCwds, apply_chdir, resolve_cwd, validate_dir};
 
 const PULSE_INTERVAL_S: i64 = 30;
 
+/// The re-establishment backoff's ceiling, and the run length that counts
+/// as having stayed up.
+const MAX_BACKOFF_S: u64 = 30;
+
 /// Expand a leading `~` or `~/...` to `$HOME`. A control line is JSON over
 /// stdio, never a shell, so this is the only place a `~`-prefixed path is
 /// ever resolved — anywhere else, it stays a literal tilde character.
@@ -347,14 +351,35 @@ enum ServeOutcome {
     Failed(String),
 }
 
+/// The claim: check-and-insert in one lock acquisition — `served`'s
+/// insert-if-absent IS the claim, not a side effect of a later step. Taking
+/// it is what makes a second caller (a retry, the other transport) see
+/// `already_attached` instead of starting a second undertaking for the same
+/// conversation, so it is taken before anything slow and before any reply
+/// goes out. Returns false when the id is already held here.
+fn claim_conversation(
+    served: &ServedCwds,
+    conv: &str,
+    cwd_cell: &Arc<RwLock<std::path::PathBuf>>,
+) -> bool {
+    let mut map = served.write().unwrap();
+    if map.contains_key(conv) {
+        return false;
+    }
+    map.insert(conv.to_string(), Arc::clone(cwd_cell));
+    true
+}
+
 /// Serve a conversation: claim the id in `served`, subscribe (the fact
 /// before the claim's announcement - a conversation that cannot hear
 /// requests is not spawned in any meaningful sense, so the `attached`
 /// publish waits for this fact), spawn the agent loop on the seeded tree,
 /// and publish `attached` so observers see the conversation exist before
 /// its first message. Shared by spawn (a fresh tree), adopt (a replayed
-/// record), and the `service` request (either), and by the future warden
-/// before a fourth caller copies the wiring.
+/// record), and by the future warden before a fourth caller copies the
+/// wiring. The `service` request claims and serves in two steps instead
+/// (`claim_conversation` then `serve_claimed`), because its reply must go
+/// out between the two.
 async fn serve_conversation<B: Broker, D: DeltaSink>(
     broker: &B,
     sink: D,
@@ -364,19 +389,27 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
     config: agent::AgentConfig,
     conversation: decisions::Conversation,
 ) -> ServeOutcome {
-    let conv = config.conv.0.clone();
-    // Read before the move: `config` is owned by the spawned task. Registers
-    // this conversation's cwd cell so `chdir` can look it up later.
-    let cwd_cell = Arc::clone(&config.cwd);
-    // The claim: check-and-insert in one lock acquisition — `served`'s
-    // insert-if-absent IS the claim, not a side effect of a later step.
-    {
-        let mut map = served.write().unwrap();
-        if map.contains_key(&conv) {
-            return ServeOutcome::AlreadyAttached;
-        }
-        map.insert(conv.clone(), Arc::clone(&cwd_cell));
+    if !claim_conversation(served, &config.conv.0, &config.cwd) {
+        return ServeOutcome::AlreadyAttached;
     }
+    serve_claimed(broker, sink, world, instance, served, config, conversation).await
+}
+
+/// Everything after the claim, for a caller that already holds it. Releases
+/// the claim on any failure, so a retry is never locked out by an
+/// undertaking that did not get off the ground.
+async fn serve_claimed<B: Broker, D: DeltaSink>(
+    broker: &B,
+    sink: D,
+    world: &str,
+    instance: &str,
+    served: &ServedCwds,
+    config: agent::AgentConfig,
+    conversation: decisions::Conversation,
+) -> ServeOutcome {
+    let conv = config.conv.0.clone();
+    // Read before the move: `config` is owned by the spawned task.
+    let cwd_cell = Arc::clone(&config.cwd);
     let requests = match agent::subscribe(broker, &config.conv).await {
         Ok(s) => s,
         Err(e) => {
@@ -906,16 +939,15 @@ fn fold_world_telemetry(
     let interval = value.get("intervalS").and_then(serde_json::Value::as_i64);
     let mut map = liveness.lock().unwrap();
     match leaf {
-        "pulse" => match interval {
-            Some(interval) => map.on_pulse(instance, interval, at),
-            // A pulse without a cadence still proves presence — folded
-            // like `ready`, under the flat default threshold.
-            None => map.on_ready(instance, at),
-        },
+        // A pulse's `intervalS` is required and bounded; the fold drops the
+        // event whole when it is missing or out of range, because an
+        // invalid heartbeat is not a heartbeat and proves nothing.
+        "pulse" => map.on_pulse(instance, interval, at),
         "ready" => map.on_ready(instance, at),
         // Old-tree attachment telemetry proves the publisher's presence
         // exactly as a pulse does (towerd's fold counts it the same way);
-        // `attached` may also carry the cadence.
+        // `attached` may also carry the cadence, and a bad one invalidates
+        // that event just as it does a pulse.
         "attached" => map.on_attached(instance, interval, at),
         "detached" => map.on_ready(instance, at),
         _ => {}
@@ -1007,8 +1039,10 @@ fn drain_ready_telemetry<S: bridge::broker::BrokerSubscription>(
 /// then dispatched on the four cases exactly. The reply confirms the
 /// premise, never the outcome: acceptance means the servicing was
 /// undertaken — the outcome is the `attached` on the conversation's tree.
+/// So the answer is settled here, and the loading it authorises is handed
+/// off rather than waited on.
 async fn handle_service<B: Broker, D: DeltaSink>(
-    host: &Host<B, D>,
+    host: &Arc<Host<B, D>>,
     conv: String,
     cwd: Option<String>,
     model: Option<String>,
@@ -1070,22 +1104,6 @@ async fn handle_service<B: Broker, D: DeltaSink>(
             return wire::encode_rejected_detailed("invalid_cwd", &e);
         }
     };
-    // No standing attachment and no history: spawn fresh. History: adopt.
-    // One replay answers both — an empty backlog is the fresh case.
-    let messages = match replay_conversation(&host.broker, &host.stream, &conv, &host.attach).await
-    {
-        Ok(m) => m,
-        Err(e) => {
-            let detail = format!("history replay failed: {e:#}");
-            eprintln!("bridge: service {conv}: {detail}");
-            return wire::encode_rejected_detailed("failed", &detail);
-        }
-    };
-    let conversation = if messages.is_empty() {
-        decisions::Conversation::default()
-    } else {
-        decisions::Conversation::adopt(messages)
-    };
     // A named model pins its own cell; none shares the live default — same
     // rule as a stdio spawn.
     let model_cell = match model {
@@ -1093,21 +1111,58 @@ async fn handle_service<B: Broker, D: DeltaSink>(
         None => Arc::clone(&host.default_model),
     };
     let config = host.config(&conv, model_cell, Arc::new(RwLock::new(resolved_cwd)));
-    match serve_conversation(
-        &host.broker,
-        host.delta.clone(),
-        &host.world,
-        &host.instance,
-        &host.served,
-        config,
-        conversation,
-    )
-    .await
-    {
-        ServeOutcome::Attached(..) => wire::encode_accepted(None),
-        ServeOutcome::AlreadyAttached => wire::encode_rejected("already_attached"),
-        ServeOutcome::Failed(detail) => wire::encode_rejected_detailed("failed", &detail),
+    // The claim goes before the reply, never on the handed-off work: it is
+    // what a retry from a sender that gave up waiting collides with, and a
+    // claim taken only once the replay started would let that retry begin a
+    // second replay of the same conversation.
+    if !claim_conversation(&host.served, &conv, &config.cwd) {
+        return wire::encode_rejected("already_attached");
     }
+    // Accepting and loading are separate concerns: the reply confirms the
+    // premise, so nothing about it waits on a replay. Handing the loading
+    // off frees the request loop for the next request immediately, and
+    // conversations are independent — one conversation's history must never
+    // hold up a request about another. How that handed-off loading is
+    // scheduled (concurrently, or serialised against broker and disk
+    // contention) is a separate question, deliberately not settled here.
+    let host = Arc::clone(host);
+    tokio::spawn(async move {
+        // No standing attachment and no history: spawn fresh. History:
+        // adopt. One replay answers both — an empty backlog is the fresh
+        // case.
+        let messages =
+            match replay_conversation(&host.broker, &host.stream, &conv, &host.attach).await {
+                Ok(m) => m,
+                Err(e) => {
+                    // The reply is long gone, so the failure shows where
+                    // every other outcome shows: on the record, as the
+                    // `attached` that never arrives. Release the claim so a
+                    // later request can try again.
+                    host.served.write().unwrap().remove(&conv);
+                    eprintln!("bridge: service {conv}: history replay failed: {e:#}");
+                    return;
+                }
+            };
+        let conversation = if messages.is_empty() {
+            decisions::Conversation::default()
+        } else {
+            decisions::Conversation::adopt(messages)
+        };
+        if let ServeOutcome::Failed(detail) = serve_claimed(
+            &host.broker,
+            host.delta.clone(),
+            &host.world,
+            &host.instance,
+            &host.served,
+            config,
+            conversation,
+        )
+        .await
+        {
+            eprintln!("bridge: service {conv}: {detail}");
+        }
+    });
+    wire::encode_accepted(None)
 }
 
 /// Serve `agent.v1.{world}.requests.>` for this instance's life — the
@@ -1121,14 +1176,23 @@ async fn handle_service<B: Broker, D: DeltaSink>(
 async fn serve_agent_requests<B: Broker, D: DeltaSink>(host: Arc<Host<B, D>>) {
     let mut delay = 1u64;
     loop {
-        if serve_agent_requests_once(&host).await {
-            // It served: whatever ended it is fresh trouble, not a
-            // continuation of earlier failures — start the backoff over.
-            delay = 1;
+        let started = std::time::Instant::now();
+        let established = serve_agent_requests_once(&host).await;
+        if established {
+            // Establishing is the attempt; staying up is the evidence. A
+            // feed that dies the moment it is made would otherwise reset
+            // the backoff every time and re-seed a MAX_SILENCE_S window
+            // once a second, forever. Only a run that lasted longer than
+            // the longest backoff proves the trouble had actually passed.
+            if started.elapsed() >= std::time::Duration::from_secs(MAX_BACKOFF_S) {
+                delay = 1;
+            }
+            eprintln!("bridge: agent request serving interrupted; re-establishing in {delay}s");
+        } else {
+            eprintln!("bridge: agent request serving not established; retrying in {delay}s");
         }
-        eprintln!("bridge: agent request serving interrupted; re-establishing in {delay}s");
         tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-        delay = (delay * 2).min(30);
+        delay = (delay * 2).min(MAX_BACKOFF_S);
     }
 }
 
@@ -2036,6 +2100,23 @@ mod tests {
         serde_json::from_slice(reply).expect("reply is one json value")
     }
 
+    /// The reply lands before the loading it authorises, so a test that
+    /// wants the outcome waits for the outcome. Polls rather than sleeps a
+    /// fixed span: it returns the moment the call shows up, and only fails
+    /// after long enough that a real hang is the only explanation.
+    async fn await_call(broker: &FakeBroker, want: &str) {
+        for _ in 0..1_000 {
+            if broker.calls.lock().unwrap().iter().any(|c| c == want) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+        panic!(
+            "{want} never happened; calls: {:?}",
+            broker.calls.lock().unwrap()
+        );
+    }
+
     /// Fresh spawn: no standing attachment, no history — accepted, and the
     /// claim is announced on the conversation's own attachment leaf.
     #[tokio::test]
@@ -2049,13 +2130,7 @@ mod tests {
         let reply = super::handle_service(&host, "conv-f".into(), None, None).await;
 
         assert_eq!(reply_json(&reply), serde_json::json!({ "accepted": true }));
-        let calls = broker.calls.lock().unwrap().clone();
-        assert!(
-            calls
-                .iter()
-                .any(|c| c == "publish:conv.v2.conv-f.attachment.attached"),
-            "{calls:?}"
-        );
+        await_call(&broker, "publish:conv.v2.conv-f.attachment.attached").await;
     }
 
     /// Adopt: no standing attachment but a committed record — accepted, the
@@ -2088,6 +2163,7 @@ mod tests {
         assert_eq!(reply_json(&reply), serde_json::json!({ "accepted": true }));
         // The adopted tip rides the attached claim — the observable proof
         // the record was replayed, not spawned over.
+        await_call(&broker, "publish:conv.v2.conv-h.attachment.attached").await;
         let published = broker.published.lock().unwrap().clone();
         let attached = published
             .iter()
@@ -2113,7 +2189,7 @@ mod tests {
         host.liveness
             .lock()
             .unwrap()
-            .on_pulse("inst-mate", 30, std::time::Instant::now());
+            .on_pulse("inst-mate", Some(30), std::time::Instant::now());
 
         let reply = super::handle_service(&host, "conv-a".into(), None, None).await;
 
@@ -2148,13 +2224,7 @@ mod tests {
         let reply = super::handle_service(&host, "conv-s".into(), None, None).await;
 
         assert_eq!(reply_json(&reply), serde_json::json!({ "accepted": true }));
-        let calls = broker.calls.lock().unwrap().clone();
-        assert!(
-            calls
-                .iter()
-                .any(|c| c == "publish:conv.v2.conv-s.attachment.attached"),
-            "{calls:?}"
-        );
+        await_call(&broker, "publish:conv.v2.conv-s.attachment.attached").await;
     }
 
     /// Standing attachment in another world: accepted and taken over even
@@ -2174,7 +2244,7 @@ mod tests {
         host.liveness
             .lock()
             .unwrap()
-            .on_pulse("inst-far", 30, std::time::Instant::now());
+            .on_pulse("inst-far", Some(30), std::time::Instant::now());
 
         let reply = super::handle_service(&host, "conv-x".into(), None, None).await;
 
@@ -2226,6 +2296,7 @@ mod tests {
         let reply = super::handle_service(&host, "conv-d".into(), None, None).await;
 
         assert_eq!(reply_json(&reply), serde_json::json!({ "accepted": true }));
+        await_call(&broker, "publish:conv.v2.conv-d.attachment.attached").await;
         let published = broker.published.lock().unwrap().clone();
         let attached = published
             .iter()
@@ -2291,7 +2362,7 @@ mod tests {
             ]),
         );
         let scratch = TestScratch::new("service-loop");
-        let host = Arc::new(host(&scratch, broker.clone()));
+        let host = host(&scratch, broker.clone());
 
         super::serve_agent_requests_once(&host).await;
 
@@ -2333,7 +2404,7 @@ mod tests {
             .unwrap()
             .insert("agent.v1.mac.telemetry.>".to_string());
         let scratch = TestScratch::new("service-no-seed");
-        let host = Arc::new(host(&scratch, broker.clone()));
+        let host = host(&scratch, broker.clone());
 
         let established = super::serve_agent_requests_once(&host).await;
 
@@ -2378,7 +2449,7 @@ mod tests {
             ]),
         );
         let scratch = TestScratch::new("service-dead-feed");
-        let host = Arc::new(host(&scratch, broker.clone()));
+        let host = host(&scratch, broker.clone());
 
         let established = super::serve_agent_requests_once(&host).await;
 
@@ -2406,7 +2477,7 @@ mod tests {
             .unwrap()
             .insert("agent.v1.mac.telemetry.>".to_string());
         let scratch = TestScratch::new("service-no-feed");
-        let host = Arc::new(host(&scratch, broker.clone()));
+        let host = host(&scratch, broker.clone());
 
         super::serve_agent_requests_once(&host).await;
 
@@ -2491,7 +2562,7 @@ mod tests {
             .unwrap()
             .insert("agent.v1.mac.telemetry.>".to_string());
         let scratch = TestScratch::new("service-queued-telemetry");
-        let host = Arc::new(host(&scratch, broker.clone()));
+        let host = host(&scratch, broker.clone());
 
         super::serve_agent_requests_once(&host).await;
 
@@ -2607,6 +2678,7 @@ mod tests {
 
         let first = super::handle_service(&host, "conv-r".into(), None, None).await;
         assert_eq!(reply_json(&first), serde_json::json!({ "accepted": true }));
+        await_call(&broker, "publish:conv.v2.conv-r.attachment.attached").await;
 
         // The second read of the record now shows our own standing claim.
         let own = broker

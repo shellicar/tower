@@ -33,11 +33,13 @@ pub(crate) fn config(conv: &str, scratch: &TestScratch) -> crate::agent::AgentCo
 
 /// A literal `Host` over the FakeBroker — world `mac`, instance `inst-me`,
 /// stream `conv-approval` — for tests that drive the world request path.
+/// Arc-wrapped because that is how the request path holds it: the service
+/// handler shares it with the work it hands off.
 pub(crate) fn host(
     scratch: &TestScratch,
     broker: FakeBroker,
-) -> crate::Host<FakeBroker, crate::anthropic::NoopDeltaSink> {
-    crate::Host {
+) -> Arc<crate::Host<FakeBroker, crate::anthropic::NoopDeltaSink>> {
+    Arc::new(crate::Host {
         broker,
         delta: crate::anthropic::NoopDeltaSink,
         world: "mac".to_string(),
@@ -75,5 +77,5 @@ pub(crate) fn host(
                 .checked_sub(std::time::Duration::from_secs(120))
                 .expect("test host uptime under 120s: cannot backdate the liveness map"),
         ))),
-    }
+    })
 }
