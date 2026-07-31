@@ -395,6 +395,37 @@ async fn serve_conversation<B: Broker, D: DeltaSink>(
     serve_claimed(broker, sink, world, instance, served, config, conversation).await
 }
 
+/// The two subscriptions serving requires, both of which must be live
+/// before the claim is announced: the conversation's own request tree, and
+/// the attachment watch. Subscribing is instant and it is what makes the
+/// conversation reachable, so it happens before a `service` reply goes out
+/// — a request that arrives while the history is still loading queues
+/// against a live subscription and gets an answer, rather than finding no
+/// responder at all.
+///
+/// Watching for a displacement is a compliance requirement of serving
+/// (agent.md, Attachment), not an optional extra: an instance that cannot
+/// watch can never see itself superseded, so it must not claim in the first
+/// place — same discipline as the requests subscribe beside it.
+async fn subscribe_conversation<B: Broker>(
+    broker: &B,
+    conv: &wire::ConversationId,
+) -> Result<(B::Subscription, B::Subscription), String> {
+    let requests = agent::subscribe(broker, conv)
+        .await
+        .map_err(|e| format!("subscribe failed: {:#}", anyhow::Error::new(e)))?;
+    let attachment_watch = broker
+        .subscribe(format!("conv.v2.{}.attachment.>", conv.0))
+        .await
+        .map_err(|e| {
+            format!(
+                "attachment watch subscribe failed: {:#}",
+                anyhow::Error::new(e)
+            )
+        })?;
+    Ok((requests, attachment_watch))
+}
+
 /// Everything after the claim, for a caller that already holds it. Releases
 /// the claim on any failure, so a retry is never locked out by an
 /// undertaking that did not get off the ground.
@@ -408,40 +439,49 @@ async fn serve_claimed<B: Broker, D: DeltaSink>(
     conversation: decisions::Conversation,
 ) -> ServeOutcome {
     let conv = config.conv.0.clone();
-    // Read before the move: `config` is owned by the spawned task.
-    let cwd_cell = Arc::clone(&config.cwd);
-    let requests = match agent::subscribe(broker, &config.conv).await {
-        Ok(s) => s,
-        Err(e) => {
-            let detail = format!("subscribe failed: {:#}", anyhow::Error::new(e));
-            eprintln!("bridge: {detail} ({conv})");
-            served.write().unwrap().remove(&conv);
-            return ServeOutcome::Failed(detail);
-        }
-    };
-    // The displacement watch must be live before our own `attached` goes
-    // out, or a competing claim landing in the gap is never seen — so this
-    // subscribes before anything is published, same discipline as `requests`
-    // above.
-    // Watching for a displacement is a compliance requirement of serving
-    // (agent.md, Attachment), not an optional extra: an instance that
-    // cannot watch can never see itself superseded, so it must not claim in
-    // the first place — same discipline as the `requests` subscribe above.
-    let attachment_watch = match broker
-        .subscribe(format!("conv.v2.{conv}.attachment.>"))
-        .await
-    {
-        Ok(s) => s,
-        Err(e) => {
-            let detail = format!(
-                "attachment watch subscribe failed: {:#}",
-                anyhow::Error::new(e)
-            );
+    let (requests, attachment_watch) = match subscribe_conversation(broker, &config.conv).await {
+        Ok(pair) => pair,
+        Err(detail) => {
             eprintln!("bridge[{conv}]: {detail}");
             served.write().unwrap().remove(&conv);
             return ServeOutcome::Failed(detail);
         }
     };
+    serve_subscribed(
+        broker,
+        sink,
+        world,
+        instance,
+        served,
+        config,
+        conversation,
+        requests,
+        attachment_watch,
+    )
+    .await
+}
+
+/// Everything after the claim and the subscriptions, for a caller holding
+/// both. This is where the loaded conversation finally matters: the agent
+/// loop starts on it, and the `attached` announcing the claim carries the
+/// `tip` read off it — which is why `attached` cannot be published before
+/// the history is loaded, and why it is the signal that this conversation
+/// is caught up and ready.
+#[allow(clippy::too_many_arguments)]
+async fn serve_subscribed<B: Broker, D: DeltaSink>(
+    broker: &B,
+    sink: D,
+    world: &str,
+    instance: &str,
+    served: &ServedCwds,
+    config: agent::AgentConfig,
+    conversation: decisions::Conversation,
+    requests: B::Subscription,
+    attachment_watch: B::Subscription,
+) -> ServeOutcome {
+    let conv = config.conv.0.clone();
+    // Read before the move: `config` is owned by the spawned task.
+    let cwd_cell = Arc::clone(&config.cwd);
     // tip: where the conversation stands right now, so an observer other
     // than this servicer (towerd, a client, another agent) can learn it
     // without replaying the change stream first — the gap that made a
@@ -1118,6 +1158,20 @@ async fn handle_service<B: Broker, D: DeltaSink>(
     if !claim_conversation(&host.served, &conv, &config.cwd) {
         return wire::encode_rejected("already_attached");
     }
+    // Subscribing is instant, and it is what makes the conversation
+    // reachable — so it belongs on this side of the reply too. A say that
+    // arrives while the history is still loading meets a live subscription
+    // and is answered on its own merits, rather than finding no responder
+    // at all.
+    let (requests, attachment_watch) =
+        match subscribe_conversation(&host.broker, &config.conv).await {
+            Ok(pair) => pair,
+            Err(detail) => {
+                eprintln!("bridge: service {conv}: {detail}");
+                host.served.write().unwrap().remove(&conv);
+                return wire::encode_rejected_detailed("failed", &detail);
+            }
+        };
     // Accepting and loading are separate concerns: the reply confirms the
     // premise, so nothing about it waits on a replay. Handing the loading
     // off frees the request loop for the next request immediately, and
@@ -1148,7 +1202,7 @@ async fn handle_service<B: Broker, D: DeltaSink>(
         } else {
             decisions::Conversation::adopt(messages)
         };
-        if let ServeOutcome::Failed(detail) = serve_claimed(
+        if let ServeOutcome::Failed(detail) = serve_subscribed(
             &host.broker,
             host.delta.clone(),
             &host.world,
@@ -1156,6 +1210,8 @@ async fn handle_service<B: Broker, D: DeltaSink>(
             &host.served,
             config,
             conversation,
+            requests,
+            attachment_watch,
         )
         .await
         {
