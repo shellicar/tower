@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::concerns::approvals::{Approvals, ask_input, ask_label};
 use crate::concerns::rail::Rail;
 use crate::time::{Millis, age};
-use crate::ui::{short, truncate};
+use crate::ui::truncate;
 
 /// The decision-relevant payload: file paths render as themselves (the 90%
 /// case — DeleteFile/DeleteDirectory take a top-level `files` array; the
@@ -94,7 +94,7 @@ pub fn ApprovalsView(
                                     .and_then(Value::as_str)
                                     .map(str::to_owned);
                                 let conv_label = conv.clone().map(|c| {
-                                    rail.with(|r| r.row(&c).and_then(|row| row.title.clone())).unwrap_or_else(|| short(&c))
+                                    rail.with(|r| r.row(&c).and_then(|row| row.title.clone())).unwrap_or_else(|| c.clone())
                                 });
                                 let raised = ask.raised_ts;
                                 view! {

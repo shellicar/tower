@@ -35,7 +35,7 @@
 
 {#if loaded}
   {#if image}
-    <img class="my-1 max-w-full" src={loaded} alt={ref.hint} />
+    <img class="my-1 max-h-96 max-w-full" src={loaded} alt={ref.hint} />
   {:else}
     <pre class="wrap-anywhere my-1 max-h-[400px] overflow-x-auto overflow-y-auto bg-neutral-900 p-2 whitespace-pre-wrap">{loaded}</pre>
   {/if}
