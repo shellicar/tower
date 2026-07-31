@@ -471,8 +471,11 @@ body doesn't carry what it needs (`invalid` — here an empty
 `conversationId`), a named environment value the world cannot establish
 (`invalid_cwd` — presence binds, never a silent fallback), an operation the
 world could not undertake (`failed`, the cause riding `detail` — the
-machine-facing token stays coarse), and a leaf this servicer doesn't
-implement (`unsupported` — compliance is answering, not implementing).
+machine-facing token stays coarse), and a leaf this spec does not list
+(`unsupported` — compliance is answering, not implementing). The last one
+is deliberately not `drain`: a listed leaf has its own contract, which a2
+exercises, and answering the same request two ways across two fixtures
+would leave a reader unable to tell which is the contract.
 
 - Exercises: four requests, four rejections; no event traffic at all.
 - Asserts: `reason` is the token a caller branches on; `detail` is optional
