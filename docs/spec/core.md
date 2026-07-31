@@ -2,7 +2,7 @@
 
 ## System principles
 
-Not NATS rules — the design posture the spec serves. Recorded here because
+The design posture the spec serves. Recorded here because
 each one directly shaped the structure `nats.md` defines, and unrecorded
 reasoning gets relitigated by accident. Most crystallised while dismantling
 the tap-era design — run, heartbeats and approvals evicted from the

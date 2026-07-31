@@ -2,7 +2,7 @@
 
 ## Content vocabulary
 
-The standard by which a tool's output is presented. This document records the understanding reached in design discussion: what the content vocabulary is, why it has to be a standard, and where the boundary sits between a tool and the presentation.
+The standard by which a tool's output is presented: what the content vocabulary is, why it has to be a standard, and where the boundary sits between a tool and the presentation.
 
 > Understanding, not a spec. This captures the reasoning so a later session reconstructs it rather than re-deriving it worse. It fixes concepts and responsibilities, not types or APIs.
 

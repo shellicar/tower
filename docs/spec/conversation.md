@@ -290,10 +290,9 @@ terminal appears on the change stream the same as one that arrived over
 
 ## Attachment — `attachment`
 
-Who is serving this conversation, now. This is the wire shape of the claim
-agent.md's Attachment section conducts itself by — read that section
-first for the model (singular, unconditionally superseding, no fencing).
-This section only covers the shape on this tree.
+Who is serving this conversation, now. The wire shape of the claim agent.md's
+Attachment section conducts itself by: read that section first for the model
+(singular, unconditionally superseding, no fencing).
 
 | Event | Fields | Notes |
 |---|---|---|

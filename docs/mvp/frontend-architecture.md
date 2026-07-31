@@ -6,11 +6,11 @@ architecture constant across both is what lets the side-by-side isolate *what th
 language buys* (enforcement, shared wire types) from *what the architecture buys*
 (isolation). Decisions are recorded as decisions, with the road not taken named.
 
-Nothing here changes behaviour or touches towerd. It is boundaries, not
-behaviour — the investigations found propagation already correct (push, via
-frames); the only sin is that every concern shares one mutable reactive surface
-on one thread, so a fault anywhere freezes everything (the async-`$state`
-incident). This doc removes the sharing.
+Nothing here changes behaviour or touches towerd. The investigations found
+propagation already correct (push, via frames); the only sin is that every
+concern shares one mutable reactive surface on one thread, so a fault anywhere
+freezes everything (the async-`$state` incident). Removing that sharing is the
+whole of the change.
 
 ## The principle
 

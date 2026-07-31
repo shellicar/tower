@@ -1,10 +1,10 @@
 # Frontend parity — Svelte vs Leptos
 
 Living gap list between `mvp/frontend-svelte` (Svelte) and `mvp/frontend-leptos`
-(Rust/Leptos). CLAUDE.md's rule is that the two track one feature set; this
-doc is how that rule gets enforced when it's violated — each gap here is
-precise enough to hand to a session as a porting task on its own. Cross items
-off (`[x]`) as they close; don't rewrite the doc, update it.
+(Rust/Leptos). CLAUDE.md's rule is that the two track one feature set; each gap
+listed here is a live violation of it, stated precisely enough to hand to a
+session as a porting task on its own. Cross items off (`[x]`) as they close;
+don't rewrite the doc, update it.
 
 Method: walked `docs/mvp/tower-ws-spec.md` frame by frame (does each side
 parse it, fold it, render it, act on it), then the component surface (panel,

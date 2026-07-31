@@ -1,10 +1,10 @@
 # Exec permissions: design considerations
 
-Not yet built. This is the understanding reached working through what a
-configurable permission system for the bridge's `Exec` tool needs to handle,
-before writing any of it. Grounded in claude-sdk-cli's actual code
-(`/Users/stephen/repos/@shellicar/claude-cli`) and a local Claude Code
-checkout (`~/repos/chatgptprojects/claude-code`), not guessed.
+Not yet built. What a configurable permission system for the bridge's `Exec`
+tool needs to handle, worked through before writing any of it. Grounded in
+claude-sdk-cli's actual code (`/Users/stephen/repos/@shellicar/claude-cli`)
+and a local Claude Code checkout (`~/repos/chatgptprojects/claude-code`),
+not guessed.
 
 ## Terminology
 
