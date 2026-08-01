@@ -71,8 +71,8 @@ tolerates it; a sibling-set subscriber is silently blind to it, and on a
 committal stream blind means wrong state with no error.
 
 **Why concern-rooted, a decision rather than a discovery.** The alternative was
-considered: rooting the tree by plane or mechanism (`tap.v1.conversation.{id}`
-(the original scheme), monitoring and operational as separate roots with the
+considered: rooting the tree by plane or mechanism (`tap.v1.conversation.{id}`,
+the original scheme), monitoring and operational as separate roots with the
 concerns nested inside. Neither shape is wrong; this one was chosen, for these
 reasons:
 

@@ -63,7 +63,7 @@ Three roles:
   answered `rejected: unsupported`, because compliance is answering, not
   implementing.
 
-Runtime never checks conformance, because the tolerance rules forbid it, or every
+Runtime never checks conformance: the tolerance rules forbid it, or every
 addition becomes a breaking change. Strictness lives in CI, where it costs
 nothing.
 
