@@ -129,8 +129,8 @@ about forty lines, and it is the cost.
 conversations joined to rows. So those forty lines exist twice, in each
 frontend.
 
-Two copies of the row set in memory. A `RowState` is small — conv id, title,
-timestamps, a tag record — so at two thousand conversations that is a few
+Two copies of the row set in memory. A `RowState` is small (conv id, title,
+timestamps, a tag record), so at two thousand conversations that is a few
 hundred kilobytes, twice.
 
 There is a middle option. The rail keeps folding once, and a component asks for
