@@ -65,8 +65,9 @@ I grepped every rail use in both. Two kinds:
 - `RowList.svelte` uses `ordered`, `pendingByConv`, `tagKeys`, `attachedOnly`,
   `staleConvs`, and `verdict(conv)` per row. `ui/rail.rs` uses the same six.
 - `UnreadView.svelte` uses `staleRows`. `ui/unread.rs` uses `stale_rows()`.
-- `App.svelte` uses `staleConvs` and `staleRows` for the per-tab unread count.
-  `ui/tabs.rs` does the same through `rail.with`.
+- `App.svelte` uses `staleConvs` for the per-tab unread count and `staleRows`
+  for the global unread toggle. `ui/tabs.rs` reads `stale_convs()` only; the
+  Leptos global toggle lives in `ui/rail.rs` instead, inside the first surface.
 
 Everything that reads one row already declares what it needs. Moving those to
 component-owned state changes nothing about how much work happens; the
@@ -129,12 +130,14 @@ against row presence. The five folds the sample declares span `rail.svelte.ts`
 lines 42 to 155, about a hundred and fourteen lines, and that is the cost.
 
 `UnreadView` needs the rows and stale folds, lines 42 to 60 and 138 to 147,
-about thirty of those lines. `App.svelte` needs the same thirty. So the rows and
-stale folds exist three times in each frontend, and the rest twice.
+about thirty of those lines. `App.svelte` needs the same thirty; `ui/tabs.rs`
+needs the stale fold alone, about ten. So the stale fold exists three times in
+each frontend, the rows fold three times in Svelte and twice in Leptos, and the
+rest once, in the rail surface alone.
 
-Three copies of the row set in memory. A `RowState` is small (conv id, title,
-timestamps, a tag record), so at two thousand conversations that is a few
-hundred kilobytes, three times.
+Three copies of the row set in memory in Svelte, two in Leptos. A `RowState` is
+small (conv id, title, timestamps, a tag record), so at two thousand
+conversations that is a few hundred kilobytes each time.
 
 There is a middle option. The rail keeps folding once, and a component asks for
 the slice it wants:
@@ -167,10 +170,10 @@ frontend.
 
 What is left is a choice between two prices:
 
-- **Component-folded.** The rows and stale folds, about thirty lines, written
-  three times in each frontend, the rest twice, and three copies of the row set.
-  In exchange the component names the frames that drive it, which is the
-  property that was asked for.
+- **Component-folded.** The stale fold written three times in each frontend, the
+  rows fold three times in Svelte and twice in Leptos, the rest once, and three
+  copies of the row set in Svelte. In exchange the component names the frames
+  that drive it, which is the property that was asked for.
 - **The middle.** No duplication and no extra copies. The component declares
   which slice it wants, but not which frames produce it, so half the legibility
   that was asked for.

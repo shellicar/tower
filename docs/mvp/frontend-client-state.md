@@ -7,25 +7,29 @@ Both frontends have this; it is not a parity gap.
 
 ## The rule
 
-A client tracks its own request until that request is answered, and relies on
-it no further.
+Two clients open on the same conversation agree on which actions are valid.
+Whatever decides what can be done is read from the conversation, never from
+state a client holds about its own request.
 
-The window between hitting send and receiving the servicer's accept is
-legitimately client-only, because nothing on the wire knows the say exists yet.
-That is `pendingSay`, set before the request goes out. It is held past the
-accept, until the committed message lands, so the optimistic greyed say can be
-shown and superseded by its own commit. `lastSay` is a different field: the
-outcome of the last say, shown until the next one starts.
+A client may still hold that state. `pendingSay` is the say in flight, set
+before the request goes out and held until the committed message lands, so the
+panel can grey out what was just said and hand the words back if the query dies
+first. Two tabs already disagree about it: it is per-tab, nothing rehydrates it,
+and a reload loses both the greyed line and the restore. That divergence is
+cosmetic. Neither tab is wrong about what can be done.
 
-Everything after the accept is a fact about the conversation, and the client
-reads it from the conversation.
+`liveQuery` is the other kind. It decides whether the composer is enabled, so
+two tabs disagreeing about it means they disagree about whether you may speak.
+That is the line: a value that only shows something may be local, a value that
+decides something may not.
 
 ## Where the code breaks the rule
 
 Both frontends gate sending on `liveQuery`, a field on the client's own
 per-conversation state. It holds the id of the query this browser tab started
-and has not yet seen finish. Nothing else sets it, and it is set by the accept,
-which is the moment it should have been let go.
+and has not yet seen finish. Nothing else sets it, so it answers "am I waiting
+on something I sent" and is then read as though it answered "is this
+conversation busy".
 
 The two put the gate in different layers. Svelte decides in the component
 (`ConversationPanel.svelte:178`). Leptos decides in the concern
