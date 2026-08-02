@@ -39,44 +39,6 @@ same diagnosis: Svelte's keyed `{#each}` already isolates per item, so its
 instance of the fault was the shared map alone. That difference is only
 visible because both exist.
 
-## The second failure: client state that outlives its own request
-
-Granularity is one half. The other is provenance: state the client holds that
-the record already answers, and answers differently.
-
-`ConversationPanel` decides whether you can send by reading `liveQuery`, a
-field on the client's own per-conversation state. It holds the id of the query
-this browser tab started and has not yet seen finish. Nothing else sets it.
-
-That produces three wrong answers today:
-
-- A second tab watching a conversation mid-turn sees it as idle, because it
-  did not send the say.
-- A reloaded tab sees it as idle for the same reason.
-- The tab that did send stays blocked forever when the servicer dies before
-  the query closes, because the closure that would clear it is never
-  published.
-
-The rule the code is missing: a client tracks its own request only until that
-request is answered, and relies on it no further. The window between hitting
-send and receiving the accept is legitimately client-only, because nothing on
-the wire knows the say exists yet. `lastSay` is exactly that and is cleared on
-accept. `liveQuery` is set by the accept, which is the moment it should have
-been let go.
-
-What replaces it is a fold of facts already on the wire: a query is running
-when the record holds an accepted query with no closure and the instance
-serving the conversation is alive. The rail already derives that liveness from
-the attachment and pulses against its own clock. Open query plus live holder
-is busy. Open query plus stranded holder is a servicer that died mid-query,
-which resolves itself as liveness expires, with no timer and no special case.
-
-One thing to confirm before building it: whether a client receives query
-closures in the history it gets when a conversation is opened, or only live
-from that moment. If only live, the fold cannot answer for a query that opened
-before the client looked, and that is a towerd change rather than a frontend
-one.
-
 ## What the alternative is
 
 A component subscribes to the frames it cares about, folds them into state it
