@@ -1,162 +1,200 @@
 # Frontend re-architecture
 
-Whether tower's frontends should move from concern-owned state to
-component-owned state, and how that would be decided by measurement rather
-than by argument.
+## Why this exists
 
-Written 1 August 2026 from the Flightrac work, where the same three shapes
-were built and compared. Nothing here is a proposal to act on yet: it is the
-analysis and the experiment that would settle it.
+In July you asked for one frontend architecture and got another. Claude argued
+you out of it and you accepted the argument.
 
-## The shape today
+This works out whether you were right, by reading the code that exists in both
+frontends. It is not a proposal, and nothing needs to be built to answer it.
 
-`mvp/frontend-svelte/src/lib/concerns/` holds `rail`, `conversation`,
-`approvals`, `usage` and `view`. Each is a module singleton that folds the
-frames it cares about and exposes getters. Components import a concern and
-read it: `ConversationPanel` reads `conversations.get(conv)`, the header badge
-reads `approvals.pendingApprovals`, the rail reads `rail.staleConvs`.
+## What you asked for
 
-The state is encapsulated: private fields, getters, methods. No component can
-assign into a concern. So the failure mode is not corruption.
+Two things, in your words:
 
-The failure mode is granularity. One reactive container read by many
-components invalidates all of them together.
+1. "Which components receive these deltas" should be answerable by looking at
+   the component.
+2. A component and its subtree own their data, their logic and their
+   rendering.
 
-## The evidence, from this repo's own history
+You also said the alternative "keeps the god-store shape in smaller pieces".
 
-- `670a950` — "Give each open conversation its own reactive entry instead of
-  one shared map." Typing a single character updated a shared map and every
-  panel re-rendered. The fix splits the container so a write reaches one
-  reader.
-- `39140c9` — "Key the streaming render by segment." The same class of
-  problem, one level down, inside a component.
+## What you got
 
-Both are repairs to the consequence. The cause is that several components read
-one container, and the container is what changes.
+Both frontends have the same five concerns, each folding the frames it cares
+about, with components reading from them. `lib/concerns/` in Svelte,
+`src/concerns/` in Leptos.
 
-Note also that the Svelte and Leptos sides needed different remedies for the
-same diagnosis: Svelte's keyed `{#each}` already isolates per item, so its
-instance of the fault was the shared map alone. That difference is only
-visible because both exist.
+You got the second thing you asked for, mostly. `approvals` folds only
+approvals. Nothing stores a shared derived value: the badge, the view and the
+panel each ask for a different slice and each recomputes it.
 
-## What the alternative is
+You did not get the first thing, in either. Here is the top of
+`ApprovalsView.svelte`:
 
-A component subscribes to the frames it cares about, folds them into state it
-alone owns, and coordinates with other components by events.
-
-```ts
-// today
-const oc = conversations.get(conv);
-
-// the alternative
-const oc = subscribeConversation(conv);  // this panel's own state
+```svelte
+import { approvals, rail, view } from './app';
 ```
 
-Concretely for tower:
+and the Leptos equivalent in `ui/approvals.rs`:
 
-- `ConversationPanel` subscribes to the frames for its own conversation. A
-  keystroke's frame is delivered to that panel and to nothing else.
-- `ApprovalsView`, the header badge and the rail marker each subscribe to
-  `approval` frames and fold what they need. Three folds of the same stream,
-  which cannot disagree, because frames arrive once in one order.
-- The selected tab, the open conversations, and anything else that is "what
-  the user just did" are events rather than stored state.
+```rust
+rail.with(|r| r.row(&c).and_then(|row| row.title.clone()))
+```
 
-The things this makes harder are the derivations across the whole set: the
-rail needs every row, stale counts span conversations. Each becomes a
-component folding the whole stream for itself. That is more duplicated folding
-than the concern shape, and whether it is acceptable is one of the things to
-measure.
+Neither tells you which frames drive the component. To find out you open the
+concern and read that it folds `approvals` and `approval`, that "void" is
+computed against a clock this client owns, and that answering sends a request
+whose result comes back as an ordinary `approval` event.
 
-## Why not a rewrite
+Under what you asked for, that would be at the top of the component.
 
-The bugs that motivated this were fixed. `670a950` reached per-conversation
-granularity from the other direction, so the remaining benefit is prevention
-of the next instance rather than repair of a current one. Against that: two
-frontends, a working tool in daily use, and no new capability at the end.
+## What it would cost to change
 
-The two shapes coexist. A component can subscribe to the transport directly
-while the concerns remain for everything else. So the question is not whether
-to rewrite but whether to build the next surface the new way, and migrate an
-existing one to compare.
+Most of it costs nothing, and that is the finding. It holds in both frontends,
+which is what makes it worth acting on rather than a quirk of one.
 
-## How it would be evaluated
+I grepped every rail use in both. Two kinds:
 
-Tower has something Flightrac did not: a built-in control group. Two frontends
-render the same data from the same socket. Migrate one, leave the other, and
-every measurement has a paired comparison under identical conditions.
+**Reads one row.** In Svelte, `ApprovalsView` uses `rail.row(conv)?.title` and
+`ConversationPanel` uses `rail.row(oc.conv)` and `rail.setTitle`. In Leptos,
+`ui/approvals.rs` and `ui/conversation.rs` do the same through `r.row(&c)`.
 
-The axes, in the order they matter:
+**Reads the whole set.** Two surfaces, the same two in both frontends:
 
-1. **Which components re-render when one frame arrives.** This is the whole
-   argument. Everything else is secondary.
-2. **CPU while typing**, with several conversations open. The original
-   symptom.
-3. **Memory**, since per-component folding duplicates state.
-4. **What a component tells you when you read it.** Whether the frames it
-   receives are visible at its top, or have to be traced through a concern.
-5. **What it costs to add a surface.** One file, or a file plus a concern
-   change.
+- `RowList.svelte` uses `ordered`, `pendingByConv`, `tagKeys`, `attachedOnly`,
+  `staleConvs`, and `verdict(conv)` per row. `ui/rail.rs` uses the same six.
+- `UnreadView.svelte` uses `staleRows`. `ui/unread.rs` uses `stale_rows()`.
 
-## How it would be verified
+Everything that reads one row already declares what it needs. Moving those to
+component-owned state changes nothing about how much work happens; the
+component asks for a conversation instead of reaching into a map for it.
 
-Not by reasoning. By instrumenting the running app and reading numbers, the
-same way the memory question was settled in Flightrac — where the first result
-contradicted the prediction and turned out to be a framework property, not an
-architectural one.
+So the entire cost of the change lands on two surfaces, and since it has to
+happen in both frontends, on four components: `RowList.svelte`,
+`UnreadView.svelte`, `ui/rail.rs` and `ui/unread.rs`.
 
-**Render counting.** Give every surface a small footer showing how many times
-it has rendered and which frame it last handled. Open six conversations, type
-one character into one of them, and read the counters.
+### Leptos has the sharper version of the problem
 
-- Today, the prediction is that every panel's counter advances.
-- Under component-owned, one panel's advances.
+In Svelte the rail holds several separate `$state` fields, so reading `ordered`
+tracks `#rows` and nothing else. In Leptos the whole rail is one signal, and
+`rail.with(...)` subscribes the reader to all of it.
 
-That single measurement is the thesis, and it either holds or it does not.
+There is a comment in `ui/rail.rs` at line 337 saying so:
 
-**Frame delivery counting.** Count frames delivered per component, not just
-renders. Distinguishes "the component was told and chose not to change" from
-"the component was never told", which are different properties.
+```rust
+let pending = rail.with(|r| r.pending_by_conv(now.get()));
+// Computed once per render, then a plain lookup per row
+// below — not a fresh `rail.with()` closure per row, which
+// would re-subscribe every row to the WHOLE rail signal
+// and recompute on any unrelated mutation (an agent pulse...)
+```
 
-**CPU under load.** The existing idle CPU numbers in this repo (`5b6e6e1`)
-give a baseline. Repeat under typing with N conversations open, before and
-after, on both frontends. Migrate the Leptos side first and hold Svelte as the
-control.
+That is the granularity problem, written down by whoever hit it, worked around
+by hand, in the surface that would carry the cost of changing. Nothing enforces
+that workaround: the next person writing a row renderer can reintroduce it by
+putting a `rail.with` where it reads naturally.
 
-**Memory with N conversations open.** Per-component folding means several
-components each holding a copy. In Flightrac this cost about 4 MB per
-duplicate copy of a 20,000 sample document and was not a deciding factor.
-Tower's conversations are larger and there are more of them, so this is the
-measurement most likely to say no.
+## The two components, written both ways
 
-Be careful with this one specifically: in Flightrac the first memory numbers
-pointed the wrong way entirely, and the cause was Svelte deep-proxying large
-objects rather than anything architectural. One line of `$state.raw` moved
-13 MB. Check that before concluding anything about the design.
+`RowList` today:
 
-**Reading the code.** Not a number, but do it deliberately and on the same
-file in both shapes: open `ConversationPanel` before and after and ask what it
-tells you about which frames it receives.
+```svelte
+const rows = $derived(rail.ordered);
+const pending = $derived(rail.pendingByConv);
+const stale = $derived(rail.staleConvs);
+```
 
-## What would falsify it
+Three getters over state the rail already holds. The rail folds `list`, `row`,
+`agents`, `agent`, `approvals`, `approval`, `stale_conversations`,
+`stale_conversation` and `attachment_dismissed` once, for everyone.
 
-Worth writing down in advance, so the experiment can fail honestly.
+`RowList` folding for itself:
 
-- Render counts do not improve, because the concerns are already fine-grained
-  enough after `670a950`.
-- Memory grows unacceptably with conversations open, because the duplicated
-  folds are large.
-- The cross-set derivations (rail, stale counts) become materially worse to
-  read than the single fold they replace.
-- The two frontends diverge in shape, because the pattern turns out to be
-  natural in one and awkward in the other.
+```svelte
+const rows    = fold('list', 'row');                    // a Map, sorted
+const pending = fold('approvals', 'approval');          // a Set of conv ids
+const stale   = fold('stale_conversations', 'stale_conversation');
+const agents  = fold('agents', 'agent', 'attachment_dismissed');
+const tagKeys = fold('list');                           // tagKeys rides on list
+```
 
-## If it goes ahead
+Do not read that as five lines against three. Each `fold` above stands for the
+body the rail runs today: `list` replaces the map, `row` upserts by conversation
+and preserves fields the frame omits, `agent` has to reconcile attachment
+against row presence. That is `rail.svelte.ts` lines 42 to 60 and 138 to 147,
+about forty lines, and it is the cost.
 
-Migrate one surface, not the app. `ApprovalsView` is the candidate: it is
-small, it has two other surfaces reading the same frames (the header badge and
-the rail marker), so it exercises the duplicate-fold question immediately, and
-it is not on the critical path if it goes wrong.
+`UnreadView` needs two of the same folds, because `staleRows` is stale
+conversations joined to rows. So those forty lines exist twice, in each
+frontend.
 
-Measure before, migrate, measure after, on both frontends, with the
-unmigrated one as the control.
+Two copies of the row set in memory. A `RowState` is small — conv id, title,
+timestamps, a tag record — so at two thousand conversations that is a few
+hundred kilobytes, twice.
+
+There is a middle option. The rail keeps folding once, and a component asks for
+the slice it wants:
+
+```svelte
+const rows    = rail.subscribeOrdered();
+const pending = rail.subscribePending();
+```
+
+No duplicated folding, and each subscriber invalidates on its own. `670a950`
+already moved conversations part of the way here, for a different reason.
+
+But be clear about what it does not give you. You asked in July that a component
+tell you which deltas reach it. `fold('list', 'row')` says that literally.
+`rail.subscribeOrdered()` says which slice the component wants, and to learn
+that `ordered` is driven by `list` and `row` you still open the rail.
+
+So the middle buys the invalidation and a declaration of appetite. It buys some
+of the legibility and not all of it.
+
+## What this says
+
+You asked for two properties. One is present. The other is missing, and getting
+it costs two components changing shape, either by folding for themselves or by
+asking the rail for a slice.
+
+Nothing in the code argues against it. The thing that would have, the whole-set
+derivations, lives in two of the four components that touch the rail in each
+frontend.
+
+What is left is a choice between two prices:
+
+- **Component-folded.** About forty lines of folding duplicated across two
+  surfaces in each frontend, and a second copy of the row set. In exchange the
+  component names the frames that drive it, which is what you asked for.
+- **The middle.** No duplication and no second copy. The component declares
+  which slice it wants, but not which frames produce it, so half the legibility
+  you asked for.
+
+In Leptos the middle buys something extra that it does not buy in Svelte: a
+subscription per slice instead of `rail.with` subscribing the reader to the
+whole rail. That removes the hazard the comment at `ui/rail.rs:337` is working
+around by hand.
+
+Read that as a reason to weigh the middle for both, never as a reason to split
+them. Whichever shape wins has to win in both frontends, for the same reason the
+change itself does: they are only diagnostic while they are the same design.
+
+Read the two versions of `RowList` above and decide which of those you are
+buying.
+
+## What is not in this
+
+Performance. `670a950` and `39140c9` fixed the two instances where one shared
+container re-rendered everything, and neither is an argument for changing
+anything now.
+
+Behaviour. The domain objects do not change. Same rows, same conversations,
+same frames on the wire, same folds over them. Only where they live changes.
+
+Doing one frontend and not the other. Parity is architectural, not visual. Two
+frontends are worth having because they are the same design in two languages,
+which is what makes a difference between them diagnostic: it tells you whether
+a problem is the framework or the design. Re-architect one and that is gone.
+
+So this is a change to both or to neither.
