@@ -1,0 +1,1 @@
+{"type":"change","category":"added","description":"towerd names its own build on startup: version, the commit it was built from (suffixed -dirty when the tree it compiled had uncommitted or untracked changes), and the build time."}
