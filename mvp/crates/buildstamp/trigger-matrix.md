@@ -43,5 +43,7 @@ macOS, 2026-08-02, in a linked worktree (`.git` is a file), H = `0ec2a77`.
 | commit a change, rebuild touching nothing else | the new hash, clean | recorded below |
 
 The last row moves H, so it is recorded after the fact: committing this file
-took the tree to `PENDING`, and the next `cargo build -p bridge`, with nothing
-else touched, stamped `PENDING`.
+took the tree to `dffdf7f`, and the next `cargo build -p bridge`, with nothing
+else touched, stamped `dffdf7f` clean. That commit touched no file bridge
+compiles, so the rebuild came from the worktree's own `HEAD` alone, which is
+the path a hardcoded `.git/HEAD` would have missed here.
