@@ -60,19 +60,22 @@ I grepped every rail use in both. Two kinds:
 `ConversationPanel` uses `rail.row(oc.conv)` and `rail.setTitle`. In Leptos,
 `ui/approvals.rs` and `ui/conversation.rs` do the same through `r.row(&c)`.
 
-**Reads the whole set.** Two surfaces, the same two in both frontends:
+**Reads the whole set.** Three surfaces, the same three in both frontends:
 
 - `RowList.svelte` uses `ordered`, `pendingByConv`, `tagKeys`, `attachedOnly`,
   `staleConvs`, and `verdict(conv)` per row. `ui/rail.rs` uses the same six.
 - `UnreadView.svelte` uses `staleRows`. `ui/unread.rs` uses `stale_rows()`.
+- `App.svelte` uses `staleConvs` and `staleRows` for the per-tab unread count.
+  `ui/tabs.rs` does the same through `rail.with`.
 
 Everything that reads one row already declares what it needs. Moving those to
 component-owned state changes nothing about how much work happens; the
 component asks for a conversation instead of reaching into a map for it.
 
-So the entire cost of the change lands on two surfaces, and since it has to
-happen in both frontends, on four components: `RowList.svelte`,
-`UnreadView.svelte`, `ui/rail.rs` and `ui/unread.rs`.
+So the entire cost of the change lands on three surfaces, and since it has to
+happen in both frontends, on six components: `RowList.svelte`,
+`UnreadView.svelte`, `App.svelte`, `ui/rail.rs`, `ui/unread.rs` and
+`ui/tabs.rs`.
 
 ### Leptos has the sharper version of the problem
 
@@ -97,15 +100,15 @@ putting a `rail.with` where it reads naturally.
 
 ## The two components, written both ways
 
-`RowList` today:
+`RowList` today, verbatim from lines 28 and 32, with `staleConvs` read inline in
+the template at line 236:
 
 ```svelte
-const rows = $derived(rail.ordered);
-const pending = $derived(rail.pendingByConv);
-const stale = $derived(rail.staleConvs);
+const visible = $derived(rail.ordered.filter(matches));
+const pendingByConv = $derived(rail.pendingByConv);
 ```
 
-Three getters over state the rail already holds. The rail folds `list`, `row`,
+Getters over state the rail already holds. The rail folds `list`, `row`,
 `agents`, `agent`, `approvals`, `approval`, `stale_conversations`,
 `stale_conversation` and `attachment_dismissed` once, for everyone.
 
@@ -122,16 +125,16 @@ const tagKeys = fold('list');                           // tagKeys rides on list
 Do not read that as five lines against three. Each `fold` above stands for the
 body the rail runs today: `list` replaces the map, `row` upserts by conversation
 and preserves fields the frame omits, `agent` has to reconcile attachment
-against row presence. That is `rail.svelte.ts` lines 42 to 60 and 138 to 147,
-about forty lines, and it is the cost.
+against row presence. The five folds the sample declares span `rail.svelte.ts`
+lines 42 to 155, about a hundred and fourteen lines, and that is the cost.
 
-`UnreadView` needs two of the same folds, because `staleRows` is stale
-conversations joined to rows. So those forty lines exist twice, in each
-frontend.
+`UnreadView` needs the rows and stale folds, lines 42 to 60 and 138 to 147,
+about thirty of those lines. `App.svelte` needs the same thirty. So the rows and
+stale folds exist three times in each frontend, and the rest twice.
 
-Two copies of the row set in memory. A `RowState` is small (conv id, title,
+Three copies of the row set in memory. A `RowState` is small (conv id, title,
 timestamps, a tag record), so at two thousand conversations that is a few
-hundred kilobytes, twice.
+hundred kilobytes, three times.
 
 There is a middle option. The rail keeps folding once, and a component asks for
 the slice it wants:
@@ -164,11 +167,11 @@ frontend.
 
 What is left is a choice between two prices:
 
-- **Component-folded.** About forty lines of folding duplicated across two
-  surfaces in each frontend, and a second copy of the row set. In exchange the
-  component names the frames that drive it, which is the property that was
-  asked for.
-- **The middle.** No duplication and no second copy. The component declares
+- **Component-folded.** The rows and stale folds, about thirty lines, written
+  three times in each frontend, the rest twice, and three copies of the row set.
+  In exchange the component names the frames that drive it, which is the
+  property that was asked for.
+- **The middle.** No duplication and no extra copies. The component declares
   which slice it wants, but not which frames produce it, so half the legibility
   that was asked for.
 

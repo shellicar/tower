@@ -1,8 +1,7 @@
 # Frontend client state
 
 What a browser client may hold for itself, and what it must read from the
-conversation. Written 2 August 2026 from a live failure: a composer that
-stayed disabled with no way to send.
+conversation.
 
 Both frontends have this; it is not a parity gap.
 
@@ -12,28 +11,39 @@ A client tracks its own request until that request is answered, and relies on
 it no further.
 
 The window between hitting send and receiving the servicer's accept is
-legitimately client-only, because nothing on the wire knows the say exists
-yet. That is what `lastSay` is, and it is cleared on accept.
+legitimately client-only, because nothing on the wire knows the say exists yet.
+That is `pendingSay`, set before the request goes out. It is held past the
+accept, until the committed message lands, so the optimistic greyed say can be
+shown and superseded by its own commit. `lastSay` is a different field: the
+outcome of the last say, shown until the next one starts.
 
 Everything after the accept is a fact about the conversation, and the client
 reads it from the conversation.
 
 ## Where the code breaks the rule
 
-`ConversationPanel` decides whether you can send by reading `liveQuery`, a
-field on the client's own per-conversation state. It holds the id of the query
-this browser tab started and has not yet seen finish. Nothing else sets it,
-and it is set by the accept, which is the moment it should have been let go.
+Both frontends gate sending on `liveQuery`, a field on the client's own
+per-conversation state. It holds the id of the query this browser tab started
+and has not yet seen finish. Nothing else sets it, and it is set by the accept,
+which is the moment it should have been let go.
 
-Three wrong answers follow:
+The two put the gate in different layers. Svelte decides in the component
+(`ConversationPanel.svelte:178`). Leptos decides in the concern
+(`concerns/conversation.rs`, `can_send`), deliberately and with its reasoning
+written down, and a test pins it. Whoever changes this changes both, and the
+Leptos test is asserting the current rule on purpose.
+
+Two wrong answers follow:
 
 - A second tab watching a conversation mid-turn sees it as idle, because it
   did not send the say.
 - A reloaded tab sees it as idle for the same reason.
-- The tab that did send stays blocked forever when the servicer dies before
-  the query closes, because the closure that would clear it is never
-  published. Observed on 2 August: a bridge was interrupted mid-query and its
-  composer could not be used again until the page was reloaded.
+
+A third case looks worse than it is and is worth recording so nobody rediscovers
+it as a bug: when a servicer dies mid-query no closure ever arrives, so the tab
+that sent stays gated. The cancel button renders in exactly that state, towerd
+answers it `unreachable`, and that clears `liveQuery` and hands the words back.
+Reconnecting, or closing and reopening the conversation, clears it too.
 
 ## What replaces it
 
@@ -46,9 +56,10 @@ Open query plus live holder is busy. Open query plus stranded holder is a
 servicer that died mid-query, which resolves itself as liveness expires, with
 no timer and no special case.
 
-## To confirm before building it
+## This is a towerd change, not only a frontend one
 
-Whether a client receives query closures in the history it gets when a
-conversation is opened, or only live from that moment. If only live, the fold
-cannot answer for a query that opened before the client looked, and that is a
-towerd change rather than a frontend one.
+A client receives query closures only live, from the moment it starts watching
+(`ws.rs`, the `QueryClosed` arm is gated on `watching`). Opening a conversation
+returns its messages and a usage frame, and nothing carries a query-open fact at
+all. So the fold cannot answer for a query that opened before the client looked,
+and towerd has to carry that fact before the frontend can fold it.

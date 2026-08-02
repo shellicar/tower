@@ -205,6 +205,12 @@ From a full side-by-side walk of rail, approvals, conversation panel, blocks,
 refs, and unread. Send-eligibility, title-edit, and attachment handling were
 checked and found faithful — no gaps there.
 
+Six items from that walk have since shipped and are recorded above rather than
+here: the untitled-id fallback, the attached-only status dot, `lastKind` on rail
+rows, and attached-only ordering closed with the rail-level section (27 Jul);
+the ref-image height cap closed with it; the collapse affordance closed with the
+markdown port (28 Jul).
+
 - [ ] **Inline conversation-footer approval callout diverges.** FULLY RULED (25 Jul), composed from
   both sides: Svelte's amber text + background wins (salience); everything else Leptos — the raw
   tool input JSON shows (an approval gate should show what's being approved), and the buttons sit
@@ -217,24 +223,6 @@ checked and found faithful — no gaps there.
   no raw input. Leptos: neutral box (`.approval { border: 1px solid #404040 }`, no tint),
   bold ask name, capitalised `Approve`/`Deny`, and dumps the raw input as a truncated
   `<pre>` Svelte never shows here. The dedicated ApprovalsView panel matches well on both.
-- [ ] **Untitled-conversation label fallback is inconsistent.** RULED (25 Jul): full id everywhere,
-  both frontends. Svelte always falls back to
-  the full conversation id. Leptos uses a shortened id in four places (rail row, potential-
-  conversation row, approvals view's conversation link, conversation header) but the full id
-  in a fifth (UnreadView) — inconsistent internally, not just against Svelte. Decide one
-  behaviour, apply it everywhere in both.
-- [ ] **Attached-only ("served, silent") rows: missing status dot in Leptos.** Svelte always
-  shows a dot, green by default unless stranded. Leptos shows a dot only when it has a
-  verdict — no verdict means a visibly blanker row.
-- [ ] **Rail rows drop `lastKind` in Leptos.** Svelte shows `lastKind · age` per row; Leptos
-  shows only age (both still show it in the conversation panel's status line).
-- [ ] **`tool_use`/`tool_result` collapse affordance differs.** RULED (25 Jul): Svelte's shape wins —
-  Leptos adopts it. Svelte: plain `<button>` with
-  local `expanded` state, no disclosure triangle, CSS-ellipsis one-line preview. Leptos:
-  native `<details>/<summary>` (browser triangle), no truncation so a long preview wraps
-  across multiple lines.
-- [ ] **Ref images: height cap only in Leptos.** Leptos caps loaded images at
-  `max-height: 24rem`; Svelte caps only `max-width`, so a tall image grows arbitrarily long.
 - [ ] **Scroll-anchor "at bottom" tolerance differs.** Svelte 2px, Leptos 32px — Leptos stays
   pinned (and hides the "↓ latest" button) noticeably before the true bottom. Two axes: the
   tolerance BEHAVIOUR (unruled), and the "↓ latest" button VISUAL — RULED (25 Jul): Svelte's
@@ -255,9 +243,6 @@ checked and found faithful — no gaps there.
   has an explicit Send button. Add one to Svelte, matching its lowercase chrome (`send`).
 - [ ] **Leptos composer is shorter than Svelte's** (found live, 25 Jul): match Svelte's editor
   height.
-- [ ] **Rail ordering of new/attached-only conversations differs** (found live, 25 Jul): Svelte
-  puts them at the TOP, Leptos at the BOTTOM. RULED: top wins — that's where dismissal happens
-  and where new live conversations belong. Fix Leptos.
 - [ ] **Approval components differ very slightly** (found live, 25 Jul): near-nothing, noted so a
   later strict pass knows it was seen and deprioritised.
 - [x] **Pre-Layout tab-highlight transient** (review finding, 26 Jul, seen and accepted): with a
