@@ -2,35 +2,34 @@
 
 ## Why this exists
 
-In July you asked for one frontend architecture and got another. Claude argued
-you out of it and you accepted the argument.
+In July one frontend architecture was chosen and a different one was built.
+This works out whether there is still a reason to prefer the one that was
+chosen, given what exists now, by reading the code in both frontends. It is not
+a proposal, and nothing needs to be built to answer it.
 
-This works out whether you were right, by reading the code that exists in both
-frontends. It is not a proposal, and nothing needs to be built to answer it.
+## What was asked for
 
-## What you asked for
-
-Two things, in your words:
+Two properties:
 
 1. "Which components receive these deltas" should be answerable by looking at
    the component.
 2. A component and its subtree own their data, their logic and their
    rendering.
 
-You also said the alternative "keeps the god-store shape in smaller pieces".
+The alternative was described as keeping "the god-store shape in smaller
+pieces".
 
-## What you got
+## What was built
 
 Both frontends have the same five concerns, each folding the frames it cares
 about, with components reading from them. `lib/concerns/` in Svelte,
 `src/concerns/` in Leptos.
 
-You got the second thing you asked for, mostly. `approvals` folds only
+The second property is present, mostly. `approvals` folds only
 approvals. Nothing stores a shared derived value: the badge, the view and the
 panel each ask for a different slice and each recomputes it.
 
-You did not get the first thing, in either. Here is the top of
-`ApprovalsView.svelte`:
+The first is absent in both. The top of `ApprovalsView.svelte`:
 
 ```svelte
 import { approvals, rail, view } from './app';
@@ -42,12 +41,13 @@ and the Leptos equivalent in `ui/approvals.rs`:
 rail.with(|r| r.row(&c).and_then(|row| row.title.clone()))
 ```
 
-Neither tells you which frames drive the component. To find out you open the
-concern and read that it folds `approvals` and `approval`, that "void" is
-computed against a clock this client owns, and that answering sends a request
-whose result comes back as an ordinary `approval` event.
+Neither names the frames that drive the component. Finding that out means
+opening the concern and reading that it folds `approvals` and `approval`, that
+"void" is computed against a clock this client owns, and that answering sends a
+request whose result comes back as an ordinary `approval` event.
 
-Under what you asked for, that would be at the top of the component.
+Under the property that was asked for, that would be at the top of the
+component.
 
 ## What it would cost to change
 
@@ -144,17 +144,17 @@ const pending = rail.subscribePending();
 No duplicated folding, and each subscriber invalidates on its own. `670a950`
 already moved conversations part of the way here, for a different reason.
 
-But be clear about what it does not give you. You asked in July that a component
-tell you which deltas reach it. `fold('list', 'row')` says that literally.
-`rail.subscribeOrdered()` says which slice the component wants, and to learn
-that `ordered` is driven by `list` and `row` you still open the rail.
+Be clear about what it does not give. The July property was that a component
+states which deltas reach it. `fold('list', 'row')` says that literally.
+`rail.subscribeOrdered()` says which slice the component wants, and learning
+that `ordered` is driven by `list` and `row` still means opening the rail.
 
 So the middle buys the invalidation and a declaration of appetite. It buys some
 of the legibility and not all of it.
 
 ## What this says
 
-You asked for two properties. One is present. The other is missing, and getting
+Two properties were asked for. One is present. The other is missing, and getting
 it costs two components changing shape, either by folding for themselves or by
 asking the rail for a slice.
 
@@ -166,10 +166,11 @@ What is left is a choice between two prices:
 
 - **Component-folded.** About forty lines of folding duplicated across two
   surfaces in each frontend, and a second copy of the row set. In exchange the
-  component names the frames that drive it, which is what you asked for.
+  component names the frames that drive it, which is the property that was
+  asked for.
 - **The middle.** No duplication and no second copy. The component declares
   which slice it wants, but not which frames produce it, so half the legibility
-  you asked for.
+  that was asked for.
 
 In Leptos the middle buys something extra that it does not buy in Svelte: a
 subscription per slice instead of `rail.with` subscribing the reader to the
@@ -180,8 +181,7 @@ Read that as a reason to weigh the middle for both, never as a reason to split
 them. Whichever shape wins has to win in both frontends, for the same reason the
 change itself does: they are only diagnostic while they are the same design.
 
-Read the two versions of `RowList` above and decide which of those you are
-buying.
+The two versions of `RowList` above are what each price buys.
 
 ## What is not in this
 
