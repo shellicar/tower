@@ -43,3 +43,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Configuring a GitHub credential stops Exec children authenticating with the host's own gh login. A host that configures none is unaffected.
+- The commit in bridge's build stamp can now be trusted: the hash carries a -dirty suffix unless a git status over bridge and the crates it compiles reported no modified, staged or untracked files, so a binary built from an edited tree no longer names a commit it does not contain.

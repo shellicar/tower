@@ -269,6 +269,7 @@ dependencies = [
  "bridge-secrets",
  "bridge-testkit",
  "bridge-tools-github",
+ "buildstamp",
  "bytes",
  "futures",
  "image",
@@ -337,6 +338,10 @@ dependencies = [
  "serde_json",
  "tokio",
 ]
+
+[[package]]
+name = "buildstamp"
+version = "0.1.0"
 
 [[package]]
 name = "bumpalo"
@@ -1180,6 +1185,7 @@ dependencies = [
  "anyhow",
  "base64",
  "bridge",
+ "buildstamp",
  "crossterm",
  "interprocess",
  "pulldown-cmark",
@@ -3507,6 +3513,7 @@ name = "tower-frontend-leptos"
 version = "0.1.0"
 dependencies = [
  "ammonia",
+ "buildstamp",
  "console_error_panic_hook",
  "futures",
  "gloo-net",
@@ -3559,6 +3566,7 @@ dependencies = [
  "anyhow",
  "async-nats",
  "axum",
+ "buildstamp",
  "futures",
  "rusqlite",
  "serde",

@@ -12,3 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Open towerd's database in WAL mode.
 - Ignore a displaced agent's release of a claim it no longer holds.
 - Order attachments in the connect snapshot oldest first.
+### Added
+
+- towerd names its own build on startup: version, the commit it was built from (suffixed -dirty when the tree it compiled had uncommitted or untracked changes), and the build time.

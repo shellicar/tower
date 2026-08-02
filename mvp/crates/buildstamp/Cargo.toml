@@ -1,0 +1,12 @@
+# Every binary's build script, so a running binary can name the commit it was
+# built from and say whether the working tree it compiled matched that commit.
+# std only, deliberately: a build-dependency is compiled before anything else
+# in the workspace, and vergen/git-version approximate the dirty question
+# rather than scoping it to what the binary actually compiles.
+[package]
+name = "buildstamp"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true

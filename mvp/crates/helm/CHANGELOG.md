@@ -15,3 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - A `-c` configuration batch is applied before the conversation is created.
+### Added
+
+- helm names its own build before it takes the screen: version, the commit it was built from (suffixed -dirty when the tree it compiled had uncommitted or untracked changes), and the build time.
