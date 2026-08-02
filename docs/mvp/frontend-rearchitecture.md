@@ -60,7 +60,8 @@ I grepped every rail use in both. Two kinds:
 `ConversationPanel` uses `rail.row(oc.conv)` and `rail.setTitle`. In Leptos,
 `ui/approvals.rs` and `ui/conversation.rs` do the same through `r.row(&c)`.
 
-**Reads the whole set.** Three surfaces, the same three in both frontends:
+**Reads the whole set.** Three surfaces, the same three in both frontends,
+though they do not read the same slices:
 
 - `RowList.svelte` uses `ordered`, `pendingByConv`, `tagKeys`, `attachedOnly`,
   `staleConvs`, and `verdict(conv)` per row. `ui/rail.rs` uses the same six.
