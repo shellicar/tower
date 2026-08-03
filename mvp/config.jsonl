@@ -1,5 +1,5 @@
 {"skills":{"dir":"~/repos/shellicar/skills-v2/skills"}}
-{"model":{"name":"claude-sonnet-5","maxTokens":128000,"thinking":"adaptive","thinkingDisplay":"summarized"}}
+{"model":{"name":"claude-opus-5","maxTokens":128000,"thinking":"adaptive","thinkingDisplay":"summarized"}}
 {"permissions": [
   { "match": "$PWD", "read": "allow", "write": "allow", "delete": "ask", "exec": "allow" },
   { "match": "*", "read": "allow", "write": "ask", "delete": "deny", "exec": "ask" }
