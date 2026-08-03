@@ -225,9 +225,21 @@ export class Rail {
   liveCwd(conv: string): string | undefined {
     const a = this.#attachments.get(conv);
     if (!a) return undefined;
-    const inst = this.#instances.get(`${a.world}/${a.instanceId}`);
+    const inst = this.#instance(a);
     if (!inst || livenessVerdict(this.#now, inst.lastPulse, inst.intervalS) !== 'alive') return undefined;
     return a.cwd;
+  }
+
+  /** The instance an attachment names. The key is the (world, instanceId)
+   *  pair, and it degrades the same way the gates do (ws-spec): a claim
+   *  published without a world keys as "/inst-1" while that same instance's
+   *  pulses key as "mac/inst-1", so an exact miss falls back to a bare
+   *  `instanceId` match rather than reading as no instance at all. */
+  #instance(held: { world: string; instanceId: string }): AgentInstance | undefined {
+    return (
+      this.#instances.get(`${held.world}/${held.instanceId}`) ??
+      [...this.#instances.values()].find((i) => sameInstance(held, i))
+    );
   }
 
   /** Potential conversations: attached, no row yet — served, silent. Transient

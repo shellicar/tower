@@ -246,11 +246,26 @@ impl Rail {
     /// supersession), so a conversation has at most one.
     pub fn live_cwd(&self, conv: &str, now: Millis) -> Option<&str> {
         let a = self.attachments.get(conv)?;
-        let inst = self
-            .instances
-            .get(&format!("{}/{}", a.world, a.instance_id))?;
+        let inst = self.instance_of(a)?;
         let alive = liveness_verdict(now, inst.last_pulse, inst.interval_s) == Liveness::Alive;
         alive.then_some(a.cwd.as_deref()).flatten()
+    }
+
+    /// The instance an attachment names. The key is the (world, instance_id)
+    /// pair, and it degrades the same way the gates do (ws-spec): a claim
+    /// published without a world keys as "/inst-1" while that same instance's
+    /// pulses key as "mac/inst-1", so an exact miss falls back to a bare
+    /// `instance_id` match rather than reading as no instance at all.
+    fn instance_of(&self, held: &Attachment) -> Option<&Instance> {
+        self.instances
+            .get(&format!("{}/{}", held.world, held.instance_id))
+            .or_else(|| {
+                self.instances.iter().find_map(|(key, instance)| {
+                    let (world, instance_id) = key.split_once('/')?;
+                    same_instance((&held.world, &held.instance_id), (world, instance_id))
+                        .then_some(instance)
+                })
+            })
     }
 
     /// Potential conversations: attached, no row yet — served, silent. They
@@ -570,6 +585,51 @@ mod tests {
 
         assert_eq!(rail.live_cwd("a", 200_000), Some("/new/path"));
         assert_eq!(rail.live_cwd("unknown", 200_000), None);
+    }
+
+    #[test]
+    fn live_cwd_degrades_to_the_bare_instance_id_when_the_claim_omits_world() {
+        // towerd stores an absent world as an empty string, so a conv-leaf
+        // claim published without one keys as "/inst-1" while that same
+        // instance's pulses key as "mac/inst-1". ws-spec is explicit that the
+        // map keys degrade to bare instanceId, not only the gates.
+        let mut rail = Rail::default();
+        rail.apply(&ServerMsg::Agents {
+            instances: vec![ws_types::WsAgentInstance {
+                world: "mac".into(),
+                instance_id: "inst-1".into(),
+                host: None,
+                last_pulse: 100_000,
+                interval_s: Some(15),
+            }],
+            attachments: vec![ws_types::WsAgentAttachment {
+                world: String::new(),
+                instance_id: "inst-1".into(),
+                conv: "a".into(),
+                cwd: Some("/served/here".into()),
+                attached_ts: 100_000,
+            }],
+        });
+
+        let actual = rail.live_cwd("a", 120_000);
+
+        assert_eq!(actual, Some("/served/here"));
+    }
+
+    #[test]
+    fn live_cwd_follows_a_chdir_on_the_standing_attachment() {
+        // towerd answers a conv-leaf `moved` with an Attached fact carrying
+        // the claim's ORIGINAL attached_ts (towerd views/fold.rs): same world,
+        // same instance, later cwd. Nothing about that shape may look like a
+        // stale fact to skip.
+        let mut rail = Rail::default();
+        attach(&mut rail, "w1", 100_000, "/repos/tower");
+
+        attach(&mut rail, "w1", 100_000, "/repos/tower/mvp");
+
+        let actual = rail.live_cwd("a", 120_000);
+
+        assert_eq!(actual, Some("/repos/tower/mvp"));
     }
 
     #[test]

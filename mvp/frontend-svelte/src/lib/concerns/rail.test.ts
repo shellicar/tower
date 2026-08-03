@@ -116,6 +116,40 @@ describe('liveCwd', () => {
     expect(rail.liveCwd('unknown')).toBeUndefined();
   });
 
+  it('degrades to the bare instanceId when the claim omits world', () => {
+    // towerd stores an absent world as an empty string, so a conv-leaf claim
+    // published without one keys as "/inst-1" while that same instance's
+    // pulses key as "mac/inst-1". ws-spec is explicit that the map keys
+    // degrade to bare instanceId, not only the gates.
+    const { rail, emit } = fakeTransport({ now: () => 120_000 });
+    emit({
+      type: 'agents',
+      instances: [{ world: 'mac', instanceId: 'inst-1', lastPulse: 100_000, intervalS: 15 }],
+      attachments: [{ world: '', instanceId: 'inst-1', conv: 'a', cwd: '/served/here', attachedTs: 100_000 }],
+    });
+
+    const expected = '/served/here';
+    const actual = rail.liveCwd('a');
+
+    expect(actual).toBe(expected);
+  });
+
+  it('follows a chdir on the standing attachment', () => {
+    // towerd answers a conv-leaf `moved` with an Attached fact carrying the
+    // claim's ORIGINAL attachedTs (towerd views/fold.rs): same world, same
+    // instance, later cwd. Nothing about that shape may look like a stale
+    // fact to skip.
+    const { rail, emit } = fakeTransport({ now: () => 120_000 });
+    emit(attached('w1', 100_000, '/repos/tower'));
+
+    emit(attached('w1', 100_000, '/repos/tower/mvp'));
+
+    const expected = '/repos/tower/mvp';
+    const actual = rail.liveCwd('a');
+
+    expect(actual).toBe(expected);
+  });
+
   it('hides the cwd of a stranded attachment', () => {
     // Attached at t=0, read at t=1000s: silence far past the stranded
     // threshold. Liveness is a fold against the clock (agent-spec); a dead
