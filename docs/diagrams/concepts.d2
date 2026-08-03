@@ -1,0 +1,116 @@
+vars: {
+  d2-config: {
+    theme-id: 200
+    layout-engine: elk
+  }
+}
+
+direction: down
+
+title: "Tower: how the concepts relate" {
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+classes: {
+  person: {
+    style: { fill: "#3A3413"; stroke: "#F1C40F"; font-color: "#FBF6E3" }
+  }
+  conv: {
+    style: { fill: "#13294A"; stroke: "#5DADE2"; font-color: "#EAF2FB" }
+  }
+  record: {
+    style: { fill: "#0E2E33"; stroke: "#5DD0E0"; font-color: "#E0FAFD" }
+  }
+  place: {
+    style: { fill: "#2E1E0E"; stroke: "#E67E22"; font-color: "#FBEFE3" }
+  }
+  claim: {
+    style: { fill: "#2A1B3A"; stroke: "#A569BD"; font-color: "#F3EAFB" }
+  }
+  ask: {
+    style: { fill: "#3A1714"; stroke: "#E74C3C"; font-color: "#FBEAEA" }
+  }
+  derived: {
+    style: { fill: transparent; stroke: "#7F8C8D"; stroke-dash: 3; font-color: "#AEB6BF" }
+  }
+  group: {
+    style: { fill: transparent; stroke: "#566573"; stroke-dash: 3; font-color: "#7F8C8D" }
+  }
+  rel: {
+    style: { stroke: "#5DADE2"; font-color: "#9FC9E8" }
+  }
+  owns: {
+    style: { stroke: "#5DD0E0"; font-color: "#9FD6DF" }
+  }
+  place_rel: {
+    style: { stroke: "#E67E22"; font-color: "#E0A96D" }
+  }
+  claim_rel: {
+    style: { stroke: "#A569BD"; font-color: "#C9A6DE" }
+  }
+  fold: {
+    style: { stroke: "#7F8C8D"; stroke-dash: 3; font-color: "#AEB6BF" }
+  }
+}
+
+user: "User\na person, or another agent" { class: person }
+
+# ---- the conversation and what it is made of ----
+conversation: "Conversation\nthe thing you look at: a durable transcript with an id" { class: conv }
+
+query: "Query\none say and everything it caused, until it closes" { class: record }
+turn: "Turn\none round of the model loop" { class: record }
+message: "Message\nan utterance in the transcript, with a stable id" { class: record }
+content: "Content block\ntext, thinking, tool use, tool result, image, document" { class: record }
+ref: "Ref\na heavy block stored by content hash, fetched on demand" { class: record }
+tip: "Tip\nwhich message the conversation currently stands at" { class: derived }
+
+# ---- where it runs ----
+world: "World\na place an agent can run: a machine, a container" { class: place }
+instance: "Agent instance\none process's presence in a world: (world, instanceId)" { class: place }
+attachment: "Attachment\nthe claim: this instance is serving this conversation, now" { class: claim }
+
+# ---- permission ----
+approval: "Approval\na pending ask: may the agent do this thing" { class: ask }
+
+# ---- what nobody declares ----
+derived: "Derived by each reader, never stored as a verdict" {
+  class: group
+  liveness: "Liveness\nalive · released · stranded, from the last pulse against the reader's own clock" { class: derived }
+  staleness: "Staleness\nhow long since this conversation moved; what orders the fleet" { class: derived }
+}
+
+# ---- the conversation's own structure ----
+user -> conversation: "says into" { class: rel }
+conversation -> query: "has many, one per say" { class: owns }
+query -> turn: "has many: the loop runs until the model stops asking for tools" { class: owns }
+turn -> message: "commits" { class: owns }
+message -> content: "is made of" { class: owns }
+content -> ref: "heavy ones become" { class: owns }
+conversation -> tip: "stands at" { class: fold }
+tip -> message: "points at" { class: fold }
+
+# ---- placement ----
+instance -> world: "lives in, and one or many share a world;\nthe pair (world, instanceId) is the instance's whole identity" { class: place_rel }
+
+# ---- the claim is the only link between a conversation and a place ----
+instance -> attachment: "makes" { class: claim_rel }
+attachment -> conversation: "claims; at most one stands at a time" { class: claim_rel }
+attachment -> world: "asking a different world to serve is how work migrates" { class: claim_rel }
+
+# ---- permission ----
+turn -> approval: "a tool use may raise" { class: rel }
+user -> approval: "settles" { class: rel }
+
+# ---- folds ----
+instance -> derived.liveness: "pulses feed" { class: fold }
+conversation -> derived.staleness: "activity feeds" { class: fold }
+
+note: "Read it as a sentence. A user says into a conversation; the say opens a query; the query runs turns until the model stops asking for tools; each turn commits messages, made of content blocks, with the heavy ones swapped for refs the client fetches only if it needs them.\nThe conversation is entirely separate from where it runs. An agent instance is a process's presence in a world, and the only link between the two sides is the attachment: a claim that this instance is serving this conversation, now. At most one stands at a time, a new one unconditionally supersedes the last, and that supersession is exactly what migrating a conversation to another machine is.\nNothing declares whether an instance is alive or a conversation is stale. Both are folds each reader computes for itself from the events it has seen, so there is no verdict to go wrong and no server tick to depend on.\nColours: gold = people, blue = the conversation, cyan = what it is made of, orange = placement, purple = the claim, red = permission, dashed = derived, never stored." {
+  near: bottom-center
+  shape: text
+  style.font-color: "#7F8C8D"
+}
