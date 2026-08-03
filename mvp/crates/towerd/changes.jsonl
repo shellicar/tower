@@ -1,1 +1,3 @@
 {"type":"change","category":"fixed","description":"Open towerd's database in WAL mode."}
+{"type":"change","category":"fixed","description":"An agent displaced from a conversation no longer clears the standing attachment when it releases its own superseded claim, so clients keep showing the agent that actually holds the conversation."}
+{"type":"change","category":"fixed","description":"Attachments in the connect snapshot arrive oldest first, so a client reconnecting mid-handover settles on the claim that stands rather than whichever one the database happened to return first."}
