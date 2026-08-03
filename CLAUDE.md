@@ -54,7 +54,9 @@ deviations land in the doc first, then the code.
   must/want/NO scope), `sdk-feature-inventory.md`, `sdk-shape.md`,
   `tool-philosophy.md`, `sdk-tools.md`, `cli-features.md` (the SDK/agent
   reference), `code-architecture.md`, `orchestration-layer.md`,
-  `multi-transport-architecture.md`, `tui-architecture.md`, `project-state.md`.
+  `multi-transport-architecture.md`, `tui-architecture.md`, `project-state.md`,
+  `landscape.md` (what else exists: Synadia's NATS agent protocol, Open Agent
+  Spec, herdr, firstmate; what each traded away, and what tower should take).
   Don't maintain it; don't guess past it either.
 - Spec changes ride their own PR, never bundled with code. One owner per
   document per change; implementation PRs build to merged spec text.
