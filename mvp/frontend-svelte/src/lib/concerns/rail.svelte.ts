@@ -208,7 +208,7 @@ export class Rail {
 
   #liveness(conv: string): AgentInstance | null {
     const a = this.#attachments.get(conv);
-    return a ? (this.#instances.get(`${a.world}/${a.instanceId}`) ?? null) : null;
+    return a ? (this.#instance(a) ?? null) : null;
   }
 
   /** The conversation's live attachment's cwd — "where is this conversation

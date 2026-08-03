@@ -34,6 +34,17 @@ function attached(world: string, ts: number, cwd?: string): ServerMsg {
   return { type: 'agent', kind: 'attached', world, instanceId: 'inst-1', ts, conv: 'a', cwd } as ServerMsg;
 }
 
+// A reconnect snapshot whose claim omits its world (towerd stores absent as
+// an empty string) while the instance's own pulses carry one: the claim keys
+// as "/inst-1", the instance as "mac/inst-1".
+function worldlessClaimSnapshot(): ServerMsg {
+  return {
+    type: 'agents',
+    instances: [{ world: 'mac', instanceId: 'inst-1', lastPulse: 100_000, intervalS: 15 }],
+    attachments: [{ world: '', instanceId: 'inst-1', conv: 'a', cwd: '/served/here', attachedTs: 100_000 }],
+  };
+}
+
 describe('Rail attachments', () => {
   it('a new attached supersedes the old pair, never sits beside it', () => {
     const { rail, sent, emit } = fakeTransport();
@@ -104,6 +115,21 @@ describe('detached gating', () => {
   });
 });
 
+describe('verdict', () => {
+  it('degrades to the bare instanceId when the claim omits world', () => {
+    // The dot on every rail row reads this. A claim that omits its world must
+    // still find the instance that is pulsing under one, or the agents this
+    // conversation is actually served by all read as nothing attached.
+    const { rail, emit } = fakeTransport({ now: () => 120_000 });
+    emit(worldlessClaimSnapshot());
+
+    const expected = 'alive';
+    const actual = rail.verdict('a');
+
+    expect(actual).toBe(expected);
+  });
+});
+
 describe('liveCwd', () => {
   it('reads the attachment replacing a prior one', () => {
     // A second attached for the same conv supersedes the first (agent-spec);
@@ -117,16 +143,10 @@ describe('liveCwd', () => {
   });
 
   it('degrades to the bare instanceId when the claim omits world', () => {
-    // towerd stores an absent world as an empty string, so a conv-leaf claim
-    // published without one keys as "/inst-1" while that same instance's
-    // pulses key as "mac/inst-1". ws-spec is explicit that the map keys
-    // degrade to bare instanceId, not only the gates.
+    // ws-spec is explicit that the map keys degrade to bare instanceId, not
+    // only the gates.
     const { rail, emit } = fakeTransport({ now: () => 120_000 });
-    emit({
-      type: 'agents',
-      instances: [{ world: 'mac', instanceId: 'inst-1', lastPulse: 100_000, intervalS: 15 }],
-      attachments: [{ world: '', instanceId: 'inst-1', conv: 'a', cwd: '/served/here', attachedTs: 100_000 }],
-    });
+    emit(worldlessClaimSnapshot());
 
     const expected = '/served/here';
     const actual = rail.liveCwd('a');
