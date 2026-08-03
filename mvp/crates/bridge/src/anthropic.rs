@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use wire::ConversationId;
 
-pub const MAX_TOKENS: i64 = 8192;
+pub const MAX_TOKENS: i64 = 120000;
 
 /// Built once at startup (main.rs) and threaded down through `AgentConfig`/
 /// `TurnContext` alongside the NATS client, `Auth`, and every other shared
