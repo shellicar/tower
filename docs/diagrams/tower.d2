@@ -1,0 +1,129 @@
+vars: {
+  d2-config: {
+    theme-id: 200
+    layout-engine: elk
+  }
+}
+
+direction: down
+
+title: "Tower: how it fits together" {
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+classes: {
+  service: {
+    style: { fill: "#14352A"; stroke: "#2ECC71"; font-color: "#E8F8F0" }
+  }
+  client: {
+    style: { fill: "#13294A"; stroke: "#5DADE2"; font-color: "#EAF2FB" }
+  }
+  bus: {
+    style: { fill: "#0E2E33"; stroke: "#5DD0E0"; font-color: "#E0FAFD" }
+  }
+  store: {
+    style: { fill: "#2A1B3A"; stroke: "#A569BD"; font-color: "#F3EAFB" }
+  }
+  external: {
+    style: { fill: "#3A1714"; stroke: "#E74C3C"; font-color: "#FBEAEA" }
+  }
+  person: {
+    style: { fill: "#3A3413"; stroke: "#F1C40F"; font-color: "#FBF6E3" }
+  }
+  world: {
+    style: { fill: "#2E1E0E"; stroke: "#E67E22"; font-color: "#FBEFE3" }
+  }
+  other: {
+    style: { fill: "#0E3535"; stroke: "#1ABC9C"; font-color: "#E8F8F5" }
+  }
+  group: {
+    style: { fill: transparent; stroke: "#566573"; stroke-dash: 3; font-color: "#7F8C8D" }
+  }
+  event: {
+    style: { stroke: "#2ECC71"; font-color: "#9FE0B8" }
+  }
+  wire: {
+    style: { stroke: "#5DADE2"; font-color: "#9FC9E8" }
+  }
+  claim: {
+    style: { stroke: "#E67E22"; stroke-dash: 3; font-color: "#E0A96D" }
+  }
+}
+
+users: "users\nread a conversation, say into it, approve a tool" { class: person }
+
+# ---- clients: the three ways a conversation is read and spoken into ----
+clients: "Clients" {
+  class: group
+  svelte: "frontend-svelte\nbrowser · Svelte 5" { class: client }
+  leptos: "frontend-leptos\nbrowser · Rust/Leptos" { class: client }
+  helm: "helm\nterminal · ratatui" { class: client }
+}
+
+# ---- towerd: the fleet view ----
+towerd: "towerd\nfolds the bus into state, serves the clients" {
+  class: service
+  ws: "WebSocket + HTTP\nrows, conversations, GET /ref/{id}" { class: service }
+  views: "Views\nowns sqlite on its own thread" { class: service }
+}
+
+db: "sqlite\nconversations, agent facts, refs" { class: store }
+
+# ---- the bus: the only thing every part shares ----
+nats: "NATS\nconv · agent · approval subjects, JetStream, object store" { class: bus }
+
+# ---- worlds: where agents actually run ----
+worlds: "Worlds: a world is a place an agent can run, a machine or a container" {
+  class: group
+
+  mac: "world: mac" {
+    class: world
+    b1: "bridge (agent instance)\nhosts the agent, streams it onto the bus" { class: service }
+    b2: "bridge (agent instance)\nspawned by helm" { class: service }
+    csc: "claude-sdk-cli (agent instance)\na separate implementation of the same contract:\nits own terminal UI and its own agent, publishing straight onto the bus" { class: other }
+  }
+
+  box: "world: container-7f3" {
+    class: world
+    b3: "bridge (agent instance)\none of several sharing a world" { class: service }
+  }
+}
+
+anthropic: "Anthropic API" { class: external }
+
+# ---- people reach conversations through a client, never a world ----
+users -> clients.svelte { class: wire }
+users -> clients.leptos { class: wire }
+users -> clients.helm { class: wire }
+
+clients.svelte <-> towerd.ws: "WebSocket: events down, says up" { class: wire }
+clients.leptos <-> towerd.ws: "WebSocket: events down, says up" { class: wire }
+
+# helm is NATS-less: the bridge it spawns proxies everything onto the bus.
+clients.helm <-> worlds.mac.b2: "spawned as a child\ntwo OS pipes, no broker of its own" { class: wire }
+
+towerd.ws -> towerd.views { class: wire }
+towerd.views <-> db: "reads · writes in one transaction" { class: wire }
+
+nats <-> towerd: "replay + live events down\nsays, approvals up" { class: event }
+
+# ---- each world speaks for itself on the bus ----
+worlds.mac <-> nats: "agent.v1.mac: ready, pulse\nservice, drain" { class: event }
+worlds.box <-> nats: "agent.v1.container-7f3" { class: event }
+
+worlds.mac.b1 <-> anthropic: "the model conversation" { class: wire }
+worlds.mac.csc <-> anthropic: "talks to the model itself" { class: wire }
+users -> worlds.mac.csc: "reads and says in its own terminal UI, no towerd in the path" { class: wire }
+
+# ---- the claim: an instance attaches to a conversation ----
+worlds.mac.b1 -> nats: "attached: this instance now serves conversation X" { class: claim }
+worlds.box.b3 -> nats: "attached" { class: claim }
+worlds.mac.csc -> nats: "attached" { class: claim }
+
+note: "A conversation is the thing people look at: a durable transcript with an id, living on the bus and folded into towerd's sqlite. A world is a place an agent can run, a machine or a container, named by whoever deployed it and never centrally registered. An agent instance is one process's presence in a world, the pair (world, instanceId); it claims a conversation by attaching to it, and a conversation is served by at most one instance at a time.\nUsers never address a world. They open a conversation in a client and say into it; asking a different world to serve that conversation is how work migrates between machines. Whether an instance is still alive is nobody's declaration: each client derives it from the last pulse against its own clock.\nNothing here is privileged. claude-sdk-cli is its own terminal agent with its own UI, written before any of this, and it takes part by publishing the same subjects everything else does: towerd folds its conversations beside the rest and never knows the difference. That is what the contract buys, and it is the test of whether the contract is real.\nColours: green = our services, teal = a separate implementation of the same contract, blue = clients, cyan = the bus, orange = worlds, purple = storage, gold = people, red = external." {
+  near: bottom-center
+  shape: text
+  style.font-color: "#7F8C8D"
+}
