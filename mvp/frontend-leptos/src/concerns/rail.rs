@@ -228,9 +228,7 @@ impl Rail {
     }
 
     fn best_liveness(&self, conv: &str) -> Option<&Instance> {
-        let a = self.attachments.get(conv)?;
-        self.instances
-            .get(&format!("{}/{}", a.world, a.instance_id))
+        self.instance_of(self.attachments.get(conv)?)
     }
 
     /// The conversation's live attachment's cwd — "where is this
@@ -587,14 +585,11 @@ mod tests {
         assert_eq!(rail.live_cwd("unknown", 200_000), None);
     }
 
-    #[test]
-    fn live_cwd_degrades_to_the_bare_instance_id_when_the_claim_omits_world() {
-        // towerd stores an absent world as an empty string, so a conv-leaf
-        // claim published without one keys as "/inst-1" while that same
-        // instance's pulses key as "mac/inst-1". ws-spec is explicit that the
-        // map keys degrade to bare instanceId, not only the gates.
-        let mut rail = Rail::default();
-        rail.apply(&ServerMsg::Agents {
+    /// A reconnect snapshot whose claim omits its world (towerd stores absent
+    /// as an empty string) while the instance's own pulses carry one: the
+    /// claim keys as "/inst-1", the instance as "mac/inst-1".
+    fn worldless_claim_snapshot() -> ServerMsg {
+        ServerMsg::Agents {
             instances: vec![ws_types::WsAgentInstance {
                 world: "mac".into(),
                 instance_id: "inst-1".into(),
@@ -609,11 +604,33 @@ mod tests {
                 cwd: Some("/served/here".into()),
                 attached_ts: 100_000,
             }],
-        });
+        }
+    }
+
+    #[test]
+    fn live_cwd_degrades_to_the_bare_instance_id_when_the_claim_omits_world() {
+        // ws-spec is explicit that the map keys degrade to bare instanceId,
+        // not only the gates.
+        let mut rail = Rail::default();
+        rail.apply(&worldless_claim_snapshot());
 
         let actual = rail.live_cwd("a", 120_000);
 
         assert_eq!(actual, Some("/served/here"));
+    }
+
+    #[test]
+    fn verdict_degrades_to_the_bare_instance_id_when_the_claim_omits_world() {
+        // The dot on every rail row reads this. A claim that omits its world
+        // must still find the instance that is pulsing under one, or the
+        // agents this conversation is actually served by all read as nothing
+        // attached.
+        let mut rail = Rail::default();
+        rail.apply(&worldless_claim_snapshot());
+
+        let actual = rail.verdict("a", 120_000);
+
+        assert_eq!(actual, Some(Liveness::Alive));
     }
 
     #[test]
