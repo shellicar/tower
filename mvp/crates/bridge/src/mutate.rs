@@ -109,7 +109,13 @@ pub async fn run_append_file(input: &Value) -> (String, bool) {
         Ok(f) => f,
         Err(e) => return (format!("failed to open {path}: {e}"), true),
     };
-    match file.write_all(content.as_bytes()).await {
+    if let Err(e) = file.write_all(content.as_bytes()).await {
+        return (format!("failed to append to {path}: {e}"), true);
+    }
+    // tokio's File does its real I/O on a background task; without an
+    // explicit flush the write may still be in flight when the handle
+    // drops, and a prompt reader sees an empty file.
+    match file.flush().await {
         Ok(()) => (format!("appended {} B to {path}", content.len()), false),
         Err(e) => (format!("failed to append to {path}: {e}"), true),
     }
