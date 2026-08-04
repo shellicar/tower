@@ -1,3 +1,4 @@
 {"subject":"agent.v1.mac.requests.service","message":{"ts":"2026-07-07T21:00:00+10:00","from":{"kind":"orchestrator"},"conversationId":"conv-abc","cwd":"~/repos/tower"},"reply":{"accepted":true}}
 {"subject":"conv.v2.conv-abc.attachment.attached","message":{"ts":"2026-07-07T21:00:01+10:00","instanceId":"inst-1a2f","world":"mac","cwd":"~/repos/tower","tip":"m4","intervalS":30}}
-{"subject":"agent.v1.mac.requests.service","message":{"ts":"2026-07-07T21:00:30+10:00","from":{"kind":"orchestrator"},"conversationId":"conv-abc","cwd":"~/repos/tower"},"reply":{"rejected":true,"reason":"already_attached"}}
+{"subject":"agent.v1.mac.telemetry.pulse","message":{"ts":"2026-07-07T21:00:30+10:00","instanceId":"inst-1a2f","intervalS":30}}
+{"subject":"agent.v1.mac.requests.service","message":{"ts":"2026-07-07T21:00:45+10:00","from":{"kind":"orchestrator"},"conversationId":"conv-abc","cwd":"~/repos/tower"},"reply":{"rejected":true,"reason":"already_attached"}}
