@@ -1,159 +1,155 @@
-//! The stamp a binary answers "which commit am I?" with, computed at build
-//! time from git and baked in as environment variables.
+//! The stamp a binary answers "which commit am I?" with.
 //!
-//! A bare hash is only worth anything if it can be trusted, so `-dirty` is
-//! appended unless a `git status` actually ran and reported nothing: an
-//! untracked `.rs` compiles like any other file, and a git that could not be
-//! run has certified nothing. The status is scoped to the directories the
-//! crate really compiles (itself plus its path dependencies, transitively),
-//! so an edit to a crate this binary does not depend on leaves it clean.
+//! Cargo already knows what a binary was compiled from: after a build,
+//! `target/<profile>/<binary>.d` lists every local source file that went into
+//! it, path dependencies and patched crates included. So the build computes
+//! the stamp and hands it to a second build through the environment, and a
+//! build script's whole job is to receive it.
+//!
+//! A stamp reads clean only when a `git status` ran and reported nothing over
+//! that file list. An untracked file that is part of the build shows up as
+//! `??` and counts; one that is not part of the build cannot change the
+//! binary, so it does not.
+//!
+//! Cargo does not list `Cargo.lock` or the workspace manifest, which are
+//! equally part of what compiles, so they are added to the checked set here.
 
-use std::collections::BTreeSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Emit the stamp for the crate whose build script calls this, as
-/// `{prefix}_GIT_HASH` and `{prefix}_BUILD_TIME`.
+/// Called by a binary crate's build script. Receives the stamp the build
+/// handed it as `BUILDSTAMP_{prefix}`, and emits it as `{prefix}_GIT_HASH`.
 pub fn emit(prefix: &str) {
-    let manifest_dir = PathBuf::from(
-        std::env::var("CARGO_MANIFEST_DIR")
-            .expect("cargo sets CARGO_MANIFEST_DIR for a build script"),
-    );
-    let footprint = footprint(&manifest_dir);
+    let handed_in = format!("BUILDSTAMP_{prefix}");
+    println!("cargo:rerun-if-env-changed={handed_in}");
 
-    let hash = git_short_hash(&manifest_dir);
-    let dirty = hash.is_none() || !certified_clean(&manifest_dir, &footprint);
-    let stamp = format!(
-        "{}{}",
-        hash.as_deref().unwrap_or("unknown"),
-        if dirty { "-dirty" } else { "" }
-    );
+    let stamp = std::env::var(&handed_in)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(from_previous_build);
 
     println!("cargo:rustc-env={prefix}_GIT_HASH={stamp}");
     println!("cargo:rustc-env={prefix}_BUILD_TIME={}", build_time_utc());
-
-    // Naming any rerun-if-changed switches off cargo's default of re-running
-    // this script whenever a file in the package changes. So the source
-    // directories have to be named alongside the git paths, or an unstaged
-    // edit recompiles the code without recomputing the stamp, which is the
-    // exact case the dirty marker exists for.
-    for dir in &footprint {
-        println!("cargo:rerun-if-changed={}", dir.display());
-        println!(
-            "cargo:rerun-if-changed={}",
-            dir.join("Cargo.toml").display()
-        );
-    }
-    // Resolved, not assumed: this repo works in linked worktrees, where .git
-    // is a file and the worktree's own HEAD and index live elsewhere.
-    if let Some(git_dir) = git_dir(&manifest_dir) {
-        println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
-        println!("cargo:rerun-if-changed={}", git_dir.join("index").display());
-    }
 }
 
-/// The directories this crate compiles: its own, plus every path dependency
-/// reachable from it. Everything in this workspace is a path dependency, so
-/// the manifests answer this without a `cargo metadata` subprocess.
-pub fn footprint(manifest_dir: &Path) -> BTreeSet<PathBuf> {
-    let root = manifest_dir
-        .canonicalize()
-        .unwrap_or_else(|_| manifest_dir.to_path_buf());
-    let mut resolved = BTreeSet::new();
-    let mut pending = vec![root];
-    while let Some(dir) = pending.pop() {
-        if !resolved.insert(dir.clone()) {
-            continue;
-        }
-        for dep in dependency_paths(&dir) {
-            if let Ok(dep) = dep.canonicalize()
-                && !resolved.contains(&dep)
-            {
-                pending.push(dep);
-            }
-        }
-    }
-    resolved
-}
-
-fn dependency_paths(manifest_dir: &Path) -> Vec<PathBuf> {
-    let Ok(manifest) = fs::read_to_string(manifest_dir.join("Cargo.toml")) else {
-        return Vec::new();
+/// The stamp for the binary that `dep_info` describes: cargo's
+/// `target/<profile>/<binary>.d`, or the wasm target's own copy of it.
+pub fn stamp(dep_info: &Path) -> String {
+    // Absolute first: the walk up to the workspace root has to leave the
+    // caller's working directory, and a relative path runs out of ancestors
+    // before it gets there.
+    let Ok(dep_info) = std::path::absolute(dep_info) else {
+        return "unknown-dirty".to_string();
     };
+    let dep_info = dep_info.as_path();
+    let Some(workspace) = workspace_root(dep_info) else {
+        return "unknown-dirty".to_string();
+    };
+    // Resolved, because git reports its own toplevel resolved: an unresolved
+    // path through a symlinked parent reads as outside the repository, and
+    // git rejects the whole status call rather than that one pathspec.
+    let workspace = workspace.canonicalize().unwrap_or(workspace);
+    let Some(hash) = git(&workspace, &["rev-parse", "--short", "HEAD"]) else {
+        return "unknown-dirty".to_string();
+    };
+    let Some(repo) = git(&workspace, &["rev-parse", "--show-toplevel"]).map(PathBuf::from) else {
+        return format!("{hash}-dirty");
+    };
+    match checked_paths(dep_info, &workspace, &repo) {
+        Some(paths) if certified_clean(&repo, &paths) => hash,
+        _ => format!("{hash}-dirty"),
+    }
+}
+
+/// The files a `git status` has to answer for: what cargo recorded as
+/// compiled, plus the lockfile and workspace manifest it does not record.
+/// `None` when the dep-info is unreadable, which certifies nothing.
+fn checked_paths(dep_info: &Path, workspace: &Path, repo: &Path) -> Option<Vec<PathBuf>> {
+    let recorded = std::fs::read_to_string(dep_info).ok()?;
+    // The list carries whatever build scripts declared, which can include
+    // directories and paths outside the repository (a linked worktree's git
+    // internals, for one). Git rejects the whole call over an outside path,
+    // and a directory would drag in files that are not compiled.
+    let mut paths: Vec<PathBuf> = compiled_files(&recorded)
+        .into_iter()
+        .map(|path| path.canonicalize().unwrap_or(path))
+        .filter(|path| path.starts_with(repo) && !path.is_dir())
+        .collect();
+    paths.push(workspace.join("Cargo.lock"));
+    paths.push(workspace.join("Cargo.toml"));
+    Some(paths)
+}
+
+fn compiled_files(dep_info: &str) -> Vec<PathBuf> {
+    dep_info
+        .lines()
+        .filter_map(dependency_list)
+        .flat_map(split_escaped)
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// The right-hand side of a dep-info line: `<output>: <file> <file>`. The
+/// colon that ends the output is the one followed by whitespace, which the
+/// colon in a Windows drive letter never is.
+fn dependency_list(line: &str) -> Option<&str> {
+    let bytes = line.as_bytes();
+    let end = (0..bytes.len())
+        .find(|&i| bytes[i] == b':' && bytes.get(i + 1).is_none_or(|c| c.is_ascii_whitespace()))?;
+    Some(&line[end + 1..])
+}
+
+/// Whitespace separates paths, and a backslash before a space escapes it.
+/// A backslash anywhere else is a Windows path separator, not an escape.
+fn split_escaped(list: &str) -> Vec<String> {
     let mut paths = Vec::new();
-    let mut in_dependencies = false;
-    for line in manifest.lines().map(str::trim) {
-        if let Some(header) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
-            in_dependencies = is_dependencies_header(header.trim());
-            continue;
+    let mut current = String::new();
+    let mut chars = list.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&' ') => {
+                current.push(' ');
+                chars.next();
+            }
+            c if c.is_whitespace() => {
+                if !current.is_empty() {
+                    paths.push(std::mem::take(&mut current));
+                }
+            }
+            c => current.push(c),
         }
-        if !in_dependencies || line.starts_with('#') {
-            continue;
-        }
-        if let Some(path) = path_value(line) {
-            paths.push(manifest_dir.join(path));
-        }
+    }
+    if !current.is_empty() {
+        paths.push(current);
     }
     paths
 }
 
-/// `[dependencies]`, `[dependencies.wire]`, and the target-specific forms,
-/// but never dev- or build-dependencies, which no shipped binary contains.
-/// Their hyphen is what excludes them: only a `.` before `dependencies` is a
-/// table separator.
-fn is_dependencies_header(header: &str) -> bool {
-    header == "dependencies"
-        || header.starts_with("dependencies.")
-        || header.ends_with(".dependencies")
-        || header.contains(".dependencies.")
+/// The directory holding `Cargo.lock`, walking up from the dep-info file.
+fn workspace_root(dep_info: &Path) -> Option<PathBuf> {
+    dep_info
+        .ancestors()
+        .skip(1)
+        .find(|dir| dir.join("Cargo.lock").is_file())
+        .map(Path::to_path_buf)
 }
 
-fn path_value(line: &str) -> Option<&str> {
-    let mut rest = line;
-    loop {
-        let key = rest.find("path")?;
-        let own_key = key == 0
-            || !matches!(rest.as_bytes()[key - 1], b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-');
-        rest = &rest[key + "path".len()..];
-        if !own_key {
-            continue;
-        }
-        let Some(value) = rest.trim_start().strip_prefix('=') else {
-            continue;
-        };
-        let Some(quoted) = value.trim_start().strip_prefix('"') else {
-            continue;
-        };
-        if let Some(end) = quoted.find('"') {
-            return Some(&quoted[..end]);
-        }
-    }
-}
-
-fn certified_clean(dir: &Path, footprint: &BTreeSet<PathBuf>) -> bool {
+/// Only a status that ran and reported nothing certifies clean.
+fn certified_clean(repo: &Path, paths: &[PathBuf]) -> bool {
     let mut status = Command::new("git");
     status
-        .current_dir(dir)
+        .current_dir(repo)
         .arg("status")
         .arg("--porcelain")
         .arg("--");
-    for path in footprint {
+    for path in paths {
         status.arg(path);
     }
     match status.output() {
         Ok(out) if out.status.success() => out.stdout.is_empty(),
         _ => false,
     }
-}
-
-fn git_short_hash(dir: &Path) -> Option<String> {
-    git(dir, &["rev-parse", "--short", "HEAD"])
-}
-
-fn git_dir(dir: &Path) -> Option<PathBuf> {
-    git(dir, &["rev-parse", "--absolute-git-dir"]).map(PathBuf::from)
 }
 
 fn git(dir: &Path, args: &[&str]) -> Option<String> {
@@ -167,6 +163,25 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
     }
     let value = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (!value.is_empty()).then_some(value)
+}
+
+/// No stamp was handed in, so this is a bare `cargo build`. The previous
+/// build's dep-info still names what this binary compiles, which is at worst
+/// one build out of date and beats stamping nothing at all.
+fn from_previous_build() -> String {
+    match dep_info_beside_out_dir() {
+        Some(dep_info) => stamp(&dep_info),
+        None => "unknown-dirty".to_string(),
+    }
+}
+
+/// `OUT_DIR` is `<profile-dir>/build/<pkg>-<hash>/out`, so the dep-info sits
+/// three levels up under the binary's name.
+fn dep_info_beside_out_dir() -> Option<PathBuf> {
+    let out_dir = std::env::var_os("OUT_DIR")?;
+    let profile_dir = Path::new(&out_dir).ancestors().nth(3)?;
+    let package = std::env::var("CARGO_PKG_NAME").ok()?;
+    Some(profile_dir.join(format!("{package}.d")))
 }
 
 /// From Rust, not a `date` subprocess: `date -u` is not a program on Windows
@@ -203,118 +218,47 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 }
 
 #[cfg(test)]
-mod is_dependencies_header {
-    use super::is_dependencies_header;
+mod compiled_files {
+    use super::compiled_files;
+    use std::path::PathBuf;
 
     #[test]
-    fn accepts_the_dependencies_table() {
-        let expected = true;
+    fn reads_the_files_after_the_output() {
+        let expected = vec![
+            PathBuf::from("/repo/app/build.rs"),
+            PathBuf::from("/repo/app/src/main.rs"),
+        ];
 
-        let actual = is_dependencies_header("dependencies");
+        let actual =
+            compiled_files("/repo/target/debug/app: /repo/app/build.rs /repo/app/src/main.rs\n");
 
         assert_eq!(actual, expected);
     }
 
     #[test]
-    fn accepts_a_single_dependency_table() {
-        let expected = true;
+    fn keeps_a_windows_drive_letter_out_of_the_split() {
+        let expected = vec![PathBuf::from(r"C:\repo\app\src\main.rs")];
 
-        let actual = is_dependencies_header("dependencies.wire");
-
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn accepts_a_target_specific_dependencies_table() {
-        let expected = true;
-
-        let actual = is_dependencies_header("target.'cfg(target_arch = \"wasm32\")'.dependencies");
+        let actual =
+            compiled_files("C:\\repo\\target\\debug\\app.exe: C:\\repo\\app\\src\\main.rs\n");
 
         assert_eq!(actual, expected);
     }
 
     #[test]
-    fn rejects_dev_dependencies() {
-        let expected = false;
+    fn unescapes_a_space_in_a_path() {
+        let expected = vec![PathBuf::from("/repo/my dir/main.rs")];
 
-        let actual = is_dependencies_header("dev-dependencies");
-
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn rejects_target_specific_dev_dependencies() {
-        let expected = false;
-
-        let actual = is_dependencies_header("target.'cfg(unix)'.dev-dependencies");
+        let actual = compiled_files("/repo/target/debug/app: /repo/my\\ dir/main.rs\n");
 
         assert_eq!(actual, expected);
     }
 
     #[test]
-    fn rejects_build_dependencies() {
-        let expected = false;
+    fn ignores_a_line_with_no_dependencies() {
+        let expected: Vec<PathBuf> = Vec::new();
 
-        let actual = is_dependencies_header("build-dependencies");
-
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn rejects_an_unrelated_table() {
-        let expected = false;
-
-        let actual = is_dependencies_header("package");
-
-        assert_eq!(actual, expected);
-    }
-}
-
-#[cfg(test)]
-mod path_value {
-    use super::path_value;
-
-    #[test]
-    fn reads_the_path_of_an_inline_table_dependency() {
-        let expected = Some("../wire");
-
-        let actual = path_value("wire = { path = \"../wire\" }");
-
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn reads_the_path_when_other_keys_precede_it() {
-        let expected = Some("../ws-types");
-
-        let actual = path_value("ws-types = { version = \"0.1\", path = \"../ws-types\" }");
-
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn reads_a_bare_path_key_of_a_single_dependency_table() {
-        let expected = Some("../bridge");
-
-        let actual = path_value("path = \"../bridge\"");
-
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn ignores_a_key_that_merely_ends_in_path() {
-        let expected = None;
-
-        let actual = path_value("search-path = \"../elsewhere\"");
-
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn ignores_a_dependency_without_a_path() {
-        let expected = None;
-
-        let actual = path_value("serde = { version = \"1\", features = [\"derive\"] }");
+        let actual = compiled_files("/repo/app/src/main.rs:\n");
 
         assert_eq!(actual, expected);
     }

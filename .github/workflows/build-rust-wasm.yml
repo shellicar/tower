@@ -35,8 +35,19 @@ jobs:
           workspaces: mvp
       - run: rustup target add wasm32-unknown-unknown
       - uses: jetli/trunk-action@v0.5.0
-      - run: trunk build --release
+      # Two builds, as for the native binaries. The stamp comes from the wasm
+      # target's own dep-info: the native build of this crate compiles none of
+      # its wasm-only modules, so its record is the wrong one.
+      - name: Build
+        shell: bash
         working-directory: mvp/${{ inputs.package }}
+        run: |
+          set -eu
+          trunk build --release
+          STAMP=$(cargo run -q -p buildstamp --manifest-path ../Cargo.toml -- ../target/wasm32-unknown-unknown/release/tower-frontend-leptos.d)
+          echo "stamping ${{ inputs.package }} as $STAMP"
+          export "BUILDSTAMP_FRONTEND_LEPTOS=$STAMP"
+          trunk build --release
       - name: Package
         shell: bash
         env:

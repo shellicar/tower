@@ -1,7 +1,17 @@
 # Named verbs for the workspace. `just` with no argument lists them.
 
-# Build every crate.
+# Build every crate, stamped. Two builds: the first records what each binary
+# compiles (target/<profile>/<binary>.d), the second bakes in the stamp
+# computed from it. The second only recompiles the crates whose stamp
+# actually changed, and nothing at all when none did.
 build:
+    #!/bin/sh
+    set -eu
+    cargo build --workspace
+    BUILDSTAMP_BRIDGE=$(cargo run -q -p buildstamp -- target/debug/bridge.d)
+    BUILDSTAMP_TOWERD=$(cargo run -q -p buildstamp -- target/debug/towerd.d)
+    BUILDSTAMP_HELM=$(cargo run -q -p buildstamp -- target/debug/helm.d)
+    export BUILDSTAMP_BRIDGE BUILDSTAMP_TOWERD BUILDSTAMP_HELM
     cargo build --workspace
 
 # Test every crate.
@@ -64,10 +74,17 @@ dev:
     ./dev.sh
 
 # Build the webapps towerd serves. dist/ is gitignored, so a fresh clone
-# runs this once (or uses `just dev` and never needs it).
+# runs this once (or uses `just dev` and never needs it). The leptos stamp
+# comes from the wasm target's own dep-info: the native build of that crate
+# compiles none of its wasm-only modules, so its list is the wrong one.
 frontend:
+    #!/bin/sh
+    set -eu
     cd frontend-svelte && pnpm install && pnpm build
-    cd frontend-leptos && trunk build
+    cd ../frontend-leptos && trunk build
+    BUILDSTAMP_FRONTEND_LEPTOS=$(cargo run -q -p buildstamp --manifest-path ../Cargo.toml -- ../target/wasm32-unknown-unknown/debug/tower-frontend-leptos.d)
+    export BUILDSTAMP_FRONTEND_LEPTOS
+    trunk build
 
 # Title conversations from their own content, through bridge's model client.
 # Dry run unless --apply. Compare a sample without writing:

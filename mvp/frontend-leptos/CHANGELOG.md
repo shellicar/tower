@@ -17,3 +17,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - An agent whose claim omits its world reads as alive on the rail.
 - The app logs its own build to the browser console on load: version, the commit it was built from (suffixed -dirty when the tree it compiled had uncommitted or untracked changes), and the build time, so a stale cached bundle is visible.
+- The app logs its own build to the browser console on load: version, the commit it was built from (suffixed -dirty when any file it was compiled from was uncommitted, staged or untracked), and the build time, so a stale cached bundle is visible.
