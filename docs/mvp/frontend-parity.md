@@ -263,10 +263,10 @@ Ordered by what blocks what, not by size. Each item names the gap it closes.
    history pays the uncapped-DOM tax the whole CLAUDE.md "known follow-up" and the 21 Jul perf investigation were
    about. Landing this first is also what makes item 4 meaningful (prediction is an optimisation on windowing, not a
    substitute for it).
-4. **Leptos: port canvas height-prediction.** Depends on 3. Lower urgency than 3 alone would suggest, because the
+4. **Leptos: port canvas height-prediction.** Depends on 3. Lower urgency than 3 alone would suggest: the
    Svelte-side experience shows this bought a narrower real-world win than hoped (most
-   messages in a real conversation aren't pure-text, so most rows still hit the ResizeObserver fallback), worth
-   doing for parity but not worth over-investing in relative to 3.
+   messages in a real conversation aren't pure-text, so most rows still hit the ResizeObserver fallback).
+   Worth doing for parity but not worth over-investing in relative to 3.
 5. **Leptos: port markdown rendering.** Independent of 3/4 (it changes what a block renders, not how many are
    mounted). Could be done in parallel with either, ordered after the render-surface work only because it's a
    smaller, more self-contained slice with a ready-made test list to port (`markdown.test.ts`'s hostile-payload

@@ -1,6 +1,6 @@
 # Roadmap: CLI to tower v1
 
-How to get from the current state, the fleet run by hand over tmux, to tower v1,
+How to get from the current state (the fleet run by hand over tmux) to tower v1,
 in stages that are each independently valuable and none of which depend on the
 one after. Read alongside `planning/project-state.md` (where the design stands) and
 `planning/orchestration-layer.md` (the three-concern split this roadmap keeps honest).
@@ -26,8 +26,8 @@ send-keys. Tower is the central management plane. `tmux attach` is ssh, and it s
    ever genuinely demands removing a capability, that is a real decision made at the
    fork. What this principle rules out is capability disappearing as a side effect.
 
-2. **The mission model is data, not code.** Per the fleet VISION: the structure,
-   meaning missions, roles and phases, is compensation for substrate and economic constraints,
+2. **The mission model is data, not code.** Per the fleet VISION: the structure
+   (missions, roles, phases) is compensation for substrate and economic constraints,
    and is expected to change as those move. A mission is a way to coordinate multiple
    LLM sessions toward a goal; that is the whole definition the apps may rely on.
    The daemon routes on opaque signals; the dashboard renders what arrives; what
@@ -47,7 +47,7 @@ send-keys. Tower is the central management plane. `tmux attach` is ssh, and it s
    on demand, per principle 1.
 
 5. **Mission kinds.** Software-development missions, fleet/AI-infrastructure
-   missions, environment missions (dotfiles, tmux), the per-server tmux/VS Code
+   missions, environment missions (dotfiles, tmux). The per-server tmux/VS Code
    split is this taxonomy made physical. "Repo + branch + PR" is one kind of mission,
    not the definition. Queue views and the review surface must not assume every
    mission ends in a diff.
@@ -58,7 +58,7 @@ the one place to see what is going on. The AIDE leaves room for the assistant; i
 does not implement it.
 
 Tower is also not the only view. Any consumer of the same events is a peer of the
-dashboard, an SDLC tool making the agent a first-class concern on a work item
+dashboard. An SDLC tool making the agent a first-class concern on a work item
 (lifecycle events as PBI comments, a status badge, a click-through to the tower
 panel) is the canonical example. That costs a subscriber, not a redesign; nothing
 about tower's view is privileged.
@@ -159,16 +159,16 @@ static binary: the distributable client app exists.
 ### Stage 6. Tower proper
 
 The daemon takes over spawning from tmux (control plane). Missions become first-class
-in the dashboard: queue and activity views, verdict routing, and the review surface,
-per-mission debrief, diff, and verdict actions, with "open in editor" as the
+in the dashboard: queue and activity views, verdict routing, and the review surface
+(per-mission debrief, diff, and verdict actions), with "open in editor" as the
 attention-slaved escape hatch.
 
 *Value: the AIDE surface, agent-based rather than file-based.*
 *Retires: tmux as orchestrator. Never tmux as terminal, and never the attach
 fallback.*
 
-This stage is not the summit; it is the trailhead of the next leg. The full AIDE,
-meaning the review surface matured, the bookie and the assistant's window, starts here and
+This stage is not the summit; it is the trailhead of the next leg. The full AIDE (the
+review surface matured, the bookie, the assistant's window) starts here and
 gets its own document when it is real.
 
 ## What this roadmap does not decide

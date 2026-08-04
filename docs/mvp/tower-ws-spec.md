@@ -22,7 +22,7 @@ Two kinds of traffic, mirroring the wire's own split:
 ## Connection lifecycle
 
 1. Client connects to `/ws`. No auth in v1 (towerd binds locally).
-2. towerd sends `list`, the full row snapshot, once, unasked.
+2. towerd sends `list` (the full row snapshot) once, unasked.
 3. From then on `row` events arrive for every conversation, forever.
 4. The client `open`s any number of conversations; each answers with
    `conversation` (the catch-up) and starts that conversation's `message` /
@@ -48,7 +48,7 @@ A request towerd does not recognise is still answered: `error` with reason
 ```
 
 Subscribe to one conversation's content. `after` is the client's high-water
-mark, the largest message `ts` it already holds, and `null` means "from the
+mark (the largest message `ts` it already holds), and `null` means "from the
 start". The response is `conversation`, carrying every stored message newer
 than `after`; from then on the conversation's `message` and `streaming` events
 flow until `close` or disconnect. `open` is additive (any number of
@@ -245,7 +245,7 @@ The catch-up: every stored message with `ts` greater than the request's
 `after`, in `ts` order. Each message carries all three ids, `id` (message),
 `query` and `turn`, as every message does everywhere in this system; plus
 `role`, the `from` object verbatim from the wire (**absent for a
-`tool_result`**, since a mechanical delivery carries no sender and is never fabricated),
+`tool_result`**, since a mechanical delivery carries no sender; it is never fabricated),
 `content` blocks verbatim
 (the client renders known block types, skips unknown ones), and `ts`. The
 boundary may overlap what the client already holds when `after` is a shared
@@ -297,7 +297,7 @@ shown, never branched on beyond display. Same gating as `message`: only for
 open conversations.
 
 **Query state is the client's knowledge, and unknown is a real state.**
-towerd stores no query state, since this event is forwarded rather than folded, so a
+towerd stores no query state (this event is forwarded, not folded), so a
 client knows a query is live only by evidence from its own connection: its
 own `say_result` minted the query, or activity arrived, and no closure has.
 After a fresh connect or reconnect the state is **unknown**, and the client
@@ -454,7 +454,7 @@ retraction: upsert by `conv`, keyed however suits (a plain set of stale
 convs is enough, since only the current state matters).
 
 There is no dedicated ack message: opening a conversation (`open`) is the
-ack, "I have this open, therefore I saw it", the same mechanism that gates
+ack ("I have this open, therefore I saw it"), the same mechanism that gates
 content, nothing new to send. A conversation already open when its episode
 would otherwise start acks itself the instant the qualifying content lands,
 before the timer ever gets a chance to fire, so a conversation you're
@@ -640,7 +640,7 @@ materialises it is entirely the client's policy.** Fetch eagerly and bake a
 facts, never rendering mechanism. References are content-addressed, so any
 constructed URL is immutable and cacheable forever.
 
-Everything else about the message, its ids, its position and the tip, is
+Everything else about the message (its ids, its position, the tip) is
 unaffected: externalisation never falsifies position, and a client that never
 fetches a single ref still reads the whole dialogue.
 
@@ -651,7 +651,7 @@ POST /attachment           body = the bytes, Content-Type = the media type
   → 200 { "id": "att-7c9e…", "mediaType": "image/png", "size": 48213 }
 ```
 
-Upload happens over HTTP, keeping the WS light, and eagerly, at attach time:
+Upload happens over HTTP (keeping the WS light) and eagerly, at attach time:
 the client uploads when the user picks the file, holds the returned reference,
 and includes it in the eventual `say`'s `attachments`. towerd puts the bytes
 into the deployment's **transit** object store (conversation.md: transit,

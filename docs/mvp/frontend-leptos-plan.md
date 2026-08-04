@@ -102,7 +102,7 @@ Five concerns now, same contract, ported to Leptos signals instead of
    find/select/right-click/inspect come back? Idle CPU/memory against the
    egui numbers in `frontend-comparison.md` (~175MB/several % CPU) and the
    Svelte numbers (~55MB/near-zero). Tofu-glyph problem should simply not
-   exist (real text nodes), to confirm.
+   exist (real text nodes). Confirm.
 4. **Survival under careless extension**: same build-in-sequence method:
    add conversation, then approvals, then upload, each as "a concern + wiring
    in the root," and note where the compiler catches a mistake versus where it

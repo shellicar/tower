@@ -76,7 +76,7 @@ often a view recomputes) is a per-concern cadence detail (rail ~30s, approvals
 ~1s) and stays local to each concern.
 
 *Not taken:* reading `now()` inline (today's `Date.now()` in getters), because the
-verdicts become untestable. A single shared global clock, a thread back through
+verdicts become untestable. A single shared global clock: a thread back through
 the walls, and unnecessary since the cadences already differ per concern. The
 split matters: **ticker = cadence (local); clock = the value the verdict reads
 (injected, testable).**
