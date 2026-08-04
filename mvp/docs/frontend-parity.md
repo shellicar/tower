@@ -6,7 +6,7 @@ doc is how that rule gets enforced when it's violated — each gap here is
 precise enough to hand to a session as a porting task on its own. Cross items
 off (`[x]`) as they close; don't rewrite the doc, update it.
 
-Method: walked `docs/mvp/tower-ws-spec.md` frame by frame (does each side
+Method: walked `mvp/docs/tower-ws-spec.md` frame by frame (does each side
 parse it, fold it, render it, act on it), then the component surface (panel,
 rail, approvals, tabs/view, composer, usage line, unread/stale, title/tag
 editing, attachments, refs), reading both concern layers (`lib/concerns/*.svelte.ts`
@@ -73,7 +73,7 @@ side by side. Derived from code, not from any prior claim about what's missing.
   cover the full frame set actually in use: `layout`/`set_layout`/`layout_set`, `dismiss_approval`/
   `dismiss_attachment`/`attachment_dismissed`, `stale_conversations`/`stale_conversation` are present in both —
   no wire-type drift between the two frontends. **Not a gap.**
-- `docs/mvp/tower-ws-spec.md` itself does not document any of those frames (tabs/layout, dismiss, stale/unread) —
+- `mvp/docs/tower-ws-spec.md` itself does not document any of those frames (tabs/layout, dismiss, stale/unread) —
   the doc is stale relative to both frontends' code. Outside this doc's scope (it compares the two frontends,
   not frontend-vs-doc), but worth recording separately, since the spec was taken to be current.
 
@@ -180,7 +180,7 @@ side by side. Derived from code, not from any prior claim about what's missing.
 
   ~~**`mvp/frontend-svelte/src/lib/core/uploads.ts`'s `uploadAttachment` never reads or carries `bucket`.**~~ It builds the
   `AttachmentRef` sent in a `say` from only `{ id, mediaType, size }` off the `POST /attachment` response, and
-  `types.ts`'s `AttachmentRef.source` type doesn't even have a `bucket` field to hold one. `docs/mvp/tower-ws-spec.md`'s
+  `types.ts`'s `AttachmentRef.source` type doesn't even have a `bucket` field to hold one. `mvp/docs/tower-ws-spec.md`'s
   normative zod schema requires it, not optionally: `say.attachments[].source` is
   `z.looseObject({ type, id, bucket: z.string(), mediaType, size })`, and the spec prose is explicit — "a servicer
   resolves against the bucket the block names, never a guess from its own deployment config; a block naming no

@@ -1,4 +1,4 @@
-//! concerns/conversation — the open conversations' owned store (docs/mvp/
+//! concerns/conversation — the open conversations' owned store (mvp/docs/
 //! frontend-architecture.md). Owns a keyed map of open conversations and
 //! their content, folds its OWN slices of the wire (its convs' messages,
 //! streaming, query closures), and drives say/cancel.

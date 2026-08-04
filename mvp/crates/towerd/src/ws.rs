@@ -1,4 +1,4 @@
-//! The browser boundary: ClientMsg/ServerMsg per docs/mvp/tower-ws-spec.md,
+//! The browser boundary: ClientMsg/ServerMsg per mvp/docs/tower-ws-spec.md,
 //! and the per-socket session loop. One task per socket; a dropped socket
 //! ends everything, reconnect = fresh session.
 

@@ -2,13 +2,13 @@
 
 ## Read first
 
-- `docs/mvp/frontend-architecture.md` — the architecture both existing frontends
+- `mvp/docs/frontend-architecture.md` — the architecture both existing frontends
   hold constant: transport, concerns (rail, conversations, approvals, view),
   fan-out vs subscribe, the read/write split. This build holds it constant too.
-- `docs/mvp/frontend-comparison.md` — the Svelte-vs-egui write-up, merged to
+- `mvp/docs/frontend-comparison.md` — the Svelte-vs-egui write-up, merged to
   `main`. Read the whole thing before starting; this plan assumes its four
   axes and doesn't restate them.
-- `docs/mvp/tower-ws-spec.md` — the wire contract to build against.
+- `mvp/docs/tower-ws-spec.md` — the wire contract to build against.
 - `mvp/crates/ws-types` — the shared `ServerMsg`/`ClientMsg` types. Reuse
   verbatim; do not hand-roll a parallel type file (that's the mistake the
   Svelte side lives with).
@@ -132,6 +132,6 @@ Five concerns now, same contract, ported to Leptos signals instead of
 
 The existing `frontend-comparison.md` is the model: axis by axis, with
 verdicts, not a build log. Whatever gets written after this build should sit
-next to it (`docs/mvp/frontend-comparison-leptos.md` or folded into the
+next to it (`mvp/docs/frontend-comparison-leptos.md` or folded into the
 existing doc as a third column) — Stephen reads these to decide what Tower
 actually ships with, so the reasoning matters more than the code.

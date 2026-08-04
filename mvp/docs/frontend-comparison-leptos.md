@@ -1,6 +1,6 @@
 # Leptos: a third read on what the language and the render surface buy
 
-`mvp/frontend-leptos` is the third build against docs/mvp/frontend-architecture.md,
+`mvp/frontend-leptos` is the third build against mvp/docs/frontend-architecture.md,
 alongside the Svelte control (`mvp/frontend-svelte`) and the egui twin (`mvp/frontend-rs`,
 written up in `frontend-comparison.md`). Same slice: the staleness rail, one
 conversation panel with say/cancel/attach, the approvals view. This build asks the

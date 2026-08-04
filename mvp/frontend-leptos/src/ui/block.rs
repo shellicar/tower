@@ -4,7 +4,7 @@
 //! a plain toggle button (Svelte's shape, ruled by the SC — no disclosure
 //! triangle, one-line ellipsis preview), thinking and unknown blocks fold to
 //! a summary line via `<details>`, the primary render lever for per-message
-//! collapsing (docs/mvp/tower-v1-design.md, weight-as-refs note).
+//! collapsing (mvp/docs/tower-v1-design.md, weight-as-refs note).
 
 use leptos::prelude::*;
 use serde_json::Value;

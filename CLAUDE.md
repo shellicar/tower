@@ -9,8 +9,8 @@ The rest of the repo is specs (live contract), the planning design corpus (see
 below — not archive), and the poc.
 
 `frontend-leptos/` is a second, comparison build of the same browser client
-(docs/mvp/frontend-leptos-plan.md, frontend-comparison-leptos.md) — DOM-based
-Rust/Leptos against the wire alone (`docs/mvp/tower-ws-spec.md`), isolating
+(mvp/docs/frontend-leptos-plan.md, frontend-comparison-leptos.md) — DOM-based
+Rust/Leptos against the wire alone (`mvp/docs/tower-ws-spec.md`), isolating
 what a Rust renderer buys over Svelte. It is not a lagging prototype: the two
 track ONE feature set. A change to what a conversation panel shows or does
 (a new usage-line field, an attachment affordance, a status badge) lands in
@@ -38,8 +38,8 @@ port (gpui-pretext on crates.io claims to be one — unverified).
 Pointers, not restatements. The doc wins where code and doc disagree;
 deviations land in the doc first, then the code.
 
-- `docs/mvp/tower-v1-design.md` — the architecture: seams, schema, decisions.
-- `docs/mvp/tower-ws-spec.md` — the browser contract. The frontend builds
+- `mvp/docs/tower-v1-design.md` — the architecture: seams, schema, decisions.
+- `mvp/docs/tower-ws-spec.md` — the browser contract. The frontend builds
   against this document alone.
 - `docs/spec/` — the wire contract (core, nats, conversation, approval,
   agent, content, conformance, scenarios); `docs/spec/README.md` indexes it.
@@ -54,10 +54,12 @@ deviations land in the doc first, then the code.
   must/want/NO scope), `sdk-feature-inventory.md`, `sdk-shape.md`,
   `tool-philosophy.md`, `sdk-tools.md`, `cli-features.md` (the SDK/agent
   reference), `code-architecture.md`, `orchestration-layer.md`,
-  `multi-transport-architecture.md`, `tui-architecture.md`, `project-state.md`,
-  `landscape.md` (what else exists: Synadia's NATS agent protocol, Open Agent
-  Spec, herdr, firstmate; what each traded away, and what tower should take).
+  `multi-transport-architecture.md`, `tui-architecture.md`, `project-state.md`.
   Don't maintain it; don't guess past it either.
+- `docs/design/` — live design work, maintained; the opposite of the corpus
+  above. `landscape.md` (what else exists: Synadia's NATS agent protocol, Open
+  Agent Spec, herdr, firstmate; what each traded away, and what tower should
+  take).
 - Spec changes ride their own PR, never bundled with code. One owner per
   document per change; implementation PRs build to merged spec text.
 

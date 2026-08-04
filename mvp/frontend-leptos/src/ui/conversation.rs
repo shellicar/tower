@@ -1,11 +1,11 @@
 //! The open conversation panel: reads `conversations`, `approvals`, and
 //! `rail` (the header title, `lastKind`/staleness — the read/write split
-//! Rust gives for free, docs/mvp/frontend-architecture.md). Owns its own
+//! Rust gives for free, mvp/docs/frontend-architecture.md). Owns its own
 //! local UI state (the composer draft, attachment chips, the scroll anchor,
 //! the title editor) — a component's state, per the architecture doc, never
 //! a concern's. Tracks mvp/frontend-svelte's ConversationPanel.svelte feature for
 //! feature, including usage/pricing and attachments — the slice grew past
-//! docs/mvp/frontend-leptos-plan.md's original frontend-rs-only scope once
+//! mvp/docs/frontend-leptos-plan.md's original frontend-rs-only scope once
 //! the plan's question 2 (full Svelte parity) was answered. Tabs live in
 //! `ui/tabs.rs` and the `view` concern instead.
 //!
@@ -167,7 +167,7 @@ fn media_label(v: &Value) -> String {
 /// The conversation's cost surface: towerd ships the token facts, priced
 /// here ($ and context %) — the client owns that policy, same split as
 /// mvp/frontend-svelte's `ConversationPanel.svelte`. Model leads the line: it's a
-/// per-conversation fact (a spawn may name its own, docs/mvp/bridge-stdio-
+/// per-conversation fact (a spawn may name its own, mvp/docs/bridge-stdio-
 /// spec.md), read off THIS conversation's own usage snapshot — never a
 /// host-wide default — same footing claude-sdk-cli gives it front and
 /// centre in its own status line.

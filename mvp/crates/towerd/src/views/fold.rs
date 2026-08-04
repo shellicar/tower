@@ -634,7 +634,7 @@ impl Views {
         // (input + cache, the real point-in-time snapshot) and an output-
         // only frame that reports outputTokens alone, with input/cache all
         // zero. `context_tokens` is a snapshot, never a running sum
-        // (docs/mvp/tower-ws-spec.md: "the latest turn's"), so the output-
+        // (mvp/docs/tower-ws-spec.md: "the latest turn's"), so the output-
         // only frame's zero must never overwrite the real value — the same
         // guard claude-sdk-cli's own StatusState.update() carries locally
         // ("the output frame would otherwise clobber it to zero").

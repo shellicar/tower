@@ -1,4 +1,4 @@
-//! concerns/rail — the staleness rail's owned store (docs/mvp/
+//! concerns/rail — the staleness rail's owned store (mvp/docs/
 //! frontend-architecture.md), ported verbatim from frontend-rs's rail.rs: the
 //! fold logic is render-framework-agnostic, only the wrapper at the
 //! composition root differs (a `RwSignal<Rail>` instead of a plain field
