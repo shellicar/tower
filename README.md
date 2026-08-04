@@ -58,6 +58,8 @@ not discardable either: it holds the reasoning you would otherwise guess at.
 
 - [`docs/design/landscape.md`](docs/design/landscape.md): what else exists,
   what each project traded away, and what tower should take.
+- [`docs/design/lookout.md`](docs/design/lookout.md): the daemon that watches
+  conversations and decides what reaches a handler, and the limits it holds.
 
 - [`docs/roadmap.md`](docs/roadmap.md): CLI to tower v1, in stages that are
   each independently valuable.
