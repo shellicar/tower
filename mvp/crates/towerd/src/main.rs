@@ -1,4 +1,4 @@
-//! towerd: ingest → views → web (docs/mvp/tower-v1-design.md). Startup order
+//! towerd: ingest → views → web (mvp/docs/tower-v1-design.md). Startup order
 //! is the design's: open db → read cursor → connect broker → spawn loops.
 //! Shutdown = crash: transactions make them the same path.
 

@@ -1,5 +1,5 @@
 //! ui — one Leptos component per render surface, each reading only the
-//! concern(s) it needs (docs/mvp/frontend-architecture.md: "a component
+//! concern(s) it needs (mvp/docs/frontend-architecture.md: "a component
 //! reads a concern... and owns only local UI state"). `app.rs` stays the
 //! composition root: it owns the concerns and the transport and wires these
 //! together; it renders none of the detail itself.

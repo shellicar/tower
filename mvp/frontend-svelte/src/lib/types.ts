@@ -1,4 +1,4 @@
-// The WS contract (docs/mvp/tower-ws-spec.md) as types. This file and the
+// The WS contract (mvp/docs/tower-ws-spec.md) as types. This file and the
 // spec are the frontend's only coupling to towerd — never its code.
 
 export type Millis = number;

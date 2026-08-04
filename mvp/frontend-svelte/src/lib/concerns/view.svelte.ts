@@ -1,4 +1,4 @@
-// concerns/view.svelte.ts — the view concern (docs/mvp/frontend-architecture.md).
+// concerns/view.svelte.ts — the view concern (mvp/docs/frontend-architecture.md).
 // It owns the shell's tabs, each tab's filter/group config, its open-set, and
 // whether the approvals view is showing.
 //

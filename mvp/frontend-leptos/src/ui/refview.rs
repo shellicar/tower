@@ -2,7 +2,7 @@
 //! supplies facts only (id, size, hint); materialising it is entirely this
 //! client's policy: nothing fetches until asked ("load · 513 KB"), text
 //! renders inline, images become a data URL. `/ref/{id}` is this client's
-//! own route knowledge, never carried in the data (docs/mvp/tower-ws-spec.md).
+//! own route knowledge, never carried in the data (mvp/docs/tower-ws-spec.md).
 
 use leptos::prelude::*;
 use serde_json::Value;

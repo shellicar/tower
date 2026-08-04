@@ -1,5 +1,5 @@
 //! The browser boundary contract: `ClientMsg` / `ServerMsg` and their payload
-//! shapes, normative in docs/mvp/tower-ws-spec.md (serde mirrors the zod).
+//! shapes, normative in mvp/docs/tower-ws-spec.md (serde mirrors the zod).
 //!
 //! One definition, both sides. towerd (producer) serialises `ServerMsg` and
 //! deserialises `ClientMsg`; the Rust-WASM frontend (consumer) does the mirror.
@@ -58,7 +58,7 @@ pub enum ClientMsg {
         approval: String,
         approved: bool,
     },
-    /// Replaces the whole layout — the fleet's shared tabs (docs/mvp/
+    /// Replaces the whole layout — the fleet's shared tabs (mvp/docs/
     /// frontend-architecture.md's `view` concern, since promoted off
     /// localStorage onto the wire: settled 12 Jul, "tower owns the
     /// management structure, clients only render it").
@@ -198,7 +198,7 @@ pub enum ServerMsg {
 
 /// One tab: a name and its open set. mvp/frontend-svelte's `Tab` also carries a
 /// `ViewConfig` (filters/grouping) — not on the wire yet, out of scope for
-/// this pass (docs/mvp/frontend-leptos-plan.md's scope note applies here too).
+/// this pass (mvp/docs/frontend-leptos-plan.md's scope note applies here too).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WsTab {
     pub name: String,
