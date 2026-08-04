@@ -108,6 +108,17 @@ pub trait Broker: Clone + Send + Sync + 'static {
         subject: String,
     ) -> impl Future<Output = Result<Self::Subscription, BrokerError>> + Send;
 
+    /// Subscribe as one member of a queue group: the broker delivers each
+    /// message to exactly one member. The world's request subjects need this
+    /// (agent.md, Requests: several instances sharing a world share a
+    /// queue group, so exactly one answers) — a plain subscribe there would
+    /// make every instance a responder.
+    fn queue_subscribe(
+        &self,
+        subject: String,
+        group: String,
+    ) -> impl Future<Output = Result<Self::Subscription, BrokerError>> + Send;
+
     /// Open a JetStream capture stream's backlog, filtered to
     /// `filter_subject`, in stream order — adopt's replay. Bounded: the
     /// returned source yields exactly the backlog pending at consumer
@@ -119,6 +130,17 @@ pub trait Broker: Clone + Send + Sync + 'static {
         &self,
         stream: String,
         filter_subject: String,
+    ) -> impl Future<Output = Result<Self::Replay, BrokerError>> + Send;
+
+    /// Like `replay`, but starting from `start` rather than the beginning
+    /// of the stream (JetStream ByStartTime) — the liveness seed's verb: a
+    /// bounded window of recent telemetry, never the capture's full
+    /// retention.
+    fn replay_since(
+        &self,
+        stream: String,
+        filter_subject: String,
+        start: std::time::SystemTime,
     ) -> impl Future<Output = Result<Self::Replay, BrokerError>> + Send;
 
     /// Fetch one attachment's bytes from the transit object store
@@ -223,11 +245,83 @@ impl Broker for NatsBroker {
             .map_err(|e| BrokerError::Subscribe(Box::new(e)))
     }
 
+    async fn queue_subscribe(
+        &self,
+        subject: String,
+        group: String,
+    ) -> Result<Self::Subscription, BrokerError> {
+        self.client
+            .queue_subscribe(subject, group)
+            .await
+            .map(NatsSubscription)
+            .map_err(|e| BrokerError::Subscribe(Box::new(e)))
+    }
+
     async fn replay(
         &self,
         stream: String,
         filter_subject: String,
     ) -> Result<Self::Replay, BrokerError> {
+        self.replay_from(
+            stream,
+            filter_subject,
+            async_nats::jetstream::consumer::DeliverPolicy::All,
+        )
+        .await
+    }
+
+    async fn replay_since(
+        &self,
+        stream: String,
+        filter_subject: String,
+        start: std::time::SystemTime,
+    ) -> Result<Self::Replay, BrokerError> {
+        self.replay_from(
+            stream,
+            filter_subject,
+            async_nats::jetstream::consumer::DeliverPolicy::ByStartTime {
+                start_time: start.into(),
+            },
+        )
+        .await
+    }
+
+    async fn fetch_object(&self, bucket: String, id: String) -> Result<Vec<u8>, BrokerError> {
+        let js = async_nats::jetstream::new(self.client.clone());
+        let store = js.get_object_store(&bucket).await.map_err(|e| {
+            BrokerError::ObjectStoreUnavailable {
+                bucket: bucket.clone(),
+                source: Box::new(e),
+            }
+        })?;
+        let mut object = store
+            .get(&id)
+            .await
+            .map_err(|e| BrokerError::ObjectNotFound {
+                id: id.clone(),
+                bucket: bucket.clone(),
+                source: Box::new(e),
+            })?;
+        use tokio::io::AsyncReadExt;
+        let mut bytes = Vec::new();
+        object
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|source| BrokerError::ObjectReadFailed {
+                id,
+                source: Box::new(source),
+            })?;
+        Ok(bytes)
+    }
+}
+
+impl NatsBroker {
+    async fn replay_from(
+        &self,
+        stream: String,
+        filter_subject: String,
+        deliver_policy: async_nats::jetstream::consumer::DeliverPolicy,
+    ) -> Result<NatsReplay, BrokerError> {
         let js = async_nats::jetstream::new(self.client.clone());
         let handle = js
             .get_stream(&stream)
@@ -239,7 +333,7 @@ impl Broker for NatsBroker {
         let consumer = handle
             .create_consumer(async_nats::jetstream::consumer::pull::Config {
                 filter_subject,
-                deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
+                deliver_policy,
                 // Ephemeral (no durable_name): explicit, not the server
                 // default reached by omission, since this is now a trait
                 // contract — the server reclaims it if a replay is ever
@@ -274,34 +368,6 @@ impl Broker for NatsBroker {
                 Ok(NatsReplay::Batch(Box::new(messages)))
             }
         }
-    }
-
-    async fn fetch_object(&self, bucket: String, id: String) -> Result<Vec<u8>, BrokerError> {
-        let js = async_nats::jetstream::new(self.client.clone());
-        let store = js.get_object_store(&bucket).await.map_err(|e| {
-            BrokerError::ObjectStoreUnavailable {
-                bucket: bucket.clone(),
-                source: Box::new(e),
-            }
-        })?;
-        let mut object = store
-            .get(&id)
-            .await
-            .map_err(|e| BrokerError::ObjectNotFound {
-                id: id.clone(),
-                bucket: bucket.clone(),
-                source: Box::new(e),
-            })?;
-        use tokio::io::AsyncReadExt;
-        let mut bytes = Vec::new();
-        object
-            .read_to_end(&mut bytes)
-            .await
-            .map_err(|source| BrokerError::ObjectReadFailed {
-                id,
-                source: Box::new(source),
-            })?;
-        Ok(bytes)
     }
 }
 

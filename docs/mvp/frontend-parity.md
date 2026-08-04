@@ -75,7 +75,7 @@ side by side. Derived from code, not from any prior claim about what's missing.
   no wire-type drift between the two frontends. **Not a gap.**
 - `docs/mvp/tower-ws-spec.md` itself does not document any of those frames (tabs/layout, dismiss, stale/unread) —
   the doc is stale relative to both frontends' code. Outside this doc's scope (it compares the two frontends,
-  not frontend-vs-doc), but worth a separate note to the SC since the task brief assumed the doc was current.
+  not frontend-vs-doc), but worth recording separately, since the spec was taken to be current.
 
 ### Tag editing — dead code on both sides, not a drift item
 
@@ -91,16 +91,17 @@ side by side. Derived from code, not from any prior claim about what's missing.
 
 - [x] **No virtual list / windowing in Leptos.** `ui/conversation.rs`'s `.messages` div renders every message in
   `oc.messages` on every render (`.into_iter().map(...).collect_view()`), unwindowed. Svelte's `ConversationPanel.svelte`
-  renders through `VirtualList.svelte` (windowed, spacer-before/after, per-id height cache). This is the memory-flagged
-  drift (virtual list landed in Svelte only, 21 Jul, `947c41a`). Porting task: port `VirtualList.svelte`'s technique to
+  renders through `VirtualList.svelte` (windowed, spacer-before/after, per-id height cache). The virtual list
+  landed in Svelte only, 21 Jul, `947c41a`. Porting task: port `VirtualList.svelte`'s technique to
   a Leptos component — keyed `<For>`, a height cache (`HashMap<String, f64>` keyed by message id), spacer elements,
   `ResizeObserver` per mounted row via `web_sys`. Do this before the height-prediction port below, since prediction is
   an optimisation *on top of* windowing, not a substitute for it — windowing is the part that actually bounds DOM size.
 
 - [ ] **No canvas height-prediction ("pretext") in Leptos**, i.e. nothing to port yet since windowing itself isn't
   there. Once windowing lands, `core/textHeight.ts`'s technique (canvas `measureText`, monospace-only fast path for
-  plain-text messages, `ResizeObserver` correction as the load-bearing fallback — never remove it, see memory
-  `666f3737-6eb4-4112-bc7c-601b5af73853`) ports via `web-sys`'s `CanvasRenderingContext2d::measure_text`. Do NOT
+  plain-text messages, `ResizeObserver` correction as the load-bearing fallback — never remove it, since pretext
+  was verified line by line against Chrome and disagrees at some wrap boundaries, so no DOM-free prediction is
+  exact) ports via `web-sys`'s `CanvasRenderingContext2d::measure_text`. Do NOT
   reach for `gpui-pretext` (crates.io) as a drop-in — it's an unverified, single-version, unaffiliated claim of a
   pretext port; if it's used, run the same line-diff verification (compare against real `Range.getClientRects()`
   output) that found pretext's own wrap-boundary divergence from Chrome before trusting it.
@@ -116,19 +117,19 @@ side by side. Derived from code, not from any prior claim about what's missing.
   Ported to `src/markdown.rs` (pulldown-cmark + ammonia, verified building under `--target wasm32-unknown-unknown`),
   threaded through `render_block(block, role)`, gated on `role == "assistant"`; the tool-block collapse affordance
   (`tool_use`/`tool_result`) was also converted to Svelte's plain-button/ellipsis-preview shape in the same pass
-  (`thinking`/unknown blocks unchanged, per the SC's ruling that it covers tool blocks only).
+  (`thinking`/unknown blocks unchanged, per the ruling that it covers tool blocks only).
 
-- [ ] **Re-verify: the scroll-anchor / approval-card bug may now also affect Leptos.** Memory `88f25ddd` (19 Jul)
+- [ ] **Re-verify: the scroll-anchor / approval-card bug may now also affect Leptos.** A 19 Jul reading
   recorded that Leptos's stick-to-bottom effect re-scrolls "on any DOM patch when at_bottom is true, unaffected by
   what caused the patch", unlike Svelte's effect which only depends on `messages.length`/`streaming` and misses an
   in-context approval card growing the footer. Reading the CURRENT `ui/conversation.rs` (its own comment dates the
-  narrowing to the per-conversation-signal CPU fix, after that memory was written): the stick-to-bottom `Effect`'s
+  narrowing to the per-conversation-signal CPU fix, after that reading): the stick-to-bottom `Effect`'s
   only reactive dependency is now `oc.with(|s| s.messages.len() + s.streaming.len())` — it does **not** read
   `approvals` or `pending_here`/`live_for_conv`, and the in-context approval card renders in the same sibling
   `.conversation-footer` as Svelte's, so growing it would shrink `.messages` the same way. On a code read alone this
-  looks like it could have regressed into the same bug the memory said Leptos didn't have — but this needs a live
+  looks like it could have regressed into the same bug that reading said Leptos didn't have — but this needs a live
   browser check (raise an approval on an anchored, scrolled-to-bottom Leptos panel, watch whether the tool input
-  scrolls into view) before either fixing it or crossing it off; do not trust the old memory's verdict against this
+  scrolls into view) before either fixing it or crossing it off; do not trust the older verdict against this
   newer code without re-running it. If it does reproduce, the fix mirrors the Svelte one: add the live-approvals-
   for-this-conv count as an effect dependency.
 
@@ -169,8 +170,8 @@ side by side. Derived from code, not from any prior claim about what's missing.
 
 ### Attachments — resolved by decision, not a port (23 Jul)
 
-- [x] **Resolved the other way: the client never carries `bucket` at all.** The SC ruled the original
-  finding's frame wrong — the bucket is a tower storage concern, and it doesn't make sense for a frontend
+- [x] **Resolved the other way: the client never carries `bucket` at all.** The original finding's frame
+  was ruled wrong: the bucket is a tower storage concern, and it doesn't make sense for a frontend
   to know or care about it. towerd now stamps the bucket into each object source when it forwards a say
   (ws.rs), the upload reply no longer returns it, the WS spec's say schema dropped it, and Leptos's
   `attachment_ref` (previously the "correct" side) had its bucket handling removed. The wire contract is
@@ -198,6 +199,58 @@ side by side. Derived from code, not from any prior claim about what's missing.
   type (add the field) — small, but worth doing before any Leptos porting work in this area, since Leptos already has
   the correct behaviour to copy from, not the other way around.
 
+### Visual / behavioural deviations (fresh comparison pass, 25 Jul)
+
+From a full side-by-side walk of rail, approvals, conversation panel, blocks,
+refs, and unread. Send-eligibility, title-edit, and attachment handling were
+checked and found faithful — no gaps there.
+
+Six items from that walk have since shipped and are recorded above rather than
+here: the untitled-id fallback, the attached-only status dot, `lastKind` on rail
+rows, and attached-only ordering closed with the rail-level section (27 Jul);
+the ref-image height cap closed with it; the collapse affordance closed with the
+markdown port (28 Jul).
+
+- [ ] **Inline conversation-footer approval callout diverges.** FULLY RULED (25 Jul), composed from
+  both sides: Svelte's amber text + background wins (salience); everything else Leptos — the raw
+  tool input JSON shows (an approval gate should show what's being approved), and the buttons sit
+  ADJACENT to the ask name, never right-aligned across the box. Button copy stays lowercase
+  `approve`/`deny` (the Svelte-wide standard — all its chrome is lowercase: attach, cancel, say…,
+  ↓ latest). Design for MULTIPLE pending approvals (parallel tool calls) — possibly unsupported
+  today, but the layout must not assume exactly one. Original finding:
+  Svelte: tinted warning box
+  (`border-amber-900 bg-amber-950/30`), plain-weight ask name, lowercase `approve`/`deny`,
+  no raw input. Leptos: neutral box (`.approval { border: 1px solid #404040 }`, no tint),
+  bold ask name, capitalised `Approve`/`Deny`, and dumps the raw input as a truncated
+  `<pre>` Svelte never shows here. The dedicated ApprovalsView panel matches well on both.
+- [ ] **Scroll-anchor "at bottom" tolerance differs.** Svelte 2px, Leptos 32px — Leptos stays
+  pinned (and hides the "↓ latest" button) noticeably before the true bottom. Two axes: the
+  tolerance BEHAVIOUR (unruled), and the "↓ latest" button VISUAL — RULED (25 Jul): Svelte's
+  visual wins; Leptos's full-width block goes.
+- [ ] **Leptos forgets the selected tab across refresh** (found live, 25 Jul): it always shows the
+  first tab after reload, where Svelte restores the last-selected one. The view concern was
+  marked parity at a code-read level — this contradicts it, so the gap is likely in what gets
+  persisted/restored (`ViewConfig`), not the tab UI itself. Verify against the code, then fix.
+- [ ] **Svelte fails to land at the true bottom of a conversation on refresh** (found live, 25 Jul):
+  initial scroll-to-bottom stops short where Leptos gets it right. Suspected cause: the virtual
+  list's initial scroll happens against estimated row heights, and the post-mount ResizeObserver
+  corrections shift content without re-anchoring. Diagnose before fixing; the fix likely
+  re-asserts bottom-anchor after correction passes, not better estimates (no DOM-free prediction is
+  exact, and the mounted row's correction is the authority: CLAUDE.md's virtual-list note).
+- [ ] **Approval button copy inconsistent within Leptos.** Lowercase in ApprovalsView,
+  capitalised inline; Svelte is lowercase in both. RULED: lowercase everywhere.
+- [ ] **Svelte has no Send button** (found live, 25 Jul): the composer sends only via ⌘↩; Leptos
+  has an explicit Send button. Add one to Svelte, matching its lowercase chrome (`send`).
+- [ ] **Leptos composer is shorter than Svelte's** (found live, 25 Jul): match Svelte's editor
+  height.
+- [ ] **Approval components differ very slightly** (found live, 25 Jul): near-nothing, noted so a
+  later strict pass knows it was seen and deprioritised.
+- [x] **Pre-Layout tab-highlight transient** (review finding, 26 Jul, seen and accepted): with a
+  persisted active-tab index > 0, no tab renders highlighted for the sub-second
+  window before the server's Layout snapshot arrives. Identical in both frontends; fixing it means
+  placeholder-highlight logic for a frame that's immediately replaced. Seen, weighed, accepted —
+  not a bug to rediscover.
+
 ## Porting order
 
 Ordered by what blocks what, not by size. Each item names the gap it closes (see above for the full description).
@@ -212,7 +265,7 @@ Ordered by what blocks what, not by size. Each item names the gap it closes (see
    about. Landing this first is also what makes item 4 meaningful (prediction is an optimisation on windowing, not a
    substitute for it).
 4. **Leptos: port canvas height-prediction.** Depends on 3. Lower urgency than 3 alone would suggest — the
-   Svelte-side memory trail (666f3737, 9d862a84) shows this bought a narrower real-world win than hoped (most
+   Svelte-side experience shows this bought a narrower real-world win than hoped (most
    messages in a real conversation aren't pure-text, so most rows still hit the ResizeObserver fallback) — worth
    doing for parity but not worth over-investing in relative to 3.
 5. **Leptos: port markdown rendering.** Independent of 3/4 (it changes what a block renders, not how many are

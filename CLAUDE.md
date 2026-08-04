@@ -143,7 +143,8 @@ only for what cargo can't do. Config env vars — towerd: `NATS_URL`,
 `TOWER_DB`, `TOWER_STREAM_AUDIT`, `TOWER_STREAM_DIAGNOSTIC`,
 `TOWER_STREAM_EPHEMERAL`, `TOWER_ATTACH_BUCKET`, `TOWER_ATTACH_TTL_S`;
 vite: `WEB_PORT`; bridge: `NATS_URL`, `BRIDGE_WORLD`, `BRIDGE_MODEL`,
-`BRIDGE_STREAM`, `BRIDGE_ATTACH_BUCKET`, `BRIDGE_THINKING_BUDGET`,
+`BRIDGE_STREAM`, `BRIDGE_STREAM_EPHEMERAL`, `BRIDGE_ATTACH_BUCKET`,
+`BRIDGE_THINKING_BUDGET`,
 `BRIDGE_REFS_DB`, `BRIDGE_MEMORY_DB`, `BRIDGE_HISTORY_DB`
 (skills has no env var and no default: the directory is empty until a stdio
 `skills` control line sets it, re-scanned per say — the first say commits the

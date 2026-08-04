@@ -1389,7 +1389,10 @@ mod tests {
                 .into(),
             reply: Some("reply-1".to_string()),
         });
-        let requests = FakeSubscription { queued };
+        let requests = FakeSubscription {
+            queued,
+            stay_open: false,
+        };
 
         let (_displaced_tx, displaced_rx) = watch::channel(false);
         run(

@@ -111,6 +111,11 @@ const AGENT_A8: &str = fixture!("agent/scenario-a8.jsonl");
 const AGENT_A9: &str = fixture!("agent/scenario-a9.jsonl");
 const AGENT_A10: &str = fixture!("agent/scenario-a10.jsonl");
 const AGENT_A11: &str = fixture!("agent/scenario-a11.jsonl");
+const AGENT_A12: &str = fixture!("agent/scenario-a12.jsonl");
+const AGENT_A13: &str = fixture!("agent/scenario-a13.jsonl");
+const AGENT_A14: &str = fixture!("agent/scenario-a14.jsonl");
+const AGENT_A15: &str = fixture!("agent/scenario-a15.jsonl");
+const AGENT_A16: &str = fixture!("agent/scenario-a16.jsonl");
 
 fn assert_all_known(events: &[Event]) {
     for e in events {
@@ -427,10 +432,149 @@ fn conv_attachment_a11_chdir_is_answered_by_moved() {
     assert_eq!(cwds, ["~/repos/tower", "~/repos/tower-wip"]);
 }
 
+/// A service-verb fixture mixes both trees: the claim on the conversation's
+/// own attachment leaf, liveness on the world's telemetry. Requests are
+/// filtered as everywhere else.
+fn mixed_events(fixture: &str) -> Vec<WireEvent> {
+    fixture
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(parse_line)
+        .collect()
+}
+
+fn replies(fixture: &str) -> Vec<serde_json::Value> {
+    fixture
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| {
+            serde_json::from_str::<serde_json::Value>(l).unwrap()["reply"]
+                .as_object()
+                .cloned()
+        })
+        .map(serde_json::Value::Object)
+        .collect()
+}
+
 #[test]
 fn agent_a5_resume_then_already_attached() {
-    // Both `service` lines are requests (filtered); one `attached` event remains.
-    let (world, conv) = world_and_conv_events(AGENT_A5);
-    assert!(world.is_empty());
-    assert_eq!(attachment_kinds(&conv), ["attached"]);
+    // Both `service` lines are requests (filtered); what remains is the
+    // claim on the conversation's own tree plus the holder's pulse — the
+    // two facts the merged premise joins.
+    let evs = mixed_events(AGENT_A5);
+    let attached: Vec<_> = evs
+        .iter()
+        .filter_map(|e| match e {
+            WireEvent::Conv(Event {
+                kind: EventKind::Attachment(ConvAttachment::Attached(a)),
+                ..
+            }) => Some(a),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(attached.len(), 1);
+    assert_eq!(attached[0].world.as_ref().unwrap().0, "mac");
+    assert!(evs.iter().any(|e| matches!(
+        e,
+        WireEvent::Agent(AgentEvent {
+            kind: AgentKind::Telemetry(AgentTelemetry::Pulse(_)),
+            ..
+        })
+    )));
+    let replies = replies(AGENT_A5);
+    assert_eq!(replies[0]["accepted"], true);
+    assert_eq!(replies[1]["reason"], "already_attached");
+}
+
+#[test]
+fn agent_a12_service_migrates_cross_world() {
+    let evs = mixed_events(AGENT_A12);
+    let worlds: Vec<_> = evs
+        .iter()
+        .filter_map(|e| match e {
+            WireEvent::Conv(Event {
+                kind: EventKind::Attachment(ConvAttachment::Attached(a)),
+                ..
+            }) => Some(a.world.as_ref().unwrap().0.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(worlds, ["pc", "mac"]);
+    // The superseded instance's stale detached is in the record, verbatim.
+    assert!(evs.iter().any(|e| matches!(
+        e,
+        WireEvent::Conv(Event {
+            kind: EventKind::Attachment(ConvAttachment::Detached(_)),
+            ..
+        })
+    )));
+    assert_eq!(replies(AGENT_A12)[0]["accepted"], true);
+}
+
+#[test]
+fn agent_a13_service_takes_over_a_stranded_holder() {
+    let evs = mixed_events(AGENT_A13);
+    let instances: Vec<_> = evs
+        .iter()
+        .filter_map(|e| match e {
+            WireEvent::Conv(Event {
+                kind: EventKind::Attachment(ConvAttachment::Attached(a)),
+                ..
+            }) => Some(a.instance_id.0.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(instances, ["inst-1a2f", "inst-9c4d"]);
+    assert_eq!(replies(AGENT_A13)[0]["accepted"], true);
+}
+
+#[test]
+fn agent_a14_service_spawns_fresh_with_a_null_tip() {
+    let evs = mixed_events(AGENT_A14);
+    let attached: Vec<_> = evs
+        .iter()
+        .filter_map(|e| match e {
+            WireEvent::Conv(Event {
+                kind: EventKind::Attachment(ConvAttachment::Attached(a)),
+                ..
+            }) => Some(a),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(attached.len(), 1);
+    assert_eq!(attached[0].tip, None); // explicit null folds as "no tip stated"
+    assert_eq!(replies(AGENT_A14)[0]["accepted"], true);
+}
+
+#[test]
+fn agent_a15_service_adopts_and_the_tip_names_the_record() {
+    let evs = mixed_events(AGENT_A15);
+    let tip = evs
+        .iter()
+        .find_map(|e| match e {
+            WireEvent::Conv(Event {
+                kind: EventKind::Attachment(ConvAttachment::Attached(a)),
+                ..
+            }) => a.tip.as_ref(),
+            _ => None,
+        })
+        .expect("the adopting claim states the tip");
+    assert_eq!(tip.0, "m1");
+    assert_eq!(replies(AGENT_A15)[0]["accepted"], true);
+}
+
+#[test]
+fn agent_a16_rejection_vocabulary() {
+    // Requests only — every line filters out of the event stream.
+    assert!(mixed_events(AGENT_A16).is_empty());
+    let replies = replies(AGENT_A16);
+    let reasons: Vec<_> = replies
+        .iter()
+        .map(|r| r["reason"].as_str().unwrap())
+        .collect();
+    assert_eq!(reasons, ["invalid", "invalid_cwd", "failed", "unsupported"]);
+    // `detail` is the human-facing diagnostics, present where the spec
+    // carries a cause; `reason` stays the machine token.
+    assert!(replies[1]["detail"].is_string());
+    assert!(replies[2]["detail"].is_string());
 }
