@@ -23,10 +23,11 @@ Its structure:
   bytes: content is revisable (see the change stream). "User-role" covers both
   what a sender said and tool results — which is why every API round is a pair.
 - **turn** — one API round: a user-role message in, an assistant message out.
-  `turnId` groups the pair. A turn ends with a reason — `tool_use` for a round
-  that calls a tool, `end_turn` for one that stops — and that reason is
-  observation: the model's own word for why it stopped, never the query's
-  ending.
+  `turnId` groups the pair. A turn ends with a reason when the service states
+  one — `tool_use` for a round that calls a tool, `end_turn` for one that
+  stops — and that reason is observation: the model's own word for why it
+  stopped, never the query's ending. A service that states none leaves the
+  turn without a reason; nothing supplies one in its place.
 - **query** — an ordered run of turns, closed by the `query` change on
   `changes` (see Query closure) — plus its **parent**: the premise its `say`
   was accepted against. The parent is the precondition made structural: the
