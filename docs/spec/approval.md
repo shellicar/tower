@@ -26,9 +26,9 @@ Two definitional boundaries, both about what a consumer may assume:
 
 Approvals are **not conversation traffic**: the same tool call raises an ask
 under one permissions regime and none under another, while the conversation
-stays byte-identical. Consequences reach the
-conversation the only way anything does — as content: approved is implicit in
-the tool having run; denied appears as whatever the agent model commits.
+stays byte-identical. Consequences reach the conversation the only way
+anything does — as content: approved is implicit in the tool having run;
+denied appears as whatever the agent model commits.
 
 ## Subjects
 

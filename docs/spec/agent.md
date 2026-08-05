@@ -49,8 +49,8 @@ economics (racing servicers waste work), a deployment's choice.
 
 Attachment claims are not here. A conversation's attachment is about the
 conversation, not the world, so it lives on its own tree
-(`conversation.md`, Attachment). What is genuinely about the world is whether
-a process is up, and whether it is still promising to be.
+(`conversation.md`, Attachment). This section covers only what is
+genuinely about the world: is a process up, and is it still promising to be.
 
 The subject spells the type, as in the conversation spec: `telemetry.pulse`,
 `requests.service`.

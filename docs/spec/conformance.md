@@ -1,8 +1,9 @@
 # Conformance
 
 How implementations prove they carry the specs — `nats.md`, `conversation.md`,
-`approval.md`, `agent.md`. The specs say what the wire carries; this says how
-an implementation proves it. The fixture set lives in `scenarios.md`.
+`approval.md`, `agent.md`. This is testing, not contract: the specs say what
+the wire carries; this says how an implementation proves it. The fixture set
+lives in `scenarios.md`.
 
 ## The problem
 

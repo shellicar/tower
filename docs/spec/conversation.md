@@ -79,11 +79,11 @@ It's deliberately not called `telemetry` either. This is a claim with
 consequences (agent.md, Attachment), not observation a consumer may
 discard.
 
-**The subject spells the type**: a message's type is
-the subject tokens after the class — underscores become token boundaries — so
-the body does not repeat it. The one exception is `deltas`: a flat subject
-carrying two shapes (`delta`, `block`) that share every policy, not a routing
-axis, so the type stays in the body there as a `type` field. The full map:
+**The subject spells the type**: a message's type is the subject tokens
+after the class — underscores become token boundaries — so the body does not
+repeat it. The one exception is `deltas`: a flat subject carrying two shapes
+(`delta`, `block`) that share every policy, not a routing axis, so the type
+stays in the body there as a `type` field. The full map:
 
 | Type | Subject |
 |---|---|
@@ -290,9 +290,10 @@ terminal appears on the change stream the same as one that arrived over
 
 ## Attachment — `attachment`
 
-Who is serving this conversation, now. The wire shape of the claim agent.md's
-Attachment section conducts itself by: read that section first for the model
-(singular, unconditionally superseding, no fencing).
+Who is serving this conversation, now. This is the wire shape of the claim
+agent.md's Attachment section conducts itself by — read that section
+first for the model (singular, unconditionally superseding, no fencing).
+This section only covers the shape on this tree.
 
 | Event | Fields | Notes |
 |---|---|---|
