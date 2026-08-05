@@ -3,7 +3,8 @@
 //! it, never for a normal build, so nothing here needs a `cfg` at all.
 
 use bridge::broker::{
-    Broker, BrokerDurable, BrokerError, BrokerMessage, BrokerReplay, BrokerSubscription,
+    Broker, BrokerDurable, BrokerError, BrokerKvWatch, BrokerMessage, BrokerReplay,
+    BrokerSubscription, KvChange,
 };
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,6 +26,7 @@ type LastData = Arc<Mutex<std::collections::HashMap<String, BrokerMessage>>>;
 type DurableData = Arc<Mutex<std::collections::HashMap<String, VecDeque<FakeReplayFrame>>>>;
 type RequestReplies = Arc<Mutex<std::collections::HashMap<String, VecDeque<Vec<u8>>>>>;
 type Requested = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
+type KvChanges = Arc<Mutex<std::collections::HashMap<String, VecDeque<KvChange>>>>;
 
 /// The only fake in a test is the Broker (CLAUDE.md's house rule). Records
 /// every subscribe/publish call, in order (`calls`) and every publish's
@@ -79,6 +81,11 @@ pub struct FakeBroker {
     /// One entry per `ack_delivered` that acked something, naming the filter
     /// subject of the consumer that acked.
     pub acked: Arc<Mutex<Vec<String>>>,
+    /// Bucket changes a watch yields, keyed by bucket. An unseeded bucket is
+    /// an ordinary quiet watch: a registry nobody is changing is the norm.
+    pub kv_changes: KvChanges,
+    /// Every durable removed, by name.
+    pub removed_durables: Arc<Mutex<Vec<String>>>,
 }
 
 #[derive(Default)]
@@ -147,10 +154,27 @@ impl BrokerDurable for FakeDurable {
     }
 }
 
+#[derive(Default)]
+pub struct FakeKvWatch {
+    pub queued: VecDeque<KvChange>,
+    pub stay_open: bool,
+}
+
+impl BrokerKvWatch for FakeKvWatch {
+    async fn next(&mut self) -> Option<Result<KvChange, BrokerError>> {
+        match self.queued.pop_front() {
+            Some(change) => Some(Ok(change)),
+            None if self.stay_open => std::future::pending().await,
+            None => None,
+        }
+    }
+}
+
 impl Broker for FakeBroker {
     type Subscription = FakeSubscription;
     type Replay = FakeReplay;
     type Durable = FakeDurable;
+    type KvWatch = FakeKvWatch;
 
     async fn publish(&self, subject: String, payload: Vec<u8>) -> Result<(), BrokerError> {
         self.calls
@@ -352,6 +376,30 @@ impl Broker for FakeBroker {
             acked: Arc::clone(&self.acked),
             stay_open,
         })
+    }
+
+    async fn kv_watch(&self, bucket: String) -> Result<Self::KvWatch, BrokerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("kv_watch:{bucket}"));
+        let queued = self
+            .kv_changes
+            .lock()
+            .unwrap()
+            .remove(&bucket)
+            .unwrap_or_default();
+        let stay_open = self.open_subjects.lock().unwrap().contains(&bucket);
+        Ok(FakeKvWatch { queued, stay_open })
+    }
+
+    async fn delete_durable(&self, stream: String, name: String) -> Result<(), BrokerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("delete_durable:{stream}:{name}"));
+        self.removed_durables.lock().unwrap().push(name);
+        Ok(())
     }
 
     async fn request(

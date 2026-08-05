@@ -7,9 +7,9 @@
 //! a JetStream backlog, and fetches an attachment out of the transit object
 //! store. The lookout is the second consumer, and it is a client rather than
 //! a servicer, which is where `request`, `last_on_subject`, `kv_entries` and
-//! `durable` come from: it reads the reporting lines out of a KV bucket,
-//! tails each worker through a durable consumer whose cursor survives a
-//! restart, reads a handler's tip to anchor a say, and sends that say as a
+//! `durable` come from: it reads the reporting lines out of a KV bucket and
+//! watches that bucket for changes, tails each worker through a durable
+//! consumer, reads a handler's tip to anchor a say, and sends that say as a
 //! request expecting an ack.
 //!
 //! Scoped to what request handling touches: `main.rs`'s spawn/adopt/revise
@@ -102,6 +102,18 @@ pub enum BrokerError {
     },
     #[error("durable consumer read failed")]
     DurableRead(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("durable consumer {name:?} could not be removed")]
+    DurableRemove {
+        name: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("key-value bucket {bucket:?} watch failed")]
+    KvWatch {
+        bucket: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("ack failed")]
     Ack(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("request to {subject:?} got no reply")]
@@ -150,10 +162,27 @@ pub trait BrokerDurable: Send {
     fn ack_delivered(&mut self) -> impl Future<Output = Result<(), BrokerError>> + Send;
 }
 
+/// One change to a key-value bucket: the key, and its new value, or `None`
+/// when the key was deleted. A registry read once is a registry as it stood
+/// at boot, so the reader watches it instead.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KvChange {
+    pub key: String,
+    pub value: Option<bytes::Bytes>,
+}
+
+/// A live view of a bucket's changes, from the moment the watch opened.
+/// History is not replayed: the caller reads the bucket once for the state it
+/// starts from, and this carries it forward.
+pub trait BrokerKvWatch: Send {
+    fn next(&mut self) -> impl Future<Output = Option<Result<KvChange, BrokerError>>> + Send;
+}
+
 pub trait Broker: Clone + Send + Sync + 'static {
     type Subscription: BrokerSubscription;
     type Replay: BrokerReplay;
     type Durable: BrokerDurable;
+    type KvWatch: BrokerKvWatch;
 
     fn publish(
         &self,
@@ -238,6 +267,21 @@ pub trait Broker: Clone + Send + Sync + 'static {
         filter_subject: String,
         name: String,
     ) -> impl Future<Output = Result<Self::Durable, BrokerError>> + Send;
+
+    /// Watch a KV bucket for changes from now on.
+    fn kv_watch(
+        &self,
+        bucket: String,
+    ) -> impl Future<Output = Result<Self::KvWatch, BrokerError>> + Send;
+
+    /// Remove a durable consumer. A consumer outlives the thing it was
+    /// watching unless something removes it, and one per departed worker
+    /// accumulates on the stream forever.
+    fn delete_durable(
+        &self,
+        stream: String,
+        name: String,
+    ) -> impl Future<Output = Result<(), BrokerError>> + Send;
 
     /// Send a request and wait for the one reply. Timeout and no-responders
     /// are both errors here: the caller retries either way, so the
@@ -353,7 +397,40 @@ impl BrokerDurable for NatsDurable {
         let Some(msg) = self.delivered.take() else {
             return Ok(());
         };
-        msg.ack().await.map_err(BrokerError::Ack)
+        // Confirmed rather than fired and forgotten. A plain ack is a publish
+        // with nothing waiting on it, so a process that acks and exits, or
+        // acks and immediately reopens the consumer, can find the ack never
+        // landed. Under `AckPolicy::All` this is one round trip per batch,
+        // not per frame.
+        msg.double_ack().await.map_err(BrokerError::Ack)
+    }
+}
+
+/// A KV bucket's change stream. A delete and a purge both mean the key is
+/// gone, which is one fact to the reader even though the server distinguishes
+/// how it went.
+pub struct NatsKvWatch {
+    bucket: String,
+    entries: async_nats::jetstream::kv::Watch,
+}
+
+impl BrokerKvWatch for NatsKvWatch {
+    async fn next(&mut self) -> Option<Result<KvChange, BrokerError>> {
+        use futures::StreamExt;
+        let entry = self.entries.next().await?;
+        Some(match entry {
+            Ok(entry) => Ok(KvChange {
+                key: entry.key,
+                value: match entry.operation {
+                    async_nats::jetstream::kv::Operation::Put => Some(entry.value),
+                    _ => None,
+                },
+            }),
+            Err(e) => Err(BrokerError::KvWatch {
+                bucket: self.bucket.clone(),
+                source: Box::new(e),
+            }),
+        })
     }
 }
 
@@ -361,6 +438,7 @@ impl Broker for NatsBroker {
     type Subscription = NatsSubscription;
     type Replay = NatsReplay;
     type Durable = NatsDurable;
+    type KvWatch = NatsKvWatch;
 
     async fn publish(&self, subject: String, payload: Vec<u8>) -> Result<(), BrokerError> {
         self.client
@@ -505,10 +583,11 @@ impl Broker for NatsBroker {
                 // Cumulative, so one ack covers a whole batch — see
                 // `BrokerDurable`.
                 ack_policy: async_nats::jetstream::consumer::AckPolicy::All,
-                // A batch is only acked once its delivery lands, and a
-                // handler mid-turn rejects deliveries for as long as its turn
-                // runs. Redelivery after the default 30s would churn through
-                // exactly that window for no gain.
+                // Frames are acked at the reader's next tick rather than on
+                // arrival, so this only has to comfortably exceed that
+                // interval. It also bounds how long a frame the client had
+                // buffered but never processed stays outstanding after a
+                // restart, which is why it is minutes rather than hours.
                 ack_wait: std::time::Duration::from_secs(300),
                 ..Default::default()
             })
@@ -528,6 +607,43 @@ impl Broker for NatsBroker {
             messages,
             delivered: None,
         })
+    }
+
+    async fn kv_watch(&self, bucket: String) -> Result<Self::KvWatch, BrokerError> {
+        let js = async_nats::jetstream::new(self.client.clone());
+        let store = js
+            .get_key_value(&bucket)
+            .await
+            .map_err(|e| BrokerError::KvUnavailable {
+                bucket: bucket.clone(),
+                source: Box::new(e),
+            })?;
+        match store.watch_all().await {
+            Ok(entries) => Ok(NatsKvWatch { bucket, entries }),
+            Err(e) => Err(BrokerError::KvWatch {
+                bucket,
+                source: Box::new(e),
+            }),
+        }
+    }
+
+    async fn delete_durable(&self, stream: String, name: String) -> Result<(), BrokerError> {
+        let js = async_nats::jetstream::new(self.client.clone());
+        let handle = js
+            .get_stream(&stream)
+            .await
+            .map_err(|e| BrokerError::StreamUnavailable {
+                stream,
+                source: Box::new(e),
+            })?;
+        handle
+            .delete_consumer(&name)
+            .await
+            .map(|_| ())
+            .map_err(|e| BrokerError::DurableRemove {
+                name,
+                source: Box::new(e),
+            })
     }
 
     async fn request(
