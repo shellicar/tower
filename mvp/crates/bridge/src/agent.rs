@@ -723,33 +723,41 @@ async fn run_query<B: Broker, D: DeltaSink>(
         )
         .await;
 
-        // The first successful turn commits the pending say, then the
-        // assistant message: the record gains the pair together, and a query
-        // that never got this far left the record untouched.
-        if let Some(u) = pending_user.take() {
-            pubr.message(&u.id, query, &turn_id, "user", Some(user_from), &u.content)
-                .await;
-            committed.push(u);
-        }
+        // A turn that produced no content at all commits nothing. The API
+        // rejects an assistant message with empty content, so committing one
+        // kills every later turn of the conversation, not just this query.
+        // The say stays pending for the reason it rides there at all: words
+        // are revocable while nothing depends on them. `turn_ended` above,
+        // carrying no stop reason, is the whole record of the attempt.
+        if !done.content.is_empty() {
+            // The first successful turn commits the pending say, then the
+            // assistant message: the record gains the pair together, and a query
+            // that never got this far left the record untouched.
+            if let Some(u) = pending_user.take() {
+                pubr.message(&u.id, query, &turn_id, "user", Some(user_from), &u.content)
+                    .await;
+                committed.push(u);
+            }
 
-        // Commit the assistant message: whatever the stop reason, this
-        // content is the record.
-        let message_id = uuid::Uuid::new_v4().to_string();
-        pubr.message(
-            &message_id,
-            query,
-            &turn_id,
-            "assistant",
-            Some(&json!({ "kind": "agent" })),
-            &done.content,
-        )
-        .await;
-        history.push(json!({ "role": "assistant", "content": done.content }));
-        committed.push(Message {
-            id: message_id,
-            role: "assistant".into(),
-            content: done.content.clone(),
-        });
+            // Commit the assistant message: whatever the stop reason, this
+            // content is the record.
+            let message_id = uuid::Uuid::new_v4().to_string();
+            pubr.message(
+                &message_id,
+                query,
+                &turn_id,
+                "assistant",
+                Some(&json!({ "kind": "agent" })),
+                &done.content,
+            )
+            .await;
+            history.push(json!({ "role": "assistant", "content": done.content }));
+            committed.push(Message {
+                id: message_id,
+                role: "assistant".into(),
+                content: done.content.clone(),
+            });
+        }
 
         // Only the service's own `tool_use` buys another round. An absent
         // reason does not: the stream is over, and any tool_use block it left
