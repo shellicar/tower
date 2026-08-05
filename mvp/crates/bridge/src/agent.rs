@@ -696,15 +696,17 @@ async fn run_query<B: Broker, D: DeltaSink>(
             }
         };
 
-        pubr.event(
-            "telemetry.turn.ended",
-            json!({
-                "ts": now_iso(),
-                "queryId": query, "turnId": turn_id,
-                "stopReason": done.stop_reason,
-            }),
-        )
-        .await;
+        // The turn ended either way. A stream that stopped before the service
+        // said why carries no `stopReason` at all: that absence is the only
+        // thing telling a truncated answer from a finished one.
+        let mut ended = json!({
+            "ts": now_iso(),
+            "queryId": query, "turnId": turn_id,
+        });
+        if let Some(reason) = &done.stop_reason {
+            ended["stopReason"] = json!(reason);
+        }
+        pubr.event("telemetry.turn.ended", ended).await;
         pubr.event(
             "telemetry.usage",
             json!({
@@ -749,7 +751,10 @@ async fn run_query<B: Broker, D: DeltaSink>(
             content: done.content.clone(),
         });
 
-        if done.stop_reason != "tool_use" {
+        // Only the service's own `tool_use` buys another round. An absent
+        // reason does not: the stream is over, and any tool_use block it left
+        // behind may be half-written.
+        if done.stop_reason.as_deref() != Some("tool_use") {
             // The query's committal closure (conversation.md, changes.query).
             pubr.event(
                 "changes.query",

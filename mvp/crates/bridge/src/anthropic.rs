@@ -269,7 +269,9 @@ impl DeltaSink for NoopDeltaSink {
 
 pub struct TurnDone {
     pub content: Vec<Value>,
-    pub stop_reason: String,
+    /// The service's own value, verbatim. `None` when the stream ended before
+    /// the service said why: the turn is over, the reason was never given.
+    pub stop_reason: Option<String>,
     pub input_tokens: i64,
     pub cache_creation_tokens: i64,
     /// The 5m/1h split of cache_creation_tokens, from message_start's
@@ -383,7 +385,7 @@ pub async fn stream_turn<D: DeltaSink>(
     // and fold into the block's `input` when the block closes.
     let mut content: Vec<Value> = Vec::new();
     let mut open_json = String::new();
-    let mut stop_reason = String::from("end_turn");
+    let mut stop_reason: Option<String> = None;
     let (mut input_tokens, mut cache_creation, mut cache_read, mut output_tokens) = (0, 0, 0, 0);
     let (mut cache_creation_5m, mut cache_creation_1h) = (0, 0);
 
@@ -460,7 +462,7 @@ pub async fn stream_turn<D: DeltaSink>(
                 }
                 "message_delta" => {
                     if let Some(reason) = event["delta"]["stop_reason"].as_str() {
-                        stop_reason = reason.to_string();
+                        stop_reason = Some(reason.to_string());
                     }
                     if let Some(out) = event["usage"]["output_tokens"].as_i64() {
                         output_tokens = out;

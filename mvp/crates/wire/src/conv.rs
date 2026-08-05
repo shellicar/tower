@@ -77,9 +77,11 @@ pub struct TurnEnded {
     pub query_id: QueryId,
     #[serde(rename = "turnId")]
     pub turn_id: TurnId,
-    /// The service's own value, verbatim — an open set.
-    #[serde(rename = "stopReason")]
-    pub stop_reason: String,
+    /// The service's own value, verbatim: an open set. Absent when the stream
+    /// ended before the service said why, so the turn is over with no reason
+    /// given. Absence is not a value; never fill it in.
+    #[serde(rename = "stopReason", default)]
+    pub stop_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

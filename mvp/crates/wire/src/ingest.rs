@@ -348,7 +348,17 @@ mod tests {
         let EventKind::Telemetry(ConvTelemetry::TurnEnded(t)) = event.kind else {
             panic!("expected turn_ended");
         };
-        assert_eq!(t.stop_reason, "end_turn");
+        assert_eq!(t.stop_reason.as_deref(), Some("end_turn"));
+    }
+
+    #[test]
+    fn a_turn_ended_with_no_stop_reason_still_parses() {
+        let payload = br#"{"ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t2"}"#;
+        let event = conv_event("conv.v2.conv-abc.telemetry.turn.ended", payload);
+        let EventKind::Telemetry(ConvTelemetry::TurnEnded(t)) = event.kind else {
+            panic!("expected turn_ended");
+        };
+        assert_eq!(t.stop_reason, None);
     }
 
     #[test]
