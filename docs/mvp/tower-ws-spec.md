@@ -365,25 +365,25 @@ conversations the instance serves; it never fans out per conversation.
 
 Upsert into the client's two maps: `(world, instanceId) → pulse`, `conv →
 attachment`. Instance identity is the pair, not bare `instanceId`. If either
-side of a comparison omits `world`, the map keys and the gates below fall back
+side of a comparison omits `world`, the map keys and the gate below fall back
 to bare `instanceId`: degraded, not broken.
 
 - `attached` **replaces the held attachment for that `conv` wholesale**.
-  There is exactly one; never a set to merge into. A directory change
-  arrives this way too: towerd folds the agent's `moved` into its own
-  attachment state, applies the standing-identity gate there, and re-sends
-  the whole current attachment as `attached` carrying the new `cwd`,
-  deliberately reusing the standing claim's original `ts` so the move
-  doesn't restart the claim. There is no `moved` frame on this wire and
-  nothing for a client to apply in place.
+  There is exactly one; never a set to merge into. A directory change from
+  an agent that publishes `moved` arrives this way too: towerd folds the
+  `moved` into its own attachment state, applies the standing-identity gate
+  there, and re-sends the whole current attachment as `attached` carrying
+  the new `cwd`, deliberately reusing the standing claim's original `ts` so
+  the move doesn't restart the claim. There is no `moved` frame on this wire
+  and nothing for a client to apply in place.
 - `detached` clears the held attachment only when its identity matches the
   one currently held, else it's a no-op: `detached` is a fact about the
   standing claim, never a new one.
 
-A `detached` from an instance that isn't the standing one is a
-stale fact about a claim already superseded, a no-op here. `kind` is an
-open set: unknown kinds are skipped, never fatal. `ts` is the fact's wire
-timestamp in millis; for `pulse` it is the new `lastPulse`.
+A `detached` from an instance that isn't the standing one is a stale fact
+about a claim already superseded, a no-op here. `kind` is an open set:
+unknown kinds are skipped, never fatal. `ts` is the fact's wire timestamp in
+millis; for `pulse` it is the new `lastPulse`.
 
 ### `layout`: once, on connect; live, unconditional
 
