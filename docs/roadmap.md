@@ -82,7 +82,7 @@ pass that dismantled "run", evicted approvals from the conversation, and split
 telemetry from the committal change stream. The shipped tap still publishes
 the retired contract; conforming the CLI is stage 2's work.
 
-*Value: the fleet visible: "conversation quiet 2 hours", grouped by
+*Value: the fleet visible as "conversation quiet 2 hours", grouped by
 deployment convention (tmux server/session/window) into what is in practice
 "mission quiet 2 hours": a capability of telemetry, never an entity in the
 spec.*
@@ -93,14 +93,14 @@ spec.*
 Delivered (claude-cli PR #411): the concern specs implemented in the node CLI,
 and something speaks. Three pieces, all landed:
 
-1. **The servicer**: the CLI implements the three specs: the committal change
+1. **The servicer.** The CLI implements the three specs: the committal change
    stream, telemetry, `say`/`cancel` with preconditions and the acceptance
    limits, the approval concern with its pulse. Proven by `spec/conformance.md`
    against the `spec/scenarios.md` fixtures.
-2. **The speaker**: the first sending client: the demonstration `send`
+2. **The speaker.** The first sending client: the demonstration `send`
    script publishes a `say` with a premise, reads the reply, and the events
    arrive on `monitor`/`query`.
-3. **The approval answerer**: the same script's answer mode: see the raise,
+3. **The approval answerer.** The same script's answer mode: see the raise,
    review the payload, answer from anywhere; it settles with `by`.
 
 `say` was the goal, and it is demonstrated end to end over a real broker: a
@@ -115,7 +115,7 @@ The debrief pointer and the prediction ride that same traffic as
 orchestrator-defined content, still timestamped before the work and scoreable
 after, so the record the bookie will need is captured from the start.
 
-*Value: sessions readable, addressable, and approvable over the wire: state
+*Value: sessions readable, addressable, and approvable over the wire. State
 declared, not guessed; send-keys as transport and the screen-scraping approval
 worker both begin dying.*
 *Retires: capture-pane-and-classify.*

@@ -14,23 +14,23 @@ side by side. Derived from code, not from any prior claim about what's missing.
 
 ## Coverage checklist (this doc's own progress, not the gaps)
 
-- [x] WS contract, client→towerd messages (types only; behavioural coverage per-concern below)
-- [x] WS contract, towerd→client frames (types only; behavioural coverage per-concern below)
-- [x] Refs mechanism: parity, covered by refview
-- [x] Attachments HTTP mechanism: gap found (`bucket` field)
-- [x] Concern: transport (connection lifecycle, reconnect, request/response): gap found (reconnect)
-- [x] Concern: rail (rows, staleness, tags/titles, potential conversations): parity
-- [x] Concern: conversation (messages, streaming, queryState, pendingSay): parity, `can_send`/composer gating logic matches
-- [x] Concern: approvals: parity
-- [x] Concern: usage: parity
-- [x] Concern: view (tabs, layout, ViewConfig persistence): gap found (active-tab restore), fixed 26 Jul
-- [x] Component: conversation panel render (blocks, markdown, virtual list, composer, scroll-anchor): gaps found
-- [x] Component: rail render (RowList vs ui/rail.rs, tag filter/group UI): parity
-- [x] Component: approvals view: parity
-- [x] Component: unread/stale view: parity
-- [x] Component: refview: parity
-- [x] Component: attachments (upload, dismiss): gap found (upload); dismiss covered under rail, parity
-- [x] Cross-cutting: tolerance, clock injection: spot-checked, no gap found
+- [x] WS contract: client→towerd messages (types only; behavioural coverage per-concern below)
+- [x] WS contract: towerd→client frames (types only; behavioural coverage per-concern below)
+- [x] Refs mechanism. Parity, covered by refview
+- [x] Attachments HTTP mechanism. Gap found (`bucket` field)
+- [x] Concern: transport (connection lifecycle, reconnect, request/response). Gap found (reconnect)
+- [x] Concern: rail (rows, staleness, tags/titles, potential conversations). Parity
+- [x] Concern: conversation (messages, streaming, queryState, pendingSay). Parity, `can_send`/composer gating logic matches
+- [x] Concern: approvals. Parity
+- [x] Concern: usage. Parity
+- [x] Concern: view (tabs, layout, ViewConfig persistence). Gap found (active-tab restore), fixed 26 Jul
+- [x] Component: conversation panel render (blocks, markdown, virtual list, composer, scroll-anchor). Gaps found
+- [x] Component: rail render, tag filter/group UI (RowList vs ui/rail.rs). Parity
+- [x] Component: approvals view. Parity
+- [x] Component: unread/stale view. Parity
+- [x] Component: refview. Parity
+- [x] Component: attachments (upload, dismiss). Gap found (upload); dismiss covered under rail, parity
+- [x] Cross-cutting: tolerance, clock injection. Spot-checked, no gap found
 - [x] Porting order
 
 ## Gaps found
@@ -181,7 +181,7 @@ side by side. Derived from code, not from any prior claim about what's missing.
   `AttachmentRef` sent in a `say` from only `{ id, mediaType, size }` off the `POST /attachment` response, and
   `types.ts`'s `AttachmentRef.source` type doesn't even have a `bucket` field to hold one. `docs/mvp/tower-ws-spec.md`'s
   normative zod schema requires it, not optionally: `say.attachments[].source` is
-  `z.looseObject({ type, id, bucket: z.string(), mediaType, size })`, and the spec prose is explicit, "a servicer
+  `z.looseObject({ type, id, bucket: z.string(), mediaType, size })`, and the spec prose states it outright, "a servicer
   resolves against the bucket the block names, never a guess from its own deployment config; a block naming no
   bucket cannot be resolved and the say that carries it rejects (`attachment_unavailable`)". Leptos's
   `frontend-leptos/src/uploads.rs::attachment_ref` does this correctly: it extracts `bucket` from the upload reply

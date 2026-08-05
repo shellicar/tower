@@ -129,7 +129,7 @@ client's policy, like every ref.
 { "type": "cancel", "id": "r7", "conv": "c65b902d-…", "query": "7d8022be-…" }
 ```
 
-Cancel a running query: stop, never rollback: everything already committed
+Cancel a running query. Stop, never rollback: everything already committed
 stands (the record constitutes the state); the query's remaining work is
 revoked and its premise freed. `query` is the id `say_result` returned, the
 cancel's target is its premise, never "whatever happens to be running".
@@ -158,8 +158,8 @@ whose decision it was.
 { "type": "set_layout", "id": "r8", "tabs": [ { "name": "main", "convs": ["c65b902d-…"] }, { "name": "ops", "convs": [] } ] }
 ```
 
-Replace the fleet's whole layout, the shared tabs and which conversations sit
-in each, every connected session's workspace, tmux-attach style: whoever
+Replace the fleet's whole layout (the shared tabs and which conversations sit
+in each), every connected session's workspace, tmux-attach style: whoever
 changes it, everyone sees it live. No `conv`: layout is fleet-wide, never
 per-conversation. Response: `layout_set`. The new layout also arrives as an
 ordinary `layout` broadcast to every connected session, this one included, so
@@ -210,8 +210,8 @@ absent means untitled, so show the id. The `list` is the only carrier: `row`
 events do not carry titles, because a rename is not fleet activity and must
 not touch staleness.
 
-The full snapshot: one row per conversation towerd has ever seen, unsorted:
-ordering is the client's (by `lastEvent`, descending, is the product). Sent
+The full snapshot: one row per conversation towerd has ever seen, unsorted.
+Ordering is the client's (by `lastEvent`, descending, is the product). Sent
 exactly once per connection, before any `row`. A client that needs it again
 reconnects.
 
@@ -242,10 +242,10 @@ always, regardless of what is open. This event *is* the staleness product.
 ```
 
 The catch-up: every stored message with `ts` greater than the request's
-`after`, in `ts` order. Each message carries all three ids, `id` (message),
-`query` and `turn`, as every message does everywhere in this system; plus
+`after`, in `ts` order. Each message carries all three ids (the message `id`,
+`query` and `turn`) as every message does everywhere in this system; plus
 `role`, the `from` object verbatim from the wire (**absent for a
-`tool_result`**, since a mechanical delivery carries no sender; it is never fabricated),
+`tool_result`** — a mechanical delivery carries no sender, never fabricated),
 `content` blocks verbatim
 (the client renders known block types, skips unknown ones), and `ts`. The
 boundary may overlap what the client already holds when `after` is a shared
@@ -337,12 +337,12 @@ conversation**. A conversation has at most one, with no candidate set, nothing
 to select among: a new `attached` unconditionally supersedes whatever stood
 before it.
 
-Facts only, never verdicts. **Liveness is the client's derivation**, a fold and
-never a declaration: an attachment whose instance's `lastPulse` lags the
-client's clock by ~3 of that instance's own `intervalS` renders as stranded. A
-live pulse renders as alive. No
-attachment is ever released here. `intervalS` may be absent, for an instance
-that has published `ready` but no pulse yet.
+Facts only, never verdicts. **Liveness is the client's derivation**, a fold
+and never a declaration: an attachment whose instance's `lastPulse` lags the
+client's clock by ~3 of that instance's own `intervalS` renders as stranded.
+A live pulse renders as alive. No attachment is ever released here.
+`intervalS` may be absent, for an instance that has published `ready` but no
+pulse yet.
 
 **Existence is a union.** A `conv` present in `attachments` but absent from
 the `list` rows is a *potential* conversation: served, ready to receive, no
@@ -525,8 +525,7 @@ Three outcomes, verbatim from the wire exchange:
 - `rejected`: the servicer answered no; `reason` is the servicer's own word,
   an open set (`stale`, meaning the tip moved or the premise has a live
   acceptance and cancel-then-send is the affordance; `unsupported`; and
-  anything future).
-  Show it; do not branch on it.
+  anything future). Show it; do not branch on it.
 - `unreachable`: nobody answered (timeout or no responders; the transport
   distinction carries no meaning and is deliberately not exposed). The
   conversation exists in the views but nothing is currently serving it.
@@ -607,7 +606,7 @@ answered with this. `reason` is an open set.
 One mechanism for every heavy value, uniformly. In v1 towerd externalises at
 four fixed nodes: `image.source` and `document.source` (base64, wherever the
 block nests), `tool_result.content`, and oversized values inside
-`tool_use.input`, replacing the value in place by a reference. The shape is
+`tool_use.input`. Each is replaced in place by a reference. The shape is
 position-agnostic, so a client handles a `$ref` at *any* node it meets;
 further nodes are add-only:
 
@@ -663,10 +662,10 @@ kept long enough for content-addressing to buy anything.
 The wire's rule that a block names its own `bucket` (a servicer resolves only
 against the bucket a block names, never a guess from its own deployment
 config) is satisfied by **towerd**, not the client: the bucket is a tower
-storage fact, so towerd stamps it
-into each object source when it forwards the say onto the wire. The client
-sends only `{ type, id, mediaType, size }`: it neither receives nor
-carries a bucket, and nothing client-side may depend on one.
+storage fact, so towerd stamps it into each object source when it forwards
+the say onto the wire. The client sends only `{ type, id, mediaType, size }`:
+it neither receives nor carries a bucket, and nothing client-side may depend
+on one.
 
 ```
 GET /attachment/{id}   → the bytes (Content-Type from upload), while the object lives
