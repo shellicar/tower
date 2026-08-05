@@ -1,22 +1,28 @@
 //! The two facts, and the whole of what the lookout reads off an event.
 //!
 //! Whether a query is open is a subject leaf plus a `queryId`; how long a
-//! conversation has been silent is a timestamp. Neither requires reading what
-//! anybody said, so the readable thing that looks like state is never
+//! conversation has been silent is a timestamp. Neither requires interpreting
+//! what anybody said, so the readable thing that looks like state is never
 //! consulted for state. `Observation` is that rule expressed as a data
 //! dependency rather than as a warning: there is nowhere in it for content to
 //! go, so no classification downstream can depend on content even by mistake.
+//!
+//! Two subtrees feed it. `changes` carries the commits and the query closes.
+//! `telemetry` carries the turn boundaries, which prove the conversation was
+//! being worked on at a moment no commit landed — a turn that starts, is
+//! cancelled, or aborts without committing anything is still life.
 
 use serde::Deserialize;
 use std::collections::BTreeSet;
 
-/// What one change event says. A commit opens a query and is the activity
-/// silence is measured against; a close pairs off an open query and is
+/// What one event says. A commit opens a query and is activity; a turn event
+/// is activity that opens nothing; a close pairs off an open query and is
 /// deliberately not activity — a conversation whose only recent event is its
 /// own turn ending has still stopped speaking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Observation {
     Committed { query: String, at_ms: i64 },
+    Alive { at_ms: i64 },
     Closed { query: String },
 }
 
@@ -34,6 +40,9 @@ struct Envelope {
 /// fact (a revision, a tip move); `Err` is one that should have and did not,
 /// which is named rather than dropped.
 pub fn observe(subject: &str, payload: &[u8]) -> Result<Option<Observation>, String> {
+    if let Some((_, leaf)) = subject.rsplit_once(".telemetry.") {
+        return observe_telemetry(subject, leaf, payload);
+    }
     let leaf = match subject.rsplit_once(".changes.") {
         Some((_, leaf)) => leaf,
         None => return Ok(None),
@@ -57,14 +66,37 @@ pub fn observe(subject: &str, payload: &[u8]) -> Result<Option<Observation>, Str
     Ok(Some(Observation::Committed { query, at_ms }))
 }
 
-/// One worker's two facts, folded from its own change subtree.
+/// A turn boundary is life and nothing else: it says the conversation was
+/// being worked on then. It never opens or closes a query, because the query
+/// pairing has its own events and telemetry runs ahead of what is committed.
+fn observe_telemetry(
+    subject: &str,
+    leaf: &str,
+    payload: &[u8],
+) -> Result<Option<Observation>, String> {
+    if !leaf.starts_with("turn.") {
+        return Ok(None);
+    }
+    let envelope: Envelope = serde_json::from_slice(payload)
+        .map_err(|e| format!("{subject} carries no readable envelope: {e}"))?;
+    let at_ms = envelope
+        .ts
+        .as_deref()
+        .and_then(wire::parse_ts)
+        .ok_or_else(|| format!("{subject} carries no readable ts"))?;
+    Ok(Some(Observation::Alive { at_ms }))
+}
+
+/// One worker's two facts, folded from its own change and telemetry subtrees.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Facts {
     /// Queries seen on a committed message with no close paired against them.
     /// The pairing is by id and is exact, which is what keeps the whole fold
     /// free of content.
     pub open: BTreeSet<String>,
-    pub last_commit_ms: Option<i64>,
+    /// The last moment this conversation was observably being worked on: a
+    /// commit, or a turn boundary.
+    pub last_activity_ms: Option<i64>,
 }
 
 impl Facts {
@@ -72,12 +104,17 @@ impl Facts {
         match observation {
             Observation::Committed { query, at_ms } => {
                 self.open.insert(query.clone());
-                self.last_commit_ms = Some(self.last_commit_ms.map_or(*at_ms, |m| m.max(*at_ms)));
+                self.mark_alive(*at_ms);
             }
+            Observation::Alive { at_ms } => self.mark_alive(*at_ms),
             Observation::Closed { query } => {
                 self.open.remove(query);
             }
         }
+    }
+
+    fn mark_alive(&mut self, at_ms: i64) {
+        self.last_activity_ms = Some(self.last_activity_ms.map_or(at_ms, |m| m.max(at_ms)));
     }
 }
 
@@ -113,6 +150,49 @@ mod observe {
         let actual = observe(
             QUERY,
             br#"{"ts":"2025-07-31T22:13:20.000Z","queryId":"q-1","reason":"completed"}"#,
+        );
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_turn_starting_is_life_and_opens_nothing() {
+        let expected = Ok(Some(Observation::Alive {
+            at_ms: 1_754_000_000_000,
+        }));
+
+        let actual = observe(
+            "conv.v2.worker-1.telemetry.turn.started",
+            br#"{"ts":"2025-07-31T22:13:20.000Z","queryId":"q-1","turnId":"t-1","model":"m"}"#,
+        );
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_turn_ending_is_life() {
+        let expected = Ok(Some(Observation::Alive {
+            at_ms: 1_754_000_000_000,
+        }));
+
+        let actual = observe(
+            "conv.v2.worker-1.telemetry.turn.ended",
+            br#"{"ts":"2025-07-31T22:13:20.000Z","queryId":"q-1","stopReason":"end_turn"}"#,
+        );
+
+        assert_eq!(actual, expected);
+    }
+
+    /// A tool call announced before it runs says the conversation was alive,
+    /// but it is not a turn boundary and the lookout does not read what tool
+    /// it was or what it was given.
+    #[test]
+    fn a_tool_use_carries_neither_fact() {
+        let expected = Ok(None);
+
+        let actual = observe(
+            "conv.v2.worker-1.telemetry.tool.use",
+            br#"{"ts":"2025-07-31T22:13:20.000Z","queryId":"q-1","name":"Exec","input":{}}"#,
         );
 
         assert_eq!(actual, expected);
@@ -253,10 +333,41 @@ mod apply {
     }
 
     #[test]
-    fn the_last_commit_is_the_newest_message_seen() {
+    fn the_last_activity_is_the_newest_message_seen() {
         let expected = Some(300);
 
-        let actual = fold(&[committed("q-1", 100), committed("q-1", 300)]).last_commit_ms;
+        let actual = fold(&[committed("q-1", 100), committed("q-1", 300)]).last_activity_ms;
+
+        assert_eq!(actual, expected);
+    }
+
+    /// The case telemetry exists for: a turn that started after the last
+    /// commit is life, so a conversation mid-turn is not read as silent since
+    /// whenever it last managed to commit something.
+    #[test]
+    fn a_turn_boundary_after_the_last_commit_is_the_last_activity() {
+        let expected = Some(300);
+
+        let actual =
+            fold(&[committed("q-1", 100), Observation::Alive { at_ms: 300 }]).last_activity_ms;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_turn_boundary_opens_no_query() {
+        let expected = true;
+
+        let actual = fold(&[Observation::Alive { at_ms: 300 }]).open.is_empty();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_turn_boundary_closes_no_query() {
+        let expected = BTreeSet::from(["q-1".to_string()]);
+
+        let actual = fold(&[committed("q-1", 100), Observation::Alive { at_ms: 300 }]).open;
 
         assert_eq!(actual, expected);
     }
@@ -265,10 +376,10 @@ mod apply {
     /// what silence is measured from, so an out-of-order pair must not move
     /// the clock backwards.
     #[test]
-    fn an_older_message_arriving_late_does_not_move_the_last_commit_back() {
+    fn an_older_message_arriving_late_does_not_move_the_last_activity_back() {
         let expected = Some(300);
 
-        let actual = fold(&[committed("q-1", 300), committed("q-1", 100)]).last_commit_ms;
+        let actual = fold(&[committed("q-1", 300), committed("q-1", 100)]).last_activity_ms;
 
         assert_eq!(actual, expected);
     }
@@ -280,7 +391,7 @@ mod apply {
     fn a_close_is_not_activity() {
         let expected = Some(100);
 
-        let actual = fold(&[committed("q-1", 100), closed("q-1")]).last_commit_ms;
+        let actual = fold(&[committed("q-1", 100), closed("q-1")]).last_activity_ms;
 
         assert_eq!(actual, expected);
     }

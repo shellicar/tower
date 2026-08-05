@@ -1,38 +1,32 @@
 //! The lookout daemon's composition root: read the environment once, connect,
-//! cold start, then tail.
+//! cold start, then wait.
 //!
-//! Cold start is ordered, and the order is the point. The durable consumers
-//! open first, so nothing published while the replay runs is missed. The
-//! replay rebuilds each worker's two facts and relays nothing. Then one tick,
-//! which is the recovery path: anything genuinely stale surfaces immediately,
-//! including a worker that died mid-turn and will never publish again.
+//! Cold start reads the registry for the workers that exist now, takes each
+//! one up, and ticks once. That first tick relays whatever is already stale,
+//! which is the recovery path: a worker that died while nothing was watching
+//! publishes no event ever, so only a tick can find it. It will also repeat
+//! anything the previous process had already said, because what was said dies
+//! with that process. That is the cheaper side of the trade.
 //!
-//! After that the loop has two mouths. An event folds into the facts and says
-//! nothing; the tick classifies everything, delivers one digest per handler,
-//! and only then acks. Ack after the relay, never before: a crash between an
-//! ack and a say loses the event silently.
+//! After that the daemon waits on three things at once. An event folds into
+//! the facts and says nothing. A change to the registry takes up a worker or
+//! lets one go, so a worker commissioned after boot is watched like any other.
+//! The clock classifies everything, delivers one digest per handler, and acks.
 
-use bridge::broker::{Broker, BrokerDurable, BrokerError, NatsBroker};
-use lookout::lines::ReportingLine;
-use lookout::watch::{Config, Watch, read_lines};
+use bridge::broker::{Broker, BrokerDurable, BrokerKvWatch, BrokerMessage, KvChange, NatsBroker};
+use lookout::daemon::Lookout;
+use lookout::watch::{Config, read_lines};
 use std::time::Duration;
-
-/// A worker's tail, and which worker it belongs to.
-struct Tail {
-    worker: String,
-    durable: <NatsBroker as Broker>::Durable,
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
-    // The same variable spawn.mts reads, so an override points both halves at
-    // the same bucket and a test never touches the one the fleet runs on.
-    let bucket =
-        std::env::var("NATS_REPORTING_BUCKET").unwrap_or_else(|_| "reporting-lines".into());
     let config = Config {
         stream: std::env::var("LOOKOUT_STREAM").unwrap_or_else(|_| "conv-approval".into()),
-        bucket,
+        telemetry_stream: std::env::var("LOOKOUT_TELEMETRY_STREAM")
+            .unwrap_or_else(|_| "conv-diagnostic".into()),
+        bucket: std::env::var("LOOKOUT_REPORTING_BUCKET")
+            .unwrap_or_else(|_| "reporting-lines".into()),
         quiet_after_ms: env_seconds("LOOKOUT_QUIET_AFTER_S", 600) * 1_000,
         say_timeout: Duration::from_secs(env_seconds("LOOKOUT_SAY_TIMEOUT_S", 5) as u64),
     };
@@ -48,40 +42,68 @@ async fn main() -> anyhow::Result<()> {
     };
     eprintln!("lookout watching {} on {url}", config.bucket);
 
-    let (lines, complaints) = read_lines(&broker, &config.bucket).await?;
-    for complaint in &complaints {
-        eprintln!("lookout: {complaint}");
-    }
+    let mut lookout = Lookout::<NatsBroker>::new(durable_prefix);
 
-    let mut watch = Watch::default();
-    let mut tails = Vec::new();
-    for line in lines {
-        match take_up(&broker, &config, &durable_prefix, &mut watch, line).await {
-            Ok(tail) => tails.push(tail),
-            Err(e) => eprintln!("lookout: {:#}", anyhow::Error::new(e)),
+    // The watch opens before the read, so a line written between the two
+    // arrives as a change rather than falling into the gap.
+    //
+    // Neither is fatal. Nothing in this repo writes the bucket, and watching
+    // nothing is a valid state for a daemon whose registry has not been
+    // created yet: it stays up, says so, and picks the bucket up when the
+    // clock next comes round.
+    let mut registry = match broker.kv_watch(config.bucket.clone()).await {
+        Ok(watch) => Some(watch),
+        Err(e) => {
+            eprintln!(
+                "lookout: not watching {} for changes: {:#}",
+                config.bucket,
+                anyhow::Error::new(e)
+            );
+            None
         }
+    };
+    match read_lines(&broker, &config.bucket).await {
+        Ok((lines, complaints)) => {
+            for complaint in &complaints {
+                eprintln!("lookout: {complaint}");
+            }
+            for line in lines {
+                report(lookout.take_up(&broker, &config, line).await);
+            }
+        }
+        Err(e) => eprintln!(
+            "lookout: {} could not be read, so nothing is being watched yet: {:#}",
+            config.bucket,
+            anyhow::Error::new(e)
+        ),
     }
-    eprintln!("lookout: watching {} worker(s)", tails.len());
+    eprintln!("lookout: watching {} worker(s)", lookout.watching().len());
 
-    tick(&broker, &config, &mut watch, &mut tails).await;
+    tick(&broker, &config, &mut lookout).await;
 
     let mut interval = tokio::time::interval(tick_every);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     interval.tick().await;
     loop {
-        let wake = next_wake(&mut interval, &mut tails).await;
-        match wake {
-            Wake::Tick => tick(&broker, &config, &mut watch, &mut tails).await,
+        match next_wake(&mut interval, &mut lookout, &mut registry).await {
+            Wake::Tick => tick(&broker, &config, &mut lookout).await,
             Wake::Event { index, frame } => {
-                let worker = tails[index].worker.clone();
-                if let Some(complaint) = watch.observe(&worker, &frame.subject, &frame.payload) {
+                if let Some(complaint) = lookout.observe(index, &frame.subject, &frame.payload) {
+                    eprintln!("lookout: {complaint}");
+                }
+            }
+            Wake::Line(change) => {
+                let complaints = lookout
+                    .line_changed(&broker, &config, &change.key, change.value.as_deref())
+                    .await;
+                for complaint in complaints {
                     eprintln!("lookout: {complaint}");
                 }
             }
             Wake::Failed { index, error } => {
                 eprintln!(
                     "lookout: {} tail failed: {:#}",
-                    tails[index].worker,
+                    lookout.worker_at(index),
                     anyhow::Error::new(error)
                 );
             }
@@ -89,8 +111,13 @@ async fn main() -> anyhow::Result<()> {
             // the select from spinning on an exhausted stream. The worker's
             // facts stay, so the clock still covers it.
             Wake::Ended { index } => {
-                eprintln!("lookout: {} tail ended", tails[index].worker);
-                tails.remove(index);
+                eprintln!("lookout: {} tail ended", lookout.source_ended(index));
+            }
+            // The registry watch ending leaves the daemon on what it already
+            // holds. It keeps watching those workers rather than exiting.
+            Wake::RegistryEnded => {
+                eprintln!("lookout: the registry watch ended; no new workers will be picked up");
+                registry = None;
             }
         }
     }
@@ -100,32 +127,49 @@ enum Wake {
     Tick,
     Event {
         index: usize,
-        frame: bridge::broker::BrokerMessage,
+        frame: BrokerMessage,
     },
+    Line(KvChange),
     Failed {
         index: usize,
-        error: BrokerError,
+        error: bridge::broker::BrokerError,
     },
     Ended {
         index: usize,
     },
+    RegistryEnded,
 }
 
-/// Wait for whichever comes first: the clock, or an event on any worker's
-/// tail. The unfinished reads are dropped when one wins, which costs nothing
-/// — a pull consumer's next read resumes where it was.
-async fn next_wake(interval: &mut tokio::time::Interval, tails: &mut [Tail]) -> Wake {
-    if tails.is_empty() {
-        interval.tick().await;
-        return Wake::Tick;
-    }
-    let polls: Vec<_> = tails
+/// Wait for whichever comes first: the clock, a change to the registry, or an
+/// event on any worker's tail. The unfinished reads are dropped when one wins,
+/// which costs nothing — a pull consumer's next read resumes where it was.
+async fn next_wake(
+    interval: &mut tokio::time::Interval,
+    lookout: &mut Lookout<NatsBroker>,
+    registry: &mut Option<<NatsBroker as Broker>::KvWatch>,
+) -> Wake {
+    let sources = lookout.sources_mut();
+    let mut tails: Vec<_> = sources
         .iter_mut()
-        .map(|tail| Box::pin(tail.durable.next()))
+        .map(|source| Box::pin(source.tail.next()))
         .collect();
+    let lines = async {
+        match registry {
+            Some(registry) => registry.next().await,
+            None => std::future::pending().await,
+        }
+    };
     tokio::select! {
         _ = interval.tick() => Wake::Tick,
-        (frame, index, _) = futures::future::select_all(polls) => match frame {
+        change = lines => match change {
+            Some(Ok(change)) => Wake::Line(change),
+            Some(Err(e)) => {
+                eprintln!("lookout: registry watch failed: {:#}", anyhow::Error::new(e));
+                Wake::RegistryEnded
+            }
+            None => Wake::RegistryEnded,
+        },
+        (frame, index, _) = select_tails(&mut tails) => match frame {
             Some(Ok(frame)) => Wake::Event { index, frame },
             Some(Err(error)) => Wake::Failed { index, error },
             None => Wake::Ended { index },
@@ -133,50 +177,36 @@ async fn next_wake(interval: &mut tokio::time::Interval, tails: &mut [Tail]) -> 
     }
 }
 
-/// Open a worker's tail before replaying its history, so an event published
-/// during the replay is delivered rather than lost between the two.
-async fn take_up(
-    broker: &NatsBroker,
-    config: &Config,
-    durable_prefix: &str,
-    watch: &mut Watch,
-    line: ReportingLine,
-) -> Result<Tail, BrokerError> {
-    let worker = line.worker.clone();
-    let durable = broker
-        .durable(
-            config.stream.clone(),
-            format!("conv.v2.{worker}.changes.>"),
-            format!("{durable_prefix}-{worker}"),
-        )
-        .await?;
-    for complaint in watch.seed(broker, config, line).await? {
-        eprintln!("lookout: {complaint}");
+/// `select_all` panics on an empty set, and a lookout watching nobody is an
+/// ordinary state — it waits for its first line.
+async fn select_tails<F: std::future::Future + Unpin>(tails: &mut [F]) -> (F::Output, usize, ()) {
+    if tails.is_empty() {
+        return std::future::pending().await;
     }
-    Ok(Tail { worker, durable })
+    let (output, index, _) = futures::future::select_all(tails.iter_mut()).await;
+    (output, index, ())
 }
 
-async fn tick(broker: &NatsBroker, config: &Config, watch: &mut Watch, tails: &mut [Tail]) {
+async fn tick(broker: &NatsBroker, config: &Config, lookout: &mut Lookout<NatsBroker>) {
     let now = wire::now_iso();
     let Some(now_ms) = wire::parse_ts(&now) else {
         eprintln!("lookout: the clock produced an unreadable timestamp {now:?}");
         return;
     };
-    let outcome = watch.tick(broker, config, now_ms, &now).await;
+    let outcome = lookout.tick(broker, config, now_ms, &now).await;
     for complaint in &outcome.complaints {
         eprintln!("lookout: {complaint}");
     }
-    for tail in tails.iter_mut() {
-        if !watch.may_ack(&tail.worker, &outcome) {
-            continue;
+}
+
+fn report(outcome: Result<Vec<String>, bridge::broker::BrokerError>) {
+    match outcome {
+        Ok(complaints) => {
+            for complaint in complaints {
+                eprintln!("lookout: {complaint}");
+            }
         }
-        if let Err(e) = tail.durable.ack_delivered().await {
-            eprintln!(
-                "lookout: {} could not ack: {:#}",
-                tail.worker,
-                anyhow::Error::new(e)
-            );
-        }
+        Err(e) => eprintln!("lookout: {:#}", anyhow::Error::new(e)),
     }
 }
 

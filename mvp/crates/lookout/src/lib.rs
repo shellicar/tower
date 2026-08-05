@@ -7,12 +7,16 @@
 //! never does, each load-bearing rather than an omission:
 //!
 //! - **No API and no write path of its own.** Nothing registers with it. It
-//!   reads the reporting lines (a KV bucket the spawn tool owns) and the bus,
+//!   reads the reporting lines (a KV bucket another tool owns) and the bus,
 //!   and writes only into a handler.
-//! - **It never parses a message body.** Whether a query is open is a subject
-//!   and a `queryId`; how long a worker has been silent is a timestamp.
-//!   `facts::observe` is the whole of what it reads off an event, and
-//!   `facts`' own tests pin that content cannot reach a classification.
+//! - **It extracts, and never interprets.** Whether a query is open is a
+//!   subject and a `queryId`; how long a worker has been silent is a
+//!   timestamp. Pulling those out of an envelope is mechanical; deciding what
+//!   a worker meant is not, and only the first happens here.
+//!   `facts::observe` is the whole of what it reads off an event, and two
+//!   tests hold the line at the level that matters: the same event classifies
+//!   identically however its content differs, and an event whose content no
+//!   message parser would accept still yields both facts.
 //! - **It renders no verdict.** It establishes facts — a query closed, a
 //!   conversation went quiet. Whether the work is acceptable is judgment, and
 //!   judgment belongs to an agent.
@@ -21,6 +25,7 @@
 //!   addable without touching it.
 
 pub mod classify;
+pub mod daemon;
 pub mod digest;
 pub mod facts;
 pub mod lines;

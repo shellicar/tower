@@ -7,6 +7,12 @@
 //! finished-and-not-reporting for 23 hours, and the human found it, not the
 //! machinery. Absence of events is the signal, and absence has no event,
 //! which is why something must tick.
+//!
+//! Known limit, and it is the threshold's rather than the classifier's: the
+//! agent host publishes nothing at all while a tool runs, so a worker part
+//! way through a long build and a worker whose process died during one look
+//! identical from here. Turn telemetry narrows the gap at every round
+//! boundary but does not close it, and no threshold separates the two.
 
 use crate::facts::Facts;
 use crate::lines::ReportingLine;
@@ -53,7 +59,7 @@ pub fn classify(facts: &Facts, silent_since_ms: i64, now_ms: i64, quiet_after_ms
 /// read as busy for ever. A line with no timestamp leaves nothing to measure
 /// against, and the worker is left alone until it speaks.
 pub fn silent_since_ms(facts: &Facts, line: &ReportingLine) -> Option<i64> {
-    facts.last_commit_ms.or(line.written_at_ms)
+    facts.last_activity_ms.or(line.written_at_ms)
 }
 
 #[cfg(test)]

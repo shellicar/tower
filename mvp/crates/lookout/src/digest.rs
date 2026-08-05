@@ -67,10 +67,13 @@ fn render_edge(edge: &Edge) -> String {
         // Named even though it is never rendered: leaving it to a catch-all
         // would make a future state silently read as one of these.
         State::Working => format!("is working, and last spoke {silence} ago"),
-        State::DeadMidTurn => format!(
-            "has a query still open and has not spoken for {silence}: it died mid-turn, and \
-             whatever it had done is unpushed"
-        ),
+        // What is established is the silence and the open query. Whether the
+        // process died, and what it was holding when it did, is the
+        // handler's to find out: the lookout has looked at no worktree and
+        // holds no idea of one.
+        State::DeadMidTurn => {
+            format!("has a query still open and has not spoken for {silence}")
+        }
         State::Finished => {
             format!("finished a turn and last spoke {silence} ago: there is something to read")
         }
@@ -198,12 +201,11 @@ mod render {
         assert_eq!(actual, expected);
     }
 
-    /// The digest is a pointer, so a worker that has been dead for a day is
-    /// named by its id and its silence, and nothing it said travels.
+    /// The digest is a pointer, so a worker silent for a day is named by its
+    /// id and its silence, and nothing it said travels.
     #[test]
     fn a_worker_dead_mid_turn_is_reported_by_id_and_silence() {
-        let expected = "- worker-2 has a query still open and has not spoken for 23h: it died \
-             mid-turn, and whatever it had done is unpushed";
+        let expected = "- worker-2 has a query still open and has not spoken for 23h";
 
         let actual = render_edge(&Edge {
             worker: "worker-2".into(),
