@@ -141,7 +141,7 @@ compute, never something it must.
 | Event | Fields | Notes |
 |---|---|---|
 | `turn_started` | `queryId`, `turnId`, `service`, `model`, `thinking`, `effort`, `maxTokens` | a message begins; fires every round of the loop. Carries the request's inputs as asked — `usage` later carries what was reported back; if they differ (model fallback), the record shows it. `service` names what was called — e.g. the Anthropic Messages API — not which model answered |
-| `turn_ended` | `queryId`, `turnId`, `stopReason` | the model stopped its message; fires every round — mid-loop rounds end `tool_use`, a closing round ends `end_turn`. That is the model's own word for why it stopped, never the query's ending: closure is the `query` change on `changes` (this spec, Query closure), and reading an ending off this event is lawful observation, never authority. `stopReason` is the service's own value, passed through verbatim — never synthesised: a turn that was cancelled or failed did not *end*, and gets its own event below |
+| `turn_ended` | `queryId`, `turnId` (+ optional: `stopReason`) | the model stopped its message; fires every round — mid-loop rounds end `tool_use`, a closing round ends `end_turn`. That is the model's own word for why it stopped, never the query's ending: closure is the `query` change on `changes` (this spec, Query closure), and reading an ending off this event is lawful observation, never authority. `stopReason` is the service's own value, passed through verbatim — never synthesised: a turn that was cancelled or failed did not *end*, and gets its own event below. It is optional because the service does not always state one: absent means the service gave no stop reason, so the turn ended without one being stated. That is the honest record of the service saying nothing, not a claim that the turn was interrupted and not a value invented to fill the field |
 | `turn_cancelled` | `queryId`, `turnId` | the turn was terminated intentionally — a `cancel` was accepted; someone decided |
 | `turn_aborted` | `queryId`, `turnId` | the attempt failed — service error, broken stream; potentially transient. Distinct from `turn_cancelled` because the two imply different follow-ups |
 | `tool_use` | `queryId`, `turnId`, `id`, `name`, `input` | `id` is the opaque tool-use id (`toolu_…`); `input` included — the action is unreviewable without the payload |
@@ -592,7 +592,7 @@ const turnRef = { queryId: z.string(), turnId: z.string() };
 // conv.v2.{conversationId}.telemetry.>
 export const conversationTelemetry = {
   'turn.started': z.looseObject({ ts, ...turnRef, service: z.string(), model: z.string(), thinking: z.boolean(), effort: z.string().optional(), maxTokens: z.number().int() }),
-  'turn.ended': z.looseObject({ ts, ...turnRef, stopReason: z.string() }),
+  'turn.ended': z.looseObject({ ts, ...turnRef, stopReason: z.string().optional() }),
   'turn.cancelled': z.looseObject({ ts, ...turnRef }),
   'turn.aborted': z.looseObject({ ts, ...turnRef }),
   'tool.use': z.looseObject({ ts, ...turnRef, id: z.string(), name: z.string(), input: z.record(z.string(), z.unknown()) }),
