@@ -196,7 +196,7 @@ approval layer sits underneath the bridge's own:
 |---|---|---|
 | `gh` (GitHub CLI) | read/write repo, PR read | PR write: create/merge/close |
 | `az` (Azure CLI) | (per-account scoped; likely read-heavy) | privileged operations |
-| Azure DevOps | - | PR + work item access |
+| Azure DevOps | — | PR + work item access |
 
 Two things that don't fold into the bridge's own approval gate cleanly:
 
