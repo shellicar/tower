@@ -2,6 +2,9 @@
 {"model":"claude-opus-5"}
 {"permissions": [
   { "match": "$PWD", "read": "allow", "write": "allow", "delete": "ask", "exec": "allow" },
+  { "match": "~/repos/kunchenguid/firstmate/**", "write": "deny", "delete": "deny", "exec": "allow" },
+  { "match": "/tmp/**", "read": "allow", "write": "allow", "delete": "allow" },
+  { "match": "/private/tmp/**", "read": "allow", "write": "allow", "delete": "allow" },
   { "match": "*", "read": "allow", "write": "ask", "delete": "deny", "exec": "ask" }
 ]}
 {"settings":{}}
