@@ -24,6 +24,7 @@ wrong, and the fix lands twice.
 | 6 — approval, both endings | `fixtures/scenario-6a.jsonl`, `fixtures/scenario-6b.jsonl` |
 | 7 — the block stream | `fixtures/scenario-7.jsonl` |
 | 8 — the attachment, both endings | `fixtures/scenario-8a.jsonl`, `fixtures/scenario-8b.jsonl` |
+| 9 — the turn that ends with no stop reason | `fixtures/v2/scenario-9.jsonl` |
 
 Each template lists the **required** entries: a producer's capture must contain
 them as a subsequence per subject, extras allowed (add-only honoured).
@@ -33,11 +34,13 @@ them as a subsequence per subject, extras allowed (add-only honoured).
 `fixtures/v2/` carries the conversation scenarios in the v2 tree
 (conversation.md, Subjects): leaf subjects spelling each type, and a
 `query` closure change wherever a query closes — completed in scenarios 1,
-2b, and 3; cancelled in scenario 2. Scenario 5's second query never closes
+2b, 3, and 9; cancelled in scenario 2. Scenario 5's second query never closes
 (still live when the fixture ends), scenario 7 is one turn's stream
 mid-query, and scenario 8b never opens a query at all (rejected before
 acceptance), so none of the three carries a closure. Scenario 6 is
-approval-concern traffic and has no v2 form.
+approval-concern traffic and has no v2 form. Scenario 9 is v2 only: the
+absence it captures is lawful in either tree (conversation.md, The v1 tree),
+and the v1 set is not extended for it.
 
 Every v2 change line carries the envelope `instanceId` — required of every
 compliant publisher, optional in the schema only for producers that predate
@@ -251,6 +254,30 @@ at all must validate them the same way — accept-with-verbatim-block or
 reject-outright are the only two compliant outcomes for a resolvable-or-not
 block. A servicer that has never implemented attachment support simply never
 exercises this fixture (declared capability, per the two-branches rule).
+
+## 9. The turn that ends with no stop reason
+
+The stream ends before the service says why it stopped: the text that arrived
+is all there is, and the closing frame that would have named a reason never
+comes. The tree starts at `m4`. Producer-side only — the say is accepted like
+any other, so there is no reject branch.
+
+- Exercises: `turn_ended` published with no `stopReason` at all; the content
+  that did arrive committed as the assistant message; a single `usage` frame,
+  since the frame that reports the closing counts is the one that never came.
+- Asserts: the absence is a lawful capture, not a malformed event — a
+  consumer reads a turn that ended with no reason stated and puts nothing in
+  the field's place; the turn is neither `turn_cancelled` (nobody decided)
+  nor `turn_aborted` (nothing failed); the committed message stands on its
+  own, whatever the service left unsaid.
+
+Fixture: `fixtures/v2/scenario-9.jsonl`.
+
+The closure is `completed`: the servicer ran a round, took what the service
+sent, and chose not to run another, which is what `completed` names. Only a
+`tool_use` reason buys a further round, and there is no reason here to buy
+one. That the answer may have been cut short is read from the absent
+`stopReason` on the observation plane; no closure reason encodes it.
 
 ## Agent scenarios
 
