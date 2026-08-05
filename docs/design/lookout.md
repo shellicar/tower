@@ -27,7 +27,7 @@ reports. It never decides what happens next.
 
 Of the three concerns above the agent, the lookout is not one of them cleanly,
 and for a first version that is accepted rather than solved. It reads the bus
-(routing), it holds a registry of live workers (control plane), and it decides
+(routing), it holds the reporting lines (control plane), and it decides
 what is worth surfacing (orchestration logic). The concern boundary it must not
 cross is the last one: it decides what is worth *saying*, never what should
 *happen*.
@@ -79,34 +79,57 @@ distort it, and the artefact is already durable where it sits.
 
 ## What the lookout never does
 
-- It has **no API**. No control subject, no adopt request. The handler mints a
-  worker's conversation id, so the handler already knows every field of the
-  registry entry and writes it itself. The lookout only subscribes and reads.
+- It has **no API and no write path of its own**. No control subject, no adopt
+  request, nothing to register with the lookout. It reads the reporting lines, which
+  the spawn tool owns, and it reads the bus. It writes only into a handler.
 - It does not spawn, brief, merge, or tear down. Those are handler actions.
 - It does not render a verdict, per limit 4.
 - It does not carry workflow knowledge, per limit 5.
 
 ## The shape
 
-Five things:
+Six things:
 
-1. **Subscribe** to conversation change events and agent telemetry, filtered to
-   the conversations in the registry.
-2. **A registry** of live workers: worker conversation, its handler, its worktree.
-   The lookout's only persistent state.
-3. **A filter**: does this need the handler?
-4. **A verifier**: before relaying a claimed outcome, check the artefact.
-5. **A sender**: say into the handler's conversation.
+1. **Subscribe** to conversation change events, filtered to the conversations in
+   the reporting lines.
+2. **Read the reporting lines**: which conversation is a worker, and whose. Written
+   by the spawn tool, never by the lookout.
+3. **A clock**, because the case that matters most produces no event at all.
+4. **A filter**: does this need the handler?
+5. **A verifier**: before relaying a claimed outcome, check the artefact.
+6. **A sender**: say into the handler's conversation.
 
 ## Decided mechanics
 
-**The registry is a NATS KV bucket, and the lookout watches it.** A registry has
-deletes, so it is a table and not a log; an append-only file would mean folding
-tombstones on read to answer "what is live now". Watching the bucket means
-registry changes arrive as events, like everything else, instead of the lookout
-stat-ing a file. Move to sqlite only if questions across entries are wanted
-(everything older than N, grouped by handler), because KV is a keyed store and
-not a query engine.
+**A reporting line is declared, never inferred.** It is not a transport fact. No
+message, spawn, or attach establishes it, because every one of those is an operation
+anyone can perform against anything. Watching traffic cannot recover it either: a
+parent asking a worker a question and a worker reporting to its parent are the same
+shape on the wire, so an inferred graph gets edges backwards. It is the org chart,
+and you find that out by looking it up rather than by watching the corridors.
+
+So the owner states it, and the statement is not a manual step. **One tool does
+spawn, register and send**, because a step a handler has to remember separately is a
+step that gets skipped or mistyped. The handler decides to commission a worker and
+calls one thing; the reporting line exists because that call is what creates the
+relationship.
+
+**Spawn and service are different verbs.** `service` is generic lifecycle: spawn,
+resume, or unconditional takeover, callable by anyone against any conversation. So
+its caller is whoever wanted the conversation attached, which says nothing about who
+owns the work, and a parent field on it would record the last party to attach.
+Spawn is the verb that says "this worker is reporting to me", and only a parent ever
+says it.
+
+That separation buys a property worth having: **a takeover does not move a line.**
+Because `service` never touches the registry, another session attaching to a worker
+does not make it theirs, and a bridge restart that re-serves the whole fleet leaves
+every reporting line intact.
+
+A line records direction of reporting and nothing else: worker conversation, owning
+conversation. Not the contract, not the worktree, which belong to the spawn. It
+confers no authority, the same way reporting to a manager rather than a peer says
+where a report goes and not who may command whom.
 
 **Keep the live registry and the historical log separate, and do not let one look
 like the other.** firstmate already keeps them apart: `state/<id>.meta` is the
@@ -124,13 +147,14 @@ only makes doing so wrong.
 
 So that lesson is structural here rather than advisory, in three places:
 
-- **The two stores share no affordance.** Live state is a `kv get` against a
-  bucket; history is a durable consumer over a subject. There is no `tail`, so the
-  cheap wrong answer is not reachable by accident.
-- **One invariant, and it is testable:** liveness comes from the registry, never
-  from the change stream. The lookout treats a message as a trigger and never
-  reads a message body to decide what is live. The test asserting that is the
-  durable form of this paragraph; the paragraph only explains why the test exists.
+- **Classification reads the shape of the stream, never the content of a message.**
+  Whether a query closed is a *subject*; how long a worker has been silent is a
+  *timestamp*. Neither requires reading what anybody said. So the readable thing
+  that looks like state is never consulted for state, which is the whole lesson
+  expressed as a data dependency rather than as a warning.
+- **That is one testable invariant:** the lookout never parses a message body. A
+  test asserting it is the durable form of this paragraph, and the paragraph exists
+  only to say why the test is there.
 - **The decision record catches a violation after the fact.** Every routing
   decision publishes which rule fired, so an answer derived from the wrong source
   shows up in the record instead of having to be inferred from behaviour.
@@ -138,6 +162,22 @@ So that lesson is structural here rather than advisory, in three places:
 **Use a durable consumer.** That is the wake queue, already built. firstmate
 hand-rolled the same thing as a file, for the same reason: a missed event must
 survive a restart.
+
+**A cold start replays, bounded by the registry.** The declared lines give the graph,
+but not the state: whether a query is open and when a worker last spoke come only from
+history. So on startup, read the bucket, then replay each listed worker's own
+`conv.v2.<worker>.changes.>` to rebuild those two facts, then tick, then tail from the
+durable consumer's cursor.
+
+Bounded by the registry is the point. Without declared lines the replay would have to
+cover every conversation on the broker to discover who is a worker at all, over a
+stream retained indefinitely, and a time window would be the only way to cap it. With
+them it is one read per live worker, and there is no window to get wrong.
+
+Replay must not relay: it is rebuilding state, not reporting news, or a restart
+re-announces every historical close. Tick once after it, and anything genuinely stale
+surfaces immediately. That single tick is the recovery path, and it is what would have
+found the worker that had been dead for a day.
 
 **Ack only after the relay succeeds.** firstmate does the same with a file:
 actionable wakes are "written to a durable local queue (`state/.wake-queue`)
@@ -148,6 +188,36 @@ semantics. Ack first and a crash between ack and say loses the event silently.
 and re-send with backoff. While a handler is busy, events pile up unacked, which
 is exactly right and costs nothing.
 
+**Sessions message down. Workers report up by marking, not by sending.** The tip
+precondition rejects a say when the tip has moved, and the tip moves with the
+recipient's *own* output, so a sender racing a live turn cannot win until that turn
+ends. Two writers on one conversation is the problem, and it gets worse once the
+lookout is also writing into handlers.
+
+firstmate has no such problem, by construction rather than by care: a worker never
+sends anything to firstmate. It appends one line, `echo "{state}: {note}" >>
+state/<id>.status`, and a watcher delivers it. Its brief is blunt that chat is not a
+channel: "the main firstmate does not read your chat, so a chat-only reply is lost."
+One writer per direction, so nothing ever races anything.
+
+The lookout collects those marks and delivers one batched digest per handler, not one
+wake per mark. Same reason firstmate batches: N wakes for N notes is how a supervisor
+drowns the worker it is supervising.
+
+This is also what keeps the lookout free of a model. firstmate's classifier is one
+regex over verbs the worker chose itself, `done:|needs-decision:|blocked:|failed:`,
+and a four-line `case`. The judgment happens where the judgment lives, in the worker,
+and the daemon only recognises a token. Ask a daemon to infer intent from prose and it
+needs a model, and then every wake costs tokens and can be wrong in ways nobody can
+enumerate.
+
+**Still open: where the mark lives.** If it is message content, the lookout must parse
+prose, which breaks the invariant above. firstmate escapes that because its status file
+is a different artefact from its chat, so the verb is structural. The equivalent here
+is a report on its own subject, which is a wire question rather than a daemon one.
+Until it is settled, structure alone gives the four states but can never say *what*
+happened: that a worker finished, never that it finished with a PR or a blocker.
+
 Note what this buys over the tmux era: firstmate decides whether it is safe to
 speak by capturing the pane, finding the composer row, and deleting every dim or
 dark-truecolor run so the harness's own grey placeholder can be told apart from
@@ -156,10 +226,44 @@ heuristic with a correctness property.
 
 ## Classification
 
-Version one wakes the handler on every query close and classifies nothing. The
-absorb rules cannot be designed before the noise has been seen; firstmate's are
-large because they accreted from experience, and their code comments still name
-the overnight failure that taught them one of the rules.
+Waking on every query close is not enough, and a live fleet showed why. Four worker
+conversations, read off the wire on 5 August:
+
+| `changes.query` | last message | real state |
+|---|---|---|
+| `completed`, 8m ago | recent | working normally |
+| **none** | recent | working, first turn |
+| `completed`, 3h ago | 3h ago | turn done, work unfinished |
+| **none** | **23h ago** | **dead mid-turn** |
+
+The last one had opened an `Exec` running `sleep 420` and a build poll. The
+`tool_result` never arrived and the query never closed, because the process went away
+mid-call and a crash publishes nothing. It had been silently finished-and-not-
+reporting for a day, and the human found it, not the machinery.
+
+So two facts classify all four, and neither is a message body: whether a query is
+still open, and how long the conversation has been silent.
+
+| open query | last activity | state |
+|---|---|---|
+| yes | recent | working. Leave it. |
+| yes | old | **dead mid-turn.** Needs re-servicing. |
+| no | recent | finished a turn. Relay it. |
+| no | old | idle, waiting on someone. |
+
+A query is open when a `queryId` has been seen on a message with no matching
+`changes.query`. That pairing is exact and needs no content, which is what keeps the
+invariant above intact.
+
+**Hence the clock.** The fourth state produces no event *ever*, so no subscription
+can reach it: absence of events is the signal, and absence has no event. This is why
+firstmate polls every fifteen seconds despite having push events available, and it is
+the state that costs most, because a worker that died mid-turn is holding unpushed
+work.
+
+Beyond those four, the absorb rules cannot be designed before the noise has been
+seen. firstmate's are large because they accreted from experience, and their code
+comments still name the overnight failure that taught them one of the rules.
 
 When the rules do arrive, the vocabulary is already proven. firstmate's
 `bin/fm-transition-lib.sh` is 103 lines and holds two things: one normalised
