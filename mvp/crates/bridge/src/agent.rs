@@ -256,6 +256,13 @@ pub async fn run<B: Broker, D: DeltaSink>(
     // The delta baseline: name→content-hash from the last scan. None until the
     // first say records it (which stays silent; the full catalogue leads instead).
     let mut skill_hashes: Option<HashMap<String, u64>> = None;
+    // The live query's baseline, held back until that query commits something.
+    // A query that commits nothing revokes its say, and the catalogue that say
+    // carried goes with it, so the next say must lead with the full catalogue
+    // again rather than a delta against one nobody ever saw. One slot is the
+    // whole state: `on_say` is stale while a query is live, so there is never
+    // more than one waiting.
+    let mut pending_hashes: Option<HashMap<String, u64>> = None;
     let (done_tx, mut done_rx) = mpsc::channel::<(String, QueryEnd)>(8);
 
     loop {
@@ -278,7 +285,7 @@ pub async fn run<B: Broker, D: DeltaSink>(
             }
             // A query finished: fold its outcome into the tree.
             Some((query, end)) = done_rx.recv() => {
-                conversation.on_query_end(query, end);
+                fold_query_end(&mut conversation, &mut skill_hashes, &mut pending_hashes, query, end);
                 cancel_tx = None;
             }
             maybe = requests.next() => {
@@ -316,7 +323,7 @@ pub async fn run<B: Broker, D: DeltaSink>(
                                 &sink,
                                 &config,
                                 &mut conversation,
-                                &mut skill_hashes,
+                                &skill_hashes,
                                 &done_tx,
                                 text,
                                 from,
@@ -324,8 +331,9 @@ pub async fn run<B: Broker, D: DeltaSink>(
                             )
                             .await
                             {
-                                Ok((query, tx)) => {
+                                Ok((query, tx, baseline)) => {
                                     cancel_tx = Some(tx);
+                                    pending_hashes = Some(baseline);
                                     encode_accepted(Some(&query))
                                 }
                                 Err(reason) => encode_rejected(&reason),
@@ -338,7 +346,7 @@ pub async fn run<B: Broker, D: DeltaSink>(
                         // buffered first: a query that finished a beat ago
                         // reads as complete, never as cancellable.
                         while let Ok((q, end)) = done_rx.try_recv() {
-                            conversation.on_query_end(q, end);
+                            fold_query_end(&mut conversation, &mut skill_hashes, &mut pending_hashes, q, end);
                             cancel_tx = None;
                         }
                         match conversation.on_cancel(&query.0) {
@@ -391,12 +399,12 @@ async fn accept_say<B: Broker, D: DeltaSink>(
     sink: &D,
     config: &AgentConfig,
     conversation: &mut Conversation,
-    skill_hashes: &mut Option<HashMap<String, u64>>,
+    skill_hashes: &Option<HashMap<String, u64>>,
     done_tx: &mpsc::Sender<(String, QueryEnd)>,
     text: String,
     from: Value,
     attachments: Vec<Value>,
-) -> Result<(String, watch::Sender<bool>), String> {
+) -> Result<(String, watch::Sender<bool>, HashMap<String, u64>), String> {
     // Validate every fresh attachment BEFORE anything commits: unlike a
     // replayed history block (objects.rs), a failure here is never ageing —
     // it means the object this say just referenced genuinely isn't there
@@ -440,7 +448,9 @@ async fn accept_say<B: Broker, D: DeltaSink>(
         }
         Some(prev) => skills.delta(prev),
     };
-    *skill_hashes = Some(skills.baseline());
+    // The baseline this say would set. Returned rather than stored: it holds
+    // only if the say commits (the serve loop, on the query's end).
+    let baseline = skills.baseline();
     let mut content = Vec::new();
     // Self-heal a broken tip. A prior servicer that died after committing a
     // tool_use but before its tool_result leaves the record ending on a
@@ -530,7 +540,7 @@ async fn accept_say<B: Broker, D: DeltaSink>(
         let end = run_query(ctx, history, rx).await;
         let _ = done.send((q, end)).await;
     });
-    Ok((query, tx))
+    Ok((query, tx, baseline))
 }
 
 struct TurnContext<B: Broker, D: DeltaSink> {
@@ -554,6 +564,30 @@ struct TurnContext<B: Broker, D: DeltaSink> {
     attach: Option<bridge::attach::AttachHandle>,
     cwd: std::path::PathBuf,
     permissions: Arc<std::sync::RwLock<crate::permissions::PermissionSet>>,
+}
+
+/// Fold a finished query into the tree, and settle the skills baseline its
+/// say was holding. The baseline advances only if the query committed
+/// something: a query that commits nothing revokes its say, so the catalogue
+/// that say carried was never seen and cannot be the baseline a later delta
+/// is measured against.
+fn fold_query_end(
+    conversation: &mut Conversation,
+    skill_hashes: &mut Option<HashMap<String, u64>>,
+    pending_hashes: &mut Option<HashMap<String, u64>>,
+    query: String,
+    end: QueryEnd,
+) {
+    let (QueryEnd::Completed { messages }
+    | QueryEnd::Cancelled { messages }
+    | QueryEnd::Aborted { messages }) = &end;
+    let committed_something = !messages.is_empty();
+    if let Some(baseline) = pending_hashes.take()
+        && committed_something
+    {
+        *skill_hashes = Some(baseline);
+    }
+    conversation.on_query_end(query, end);
 }
 
 /// Resolves when the cancel signal flips; never resolves if it never does
@@ -723,13 +757,15 @@ async fn run_query<B: Broker, D: DeltaSink>(
         )
         .await;
 
-        // A turn that produced no content at all commits nothing. The API
-        // rejects an assistant message with empty content, so committing one
-        // kills every later turn of the conversation, not just this query.
-        // The say stays pending for the reason it rides there at all: words
-        // are revocable while nothing depends on them. `turn_ended` above,
+        // A turn with nothing sendable in it commits nothing. Emptiness is
+        // not the test: a stream dying one event after a block opened leaves
+        // a block the API refuses, and a refused block in the record kills
+        // every later turn of the conversation rather than this one. The say
+        // stays pending for the reason it rides there at all: words are
+        // revocable while nothing depends on them. `turn_ended` above,
         // carrying no stop reason, is the whole record of the attempt.
-        if !done.content.is_empty() {
+        let content = anthropic::sendable(done.content);
+        if !content.is_empty() {
             // The first successful turn commits the pending say, then the
             // assistant message: the record gains the pair together, and a query
             // that never got this far left the record untouched.
@@ -748,14 +784,14 @@ async fn run_query<B: Broker, D: DeltaSink>(
                 &turn_id,
                 "assistant",
                 Some(&json!({ "kind": "agent" })),
-                &done.content,
+                &content,
             )
             .await;
-            history.push(json!({ "role": "assistant", "content": done.content }));
+            history.push(json!({ "role": "assistant", "content": content }));
             committed.push(Message {
                 id: message_id,
                 role: "assistant".into(),
-                content: done.content.clone(),
+                content: content.clone(),
             });
         }
 
@@ -802,7 +838,7 @@ async fn run_query<B: Broker, D: DeltaSink>(
             &tools,
             query,
             &turn_id,
-            &done.content,
+            &content,
             &mut cancel,
             cwd,
             permissions,

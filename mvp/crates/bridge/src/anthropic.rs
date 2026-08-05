@@ -508,6 +508,24 @@ fn finish_block(content: &mut [Value], open_json: &mut String) {
     open_json.clear();
 }
 
+/// The blocks of a turn that can be sent back, which is what a committed
+/// message has to be: the record is replayed into every later turn, so one
+/// block the API refuses kills the conversation rather than the turn. A
+/// stream that dies mid-block leaves exactly the two shapes dropped here. An
+/// empty text block is refused outright ("text content blocks must be
+/// non-empty"), and a thinking block carries a required `signature` that only
+/// arrives as a `signature_delta` at the block's end.
+pub fn sendable(content: Vec<Value>) -> Vec<Value> {
+    content
+        .into_iter()
+        .filter(|block| match block["type"].as_str().unwrap_or("") {
+            "text" => !block["text"].as_str().unwrap_or("").is_empty(),
+            "thinking" => !block["signature"].as_str().unwrap_or("").is_empty(),
+            _ => true,
+        })
+        .collect()
+}
+
 /// Append a chunk to a string field, creating it if the start event carried
 /// none (the API seeds `text: ""` on starts; tolerance costs nothing).
 fn append_str(block: &mut Value, field: &str, chunk: &str) {
@@ -580,6 +598,59 @@ mod tests {
         mark_message_cache_breakpoint(&mut messages);
         assert!(!has_cache_control(&messages[0]["content"][0]));
         assert!(has_cache_control(&messages[1]["content"][0]));
+    }
+
+    #[test]
+    fn drops_a_text_block_the_stream_never_filled() {
+        let expected: Vec<Value> = vec![];
+        let actual = sendable(vec![json!({ "type": "text", "text": "" })]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn keeps_a_text_block_that_got_its_first_delta() {
+        let expected = vec![json!({ "type": "text", "text": "h" })];
+        let actual = sendable(expected.clone());
+        assert_eq!(actual, expected);
+    }
+
+    /// `signature_delta` closes a thinking block, so a stream dying mid-think
+    /// leaves one without it, and the API requires it on the way back in.
+    #[test]
+    fn drops_a_thinking_block_whose_signature_never_arrived() {
+        let expected: Vec<Value> = vec![];
+        let actual = sendable(vec![json!({ "type": "thinking", "thinking": "half a th" })]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn keeps_a_thinking_block_that_closed_with_its_signature() {
+        let expected = vec![json!({
+            "type": "thinking", "thinking": "a whole thought", "signature": "abc123",
+        })];
+        let actual = sendable(expected.clone());
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn keeps_a_block_of_any_other_type() {
+        let expected = vec![json!({
+            "type": "tool_use", "id": "toolu_1", "name": "Read", "input": {},
+        })];
+        let actual = sendable(expected.clone());
+        assert_eq!(actual, expected);
+    }
+
+    /// The commit guard's real case: the stream opened blocks and died before
+    /// either could be finished, so there is nothing to commit.
+    #[test]
+    fn a_turn_that_only_opened_blocks_has_nothing_to_send() {
+        let expected: Vec<Value> = vec![];
+        let actual = sendable(vec![
+            json!({ "type": "thinking", "thinking": "half a th" }),
+            json!({ "type": "text", "text": "" }),
+        ]);
+        assert_eq!(actual, expected);
     }
 
     #[test]

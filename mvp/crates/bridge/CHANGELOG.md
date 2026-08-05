@@ -15,4 +15,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - AppendFile flushes its write before returning, so a reader that opens the file immediately after the append sees the appended content instead of an empty file.
 - A turn whose stream ends before the service reports why now publishes turn_ended with no stopReason, instead of a fabricated end_turn. A truncated answer no longer looks identical to a finished one.
-- A turn that produced no content at all now commits no message. A stream that died before the first content block used to commit an empty assistant message, which the Messages API rejects on every later turn, leaving the conversation permanently unable to answer.
+- A turn that produced nothing the Messages API will accept back now commits no message. A stream that died early used to commit an empty text block or a thinking block with no signature, either of which the API rejects on every later turn, leaving the conversation permanently unable to answer.
+- The skills catalogue is no longer lost when the first say of a conversation commits nothing. That say advanced the delta baseline even when it was revoked, so every later say announced only what had changed since a catalogue the model was never shown.
