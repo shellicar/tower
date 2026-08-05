@@ -24,11 +24,11 @@ Two definitional boundaries, both about what a consumer may assume:
   agent declares its model by what it publishes. A dead holder answers
   nothing; `not_found` and silence are honest outcomes.
 
-Approvals are **not conversation traffic** (see `conversation.md`): the
-same tool call raises an ask under one permissions regime and none under
-another, while the conversation stays byte-identical. Consequences reach the
-conversation the only way anything does — as content: approved is implicit in
-the tool having run; denied appears as whatever the agent model commits.
+Approvals are **not conversation traffic**: the same tool call raises an ask
+under one permissions regime and none under another, while the conversation
+stays byte-identical. Consequences reach the conversation the only way
+anything does — as content: approved is implicit in the tool having run;
+denied appears as whatever the agent model commits.
 
 ## Subjects
 

@@ -46,16 +46,26 @@ pub struct FakeBroker {
     /// subscription — live subjects with nothing to say are the norm, not a
     /// scripting error.
     pub subscribe_data: SubscribeData,
+    /// Subjects whose subscription stays open (pending forever) once its
+    /// scripted messages are drained, instead of ending. A real subscription
+    /// with nothing to say is quiet, not dead — a test that must tell the
+    /// two apart marks the subject here.
+    pub open_subjects: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 #[derive(Default)]
 pub struct FakeSubscription {
     pub queued: VecDeque<BrokerMessage>,
+    pub stay_open: bool,
 }
 
 impl BrokerSubscription for FakeSubscription {
     async fn next(&mut self) -> Option<BrokerMessage> {
-        self.queued.pop_front()
+        match self.queued.pop_front() {
+            Some(msg) => Some(msg),
+            None if self.stay_open => std::future::pending().await,
+            None => None,
+        }
     }
 }
 
@@ -104,13 +114,51 @@ impl Broker for FakeBroker {
                 "scripted subscribe failure",
             ))))
         } else {
+            let stay_open = self.open_subjects.lock().unwrap().contains(&subject);
             let queued = self
                 .subscribe_data
                 .lock()
                 .unwrap()
                 .remove(&subject)
                 .unwrap_or_default();
-            Ok(FakeSubscription { queued })
+            Ok(FakeSubscription { queued, stay_open })
+        }
+    }
+
+    /// Queue-group delivery is the real broker's concern; a fake with one
+    /// subscriber per subject serves the scripted messages the same way,
+    /// recording the group so a test can pin that the queue-group form was
+    /// used (a plain subscribe on a requests subject would make every
+    /// instance a responder).
+    async fn queue_subscribe(
+        &self,
+        subject: String,
+        group: String,
+    ) -> Result<Self::Subscription, BrokerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("queue_subscribe:{subject}:{group}"));
+        if self.subscribe_fails.load(Ordering::SeqCst)
+            || self
+                .subscribe_fail_subjects
+                .lock()
+                .unwrap()
+                .contains(&subject)
+        {
+            Err(BrokerError::Subscribe(Box::new(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                "scripted subscribe failure",
+            ))))
+        } else {
+            let stay_open = self.open_subjects.lock().unwrap().contains(&subject);
+            let queued = self
+                .subscribe_data
+                .lock()
+                .unwrap()
+                .remove(&subject)
+                .unwrap_or_default();
+            Ok(FakeSubscription { queued, stay_open })
         }
     }
 
@@ -137,6 +185,35 @@ impl Broker for FakeBroker {
                 )
             });
         Ok(FakeReplay { queued })
+    }
+
+    /// Unlike `replay`, an unscripted filter here is an ordinary
+    /// `StreamUnavailable`, not a panic: the seed's degrade path (a
+    /// deployment that doesn't capture telemetry) is a real behaviour under
+    /// test, so absence models a missing stream rather than a typo. The
+    /// fake ignores `start` — a test scripts exactly the window it means.
+    async fn replay_since(
+        &self,
+        stream: String,
+        filter_subject: String,
+        _start: std::time::SystemTime,
+    ) -> Result<Self::Replay, BrokerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("replay_since:{stream}:{filter_subject}"));
+        match self.replay_data.lock().unwrap().get(&filter_subject) {
+            Some(queued) => Ok(FakeReplay {
+                queued: queued.clone(),
+            }),
+            None => Err(BrokerError::StreamUnavailable {
+                stream,
+                source: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "no scripted capture for this filter",
+                )),
+            }),
+        }
     }
 
     async fn fetch_object(&self, bucket: String, id: String) -> Result<Vec<u8>, BrokerError> {

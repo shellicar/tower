@@ -4,7 +4,7 @@ The bridge is the v0 agent host. Its control channel is stdio, deliberately
 not a wire concern: conversation creation and host config stay local until
 practice teaches the wire shape.
 
-There is one grammar — the control line — delivered at two points:
+There is one grammar, the control line, delivered at two points:
 
 - **`-c` at launch.** A batch of control lines run before stdin takes over.
   This is how a launch is scripted: everything the bridge is asked to do at
@@ -48,8 +48,8 @@ attachment storage to host config.
 
 ## Transport
 
-One JSON object per line in, one JSON object per line out. Every input line —
-whether from `-c` or from live stdin — produces exactly one output line. A line
+One JSON object per line in, one JSON object per line out. Every input line,
+whether from `-c` or from live stdin, produces exactly one output line. A line
 that does not parse, or carries no known control key, is answered and the loop
 continues:
 
@@ -77,19 +77,19 @@ dictates when a change is visible.
 
 - **skills** is re-scanned per say. Two layers, scoped differently: the
   *directory* is per-process (`skills_root`, shared by every conversation this
-  instance serves — a repoint changes where all of them read from), but the
+  instance serves; a repoint changes where all of them read from), but the
   *delta baseline* (name→content-hash of what a conversation has already been
   told) is per-conversation, held in `agent::run`'s own local state, one scan
   history per conversation. That's why a repoint surfaces to a running
-  conversation as a catalogue delta on its next say — relative to *that
-  conversation's own* last-seen state, not a shared one — and to a new spawn
-  as the full catalogue. With no skills directory set, there is no catalogue
-  and the Skill tool is not offered.
+  conversation as a catalogue delta on its next say, relative to *that
+  conversation's own* last-seen state rather than a shared one, and to a new
+  spawn as the full catalogue. With no skills directory set, there is no
+  catalogue and the Skill tool is not offered.
 - **system** is the API system prompt, read fresh each turn and **never
   persisted** to the record. A change reaches even a running conversation on
   its next turn. Because it is not in the record, a revived conversation takes
   the currently configured system prompt, not the one it was born with.
-- **model** is only ever read at spawn — a conversation's model is part of
+- **model** is only ever read at spawn: a conversation's model is part of
   its birth config, same footing as `context`. A repoint changes what the
   *next* spawn naming no `model` gets; it cannot move a running
   conversation onto a different model, and there is no way to do that over
@@ -141,7 +141,7 @@ turn's outcome says so. Replay reads the stream named by `BRIDGE_STREAM`.
 ### skills
 
 Repoint the skills directory. `~` and `~/...` are expanded against `$HOME`
-(the only place they ever are — a control line is JSON over stdio, never a
+(the only place they ever are: a control line is JSON over stdio, never a
 shell, so nothing else expands a leading tilde).
 
 ```
@@ -149,15 +149,15 @@ shell, so nothing else expands a leading tilde).
 {"skillsDir": "/path/to/skills"}
 ```
 
-Setting it never fails — the directory might not exist yet, or might arrive
-before it does. A missing or non-directory path still sets the cell, but adds
-a `warning` alongside the (always successful) result:
+Setting it never fails, because the directory might not exist yet, or might
+arrive before it does. A missing or non-directory path still sets the cell,
+but adds a `warning` alongside the (always successful) result:
 
 ```
 {"skillsDir": "/path/to/skills", "warning": "/path/to/skills does not exist or is unreadable: …"}
 ```
 
-Missing `dir` itself is still an error — there's no path to set at all:
+Missing `dir` itself is still an error, because there's no path to set at all:
 
 ```
 {"error": "skills needs dir"}
@@ -165,7 +165,7 @@ Missing `dir` itself is still an error — there's no path to set at all:
 
 ### model
 
-Set the default model a spawn takes when it names none — a live repoint of
+Set the default model a spawn takes when it names none, a live repoint of
 `BRIDGE_MODEL`.
 
 ```

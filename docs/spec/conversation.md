@@ -79,11 +79,11 @@ It's deliberately not called `telemetry` either. This is a claim with
 consequences (agent.md, Attachment), not observation a consumer may
 discard.
 
-**The subject spells the type** (nats.md, Namespacing): a message's type is
-the subject tokens after the class — underscores become token boundaries — so
-the body does not repeat it. The one exception is `deltas`: a flat subject
-carrying two shapes (`delta`, `block`) that share every policy, not a routing
-axis, so the type stays in the body there as a `type` field. The full map:
+**The subject spells the type**: a message's type is the subject tokens
+after the class — underscores become token boundaries — so the body does not
+repeat it. The one exception is `deltas`: a flat subject carrying two shapes
+(`delta`, `block`) that share every policy, not a routing axis, so the type
+stays in the body there as a `type` field. The full map:
 
 | Type | Subject |
 |---|---|
@@ -350,7 +350,7 @@ This section only covers the shape on this tree.
 |---|---|---|
 | `attached` | `instanceId`, `world`?, `cwd`?, `tip`?, `intervalS`? | this instance is serving this conversation, now. Supersedes whatever attachment stood before it, unconditionally, exactly once per claim (agent.md, Attachment). This is what makes a conversation exist for observers before its first message. `tip`, when carried, is the conversation's tip at the moment of attachment — same shape as a say's own premise (`z.string().nullable()`, `null` for an empty conversation) — so an observer knows where the conversation stands without replaying the change stream first. `world` is required of every compliant publisher (below); `cwd` and `intervalS` are optional for backward compatibility, and their absence is not a claim the value is empty — only that this attach didn't state it. `intervalS`, when carried, is at most 600 (ten minutes), the same liveness promise a pulse makes and bounded for the same reason (agent.md, Telemetry): the bound is validity, not a cap, so a larger value makes the event invalid whole |
 | `moved` | `instanceId`, `world`?, `cwd` | a fact about the standing attachment, not a new claim: the working directory changed under it (the wire outcome of a `chdir` request, this spec, Requests). Valid only from the instance identity — `(world, instanceId)`, or bare `instanceId` if either side omits `world` — the fold currently holds as standing. Folds last-write-wins onto the held attachment's `cwd` |
-| `detached` | `instanceId`, `world`? | released — Ctrl-C, drain, done, or a displaced instance's observable act of standing down (agent.md, Attachment). Changes the fold only when its identity matches the *standing* attachment's, same rule as `moved`. A crash publishes nothing |
+| `detached` | `instanceId`, `world`? | released — Ctrl-C, drain, done, or a displaced instance's observable act of standing down. Changes the fold only when its identity matches the *standing* attachment's, same rule as `moved`. A crash publishes nothing |
 
 **`world` is required of every compliant publisher.** Same tolerance as
 envelope `instanceId` (this spec, The change stream): the schema marks it
