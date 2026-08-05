@@ -34,10 +34,11 @@ cross is the last one: it decides what is worth *saying*, never what should
 
 ## The six limits
 
-Each is a deliberate constraint, with the reason it is held. None is forced by
-the transport. firstmate holds the first three because tmux left it no choice,
-which is why it never had to justify them; here they are choices, and a choice
-needs its argument recorded.
+Each is a deliberate constraint, with the reason it is held. firstmate holds
+versions of 1, 2, 3 and 6, but only 3 and 6 are forced on it by tmux: with no
+addressing, "up" cannot be a message and a payload cannot travel. It holds 1 and
+2 as written rules, the same as here. Either way a choice needs its argument
+recorded, or it gets read as an accident and helpfully removed.
 
 **1. The human has one interlocutor.** A worker never addresses the human, and
 every upward path terminates at its parent. This is an attention limit, not a
@@ -107,20 +108,41 @@ stat-ing a file. Move to sqlite only if questions across entries are wanted
 (everything older than N, grouped by handler), because KV is a keyed store and
 not a query engine.
 
-**Keep the live registry and the historical log separate.** One store answers
-"what is live", another records what was spawned and what it produced. firstmate
-fused them: its status file is append-only, so current state has to be
-reconstructed from it, so it needed a whole script to do the reconstruction, and
-then its always-loaded prompt has to keep reminding the agent not to trust the log
-it can plainly see. Two artefacts and that reminder becomes unnecessary.
+**Keep the live registry and the historical log separate, and do not let one look
+like the other.** firstmate already keeps them apart: `state/<id>.meta` is the
+per-worker registry, `state/<id>.status` is the append-only event log, and
+`bin/fm-crew-state.sh`'s own header says "This helper never infers the current
+state from a tail of the log." So this is convergent evidence, not a cautionary
+tale.
+
+The lesson is the second clause. Two stores is necessary and not sufficient:
+firstmate has both and *still* has to say the log is not current-state truth in
+three separate places in its always-loaded prompt (`AGENTS.md` lines 89, 123 and
+367), because the log is readable, sits right next to the question, and answers it
+plausibly. Separation does not stop a reader folding the log into an answer. It
+only makes doing so wrong.
+
+So that lesson is structural here rather than advisory, in three places:
+
+- **The two stores share no affordance.** Live state is a `kv get` against a
+  bucket; history is a durable consumer over a subject. There is no `tail`, so the
+  cheap wrong answer is not reachable by accident.
+- **One invariant, and it is testable:** liveness comes from the registry, never
+  from the change stream. The lookout treats a message as a trigger and never
+  reads a message body to decide what is live. The test asserting that is the
+  durable form of this paragraph; the paragraph only explains why the test exists.
+- **The decision record catches a violation after the fact.** Every routing
+  decision publishes which rule fired, so an answer derived from the wrong source
+  shows up in the record instead of having to be inferred from behaviour.
 
 **Use a durable consumer.** That is the wake queue, already built. firstmate
 hand-rolled the same thing as a file, for the same reason: a missed event must
 survive a restart.
 
-**Ack only after the relay succeeds.** firstmate learned this as "queue before
-detector state advances"; here it is ack semantics. Ack first and a crash between
-ack and say loses the event silently.
+**Ack only after the relay succeeds.** firstmate does the same with a file:
+actionable wakes are "written to a durable local queue (`state/.wake-queue`)
+before detector state advances" (`docs/architecture.md`). Here it is ack
+semantics. Ack first and a crash between ack and say loses the event silently.
 
 **Retry a rejected say.** A stale tip means someone spoke first. Re-read the tip
 and re-send with backoff. While a handler is busy, events pile up unacked, which
@@ -149,7 +171,8 @@ one table mapping a state to an action. Four actions:
   the next real edge fires again. This is a third thing beyond wake and ignore,
   and it is only obviously necessary once an escalation has silently failed to
   re-fire.
-- **defer**: do nothing on the fast path, leave it to the slower verified path.
+- **defer**: do nothing on the fast path, and leave it to the debounced machinery
+  that already covers it.
 - **fallback**: unrecognised, so fall back to polling. Never act on an ambiguous
   read.
 
@@ -157,8 +180,9 @@ Their assignment is the expensive part, and it inverts the obvious guess:
 `blocked` is the *only* immediately-actionable state, meaning specifically that
 the agent is waiting on a human. `idle` and `done` are **defer**, because they
 blip transiently between tool calls, and fast-pathing them is, in their words, "a
-false-positive firehose". Completion is deliberately handled by the slower path
-where it can be verified.
+false-positive firehose". The arm leaves completion to "the existing
+status/turn-end completion semantics and the poll backstop": the reason is
+transience and the debounce, not verifiability.
 
 That assignment is about *rendered agent status*, and it does not transfer
 wholesale. A query close on this bus is a real semantic boundary, not a
@@ -179,7 +203,7 @@ that already discriminates, rather than from prose that has to be parsed later.
 
 Cloned at `~/repos/kunchenguid/firstmate`. The survey is in
 [`landscape.md`](landscape.md#firstmate); these are the specific artefacts, so
-nobody re-reads 7,000 lines of bash to find them.
+nobody re-reads 42,541 lines of bash across 109 files to find them.
 
 - `bin/fm-transition-lib.sh`: the normalised record and the four-action table
   above. The single most useful file in the repo.
@@ -187,48 +211,62 @@ nobody re-reads 7,000 lines of bash to find them.
   exactly. `paused:` means a bounded external wait that will clear by itself;
   `blocked:` means the supervisor must act. They get completely different
   treatment, one resurfacing on a slow cadence and one waking immediately.
-- `bin/fm-crew-state.sh` and `AGENTS.md`: "a status line is a wake event, not
-  current-state truth." Worth carrying as a sentence. A worker's self-report is
-  unreliable in both directions, claiming done when checks are red and dying
-  silently without saying anything, so the report is a doorbell and never a
-  verdict.
-- `bin/fm-spawn.sh`: the worker verifies `pwd -P` and `git rev-parse
-  --show-toplevel` before it starts, and stops if it landed in the primary
-  checkout. Two commands, and it kills a catastrophic class of error.
-- `bin/fm-teardown.sh`: a refusal to tear down unlanded work is a
-  stop-and-investigate result, never an obstacle to bypass. Adopt as a rule long
-  before automating teardown.
+- `AGENTS.md:123` for the rule, `bin/fm-crew-state.sh` for the mechanism. The rule
+  is "A `state/<id>.status` line is a wake event, not current-state truth", and
+  crew-state.sh is what you call instead: its own header says "This helper never
+  infers the current state from a tail of the log." Worth carrying as a sentence,
+  because a worker's self-report is unreliable in both directions, claiming done
+  when checks are red and dying silently without saying anything. The report is a
+  doorbell and never a verdict.
+- `bin/fm-brief.sh:421`: the generated ship brief tells the worker to check
+  `pwd -P` and `git rev-parse --show-toplevel` before it starts and to stop with a
+  blocked status if it landed in the primary checkout. Ship briefs only; the scout
+  branch carries no isolation check. `bin/fm-spawn.sh` holds a separate
+  spawner-side assertion that refuses to launch at all. Two commands on the worker
+  side, and it kills a catastrophic class of error.
+- `AGENTS.md:340`: "A teardown refusal for uncommitted or unlanded work is a
+  stop-and-investigate result, never an obstacle to bypass." The rule lives in the
+  contract, not in `bin/fm-teardown.sh`, which only says it refuses. Adopt as a
+  rule long before automating teardown.
 - `AGENTS.md` section 9: the escalation list. Work ready for review, finished
-  findings, a decision needed, a real blocker after the playbook is exhausted,
-  anything destructive or irreversible, a needed credential. Six items, already
-  shaped, and it is what a mature classifier eventually encodes.
+  findings, gate findings that require a decision under the configured authority, a
+  real blocker after the playbook is exhausted, anything destructive, irreversible
+  or security-sensitive, and a needed credential. Six items, already shaped, and it
+  is what a mature classifier eventually encodes.
 - The ship/scout split, and the clause that matters: a report may recommend
   implementation but does not authorise it.
 
-Leave behind: the always-loaded 60K contract, the second-level home architecture,
-everything about tmux, and above all the vocabulary translation table in section
-9. That table is a symptom. A single interlocutor becomes a translation
-bottleneck, because everything the fleet learns must be re-rendered for the human
-by exactly one node, and their handler's context goes mostly on re-rendering
-rather than on supervising. Limit 1 is still right. Its cost should be expected.
+Leave behind: the always-loaded contract (`AGENTS.md` is 61,576 bytes, roughly
+20,500 tokens by firstmate's own estimator), the second-level home architecture,
+everything about tmux, and above all the vocabulary translation table at
+`AGENTS.md:416-426`. That table is a symptom. A single interlocutor becomes a
+translation bottleneck, because everything the fleet learns must be re-rendered
+for the human by exactly one node, and eleven rewrite rules plus a ban on relaying
+worker reports verbatim is what that costs in prompt real estate. How much of a
+handler's context then goes on re-rendering is measured nowhere, so expect the job
+rather than a number. Limit 1 is still right.
 
 ## Deliberately not decided
 
-**Depth.** firstmate caps its tree at three levels, which is tmux pragmatism, but
-the purpose of its middle level is real: it is how a handler sheds context when it
-has too many direct reports. Depth is a context-management tool, not a hierarchy.
-At trial scale it buys nothing. Design for it, do not build it.
+**Depth.** firstmate caps its tree at three levels: `AGENTS.md:69` and
+`docs/configuration.md:218` both state that secondmates do not spawn secondmates.
+The reason given there is that the secondmate harness setting is the primary's own
+and is not inherited, and the middle level's stated purpose is domain routing,
+with per-scope project clones. That a middle tier is also how a handler sheds
+context when it has too many direct reports is my reading, not theirs. Either way
+it buys nothing at trial scale. Design for it, do not build it.
 
 **Whether the verdict shape becomes approval v2.** [`landscape.md`](landscape.md)
 records that nobody models an answer with a shape whose content routes the next
 step, and lists firstmate as blocking and waiting for the captain. That undersells
-it. firstmate has the richest version of the five, built in prose: an ask-user
-finding returns as `needs-decision`, and the answer must name the decision key,
-step, action, affected finding IDs, instructions where needed, and the exact
-response command, then require a matching `resolved` event. Two skills carry it,
-`.agents/skills/ask-user-authority/` and
-`.agents/skills/decision-hold-lifecycle/`, the second giving every unresolved
-decision a mandatory backlog lifecycle with keyed open-and-resolved semantics.
+it. firstmate has the richest version of the five, built in prose, and it lives in
+`AGENTS.md` section 7 at lines 321 to 323: an ask-user finding returns as
+`needs-decision`, the answer must name "the decision key, step, action, affected
+finding IDs, instructions where needed, and exact response command", and a
+matching `resolved` event is required. Two skills sit around that rather than
+carrying it: `.agents/skills/ask-user-authority/` owns who may answer, and
+`.agents/skills/decision-hold-lifecycle/` owns the backlog lifecycle. The keyed
+open-and-resolved semantics are `bin/fm-classify-lib.sh`.
 
 That is per-item, keyed, and correlated, which is the shape said to be missing.
 When approval v2 is taken up, there is a working implementation of the semantics
