@@ -2,7 +2,9 @@
 //! dev-dependency compiles for any test/bench in the crate that declares
 //! it, never for a normal build, so nothing here needs a `cfg` at all.
 
-use bridge::broker::{Broker, BrokerError, BrokerMessage, BrokerReplay, BrokerSubscription};
+use bridge::broker::{
+    Broker, BrokerDurable, BrokerError, BrokerMessage, BrokerReplay, BrokerSubscription,
+};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -18,6 +20,11 @@ type FetchData = Arc<Mutex<std::collections::HashMap<(String, String), Vec<u8>>>
 pub type FakeReplayFrame = Result<BrokerMessage, String>;
 type ReplayData = Arc<Mutex<std::collections::HashMap<String, VecDeque<FakeReplayFrame>>>>;
 type SubscribeData = Arc<Mutex<std::collections::HashMap<String, VecDeque<BrokerMessage>>>>;
+type KvData = Arc<Mutex<std::collections::HashMap<String, Vec<(String, bytes::Bytes)>>>>;
+type LastData = Arc<Mutex<std::collections::HashMap<String, BrokerMessage>>>;
+type DurableData = Arc<Mutex<std::collections::HashMap<String, VecDeque<FakeReplayFrame>>>>;
+type RequestReplies = Arc<Mutex<std::collections::HashMap<String, VecDeque<Vec<u8>>>>>;
+type Requested = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
 
 /// The only fake in a test is the Broker (CLAUDE.md's house rule). Records
 /// every subscribe/publish call, in order (`calls`) and every publish's
@@ -51,6 +58,27 @@ pub struct FakeBroker {
     /// with nothing to say is quiet, not dead — a test that must tell the
     /// two apart marks the subject here.
     pub open_subjects: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Reporting lines and anything else read as a table, keyed by bucket.
+    /// An unseeded bucket is `KvUnavailable`: a lookout that cannot find its
+    /// bucket is a real deployment failure worth exercising.
+    pub kv_data: KvData,
+    /// The newest frame per subject, for `last_on_subject`. Absence is the
+    /// honest empty answer (a conversation nobody has spoken into), not an
+    /// error.
+    pub last_data: LastData,
+    /// Frames a durable consumer yields, keyed by filter subject. Like
+    /// `subscribe_data`, an unseeded filter is an ordinary quiet consumer.
+    pub durable_data: DurableData,
+    /// Replies to `request`, keyed by subject and consumed in order, so a
+    /// test can script a rejection followed by an acceptance. An unseeded
+    /// subject has no responder.
+    pub request_replies: RequestReplies,
+    /// Every request sent, with its payload — the digest a handler actually
+    /// received is read from here.
+    pub requested: Requested,
+    /// One entry per `ack_delivered` that acked something, naming the filter
+    /// subject of the consumer that acked.
+    pub acked: Arc<Mutex<Vec<String>>>,
 }
 
 #[derive(Default)]
@@ -84,9 +112,45 @@ impl BrokerReplay for FakeReplay {
     }
 }
 
+/// The fake's durable consumer. `delivered` counts frames handed out since
+/// the last ack, so `acked` records an ack only when there was something to
+/// ack — the same cumulative shape the real consumer has.
+pub struct FakeDurable {
+    pub filter_subject: String,
+    pub queued: VecDeque<FakeReplayFrame>,
+    pub delivered: usize,
+    pub acked: Arc<Mutex<Vec<String>>>,
+    pub stay_open: bool,
+}
+
+impl BrokerDurable for FakeDurable {
+    async fn next(&mut self) -> Option<Result<BrokerMessage, BrokerError>> {
+        let frame = match self.queued.pop_front() {
+            Some(frame) => frame,
+            None if self.stay_open => std::future::pending().await,
+            None => return None,
+        };
+        self.delivered += 1;
+        Some(
+            frame.map_err(|message| {
+                BrokerError::DurableRead(Box::new(std::io::Error::other(message)))
+            }),
+        )
+    }
+
+    async fn ack_delivered(&mut self) -> Result<(), BrokerError> {
+        if self.delivered > 0 {
+            self.delivered = 0;
+            self.acked.lock().unwrap().push(self.filter_subject.clone());
+        }
+        Ok(())
+    }
+}
+
 impl Broker for FakeBroker {
     type Subscription = FakeSubscription;
     type Replay = FakeReplay;
+    type Durable = FakeDurable;
 
     async fn publish(&self, subject: String, payload: Vec<u8>) -> Result<(), BrokerError> {
         self.calls
@@ -234,6 +298,92 @@ impl Broker for FakeBroker {
                     "no fixture data configured for this bucket/id",
                 )),
             })
+    }
+
+    async fn kv_entries(&self, bucket: String) -> Result<Vec<(String, bytes::Bytes)>, BrokerError> {
+        self.calls.lock().unwrap().push(format!("kv:{bucket}"));
+        self.kv_data
+            .lock()
+            .unwrap()
+            .get(&bucket)
+            .cloned()
+            .ok_or_else(|| BrokerError::KvUnavailable {
+                bucket,
+                source: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "no scripted bucket",
+                )),
+            })
+    }
+
+    async fn last_on_subject(
+        &self,
+        stream: String,
+        subject: String,
+    ) -> Result<Option<BrokerMessage>, BrokerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("last_on_subject:{stream}:{subject}"));
+        Ok(self.last_data.lock().unwrap().get(&subject).cloned())
+    }
+
+    async fn durable(
+        &self,
+        stream: String,
+        filter_subject: String,
+        name: String,
+    ) -> Result<Self::Durable, BrokerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("durable:{stream}:{filter_subject}:{name}"));
+        let queued = self
+            .durable_data
+            .lock()
+            .unwrap()
+            .remove(&filter_subject)
+            .unwrap_or_default();
+        let stay_open = self.open_subjects.lock().unwrap().contains(&filter_subject);
+        Ok(FakeDurable {
+            filter_subject,
+            queued,
+            delivered: 0,
+            acked: Arc::clone(&self.acked),
+            stay_open,
+        })
+    }
+
+    async fn request(
+        &self,
+        subject: String,
+        payload: Vec<u8>,
+        _timeout: std::time::Duration,
+    ) -> Result<Vec<u8>, BrokerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("request:{subject}"));
+        self.requested
+            .lock()
+            .unwrap()
+            .push((subject.clone(), payload));
+        match self
+            .request_replies
+            .lock()
+            .unwrap()
+            .get_mut(&subject)
+            .and_then(VecDeque::pop_front)
+        {
+            Some(reply) => Ok(reply),
+            None => Err(BrokerError::Request {
+                subject,
+                source: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::NotConnected,
+                    "no scripted responder",
+                )),
+            }),
+        }
     }
 }
 

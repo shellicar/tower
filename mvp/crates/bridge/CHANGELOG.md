@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - A world can be asked to serve a conversation over NATS: bridge answers agent.v1.{world}.requests.service, spawning, adopting, or taking over per the conversation's own attachment record, and rejects every other request leaf honestly.
+- The broker seam now covers a client's needs as well as a servicer's: reading a key-value bucket, reading the newest message on one subject, consuming a stream through a named durable consumer that acks cumulatively, and sending a request that expects a reply.
 
 ### Fixed
 

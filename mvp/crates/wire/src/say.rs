@@ -33,9 +33,18 @@ pub enum SayOutcome {
 /// v2: the subject leaf (`requests.say`) spells the type; the body carries
 /// none (the discriminator lives in one place).
 pub fn encode_say(cmd: &SayCommand, ts: &str) -> Vec<u8> {
+    encode_say_from(cmd, ts, &json!({ "kind": "human" }))
+}
+
+/// The same `say`, sent by something that is not a human. `from` is
+/// provenance and never fabricated, so the sender states what it is: an
+/// orchestrator relaying on someone's behalf publishes
+/// `{ kind: "orchestrator" }` (core.md), and a message with no honest sender
+/// would be indistinguishable from the human's own.
+pub fn encode_say_from(cmd: &SayCommand, ts: &str, from: &Value) -> Vec<u8> {
     let mut payload = json!({
         "ts": ts,
-        "from": { "kind": "human" },
+        "from": from,
         "text": cmd.text,
         "precondition": { "tip": cmd.tip.as_ref().map(|t| t.0.as_str()) },
     });
