@@ -573,9 +573,8 @@ dies mid-query never publishes one (this spec, Query closure).
   assured: a servicer that dies mid-query publishes nothing, and no other
   participant can state the ending for it, so a fold must tolerate a query that
   never closes (this spec, Query closure). Deriving an ending from telemetry
-  (`turn_ended` +
-  verbatim `stopReason`) remains lawful observation, never authority. Idle is
-  derived — quiet since the last event — never declared.
+  (`turn_ended` + verbatim `stopReason`) remains lawful observation, never
+  authority. Idle is derived — quiet since the last event — never declared.
 
 ## Implementation details — deliberately not contract
 
