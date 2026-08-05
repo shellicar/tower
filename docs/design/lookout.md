@@ -32,6 +32,81 @@ what is worth surfacing (orchestration logic). The concern boundary it must not
 cross is the last one: it decides what is worth *saying*, never what should
 *happen*.
 
+## What is forced
+
+Separate from everything below. These are not choices, and each one is forced by
+something named. Confusing a choice for a constraint is how this document went wrong
+twice: a workable option gets written down as necessity, and falls over on the first
+counter-example.
+
+**Reporting lines and the mechanism for context limits must survive each other.**
+The hard one. A handler fills up and has to be reset; its workers must still know
+where to report afterwards. Any solution to one that breaks the other is not a
+solution. Three shapes satisfy it, all open: a line that is a pointer and gets
+updated, a line that is a tag which moves, or a conversation id that can begin a new
+segment. Nothing chooses between them yet.
+
+**A worker's report reaches its handler without a human noticing.** Forced by the
+alternative being the current situation. It failed twice on 5 August, both times
+found by the SC rather than by anything in the system.
+
+**Nothing drops silently.** Those same two failures. A delivery either lands or its
+not-landing is knowable, and this applies to reports, wakes and deposits alike.
+
+**Absence of events is a state, so something must poll.** A crash publishes nothing.
+One worker produced no event for 23 hours, so no subscription can ever reach that
+case, under any design.
+
+**Ownership is declared, never inferred.** A parent asking a worker a question and a
+worker reporting to its parent are the same shape on the wire, so any graph built
+from traffic gets edges backwards.
+
+**Work survives the loss of the session doing it.** Processes die mid-turn holding
+unpushed commits. This rules out work existing only in a conversation.
+
+**The bus carries no workflow.** The SC's requirement rather than a discovery:
+generic enough for different agent models and implementations. It is what keeps
+reports, verbs and delivery modes above the transport.
+
+One that reads like a constraint and is not: **the human has one place to look.** It
+is real and it is a product decision. Nothing technical forces it, and all of the
+above would work across five surfaces and be horrible.
+
+## Direction
+
+Instructions flow down. Reports flow up. The content of that is not the arrows but
+that the two directions are different kinds of thing.
+
+Down is an instruction, and it is gated, because an instruction can be wrong and a
+worker will follow it a long way before anyone notices. Up is a report, and it is not
+gated, because it commissions nothing and its question was already framed by whoever
+sent the instruction. The same mechanism in both directions would collapse the
+distinction the gate rests on.
+
+Up-then-down is therefore the normal shape of a decision, not an exception: a worker
+reports blocked, an instruction comes back. Two edges, each in its own direction.
+
+The human is the top of the same tree rather than a special case bolted above it.
+
+## The lookout is the funnel
+
+It is not a participant in either direction. It is the mechanism *for* up: many
+workers report, one handler hears. That is why it is an orchestrator rather than an
+agent, and why it never sends an instruction to anyone.
+
+Two things stop being extras once that is the framing.
+
+**Batching is what a funnel is**, not an optimisation. Many worker events becoming
+one delivery is the mechanism; *not* batching would be the special case needing a
+reason.
+
+**Rationing belongs here for the same reason.** A context limit is a flow problem,
+and the funnel is the only thing positioned to control flow. It is not an extra
+responsibility, it is what occupying that position means.
+
+The narrow end is one handler, so there is a funnel per handler rather than one per
+fleet.
+
 ## The six limits
 
 Each is a deliberate constraint, with the reason it is held. firstmate holds
@@ -377,10 +452,54 @@ When approval v2 is taken up, there is a working implementation of the semantics
 to mine rather than an abstract design to invent. Nothing here says to go and do
 it.
 
-**Whether the handler is long-lived or re-served per wake.** Every wake is a turn
-in a handler's conversation, so the handler's context is the real budget.
-firstmate has no choice, because a terminal session is long-lived, and it pays for
-that with a knowledge-sweep skill and a startup memory budget pinned at 7,500
-tokens. Conversations here are addressable and re-servable, so a wake could serve
-a *fresh* handler that reads durable state and acts, which solves the problem
-rather than managing it. Untested, and it changes what limit 2 costs.
+**How a handler survives its own context limit.** Every wake is a turn, so a
+handler's context is the real budget: one hit 91.7% of a million at 312 turns.
+firstmate has no choice about this, because a terminal session is long-lived, and it
+pays with a knowledge-sweep skill and a startup budget pinned at 7,500 tokens. It
+never compacts; it resets, and `/stow` is what makes a reset safe.
+
+The forced part is in "What is forced": reporting lines and whatever solves this must
+survive each other. What is open is which of the three shapes does it, and none of
+them is obviously better yet.
+
+Things that are settled about it, none of which pick a shape:
+
+- **`/compact`, `/clear` and `/stow` are one operation**: discard the context, keep a
+  seed. They differ in who writes the seed and whether the id changes. Compaction is
+  the same operation with a seed nobody chose, which is why the SC turns it off.
+- **A separate session can write the seed**, and compaction proves it: it is a model
+  call over the transcript, and the transcript is on the wire. That matters because
+  the handler is out of room, so it is the worst party to ask to do careful work. The
+  tradeoff is that the session which lived it knows what turned out to matter, and a
+  reader has to infer that. The two are complementary rather than competing: capture
+  judgment continuously while there is room, assemble the seed from a party that is
+  not paying for it.
+- **A seed is content on a message, not a message.** A message opens a query and gets
+  a turn; a seed must not. And this already works: a `say` carrying only text
+  committed a message with *two* content blocks, the first a skills-updated reminder
+  bridge injected. One sender, one utterance, one block nobody authored.
+- **The daemon's part is small.** It reports usage as a fact and stops relaying above
+  a threshold, because every message it sends consumes what is running out. It does
+  not reset anything: that is a verdict.
+
+## A dependency on the bus
+
+One of the three shapes needs something the bus does not have, and it is recorded
+here as a dependency rather than designed here, because the transport must stay
+generic.
+
+**There is no way to add content to a conversation without opening a query.** A `say`
+always does both. Bridge's `context` control line is configuration and only fires at
+birth. Attachments prove the *content* half already exists, content the sender did
+not author, with an object-store source and a resolver, and they still ride a say.
+
+So the content model is there and the delivery model is not. firstmate's cruder
+transport had both: `tmux send-keys -l` types without submitting, `send-keys … Enter`
+submits. The bus fused them. And their whole composer-scraping apparatus, capturing
+panes and stripping dim runs to tell a placeholder from real typed input, is the cost
+of that primitive being invisible screen state rather than a published request.
+
+What the bus would need is a way to begin a new segment under one conversation id,
+and a way to deposit content that a later message carries. Both generic, neither
+knowing why. Whether that lands, and whether the workflow uses it or uses tags
+instead, is open.
