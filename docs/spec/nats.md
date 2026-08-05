@@ -1,9 +1,9 @@
 # NATS spec — how the system uses the bus
 
 The shared structure every concern's traffic follows — namespacing, message
-shape, evolution rules. Each concern's subjects and events are defined in
-its own spec document beside this one. If this document ever needs to know
-a concern's details, the split has failed.
+shape, evolution rules. It deliberately defines **no** concern's subjects or
+events; each concern has its own spec document beside this one. If this
+document ever needs to know a concern's details, the split has failed.
 
 ## Concerns
 
