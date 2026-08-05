@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/wire", "crates/ws-types", "crates/towerd", "crates/bridge", "crates/bridge-testkit", "crates/helm", "frontend-leptos"]
+members = ["crates/wire", "crates/ws-types", "crates/towerd", "crates/bridge", "crates/bridge-testkit", "crates/helm", "crates/lookout", "frontend-leptos"]
 
 [workspace.package]
 version = "0.1.0"

@@ -290,6 +290,7 @@ name = "bridge-testkit"
 version = "0.1.0"
 dependencies = [
  "bridge",
+ "bytes",
  "uuid",
 ]
 
@@ -1713,6 +1714,22 @@ name = "log"
 version = "0.4.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
+
+[[package]]
+name = "lookout"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "bridge",
+ "bridge-testkit",
+ "bytes",
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
+ "wire",
+]
 
 [[package]]
 name = "lru"

@@ -1,0 +1,25 @@
+[package]
+name = "lookout"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+# The daemon that watches workers and tells their handler. It reads the
+# reporting lines and the bus, and writes only into a handler: no API, no
+# control subject, nothing registers with it. docs/design/lookout.md is the
+# design record and owns every limit here.
+[dependencies]
+bridge = { path = "../bridge" }
+wire = { path = "../wire" }
+anyhow.workspace = true
+async-nats.workspace = true
+bytes.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+bridge-testkit = { path = "../bridge-testkit" }
