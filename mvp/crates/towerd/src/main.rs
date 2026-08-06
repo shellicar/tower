@@ -11,6 +11,16 @@ use towerd::{ingest, views, web};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Which build this is, before anything it might fail at: towerd runs for
+    // days, so the answer to "which commit is that process?" has to survive
+    // in the log rather than in whoever started it.
+    eprintln!(
+        "towerd {} ({}) built {}",
+        env!("CARGO_PKG_VERSION"),
+        env!("TOWERD_GIT_HASH"),
+        env!("TOWERD_BUILD_TIME"),
+    );
+
     // Env vars override; the defaults are the local single-machine deployment,
     // so a bare `just run` works.
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
