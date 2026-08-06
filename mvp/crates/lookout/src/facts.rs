@@ -16,13 +16,15 @@ use serde::Deserialize;
 use std::collections::BTreeSet;
 
 /// What one event says. A commit opens a query and is activity; a turn event
-/// is activity that opens nothing; a close pairs off an open query and is
-/// deliberately not activity — a conversation whose only recent event is its
-/// own turn ending has still stopped speaking.
+/// is activity that opens nothing; a tool starting is activity and also the
+/// beginning of a wait; a close pairs off an open query and is deliberately
+/// not activity — a conversation whose only recent event is its own turn
+/// ending has still stopped speaking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Observation {
     Committed { query: String, at_ms: i64 },
     Alive { at_ms: i64 },
+    ToolStarted { at_ms: i64 },
     Closed { query: String },
 }
 
@@ -66,15 +68,21 @@ pub fn observe(subject: &str, payload: &[u8]) -> Result<Option<Observation>, Str
     Ok(Some(Observation::Committed { query, at_ms }))
 }
 
-/// A turn boundary is life and nothing else: it says the conversation was
-/// being worked on then. It never opens or closes a query, because the query
-/// pairing has its own events and telemetry runs ahead of what is committed.
+/// The telemetry the lookout reads: a turn boundary, and a tool starting.
+/// Neither opens or closes a query, because the query pairing has its own
+/// events and telemetry runs ahead of what is committed.
+///
+/// The tool is the one that matters. The agent host announces a tool before
+/// it runs and commits its result afterwards, and publishes nothing whatever
+/// in between, so a tool that has started with nothing committed since is the
+/// only positive evidence that the silence has a cause.
 fn observe_telemetry(
     subject: &str,
     leaf: &str,
     payload: &[u8],
 ) -> Result<Option<Observation>, String> {
-    if !leaf.starts_with("turn.") {
+    let started_a_tool = leaf == "tool.use";
+    if !started_a_tool && !leaf.starts_with("turn.") {
         return Ok(None);
     }
     let envelope: Envelope = serde_json::from_slice(payload)
@@ -84,7 +92,11 @@ fn observe_telemetry(
         .as_deref()
         .and_then(wire::parse_ts)
         .ok_or_else(|| format!("{subject} carries no readable ts"))?;
-    Ok(Some(Observation::Alive { at_ms }))
+    Ok(Some(if started_a_tool {
+        Observation::ToolStarted { at_ms }
+    } else {
+        Observation::Alive { at_ms }
+    }))
 }
 
 /// One worker's two facts, folded from its own change and telemetry subtrees.
@@ -95,8 +107,13 @@ pub struct Facts {
     /// free of content.
     pub open: BTreeSet<String>,
     /// The last moment this conversation was observably being worked on: a
-    /// commit, or a turn boundary.
+    /// commit, a turn boundary, or a tool starting.
     pub last_activity_ms: Option<i64>,
+    /// The last commit alone. A tool's result arrives as a commit, so this is
+    /// what a tool's start is measured against.
+    pub last_commit_ms: Option<i64>,
+    /// The last tool announced as about to run.
+    pub last_tool_ms: Option<i64>,
 }
 
 impl Facts {
@@ -104,18 +121,46 @@ impl Facts {
         match observation {
             Observation::Committed { query, at_ms } => {
                 self.open.insert(query.clone());
+                self.last_commit_ms = Some(newer(self.last_commit_ms, *at_ms));
                 self.mark_alive(*at_ms);
             }
             Observation::Alive { at_ms } => self.mark_alive(*at_ms),
+            Observation::ToolStarted { at_ms } => {
+                self.last_tool_ms = Some(newer(self.last_tool_ms, *at_ms));
+                self.mark_alive(*at_ms);
+            }
             Observation::Closed { query } => {
                 self.open.remove(query);
             }
         }
     }
 
-    fn mark_alive(&mut self, at_ms: i64) {
-        self.last_activity_ms = Some(self.last_activity_ms.map_or(at_ms, |m| m.max(at_ms)));
+    /// Whether a tool has been announced with nothing committed since. The
+    /// agent host commits a tool's result, so a commit after the announcement
+    /// is the tool finishing; no commit after it means the tool is still out.
+    ///
+    /// This is the whole of the evidence there is. It says work was started,
+    /// never that the process is still there to finish it.
+    ///
+    /// A tool announced in the same millisecond as the commit before it is
+    /// still outstanding: the call commits and the announcement follows it
+    /// immediately, so they share a timestamp routinely, and only a commit
+    /// strictly later than the announcement can be the result coming back.
+    pub fn tool_outstanding(&self) -> bool {
+        match (self.last_tool_ms, self.last_commit_ms) {
+            (Some(tool), Some(commit)) => tool >= commit,
+            (Some(_), None) => true,
+            (None, _) => false,
+        }
     }
+
+    fn mark_alive(&mut self, at_ms: i64) {
+        self.last_activity_ms = Some(newer(self.last_activity_ms, at_ms));
+    }
+}
+
+fn newer(held: Option<i64>, at_ms: i64) -> i64 {
+    held.map_or(at_ms, |m| m.max(at_ms))
 }
 
 #[cfg(test)]
@@ -183,16 +228,48 @@ mod observe {
         assert_eq!(actual, expected);
     }
 
-    /// A tool call announced before it runs says the conversation was alive,
-    /// but it is not a turn boundary and the lookout does not read what tool
-    /// it was or what it was given.
+    /// A tool announced before it runs is when the wait began. What tool it
+    /// was and what it was given are not read: the name and the input sit in
+    /// the same body and neither reaches the fold.
     #[test]
-    fn a_tool_use_carries_neither_fact() {
-        let expected = Ok(None);
+    fn a_tool_use_is_a_tool_starting() {
+        let expected = Ok(Some(Observation::ToolStarted {
+            at_ms: 1_754_000_000_000,
+        }));
 
         let actual = observe(
             "conv.v2.worker-1.telemetry.tool.use",
-            br#"{"ts":"2025-07-31T22:13:20.000Z","queryId":"q-1","name":"Exec","input":{}}"#,
+            br#"{"ts":"2025-07-31T22:13:20.000Z","queryId":"q-1","name":"Exec",
+                "input":{"command":"rm -rf /"}}"#,
+        );
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn what_a_tool_was_given_makes_no_difference_to_what_is_observed() {
+        let expected = observe(
+            "conv.v2.worker-1.telemetry.tool.use",
+            br#"{"ts":"2025-07-31T22:13:20.000Z","queryId":"q-1","name":"Exec",
+                "input":{"command":"cargo build"}}"#,
+        );
+
+        let actual = observe(
+            "conv.v2.worker-1.telemetry.tool.use",
+            br#"{"ts":"2025-07-31T22:13:20.000Z","queryId":"q-1","name":"Read",
+                "input":{"paths":["/etc/shadow"]}}"#,
+        );
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn telemetry_the_lookout_has_no_use_for_carries_nothing() {
+        let expected = Ok(None);
+
+        let actual = observe(
+            "conv.v2.worker-1.telemetry.usage",
+            br#"{"ts":"2025-07-31T22:13:20.000Z","queryId":"q-1","outputTokens":42}"#,
         );
 
         assert_eq!(actual, expected);
@@ -350,6 +427,105 @@ mod apply {
 
         let actual =
             fold(&[committed("q-1", 100), Observation::Alive { at_ms: 300 }]).last_activity_ms;
+
+        assert_eq!(actual, expected);
+    }
+
+    /// The tool round, as the agent host publishes it: the call commits, the
+    /// tool is announced, and nothing at all follows until the result
+    /// commits. In that gap the tool is outstanding.
+    #[test]
+    fn a_tool_announced_after_the_last_commit_is_outstanding() {
+        let expected = true;
+
+        let actual = fold(&[
+            committed("q-1", 100),
+            Observation::ToolStarted { at_ms: 110 },
+        ])
+        .tool_outstanding();
+
+        assert_eq!(actual, expected);
+    }
+
+    /// The result of a tool arrives as a commit, which is how the wait ends.
+    #[test]
+    fn a_commit_after_the_tool_ends_the_wait() {
+        let expected = false;
+
+        let actual = fold(&[
+            committed("q-1", 100),
+            Observation::ToolStarted { at_ms: 110 },
+            committed("q-1", 900),
+        ])
+        .tool_outstanding();
+
+        assert_eq!(actual, expected);
+    }
+
+    /// The call commits and the announcement follows immediately, so the two
+    /// share a millisecond routinely. Reading that as the tool having already
+    /// come back is what made the absorb miss the case it exists for.
+    #[test]
+    fn a_tool_announced_in_the_same_millisecond_as_the_commit_is_outstanding() {
+        let expected = true;
+
+        let actual = fold(&[
+            committed("q-1", 100),
+            Observation::ToolStarted { at_ms: 100 },
+        ])
+        .tool_outstanding();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_conversation_that_has_announced_no_tool_has_none_outstanding() {
+        let expected = false;
+
+        let actual = fold(&[committed("q-1", 100)]).tool_outstanding();
+
+        assert_eq!(actual, expected);
+    }
+
+    /// Several tools in one round are announced together and answered by a
+    /// single commit, so the wait runs from the last of them.
+    #[test]
+    fn the_wait_runs_from_the_last_tool_announced() {
+        let expected = true;
+
+        let actual = fold(&[
+            committed("q-1", 100),
+            Observation::ToolStarted { at_ms: 110 },
+            Observation::ToolStarted { at_ms: 120 },
+        ])
+        .tool_outstanding();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_tool_starting_is_activity() {
+        let expected = Some(110);
+
+        let actual = fold(&[
+            committed("q-1", 100),
+            Observation::ToolStarted { at_ms: 110 },
+        ])
+        .last_activity_ms;
+
+        assert_eq!(actual, expected);
+    }
+
+    /// A tool is not a commit, so it must not end its own wait.
+    #[test]
+    fn a_tool_starting_is_not_a_commit() {
+        let expected = Some(100);
+
+        let actual = fold(&[
+            committed("q-1", 100),
+            Observation::ToolStarted { at_ms: 110 },
+        ])
+        .last_commit_ms;
 
         assert_eq!(actual, expected);
     }

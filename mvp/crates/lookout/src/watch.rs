@@ -357,6 +357,16 @@ mod tests {
         );
     }
 
+    fn tool_started(worker: &str, at_ms: i64) -> BrokerMessage {
+        frame(
+            &format!("conv.v2.{worker}.telemetry.tool.use"),
+            format!(
+                r#"{{"ts":"{}","queryId":"q-1","name":"Exec","input":{{"command":"cargo build"}}}}"#,
+                wire::format_ts(at_ms)
+            ),
+        )
+    }
+
     fn turn_started(worker: &str, at_ms: i64) -> BrokerMessage {
         frame(
             &format!("conv.v2.{worker}.telemetry.turn.started"),
@@ -508,7 +518,7 @@ mod tests {
             watch.tick(&broker, &config(), NOW_MS, "ts").await;
             let actual = says_to(&broker)[0]
                 .1
-                .contains("has a query still open and has not spoken for 23h");
+                .contains("has a query still open, has not spoken for 23h");
 
             assert_eq!(actual, expected);
         }
@@ -550,6 +560,46 @@ mod tests {
 
             watch.tick(&broker, &config(), NOW_MS, "ts").await;
             let actual = says_to(&broker);
+
+            assert_eq!(actual, expected);
+        }
+
+        /// The case the whole tool fact exists for, end to end: a worker
+        /// twelve minutes into a build has been silent well past the
+        /// threshold, and its handler is told nothing.
+        #[tokio::test]
+        async fn a_worker_waiting_on_a_tool_it_announced_wakes_nobody() {
+            let expected: Vec<(String, String)> = vec![];
+            let broker = FakeBroker::default();
+            seed_history(
+                &broker,
+                "worker-1",
+                vec![committed("worker-1", "q-1", NOW_MS - 12 * 60_000)],
+                vec![tool_started("worker-1", NOW_MS - 12 * 60_000)],
+            );
+            accepts(&broker, "handler-1");
+            let mut watch = seeded(&broker, line("worker-1", "handler-1")).await;
+
+            watch.tick(&broker, &config(), NOW_MS, "ts").await;
+            let actual = says_to(&broker);
+
+            assert_eq!(actual, expected);
+        }
+
+        /// The same worker with no tool announced is the reading that made a
+        /// live build indistinguishable from a corpse.
+        #[tokio::test]
+        async fn the_same_worker_with_no_tool_announced_is_reported() {
+            let expected = true;
+            let broker = broker_with(
+                "worker-1",
+                vec![committed("worker-1", "q-1", NOW_MS - 12 * 60_000)],
+            );
+            accepts(&broker, "handler-1");
+            let mut watch = seeded(&broker, line("worker-1", "handler-1")).await;
+
+            watch.tick(&broker, &config(), NOW_MS, "ts").await;
+            let actual = says_to(&broker)[0].1.contains("has a query still open");
 
             assert_eq!(actual, expected);
         }

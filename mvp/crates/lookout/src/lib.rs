@@ -11,8 +11,9 @@
 //!   and writes only into a handler.
 //! - **It extracts, and never interprets.** Whether a query is open is a
 //!   subject and a `queryId`; how long a worker has been silent is a
-//!   timestamp. Pulling those out of an envelope is mechanical; deciding what
-//!   a worker meant is not, and only the first happens here.
+//!   timestamp; whether a tool is still out is a subject and two timestamps.
+//!   Pulling those out of an envelope is mechanical; deciding what a worker
+//!   meant is not, and only the first happens here.
 //!   `facts::observe` is the whole of what it reads off an event, and two
 //!   tests hold the line at the level that matters: the same event classifies
 //!   identically however its content differs, and an event whose content no

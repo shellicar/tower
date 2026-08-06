@@ -8,23 +8,33 @@
 //! machinery. Absence of events is the signal, and absence has no event,
 //! which is why something must tick.
 //!
-//! Known limit, and it is the threshold's rather than the classifier's: the
-//! agent host publishes nothing at all while a tool runs, so a worker part
-//! way through a long build and a worker whose process died during one look
-//! identical from here. Turn telemetry narrows the gap at every round
-//! boundary but does not close it, and no threshold separates the two.
+//! Silence alone cannot carry that, though, and no threshold fixes it. The
+//! agent host publishes nothing whatever between committing a tool call and
+//! committing its result, so a worker twelve minutes into a build is silent
+//! in exactly the way a corpse is. What separates them is not a better number
+//! but a different fact: the tool was announced before it ran, so a tool
+//! outstanding with nothing committed since is positive evidence that work
+//! was started, and the silence has a cause rather than a guess.
+//!
+//! So an outstanding tool absorbs the silence edge. The cost is deliberate
+//! and is the open question rather than an oversight: a process that dies
+//! *during* a tool leaves that tool outstanding for ever, and this reads it
+//! as working. Nothing here decides how long is too long, because that is the
+//! same decision as what to do about an unknown, and it is not this version's
+//! to make.
 
 use crate::facts::Facts;
 use crate::lines::ReportingLine;
 
-/// The reading of the two facts. `Working` is the only one that is left
-/// alone; the other three are worth a handler's attention.
+/// The reading. `Working` is the only one that is left alone; the other three
+/// are worth a handler's attention.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
-    /// A query is open and the conversation is still speaking.
+    /// A query is open, and either the conversation is still speaking or a
+    /// tool it announced has not come back yet.
     Working,
-    /// A query is open and the conversation has stopped speaking. The process
-    /// died mid-turn, and it is holding unpushed work.
+    /// A query is open, the conversation has stopped speaking, and no tool is
+    /// out to explain it.
     DeadMidTurn,
     /// No query is open and the conversation spoke recently: a turn finished
     /// and there is something to read.
@@ -47,6 +57,10 @@ pub fn classify(facts: &Facts, silent_since_ms: i64, now_ms: i64, quiet_after_ms
     let recent = now_ms.saturating_sub(silent_since_ms) < quiet_after_ms;
     match (facts.open.is_empty(), recent) {
         (false, true) => State::Working,
+        // The absorb. Only inside a running query: once the query has closed,
+        // whatever it announced is finished with, and an old announcement must
+        // not go on explaining a silence that outlived it.
+        (false, false) if facts.tool_outstanding() => State::Working,
         (false, false) => State::DeadMidTurn,
         (true, true) => State::Finished,
         (true, false) => State::Idle,
@@ -97,6 +111,59 @@ mod four_states {
             NOW_MS,
             QUIET_AFTER_MS,
         );
+
+        assert_eq!(actual, expected);
+    }
+
+    /// The twelve minute build. Silence past the threshold, but a tool was
+    /// announced and nothing has committed since, so the silence has a cause
+    /// and the worker is left alone.
+    #[test]
+    fn a_worker_waiting_on_a_tool_it_announced_is_working_however_long_it_is_quiet() {
+        let expected = State::Working;
+        let mut facts = working_on("q-1", NOW_MS - 12 * 60_000);
+        facts.apply(&Observation::ToolStarted {
+            at_ms: NOW_MS - 12 * 60_000,
+        });
+
+        let actual = classify(&facts, NOW_MS - 12 * 60_000, NOW_MS, QUIET_AFTER_MS);
+
+        assert_eq!(actual, expected);
+    }
+
+    /// Once the tool's result commits the explanation is spent, so a worker
+    /// that then goes quiet is surfaced as before.
+    #[test]
+    fn a_worker_quiet_since_its_tool_came_back_is_dead_mid_turn() {
+        let expected = State::DeadMidTurn;
+        let mut facts = working_on("q-1", NOW_MS - 3_600_000);
+        facts.apply(&Observation::ToolStarted {
+            at_ms: NOW_MS - 3_600_000,
+        });
+        facts.apply(&Observation::Committed {
+            query: "q-1".into(),
+            at_ms: NOW_MS - 1_800_000,
+        });
+
+        let actual = classify(&facts, NOW_MS - 1_800_000, NOW_MS, QUIET_AFTER_MS);
+
+        assert_eq!(actual, expected);
+    }
+
+    /// An announcement from a query that has since closed must not go on
+    /// explaining a silence that outlived it.
+    #[test]
+    fn a_tool_from_a_closed_query_does_not_absorb() {
+        let expected = State::Idle;
+        let mut facts = working_on("q-1", NOW_MS - 3_600_000);
+        facts.apply(&Observation::ToolStarted {
+            at_ms: NOW_MS - 3_600_000,
+        });
+        facts.apply(&Observation::Closed {
+            query: "q-1".into(),
+        });
+
+        let actual = classify(&facts, NOW_MS - 3_600_000, NOW_MS, QUIET_AFTER_MS);
 
         assert_eq!(actual, expected);
     }
