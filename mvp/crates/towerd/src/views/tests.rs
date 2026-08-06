@@ -819,6 +819,73 @@ fn a_gated_agent_v1_attached_still_feeds_the_instances_liveness_fold() {
     assert_eq!(gated.interval_s, Some(30));
 }
 
+#[test]
+fn a_displaced_agent_v1_detached_emits_no_fact_while_the_conv_leaf_stands() {
+    // The live shape: a claude-sdk-cli session on agent.v1 holds conv-abc,
+    // a conv-leaf instance supersedes it, then the displaced one does the
+    // compliant thing and publishes `detached` (agent.md, Attachment). The
+    // fact is keyed by conversation once it reaches a client, so emitting
+    // it would clear the standing claim from every UI.
+    let (mut views, mut rx) = fresh();
+    views.apply("conv-approval", 1, &event("agent.v1.mac.telemetry.attached",
+        r#"{"ts":"2026-07-28T01:00:00+10:00","instanceId":"inst-old","conversationId":"conv-abc","cwd":"~/old"}"#));
+    views.apply("conv-approval", 2, &event("conv.v2.conv-abc.attachment.attached",
+        r#"{"ts":"2026-07-28T01:01:00+10:00","instanceId":"inst-new","world":"vm","cwd":"~/new"}"#));
+    while rx.try_recv().is_ok() {}
+
+    views.apply("conv-approval", 3, &event("agent.v1.mac.telemetry.detached",
+        r#"{"ts":"2026-07-28T01:02:00+10:00","instanceId":"inst-old","conversationId":"conv-abc"}"#));
+
+    assert!(
+        rx.try_recv().is_err(),
+        "a displaced instance's detached must not be broadcast"
+    );
+    let (_, attachments) = views.agents().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].instance.0, "inst-new");
+    assert_eq!(attachments[0].cwd.as_deref(), Some("~/new"));
+}
+
+#[test]
+fn an_undisplaced_agent_v1_detached_still_emits_its_fact() {
+    // The gate is about supersession, not about agent.v1: with no conv-leaf
+    // claim standing, the release must still reach every client.
+    let (mut views, mut rx) = fresh();
+    views.apply("conv-approval", 1, &event("agent.v1.mac.telemetry.attached",
+        r#"{"ts":"2026-07-28T01:00:00+10:00","instanceId":"inst-old","conversationId":"conv-abc","cwd":"~/old"}"#));
+    while rx.try_recv().is_ok() {}
+
+    views.apply("conv-approval", 2, &event("agent.v1.mac.telemetry.detached",
+        r#"{"ts":"2026-07-28T01:02:00+10:00","instanceId":"inst-old","conversationId":"conv-abc"}"#));
+
+    assert!(matches!(
+        rx.try_recv().unwrap(),
+        ViewEvent::Agent(AgentFact::Detached { .. })
+    ));
+    let (_, attachments) = views.agents().unwrap();
+    assert!(attachments.is_empty());
+}
+
+#[test]
+fn two_agent_v1_claims_on_one_conv_come_back_oldest_first() {
+    // agent_attachments is keyed (world, instance_id, conv), so the agent.v1
+    // tree genuinely carries two claims for one conversation and the server
+    // has to pick a winner. Both clients build conv -> attachment by last-wins
+    // over this array, so the snapshot's order IS the rule that picks it.
+    // Published newest-first here, which is what an unordered select gets
+    // backwards.
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("agent.v1.vm.telemetry.attached",
+        r#"{"ts":"2026-07-28T01:05:00+10:00","instanceId":"inst-new","conversationId":"conv-abc","cwd":"~/new"}"#));
+    views.apply("conv-approval", 2, &event("agent.v1.mac.telemetry.attached",
+        r#"{"ts":"2026-07-28T01:00:00+10:00","instanceId":"inst-old","conversationId":"conv-abc","cwd":"~/old"}"#));
+
+    let (_, attachments) = views.agents().unwrap();
+
+    let actual: Vec<&str> = attachments.iter().map(|a| a.instance.0.as_str()).collect();
+    assert_eq!(actual, ["inst-old", "inst-new"]);
+}
+
 // The conversation-tree attachment leaf (conversation.md, Attachment;
 // agent.md, Attachment, Examples a-e). agent.v1's fold above is
 // untouched; these exercise the new leaf's own fold and its gate.
