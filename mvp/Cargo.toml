@@ -15,7 +15,7 @@ clone_on_ref_ptr = "warn"
 # Shared dependencies live here once; crates inherit with `foo.workspace = true`.
 [workspace.dependencies]
 anyhow = "1"
-async-nats = "0.49"
+async-nats = "0.50"
 axum = { version = "0.8", features = ["ws"] }
 futures = "0.3"
 # bridge::broker::BrokerMessage's payload: the same ref-counted byte buffer
@@ -27,7 +27,7 @@ bytes = "1"
 # behind TLS-intercepting proxies (Zscaler). uuid: id minting.
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-native-roots"] }
 regex = "1"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 # ReadFile's image conditioning (readfile.rs): native decode/resize/encode,
 # no shelling out to a platform tool (sips was the Node-side workaround for
@@ -42,10 +42,10 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # schema's declared field order (and whatever order the model actually
 # wrote) never survives to what gets published or reviewed.
 serde_json = { version = "1", features = ["preserve_order"] }
-sha2 = "0.10"
+sha2 = "0.11"
 # EditFile's diff generation — the same job the CLI's own EditFile.ts hands
 # to the npm `diff` package; no reason to hand-roll Myers diff in Rust.
-similar = "2"
+similar = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
@@ -54,7 +54,7 @@ uuid = { version = "1", features = ["v4"] }
 libc = "0.2"
 # Attachment resolution: object-store bytes inline into the model request as
 # base64 (the API's own encoding for binary sources).
-base64 = "0.22"
+base64 = "0.23"
 # The YAML organisation's own continuation of serde_yaml (github.com/yaml/
 # yaml-serde) — skills frontmatter is YAML, and hand-parsing YAML is an
 # approximation that already bit once (block-scalar descriptions).
@@ -64,8 +64,8 @@ yaml_serde = "0.10"
 # helm only writes layout — the whole reason a Rust TUI is cheap to build.
 # crossterm is ratatui's platform backend, depended on directly for the
 # input events (raw keys) ratatui doesn't wrap.
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = "0.30"
+crossterm = "0.29"
 # The editing widget ratatui deliberately doesn't ship: multi-line text
 # entry with cursor-following viewport scroll, word ops, undo. Replaces a
 # hand-rolled editor that was growing scroll logic the shelf already has.
