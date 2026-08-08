@@ -210,7 +210,10 @@ mod tests {
             stream: "conv-approval".into(),
             telemetry_stream: "conv-diagnostic".into(),
             bucket: "reporting-lines-test".into(),
-            quiet_after_ms: 600_000,
+            thresholds: crate::classify::Thresholds {
+                quiet_after_ms: 600_000,
+                tool_max_ms: 900_000,
+            },
             say_timeout: Duration::from_secs(5),
         }
     }

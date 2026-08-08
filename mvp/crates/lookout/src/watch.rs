@@ -18,7 +18,7 @@ use bridge::broker::{Broker, BrokerReplay};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use crate::classify::{self, State};
+use crate::classify::{self, Reading};
 use crate::digest::{self, Delivery, Edge};
 use crate::facts::{self, Facts};
 use crate::lines::{ReportingLine, parse_line};
@@ -33,10 +33,8 @@ pub struct Config {
     /// The reporting-line bucket. Overridable so a test never reads the
     /// bucket the fleet runs on.
     pub bucket: String,
-    /// How long a conversation may say nothing before its silence is a fact
-    /// worth reporting. The longest legitimate silence seen on this fleet is
-    /// a workspace build; the dead ones were silent for hours.
-    pub quiet_after_ms: i64,
+    /// The two clocks a reading is measured against.
+    pub thresholds: classify::Thresholds,
     pub say_timeout: Duration,
 }
 
@@ -53,7 +51,14 @@ pub struct TickOutcome {
 pub struct Watch {
     lines: BTreeMap<String, ReportingLine>,
     facts: BTreeMap<String, Facts>,
-    reported: BTreeMap<String, State>,
+    /// What each worker was last told about, keyed by worker.
+    ///
+    /// The value is the whole reading, state *and* the query it was about,
+    /// because keying on the state alone made a second turn finishing look
+    /// identical to the first. A worker that finishes, is briefed again and
+    /// finishes again has two things to say, and the query id is what tells
+    /// them apart.
+    reported: BTreeMap<String, Reading>,
 }
 
 /// Read the reporting lines. Returns the lines and, separately, every entry
@@ -166,15 +171,16 @@ impl Watch {
             let Some(silent_since_ms) = classify::silent_since_ms(&facts, line) else {
                 continue;
             };
-            let state = classify::classify(&facts, silent_since_ms, now_ms, config.quiet_after_ms);
-            if !state.is_worth_telling() || self.reported.get(worker) == Some(&state) {
+            let reading = classify::classify(&facts, silent_since_ms, now_ms, &config.thresholds);
+            if !reading.state.is_worth_telling() || self.reported.get(worker) == Some(&reading) {
                 continue;
             }
             edges.push((
                 line.owner.clone(),
                 Edge {
                     worker: worker.clone(),
-                    state,
+                    state: reading.state,
+                    query: reading.query,
                     silent_for_ms: now_ms.saturating_sub(silent_since_ms),
                 },
             ));
@@ -184,7 +190,13 @@ impl Watch {
             match deliver(broker, config, &delivery, ts).await {
                 Ok(()) => {
                     for edge in &delivery.edges {
-                        self.reported.insert(edge.worker.clone(), edge.state);
+                        self.reported.insert(
+                            edge.worker.clone(),
+                            Reading {
+                                state: edge.state,
+                                query: edge.query.clone(),
+                            },
+                        );
                     }
                 }
                 Err(complaint) => {
@@ -291,7 +303,10 @@ mod tests {
             stream: STREAM.into(),
             telemetry_stream: TELEMETRY_STREAM.into(),
             bucket: BUCKET.into(),
-            quiet_after_ms: 600_000,
+            thresholds: classify::Thresholds {
+                quiet_after_ms: 600_000,
+                tool_max_ms: 900_000,
+            },
             say_timeout: Duration::from_secs(5),
         }
     }
@@ -357,11 +372,11 @@ mod tests {
         );
     }
 
-    fn tool_started(worker: &str, at_ms: i64) -> BrokerMessage {
+    fn tool_started(worker: &str, query: &str, at_ms: i64) -> BrokerMessage {
         frame(
             &format!("conv.v2.{worker}.telemetry.tool.use"),
             format!(
-                r#"{{"ts":"{}","queryId":"q-1","name":"Exec","input":{{"command":"cargo build"}}}}"#,
+                r#"{{"ts":"{}","queryId":"{query}","name":"Exec","input":{{"command":"cargo build"}}}}"#,
                 wire::format_ts(at_ms)
             ),
         )
@@ -564,9 +579,115 @@ mod tests {
             assert_eq!(actual, expected);
         }
 
+        /// The founding case, end to end. A worker that died holding an open
+        /// `Exec` announced a tool that has been outstanding for 23 hours,
+        /// which no running tool can be, so its handler is told.
+        #[tokio::test]
+        async fn a_worker_that_died_holding_an_open_tool_is_found() {
+            let expected = true;
+            let broker = FakeBroker::default();
+            seed_history(
+                &broker,
+                "worker-1",
+                vec![committed("worker-1", "q-1", NOW_MS - 23 * 3_600_000)],
+                vec![tool_started("worker-1", "q-1", NOW_MS - 23 * 3_600_000)],
+            );
+            accepts(&broker, "handler-1");
+            let mut watch = seeded(&broker, line("worker-1", "handler-1")).await;
+
+            watch.tick(&broker, &config(), NOW_MS, "ts").await;
+            let actual = says_to(&broker)[0]
+                .1
+                .contains("which is longer than a tool can run");
+
+            assert_eq!(actual, expected);
+        }
+
+        /// A second turn finishing is a second thing to say. Keying the
+        /// suppression on the reading alone made the handler that briefs its
+        /// workers promptly the one that stopped hearing.
+        #[tokio::test]
+        async fn a_second_turn_finishing_is_relayed_again() {
+            let expected = 2;
+            let broker = broker_with(
+                "worker-1",
+                vec![
+                    committed("worker-1", "q-1", NOW_MS - 120_000),
+                    closed("worker-1", "q-1", NOW_MS - 120_000),
+                ],
+            );
+            accepts(&broker, "handler-1");
+            let mut watch = seeded(&broker, line("worker-1", "handler-1")).await;
+
+            watch.tick(&broker, &config(), NOW_MS, "ts").await;
+            // Fresh work, and it finishes too.
+            for frame in [
+                committed("worker-1", "q-2", NOW_MS - 30_000),
+                closed("worker-1", "q-2", NOW_MS - 30_000),
+            ] {
+                watch.observe("worker-1", &frame.subject, &frame.payload);
+            }
+            watch.tick(&broker, &config(), NOW_MS, "ts").await;
+            let actual = says_to(&broker).len();
+
+            assert_eq!(actual, expected);
+        }
+
+        /// The recovery case. A process that dies mid-query publishes no
+        /// closure ever, so without a later query superseding the earlier one
+        /// the worker could never read as finished again.
+        #[tokio::test]
+        async fn a_worker_reserviced_after_a_silent_death_is_relayed_when_it_finishes() {
+            let expected = true;
+            let broker = broker_with(
+                "worker-1",
+                vec![committed("worker-1", "q-1", NOW_MS - 22 * 3_600_000)],
+            );
+            accepts(&broker, "handler-1");
+            let mut watch = seeded(&broker, line("worker-1", "handler-1")).await;
+
+            watch.tick(&broker, &config(), NOW_MS, "ts").await;
+            // Re-serviced, and the new query runs to completion.
+            for frame in [
+                committed("worker-1", "q-2", NOW_MS - 30_000),
+                closed("worker-1", "q-2", NOW_MS - 30_000),
+            ] {
+                watch.observe("worker-1", &frame.subject, &frame.payload);
+            }
+            watch.tick(&broker, &config(), NOW_MS, "ts").await;
+            let actual = says_to(&broker)
+                .last()
+                .expect("a digest was sent")
+                .1
+                .contains("finished a turn");
+
+            assert_eq!(actual, expected);
+        }
+
+        /// The query the reading is about travels, so a handler that has been
+        /// reset can tell an old stop from a new one.
+        #[tokio::test]
+        async fn a_digest_names_the_query_its_reading_is_about() {
+            let expected = true;
+            let broker = broker_with(
+                "worker-1",
+                vec![
+                    committed("worker-1", "q-77", NOW_MS - 30_000),
+                    closed("worker-1", "q-77", NOW_MS - 30_000),
+                ],
+            );
+            accepts(&broker, "handler-1");
+            let mut watch = seeded(&broker, line("worker-1", "handler-1")).await;
+
+            watch.tick(&broker, &config(), NOW_MS, "ts").await;
+            let actual = says_to(&broker)[0].1.contains("Query q-77.");
+
+            assert_eq!(actual, expected);
+        }
+
         /// The case the whole tool fact exists for, end to end: a worker
-        /// twelve minutes into a build has been silent well past the
-        /// threshold, and its handler is told nothing.
+        /// twelve minutes into a build has been silent past the quiet
+        /// threshold but is within the bound, and its handler is told nothing.
         #[tokio::test]
         async fn a_worker_waiting_on_a_tool_it_announced_wakes_nobody() {
             let expected: Vec<(String, String)> = vec![];
@@ -575,7 +696,7 @@ mod tests {
                 &broker,
                 "worker-1",
                 vec![committed("worker-1", "q-1", NOW_MS - 12 * 60_000)],
-                vec![tool_started("worker-1", NOW_MS - 12 * 60_000)],
+                vec![tool_started("worker-1", "q-1", NOW_MS - 12 * 60_000)],
             );
             accepts(&broker, "handler-1");
             let mut watch = seeded(&broker, line("worker-1", "handler-1")).await;

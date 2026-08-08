@@ -27,7 +27,15 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| "conv-diagnostic".into()),
         bucket: std::env::var("LOOKOUT_REPORTING_BUCKET")
             .unwrap_or_else(|_| "reporting-lines".into()),
-        quiet_after_ms: env_seconds("LOOKOUT_QUIET_AFTER_S", 600) * 1_000,
+        thresholds: lookout::classify::Thresholds {
+            quiet_after_ms: env_seconds("LOOKOUT_QUIET_AFTER_S", 600) * 1_000,
+            // Fifteen minutes because that is the agent host's hard maximum
+            // for a tool run: past it a tool has not finished late, it has not
+            // finished at all. It is configurable because that limit is the
+            // host's and can move, and the two drifting apart silently is how
+            // a live worker gets reported or a dead one gets missed.
+            tool_max_ms: env_seconds("LOOKOUT_TOOL_MAX_S", 900) * 1_000,
+        },
         say_timeout: Duration::from_secs(env_seconds("LOOKOUT_SAY_TIMEOUT_S", 5) as u64),
     };
     // The tick is both the poll for absence and the batch boundary: events

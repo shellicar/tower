@@ -17,6 +17,10 @@ use std::collections::BTreeMap;
 pub struct Edge {
     pub worker: String,
     pub state: State,
+    /// The query the reading is about. It travels because a handler that has
+    /// been reset remembers nothing it was told before, and this is what lets
+    /// it tell an old stop from a new one.
+    pub query: Option<String>,
     /// How long the worker has been silent when the digest was built, in
     /// milliseconds. The fact behind the reading, so a handler can judge the
     /// reading rather than take it.
@@ -67,6 +71,14 @@ fn render_edge(edge: &Edge) -> String {
         // Named even though it is never rendered: leaving it to a catch-all
         // would make a future state silently read as one of these.
         State::Working => format!("is working, and last spoke {silence} ago"),
+        // The fact is the wait, and only the wait. A tool outstanding longer
+        // than a tool can run has not finished, but whether the worker is
+        // dead, wedged, or running something the bound does not know about is
+        // a judgment, and a handler can go and look.
+        State::ToolOverrun => format!(
+            "announced a tool {silence} ago and nothing has been committed since, which is \
+             longer than a tool can run"
+        ),
         // What is established is the silence, the open query, and that no
         // tool is out to account for either. Whether the process died, and
         // what it was holding when it did, is the handler's to find out: the
@@ -80,7 +92,10 @@ fn render_edge(edge: &Edge) -> String {
         }
         State::Idle => format!("has been idle for {silence}: it is waiting on someone"),
     };
-    format!("- {} {}", edge.worker, reading)
+    match &edge.query {
+        Some(query) => format!("- {} {reading}. Query {query}.", edge.worker),
+        None => format!("- {} {reading}", edge.worker),
+    }
 }
 
 /// Coarse on purpose: the handler is deciding whether to go and look, and no
@@ -103,6 +118,7 @@ mod batch {
         Edge {
             worker: worker.into(),
             state: State::Finished,
+            query: Some("q-1".into()),
             silent_for_ms: 30_000,
         }
     }
@@ -168,13 +184,14 @@ mod render {
     fn names_the_worker_its_state_and_how_long_it_has_been_silent() {
         let expected = "1 worker on your reporting line has changed state.\n\n\
              - 45fb4f20-a222-42ff-9b35-ea434224772c finished a turn and last spoke 30s ago: \
-             there is something to read\n\n\
+             there is something to read. Query qry-88.\n\n\
              Read a worker by its conversation id. These are facts, not verdicts: whether the \
              work is good is yours to judge.";
 
         let actual = render(&delivery(vec![Edge {
             worker: "45fb4f20-a222-42ff-9b35-ea434224772c".into(),
             state: State::Finished,
+            query: Some("qry-88".into()),
             silent_for_ms: 30_000,
         }]));
 
@@ -189,11 +206,13 @@ mod render {
             Edge {
                 worker: "worker-1".into(),
                 state: State::Finished,
+                query: Some("q-1".into()),
                 silent_for_ms: 30_000,
             },
             Edge {
                 worker: "worker-2".into(),
                 state: State::DeadMidTurn,
+                query: Some("q-2".into()),
                 silent_for_ms: 82_800_000,
             },
         ]))
@@ -207,11 +226,12 @@ mod render {
     #[test]
     fn a_worker_dead_mid_turn_is_reported_by_id_and_silence() {
         let expected = "- worker-2 has a query still open, has not spoken for 23h, and has no \
-             tool running to account for it";
+             tool running to account for it. Query q-7.";
 
         let actual = render_edge(&Edge {
             worker: "worker-2".into(),
             state: State::DeadMidTurn,
+            query: Some("q-7".into()),
             silent_for_ms: 82_800_000,
         });
 
@@ -225,6 +245,7 @@ mod render {
         let actual = render_edge(&Edge {
             worker: "worker-3".into(),
             state: State::Idle,
+            query: None,
             silent_for_ms: 10_800_000,
         });
 
