@@ -272,6 +272,7 @@ impl CommandOutcome {
 /// this, never drops one.
 pub async fn run_commands(
     commands: &[ExecCommand],
+    credentials: &crate::credentials::ExecCredentials,
     cancel: &mut watch::Receiver<bool>,
 ) -> Vec<CommandOutcome> {
     let mut results: Vec<CommandOutcome> = Vec::with_capacity(commands.len());
@@ -302,7 +303,7 @@ pub async fn run_commands(
                 Some(ExecOp::Or) => !prev_ok,
             };
         if run_this {
-            let group_results = run_pipeline(group, cancel).await;
+            let group_results = run_pipeline(group, credentials, cancel).await;
             prev_ok = group_results.last().is_some_and(CommandOutcome::succeeded);
             if *cancel.borrow() {
                 skip_rest = true;
@@ -325,6 +326,7 @@ pub async fn run_commands(
 /// command is ignored — its stdout is already spoken for by the pipe.
 async fn run_pipeline(
     group: &[ExecCommand],
+    credentials: &crate::credentials::ExecCredentials,
     cancel: &mut watch::Receiver<bool>,
 ) -> Vec<CommandOutcome> {
     let n = group.len();
@@ -344,6 +346,17 @@ async fn run_pipeline(
         }
         for (k, v) in &c.env {
             cmd.env(k, v);
+        }
+        // Last, and after the call's own env: a configured provider's
+        // ambient variables go whatever the call asked for, and the
+        // credential this host carries is the one the child ends up with.
+        // Applied in the other order, a call naming GH_TOKEN itself would
+        // decide what the child authenticates as.
+        for name in &credentials.strip {
+            cmd.env_remove(name);
+        }
+        for (name, value) in &credentials.provide {
+            cmd.env(name, value);
         }
         cmd.stdin(next_stdin.take().unwrap_or_else(std::process::Stdio::null));
         // A file redirect on the terminal command bypasses capture; a
@@ -725,12 +738,20 @@ async fn run_child(
 #[cfg(test)]
 mod tests {
     use super::{format_results, parse_commands, run_bash, run_commands};
+    use crate::credentials::ExecCredentials;
     use serde_json::json;
     use tokio::sync::watch;
 
     // A cancel receiver that never fires: the human is not cancelling.
     fn no_cancel() -> watch::Receiver<bool> {
         watch::channel(false).1
+    }
+
+    // No credentials configured: the child inherits this process's
+    // environment untouched, which is bridge's behaviour before any
+    // `credentials` line arrives.
+    fn no_credentials() -> ExecCredentials {
+        ExecCredentials::default()
     }
 
     #[tokio::test]
@@ -794,8 +815,16 @@ mod tests {
         input: serde_json::Value,
         cancel: &mut watch::Receiver<bool>,
     ) -> (String, bool) {
+        run_input_with(input, &no_credentials(), cancel).await
+    }
+
+    async fn run_input_with(
+        input: serde_json::Value,
+        credentials: &ExecCredentials,
+        cancel: &mut watch::Receiver<bool>,
+    ) -> (String, bool) {
         let commands = parse_commands(&input).expect("valid commands");
-        let results = run_commands(&commands, cancel).await;
+        let results = run_commands(&commands, credentials, cancel).await;
         format_results(&commands, &results)
     }
 
@@ -974,8 +1003,63 @@ mod tests {
             ]
         });
         let commands = parse_commands(&input).expect("valid commands");
-        let results = run_commands(&commands, &mut cancel).await;
+        let results = run_commands(&commands, &no_credentials(), &mut cancel).await;
         assert_eq!(results.len(), 2, "one result per input command, always");
+    }
+
+    /// The guarantee the whole credential model rests on: once a github
+    /// credential is configured, an Exec child cannot reach GitHub with
+    /// anything but what this host handed it. The ambient variables are set
+    /// on the call itself here, which is the stronger case — they are
+    /// removed after whatever set them, and a genuinely inherited variable
+    /// goes by that same removal.
+    ///
+    /// macOS only, because the github provider is: off macOS its tools are
+    /// not compiled in and no credential can be read, so there is nothing
+    /// configured to displace anything.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn a_configured_providers_ambient_variables_are_absent_while_its_credential_is_present() {
+        let mut cancel = no_cancel();
+        let configured = crate::credentials::parse_credentials(&json!({
+            "github-default": { "provider": "github", "account": "gh-reader" }
+        }))
+        .expect("valid credentials");
+        let credentials = ExecCredentials {
+            strip: crate::credentials::strip_list(&configured),
+            provide: vec![("GH_TOKEN".to_string(), "the-configured-token".to_string())],
+        };
+        let input = json!({
+            "commands": [{
+                "program": "sh",
+                "args": ["-c", "echo \"GH_TOKEN=[$GH_TOKEN]\"; echo \"GITHUB_TOKEN=[$GITHUB_TOKEN]\"; echo \"SSH_AUTH_SOCK=[$SSH_AUTH_SOCK]\"; echo \"PATH_SET=[${PATH:+yes}]\""],
+                "env": {
+                    "GH_TOKEN": "ambient",
+                    "GITHUB_TOKEN": "ambient",
+                    "SSH_AUTH_SOCK": "/tmp/agent.sock"
+                }
+            }]
+        });
+
+        let (content, is_error) = run_input_with(input, &credentials, &mut cancel).await;
+
+        assert!(!is_error, "{content}");
+        assert!(
+            content.contains("GH_TOKEN=[the-configured-token]"),
+            "the configured credential is what the child carries: {content}"
+        );
+        assert!(
+            content.contains("GITHUB_TOKEN=[]"),
+            "GITHUB_TOKEN survived: {content}"
+        );
+        assert!(
+            content.contains("SSH_AUTH_SOCK=[]"),
+            "an ssh agent would authenticate git around the token: {content}"
+        );
+        assert!(
+            content.contains("PATH_SET=[yes]"),
+            "only the provider's own variables are touched: {content}"
+        );
     }
 }
 

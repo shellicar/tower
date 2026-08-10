@@ -25,13 +25,22 @@ use crate::decisions::{CancelDecision, Conversation, Message, QueryEnd, SayDecis
 use crate::skills::Skills;
 use bridge::broker::{Broker, BrokerError, BrokerSubscription};
 
-/// Every tool schema offered on every turn, except `Skill` (gated on a
-/// non-empty catalogue — conversation-specific, not static). The one source
-/// both `run_query`'s per-turn tool list and main.rs's startup log read
-/// from, so what's printed at boot and what's actually offered can never
-/// drift apart. Bash is deliberately absent (kept in exec.rs, not deleted).
+/// Every tool schema offered on every turn, without exception. The one
+/// source both `run_query`'s per-turn tool list and main.rs's startup log
+/// read from, so what's printed at boot and what's actually offered can
+/// never drift apart. Bash is deliberately absent (kept in exec.rs, not
+/// deleted).
+///
+/// Nothing here varies with configuration, and that is the point. The tools
+/// array is ordered ahead of system and messages in the cached prompt
+/// prefix, so one character different in it misses the entire cache. A tool
+/// that appeared only once something was configured would cost every
+/// conversation the whole prefix the moment it was. So `Skill` is offered
+/// with no catalogue and the GitHub tools are offered with no credential;
+/// each answers for itself when called, and what is actually available is
+/// told to the model in the conversation instead.
 pub fn static_tool_schemas() -> Vec<Value> {
-    vec![
+    let mut schemas = vec![
         crate::exec::exec_schema(),
         crate::read::read_schema(),
         crate::find::find_schema(),
@@ -53,7 +62,23 @@ pub fn static_tool_schemas() -> Vec<Value> {
         crate::memtools::memory_types_schema(),
         crate::historytools::search_history_schema(),
         crate::historytools::read_history_schema(),
-    ]
+        crate::skills::skill_schema(),
+    ];
+    schemas.extend(github_schemas());
+    schemas
+}
+
+/// The six GitHub pull request tools, on the platform their Keychain read
+/// exists on. Off macOS they are not compiled in at all, so there is nothing
+/// to offer and nothing to dispatch.
+#[cfg(target_os = "macos")]
+fn github_schemas() -> Vec<Value> {
+    bridge_tools_github::schemas()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn github_schemas() -> Vec<Value> {
+    Vec::new()
 }
 
 pub struct AgentConfig {
@@ -103,6 +128,13 @@ pub struct AgentConfig {
     /// The path-scoped permission matrix (permissions.rs), shared and live-
     /// repointable by a `permissions` control line.
     pub permissions: Arc<std::sync::RwLock<crate::permissions::PermissionSet>>,
+    /// The configured credentials and the tool groups binding them
+    /// (credentials.rs), each a cell a control line replaces whole. Read
+    /// fresh at each use, so a reconfiguration reaches a running
+    /// conversation; the two are resolved against each other at that point,
+    /// which is what makes the order they arrive in irrelevant.
+    pub credentials: Arc<std::sync::RwLock<crate::credentials::Credentials>>,
+    pub tools: Arc<std::sync::RwLock<crate::credentials::ToolsConfig>>,
 }
 
 /// Subscribe to the conversation's requests. main calls this BEFORE
@@ -256,6 +288,10 @@ pub async fn run<B: Broker, D: DeltaSink>(
     // The delta baseline: name→content-hash from the last scan. None until the
     // first say records it (which stays silent; the full catalogue leads instead).
     let mut skill_hashes: Option<HashMap<String, u64>> = None;
+    // The same discipline for tool availability: what this conversation was
+    // last told about which tool groups it can actually use. None until the
+    // first say, which leads with the full state.
+    let mut tool_availability: Option<std::collections::BTreeMap<String, String>> = None;
     let (done_tx, mut done_rx) = mpsc::channel::<(String, QueryEnd)>(8);
 
     loop {
@@ -317,6 +353,7 @@ pub async fn run<B: Broker, D: DeltaSink>(
                                 &config,
                                 &mut conversation,
                                 &mut skill_hashes,
+                                &mut tool_availability,
                                 &done_tx,
                                 text,
                                 from,
@@ -392,6 +429,7 @@ async fn accept_say<B: Broker, D: DeltaSink>(
     config: &AgentConfig,
     conversation: &mut Conversation,
     skill_hashes: &mut Option<HashMap<String, u64>>,
+    tool_availability: &mut Option<std::collections::BTreeMap<String, String>>,
     done_tx: &mpsc::Sender<(String, QueryEnd)>,
     text: String,
     from: Value,
@@ -459,6 +497,30 @@ async fn accept_say<B: Broker, D: DeltaSink>(
     if let Some(reminder) = reminder {
         content.push(json!({ "type": "text", "text": reminder }));
     }
+    // Which tool groups this conversation can actually use, on the same
+    // footing as the skills catalogue: the full state at birth, a delta on
+    // any later say whose answer changed. The tools array itself cannot
+    // carry this (it is the cached prefix, and must not vary), so the
+    // conversation is where the model learns that calling one of them today
+    // would only return an error.
+    let availability = crate::credentials::conversation_state(
+        &config.credentials.read().unwrap(),
+        &config.tools.read().unwrap(),
+    );
+    let availability_reminder = match tool_availability.as_ref() {
+        None => {
+            if birth {
+                crate::credentials::reminder(&availability)
+            } else {
+                None
+            }
+        }
+        Some(previous) => crate::credentials::delta(previous, &availability),
+    };
+    *tool_availability = Some(availability);
+    if let Some(reminder) = availability_reminder {
+        content.push(json!({ "type": "text", "text": reminder }));
+    }
     // The user-context block sits after the catalogue and, like it, only at
     // birth; committed to the record, so revive replays it and no restart can
     // invalidate it.
@@ -518,6 +580,8 @@ async fn accept_say<B: Broker, D: DeltaSink>(
         // Read fresh per say, same discipline as `model`.
         cwd: config.cwd.read().unwrap().clone(),
         permissions: Arc::clone(&config.permissions),
+        credentials: Arc::clone(&config.credentials),
+        tools_config: Arc::clone(&config.tools),
     };
     let done = done_tx.clone();
     let q = query.clone();
@@ -554,6 +618,8 @@ struct TurnContext<B: Broker, D: DeltaSink> {
     attach: Option<bridge::attach::AttachHandle>,
     cwd: std::path::PathBuf,
     permissions: Arc<std::sync::RwLock<crate::permissions::PermissionSet>>,
+    credentials: Arc<std::sync::RwLock<crate::credentials::Credentials>>,
+    tools_config: Arc<std::sync::RwLock<crate::credentials::ToolsConfig>>,
 }
 
 /// Resolves when the cancel signal flips; never resolves if it never does
@@ -607,17 +673,16 @@ async fn run_query<B: Broker, D: DeltaSink>(
         attach,
         cwd,
         permissions,
+        credentials,
+        tools_config,
     } = &ctx;
     let pubr = Publisher::new(broker, conv, history_store, attach.clone());
 
-    // Skill only when a catalogue exists; every other tool is always this
-    // same list (static_tool_schemas) — the one source main.rs's startup log
-    // reads from too, so what's printed and what's actually offered can never
-    // drift apart.
-    let mut tools: Vec<Value> = static_tool_schemas();
-    if !skills.is_empty() {
-        tools.push(skills.tool_schema());
-    }
+    // Always the same list (static_tool_schemas) — the one source main.rs's
+    // startup log reads from too, so what's printed and what's actually
+    // offered can never drift apart, and the cached prompt prefix this array
+    // heads is never invalidated by configuration.
+    let tools: Vec<Value> = static_tool_schemas();
 
     let mut committed: Vec<Message> = Vec::new();
     // The say rides pending and commits with the FIRST turn's result: words
@@ -793,6 +858,8 @@ async fn run_query<B: Broker, D: DeltaSink>(
             &mut cancel,
             cwd,
             permissions,
+            credentials,
+            tools_config,
         )
         .await;
 
@@ -843,6 +910,80 @@ fn permission_verdict(
     )
 }
 
+/// One `Exec` call, with whatever the exec tool group carries. The
+/// credentials are resolved and read here, immediately before the children
+/// are spawned: nothing holds a secret between calls, so a rotation takes
+/// effect on the next one. A credential that cannot be read fails the call
+/// rather than letting it run without one.
+async fn run_exec(
+    commands: &[crate::exec::ExecCommand],
+    credentials: &std::sync::RwLock<crate::credentials::Credentials>,
+    tools_config: &std::sync::RwLock<crate::credentials::ToolsConfig>,
+    cancel: &mut watch::Receiver<bool>,
+) -> (String, bool) {
+    // Resolved into an owned value first: the two read guards must not be
+    // alive across the await below.
+    let resolved = crate::credentials::exec_credentials(
+        &credentials.read().unwrap(),
+        &tools_config.read().unwrap(),
+    );
+    match resolved {
+        Ok(resolved) => {
+            let results = crate::exec::run_commands(commands, &resolved, cancel).await;
+            crate::exec::format_results(commands, &results)
+        }
+        Err(e) => (format!("exec credentials unavailable: {e}"), true),
+    }
+}
+
+/// The Keychain account the github tool group binds right now, or the reason
+/// there is none. Resolved per call, so a `credentials` or `tools` line
+/// reaches a conversation already under way.
+#[cfg(target_os = "macos")]
+fn github_account(
+    credentials: &std::sync::RwLock<crate::credentials::Credentials>,
+    tools_config: &std::sync::RwLock<crate::credentials::ToolsConfig>,
+) -> Result<String, String> {
+    let state = {
+        let credentials = credentials.read().unwrap();
+        let tools_config = tools_config.read().unwrap();
+        crate::credentials::resolve(&credentials, tools_config.github.as_ref())
+    };
+    match state {
+        crate::credentials::GroupState::Active(bound) => bound
+            .first()
+            .map(|credential| credential.account.clone())
+            .ok_or_else(|| "the \"github\" tool group binds no credential".to_string()),
+        crate::credentials::GroupState::Unconfigured => Err(
+            "the GitHub tools are unavailable: no credential is bound to the \"github\" tool group"
+                .to_string(),
+        ),
+        crate::credentials::GroupState::Disabled => Err(
+            "the GitHub tools are unavailable: the \"github\" tool group is turned off".to_string(),
+        ),
+        crate::credentials::GroupState::Missing(names) => Err(format!(
+            "the GitHub tools are unavailable: the \"github\" tool group names credential {}, which is not configured",
+            names.join(", ")
+        )),
+    }
+}
+
+/// One gh call, racing the cancel signal. The gh child is killed when this
+/// future is dropped, so a cancelled turn leaves nothing running.
+#[cfg(target_os = "macos")]
+async fn run_github(
+    name: &str,
+    input: &Value,
+    cwd: &std::path::Path,
+    account: &str,
+    cancel: &mut watch::Receiver<bool>,
+) -> (String, bool) {
+    tokio::select! {
+        result = bridge_tools_github::run(name, input, cwd, account) => result,
+        _ = cancelled(cancel) => ("cancelled by user".to_string(), true),
+    }
+}
+
 /// One tool round: execute every `tool_use` block in the just-committed
 /// assistant turn and return the `tool_result` blocks, in order. The action
 /// is published as telemetry before it runs (`input` included - the action
@@ -863,6 +1004,8 @@ async fn run_tool_round<B: Broker>(
     cancel: &mut watch::Receiver<bool>,
     cwd: &std::path::Path,
     permissions: &std::sync::RwLock<crate::permissions::PermissionSet>,
+    credentials: &std::sync::RwLock<crate::credentials::Credentials>,
+    tools_config: &std::sync::RwLock<crate::credentials::ToolsConfig>,
 ) -> Vec<Value> {
     let home = bridge::home::home_dir()
         .map(std::path::PathBuf::from)
@@ -1009,8 +1152,7 @@ async fn run_tool_round<B: Broker>(
                             ("denied by permissions policy".to_string(), true)
                         }
                         crate::permissions::Verdict::Allow => {
-                            let results = crate::exec::run_commands(&commands, cancel).await;
-                            crate::exec::format_results(&commands, &results)
+                            run_exec(&commands, credentials, tools_config, cancel).await
                         }
                         crate::permissions::Verdict::Ask => {
                             let approval_id = uuid::Uuid::new_v4().to_string();
@@ -1032,9 +1174,7 @@ async fn run_tool_round<B: Broker>(
                             .await
                             {
                                 crate::approval::Verdict::Approved => {
-                                    let results =
-                                        crate::exec::run_commands(&commands, cancel).await;
-                                    crate::exec::format_results(&commands, &results)
+                                    run_exec(&commands, credentials, tools_config, cancel).await
                                 }
                                 crate::approval::Verdict::Denied { by } => {
                                     (format!("denied by {by}"), true)
@@ -1347,6 +1487,61 @@ async fn run_tool_round<B: Broker>(
                 crate::historytools::run_search_history(history_store, &block["input"])
             }
             "ReadHistory" => crate::historytools::run_read_history(history_store, &block["input"]),
+            // The six GitHub pull request tools. Offered whether or not a
+            // credential is configured (the tools array must not vary), so
+            // an unconfigured group is answered here, as an ordinary tool
+            // error naming what is missing.
+            #[cfg(target_os = "macos")]
+            name if bridge_tools_github::owns(name) => {
+                match github_account(credentials, tools_config) {
+                    Err(reason) => (reason, true),
+                    Ok(account) => {
+                        let here = match block["input"]["cwd"].as_str() {
+                            Some(raw) => resolve_against(cwd, raw),
+                            None => cwd.to_path_buf(),
+                        };
+                        match permission_verdict(permissions, cwd, &home, "github", &[]) {
+                            crate::permissions::Verdict::Deny => {
+                                ("denied by permissions policy".to_string(), true)
+                            }
+                            crate::permissions::Verdict::Allow => {
+                                run_github(name, &block["input"], &here, &account, cancel).await
+                            }
+                            crate::permissions::Verdict::Ask => {
+                                let approval_id = uuid::Uuid::new_v4().to_string();
+                                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                                let correlation = json!({
+                                    "conversationId": pubr.conv().0,
+                                    "queryId": query,
+                                    "turnId": turn_id,
+                                    "toolUseId": id,
+                                });
+                                match crate::approval::gate(
+                                    pubr.broker(),
+                                    pubr.attach(),
+                                    &approval_id,
+                                    &ask,
+                                    &correlation,
+                                    cancel,
+                                )
+                                .await
+                                {
+                                    crate::approval::Verdict::Approved => {
+                                        run_github(name, &block["input"], &here, &account, cancel)
+                                            .await
+                                    }
+                                    crate::approval::Verdict::Denied { by } => {
+                                        (format!("denied by {by}"), true)
+                                    }
+                                    crate::approval::Verdict::Cancelled => {
+                                        ("cancelled by user before approval".to_string(), true)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             other => (format!("unknown tool {other:?}"), true),
         };
         // Walk and replace: anything over the oversized threshold is stashed
@@ -1371,6 +1566,53 @@ mod tests {
     use bridge::broker::BrokerMessage;
     use bridge_testkit::{FakeBroker, FakeSubscription, TestScratch};
     use std::collections::VecDeque;
+
+    /// The tools array heads the cached prompt prefix, so it must be a
+    /// constant of the build. `static_tool_schemas` takes no arguments at
+    /// all, which is the guarantee: there is nothing it could vary with.
+    #[test]
+    fn skill_is_offered_with_no_catalogue_configured() {
+        let names = offered_names();
+        assert!(names.contains(&"Skill".to_string()), "{names:?}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_github_tools_are_offered_with_no_credential_configured() {
+        let names = offered_names();
+        for tool in [
+            "GitHub_PullRequest_Create",
+            "GitHub_PullRequest_Ready",
+            "GitHub_PullRequest_Edit",
+            "GitHub_PullRequest_Comment",
+            "GitHub_PullRequest_AutoMerge",
+            "GitHub_PullRequest_Review",
+        ] {
+            assert!(
+                names.contains(&tool.to_string()),
+                "{tool} absent: {names:?}"
+            );
+        }
+    }
+
+    /// Offered but unconfigured is answered when the tool is called, not by
+    /// withholding the schema.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_github_tool_with_nothing_configured_says_what_is_missing() {
+        let credentials = std::sync::RwLock::new(crate::credentials::Credentials::default());
+        let tools = std::sync::RwLock::new(crate::credentials::ToolsConfig::default());
+        let error = github_account(&credentials, &tools).expect_err("nothing is configured");
+        assert!(error.contains("github"), "{error}");
+        assert!(error.contains("no credential is bound"), "{error}");
+    }
+
+    fn offered_names() -> Vec<String> {
+        static_tool_schemas()
+            .iter()
+            .filter_map(|t| t["name"].as_str().map(str::to_owned))
+            .collect()
+    }
 
     /// The request loop's reply shape for a cancel naming a query this
     /// servicer never started: `rejected: not_found`, published to the

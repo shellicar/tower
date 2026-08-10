@@ -33,6 +33,13 @@ tokio.workspace = true
 uuid.workspace = true
 yaml_serde.workspace = true
 
+# The GitHub pull request tools and the Keychain read behind them, both macOS
+# only. Off macOS bridge builds without them: the six tools are not offered,
+# and no credential can be read.
+[target.'cfg(target_os = "macos")'.dependencies]
+bridge-secrets = { path = "../bridge-secrets" }
+bridge-tools-github = { path = "../bridge-tools-github" }
+
 [dev-dependencies]
 # The only fake (bridge-testkit's FakeBroker) plus a test scratch-dir
 # helper. A dev-dependency compiles for any test/bench in this crate,
