@@ -1007,36 +1007,29 @@ mod tests {
         assert_eq!(results.len(), 2, "one result per input command, always");
     }
 
-    /// The guarantee the whole credential model rests on: once a github
-    /// credential is configured, an Exec child cannot reach GitHub with
-    /// anything but what this host handed it. The ambient variables are set
-    /// on the call itself here, which is the stronger case — they are
-    /// removed after whatever set them, and a genuinely inherited variable
-    /// goes by that same removal.
-    ///
-    /// macOS only, because the github provider is: off macOS its tools are
-    /// not compiled in and no credential can be read, so there is nothing
-    /// configured to displace anything.
-    #[cfg(target_os = "macos")]
+    /// The guarantee the whole credential model rests on: an Exec child
+    /// cannot reach GitHub with anything but what this host handed it. The
+    /// ambient variables are set on the call itself here, which is the
+    /// stronger case — they are removed after whatever set them, and a
+    /// genuinely inherited variable goes by that same removal.
     #[tokio::test]
-    async fn a_configured_providers_ambient_variables_are_absent_while_its_credential_is_present() {
+    async fn a_providers_ambient_variables_are_absent_while_its_credential_is_present() {
         let mut cancel = no_cancel();
-        let configured = crate::credentials::parse_credentials(&json!({
-            "github-default": { "provider": "github", "account": "gh-reader" }
-        }))
-        .expect("valid credentials");
+        let mut provide = crate::credentials::ambient_forced_env();
+        provide.push(("GH_TOKEN".to_string(), "the-configured-token".to_string()));
         let credentials = ExecCredentials {
-            strip: crate::credentials::strip_list(&configured),
-            provide: vec![("GH_TOKEN".to_string(), "the-configured-token".to_string())],
+            strip: crate::credentials::ambient_strip_list(),
+            provide,
         };
         let input = json!({
             "commands": [{
                 "program": "sh",
-                "args": ["-c", "echo \"GH_TOKEN=[$GH_TOKEN]\"; echo \"GITHUB_TOKEN=[$GITHUB_TOKEN]\"; echo \"SSH_AUTH_SOCK=[$SSH_AUTH_SOCK]\"; echo \"PATH_SET=[${PATH:+yes}]\""],
+                "args": ["-c", "echo \"GH_TOKEN=[$GH_TOKEN]\"; echo \"GITHUB_TOKEN=[$GITHUB_TOKEN]\"; echo \"SSH_AUTH_SOCK=[$SSH_AUTH_SOCK]\"; echo \"GH_CONFIG_DIR=[$GH_CONFIG_DIR]\"; echo \"PATH_SET=[${PATH:+yes}]\""],
                 "env": {
                     "GH_TOKEN": "ambient",
                     "GITHUB_TOKEN": "ambient",
-                    "SSH_AUTH_SOCK": "/tmp/agent.sock"
+                    "SSH_AUTH_SOCK": "/tmp/agent.sock",
+                    "GH_CONFIG_DIR": "/the/operators/own/session"
                 }
             }]
         });
@@ -1057,8 +1050,44 @@ mod tests {
             "an ssh agent would authenticate git around the token: {content}"
         );
         assert!(
+            !content.contains("GH_CONFIG_DIR=[/the/operators/own/session]"),
+            "the call chose where gh reads its session: {content}"
+        );
+        assert!(
             content.contains("PATH_SET=[yes]"),
             "only the provider's own variables are touched: {content}"
+        );
+    }
+
+    /// The case the whole correction turns on: nothing configured. The
+    /// child must still be unable to authenticate, because a route that
+    /// opens when nobody configured anything is not closed.
+    #[tokio::test]
+    async fn an_unconfigured_host_still_denies_an_exec_child_every_ambient_credential() {
+        let mut cancel = no_cancel();
+        let resolved = crate::credentials::exec_credentials(
+            &crate::credentials::Credentials::default(),
+            &crate::credentials::ToolsConfig::default(),
+        )
+        .expect("an unconfigured host is not an error");
+        let input = json!({
+            "commands": [{
+                "program": "sh",
+                "args": ["-c", "echo \"GH_TOKEN=[$GH_TOKEN]\"; echo \"GITHUB_TOKEN=[$GITHUB_TOKEN]\"; echo \"SSH_AUTH_SOCK=[$SSH_AUTH_SOCK]\"; echo \"GH_CONFIG_DIR=[$GH_CONFIG_DIR]\""],
+                "env": { "GH_TOKEN": "ambient", "GITHUB_TOKEN": "ambient", "SSH_AUTH_SOCK": "/tmp/agent.sock" }
+            }]
+        });
+
+        let (content, is_error) = run_input_with(input, &resolved, &mut cancel).await;
+
+        assert!(!is_error, "{content}");
+        assert!(content.contains("GH_TOKEN=[]"), "{content}");
+        assert!(content.contains("GITHUB_TOKEN=[]"), "{content}");
+        assert!(content.contains("SSH_AUTH_SOCK=[]"), "{content}");
+        let forced = bridge_tools_github::dead_config_dir();
+        assert!(
+            content.contains(&format!("GH_CONFIG_DIR=[{}]", forced.display())),
+            "gh must find no session to fall back to: {content}"
         );
     }
 }

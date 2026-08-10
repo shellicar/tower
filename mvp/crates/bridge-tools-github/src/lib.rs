@@ -19,21 +19,21 @@
 //! child that needs it, and is read from the Keychain at the moment that
 //! child is spawned.
 //!
-//! macOS only, because the Keychain read is (`bridge-secrets`). The crate is
-//! empty on every other platform.
-#![cfg(target_os = "macos")]
+//! The crate compiles everywhere. Only the Keychain read behind a call is
+//! platform-dependent, and that is a runtime question (`bridge-secrets`),
+//! so these tools and their tests exist on every platform.
 
 mod gh;
 mod tools;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-/// The environment gh and git read for GitHub credentials, which a
-/// configured github credential displaces. Provider knowledge, deliberately
-/// not configuration: nobody setting up a credential should have to know
-/// which variables gh reads.
+/// The environment gh and git read for GitHub credentials, which no child
+/// of bridge's Exec tool may inherit. Provider knowledge, deliberately not
+/// configuration: nobody setting up a credential should have to know which
+/// variables gh reads, and the provider is the authority on its own CLI.
 ///
 /// `SSH_AUTH_SOCK` is on the list and matters most: an ssh agent would let
 /// git authenticate around the token entirely, so leaving it in place would
@@ -43,6 +43,35 @@ pub const AMBIENT_ENV: &[&str] = &["GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK"];
 /// The variable a github credential is provided through. gh prefers it over
 /// anything else it might find, which is what makes it the boundary.
 pub const TOKEN_ENV: &str = "GH_TOKEN";
+
+/// Where gh keeps the operator's own logged-in session.
+pub const CONFIG_DIR_ENV: &str = "GH_CONFIG_DIR";
+
+/// A directory that exists, is empty, and holds no session, for
+/// `CONFIG_DIR_ENV` to point at.
+///
+/// Removing the variable achieves nothing: unset, gh falls back to its real
+/// default, which is exactly where the operator's own session lives, and on
+/// macOS that session's token sits in the system keyring rather than in any
+/// file, so stripping the token variables never touches it. Overriding the
+/// location does: with nowhere to read a session from, gh fails closed and
+/// asks for a login, while a provided token still works normally.
+///
+/// An empty directory rather than the `/dev/null` the Azure side of this
+/// uses: gh reads `config.yml` out of the directory before it does anything
+/// at all, so a non-directory makes it fail to start rather than fail to
+/// authenticate.
+pub fn dead_config_dir() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = std::env::temp_dir().join("bridge-gh-no-session");
+        // Best effort: an unreadable directory is one gh finds no session
+        // in, which is the property that matters.
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    })
+    .clone()
+}
 
 /// Every tool schema this crate offers, in a fixed order. Part of bridge's
 /// static tool array, so this is a constant of the build: it never varies

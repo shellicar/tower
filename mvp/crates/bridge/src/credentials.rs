@@ -31,6 +31,11 @@ pub enum Provider {
 impl Provider {
     pub const KNOWN: &'static [&'static str] = &["github"];
 
+    /// Every provider the build knows. Their ambient defence applies to
+    /// every Exec call whether or not anything is configured, so this is
+    /// iterated rather than derived from what happens to be in the cell.
+    pub const ALL: &'static [Provider] = &[Provider::Github];
+
     fn parse(word: &str) -> Option<Self> {
         match word {
             "github" => Some(Self::Github),
@@ -44,28 +49,35 @@ impl Provider {
         }
     }
 
-    /// The ambient environment a configured credential for this provider
-    /// displaces from an Exec child. Provider knowledge, held next to the
-    /// tools that speak for the provider.
+    /// The ambient environment an Exec child must never inherit for this
+    /// provider. Provider knowledge, held next to the tools that speak for
+    /// the provider.
     pub fn ambient_env(self) -> &'static [&'static str] {
         match self {
-            #[cfg(target_os = "macos")]
             Self::Github => bridge_tools_github::AMBIENT_ENV,
-            // The github tools are not compiled in off macOS, and no
-            // credential can be read there, so there is nothing to provide
-            // in the ambient environment's place.
-            #[cfg(not(target_os = "macos"))]
-            Self::Github => &[],
+        }
+    }
+
+    /// What an Exec child must be given, rather than have taken away, for
+    /// this provider. A CLI that falls back to a default location when its
+    /// override is absent cannot be cut off by deleting the override: the
+    /// fallback is exactly where the operator's own session lives. Pointing
+    /// it somewhere with no session in it is what closes that route.
+    pub fn forced_env(self) -> Vec<(String, String)> {
+        match self {
+            Self::Github => vec![(
+                bridge_tools_github::CONFIG_DIR_ENV.to_string(),
+                bridge_tools_github::dead_config_dir()
+                    .to_string_lossy()
+                    .into_owned(),
+            )],
         }
     }
 
     /// The variable a credential for this provider is provided through.
     pub fn token_env(self) -> &'static str {
         match self {
-            #[cfg(target_os = "macos")]
             Self::Github => bridge_tools_github::TOKEN_ENV,
-            #[cfg(not(target_os = "macos"))]
-            Self::Github => "GH_TOKEN",
         }
     }
 }
@@ -279,47 +291,58 @@ pub fn warnings(credentials: &Credentials, tools: &ToolsConfig) -> Vec<String> {
     out
 }
 
-/// What Exec's children get: the ambient environment removed, and whatever
-/// the exec group carries put in its place.
-///
-/// Stripping and providing are configured separately on purpose. Configuring
-/// *any* credential for a provider is what removes that provider's ambient
-/// environment from Exec, whichever group binds it, because a privileged
-/// credential held by another group is worth nothing if Exec can still reach
-/// the same service with what it inherited. What Exec then carries is only
-/// what its own group binds.
+/// What Exec's children get: every provider's ambient credentials removed,
+/// every provider's session location pointed somewhere empty, and then
+/// whatever the exec group carries.
 #[derive(Debug, Clone, Default)]
 pub struct ExecCredentials {
     pub strip: Vec<String>,
     pub provide: Vec<(String, String)>,
 }
 
-/// The strip half, which needs no secrets and so is decided here in full.
-pub fn strip_list(credentials: &Credentials) -> Vec<String> {
-    let providers: BTreeSet<Provider> = credentials
-        .0
-        .values()
-        .filter(|credential| credential.enabled)
-        .map(|credential| credential.provider)
-        .collect();
+/// The ambient defence, which is not configuration and does not depend on
+/// any. Every known provider's credential variables come off every Exec
+/// child, always.
+///
+/// This is deliberately not conditional on something being configured. A
+/// route that opens whenever nobody configured anything is not closed, and
+/// the whole point of the privileged tools is that there is no other way to
+/// authenticate. Turning the defence off is therefore not a setting: a
+/// setting for it would be the other route.
+pub fn ambient_strip_list() -> Vec<String> {
     let mut names: BTreeSet<String> = BTreeSet::new();
-    for provider in providers {
+    for provider in Provider::ALL {
         names.extend(provider.ambient_env().iter().map(|n| (*n).to_string()));
     }
     names.into_iter().collect()
+}
+
+/// The other half of the ambient defence: what must be forced rather than
+/// removed, because removing it only sends the CLI back to its real default.
+pub fn ambient_forced_env() -> Vec<(String, String)> {
+    Provider::ALL
+        .iter()
+        .flat_map(|provider| provider.forced_env())
+        .collect()
 }
 
 /// Fails closed: a credential the exec group binds but that cannot be read
 /// fails the Exec call rather than letting it run without one. A misread
 /// credential otherwise surfaces as a puzzling 401 from whatever the command
 /// was, long after the cause.
+///
+/// An unsupported platform is not that case. There, nothing is injected and
+/// the call proceeds with the ambient defence alone, which is the strictest
+/// state and not an error: the child simply has no way to authenticate.
 pub fn exec_credentials(
     credentials: &Credentials,
     tools: &ToolsConfig,
 ) -> Result<ExecCredentials, String> {
-    let strip = strip_list(credentials);
-    let mut provide = Vec::new();
-    if let Some(active) = resolve(credentials, tools.exec.as_ref()).active() {
+    let strip = ambient_strip_list();
+    let mut provide = ambient_forced_env();
+    if bridge_secrets::keychain_supported()
+        && let Some(active) = resolve(credentials, tools.exec.as_ref()).active()
+    {
         for credential in active {
             let secret = read_secret(&credential.account)?;
             provide.push((credential.provider.token_env().to_string(), secret));
@@ -328,15 +351,9 @@ pub fn exec_credentials(
     Ok(ExecCredentials { strip, provide })
 }
 
-#[cfg(target_os = "macos")]
 fn read_secret(account: &str) -> Result<String, String> {
     bridge_secrets::read(account)
         .map_err(|e| format!("credential could not be read: {:#}", anyhow::Error::new(e)))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn read_secret(_account: &str) -> Result<String, String> {
-    Err("credentials are read from the macOS Keychain; this build cannot read one".to_string())
 }
 
 /// The `settings` view: what the two cells currently hold, and what each
@@ -393,12 +410,22 @@ pub fn conversation_state(
     let mut out = BTreeMap::new();
     out.insert(
         "GitHub pull request tools".to_string(),
-        describe(&resolve(credentials, tools.github.as_ref())),
+        describe(
+            &resolve(credentials, tools.github.as_ref()),
+            bridge_secrets::keychain_supported(),
+        ),
     );
     out
 }
 
-fn describe(state: &GroupState) -> String {
+fn describe(state: &GroupState, keychain_supported: bool) -> String {
+    // The schemas are offered on every platform, so a host that cannot read
+    // a credential has to say so here. Otherwise a configured group reads as
+    // available somewhere no call could ever authenticate.
+    if !keychain_supported {
+        return "not available: this host cannot read credentials, so calling one returns an error"
+            .to_string();
+    }
     match state {
         GroupState::Unconfigured => "not configured, so calling one returns an error".to_string(),
         GroupState::Disabled => "turned off, so calling one returns an error".to_string(),
@@ -547,28 +574,54 @@ mod tests {
         );
     }
 
-    /// The sentence this enforces: configuring any credential for a provider
-    /// is what removes that provider's ambient environment from Exec. Here
-    /// the only credential is bound to the github group, not to exec, and
-    /// exec's inherited gh environment goes anyway. Otherwise the privileged
-    /// tools would be one `Exec` call away from being bypassed.
-    ///
-    /// macOS only, like the provider itself.
-    #[cfg(target_os = "macos")]
+    /// The ambient defence is not configuration and does not wait for any.
+    /// A route that opens whenever nobody configured anything is not closed.
     #[test]
-    fn a_providers_ambient_environment_is_stripped_even_when_only_another_group_binds_it() {
-        let credentials = creds(json!({
-            "github-privileged": { "provider": "github", "account": "gh-holder" }
-        }));
-        let strip = strip_list(&credentials);
+    fn a_providers_ambient_environment_goes_with_nothing_configured_at_all() {
+        let strip = ambient_strip_list();
         assert!(strip.contains(&"GH_TOKEN".to_string()), "{strip:?}");
         assert!(strip.contains(&"GITHUB_TOKEN".to_string()), "{strip:?}");
         assert!(strip.contains(&"SSH_AUTH_SOCK".to_string()), "{strip:?}");
     }
 
+    /// Removing the variables is not enough on its own: unset, gh reads the
+    /// operator's own session from its default location, which on macOS
+    /// keeps its token in the system keyring where no amount of stripping
+    /// reaches. The location is forced somewhere empty instead.
     #[test]
-    fn nothing_is_stripped_until_a_credential_is_configured() {
-        assert!(strip_list(&Credentials::default()).is_empty());
+    fn a_providers_session_location_is_forced_somewhere_with_no_session_in_it() {
+        let forced = ambient_forced_env();
+        let (name, value) = forced
+            .iter()
+            .find(|(name, _)| name == "GH_CONFIG_DIR")
+            .expect("gh's session location is forced");
+        assert_eq!(name, "GH_CONFIG_DIR");
+        let real = bridge::home::home_dir()
+            .map(|home| std::path::PathBuf::from(home).join(".config/gh"))
+            .expect("a home directory");
+        assert_ne!(std::path::Path::new(value), real);
+        // The property is that no session lives there, not that the
+        // directory is untouched: gh may write its own preferences in.
+        // hosts.yml is where a logged-in account is recorded.
+        assert!(std::path::Path::new(value).is_dir(), "{value} must exist");
+        assert!(
+            !std::path::Path::new(value).join("hosts.yml").exists(),
+            "the forced location holds a session: {value}"
+        );
+    }
+
+    /// Nothing configured is the strictest state, not the most permissive:
+    /// the defence is there and no credential is injected.
+    #[test]
+    fn nothing_configured_still_defends_and_injects_no_credential() {
+        let resolved = exec_credentials(&Credentials::default(), &ToolsConfig::default())
+            .expect("an unconfigured host is not an error");
+        assert!(resolved.strip.contains(&"GH_TOKEN".to_string()));
+        assert!(
+            !resolved.provide.iter().any(|(name, _)| name == "GH_TOKEN"),
+            "no credential should be injected: {:?}",
+            resolved.provide
+        );
     }
 
     #[test]

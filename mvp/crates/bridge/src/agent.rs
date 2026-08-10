@@ -64,21 +64,8 @@ pub fn static_tool_schemas() -> Vec<Value> {
         crate::historytools::read_history_schema(),
         crate::skills::skill_schema(),
     ];
-    schemas.extend(github_schemas());
+    schemas.extend(bridge_tools_github::schemas());
     schemas
-}
-
-/// The six GitHub pull request tools, on the platform their Keychain read
-/// exists on. Off macOS they are not compiled in at all, so there is nothing
-/// to offer and nothing to dispatch.
-#[cfg(target_os = "macos")]
-fn github_schemas() -> Vec<Value> {
-    bridge_tools_github::schemas()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn github_schemas() -> Vec<Value> {
-    Vec::new()
 }
 
 pub struct AgentConfig {
@@ -939,11 +926,19 @@ async fn run_exec(
 /// The Keychain account the github tool group binds right now, or the reason
 /// there is none. Resolved per call, so a `credentials` or `tools` line
 /// reaches a conversation already under way.
-#[cfg(target_os = "macos")]
 fn github_account(
     credentials: &std::sync::RwLock<crate::credentials::Credentials>,
     tools_config: &std::sync::RwLock<crate::credentials::ToolsConfig>,
 ) -> Result<String, String> {
+    // The schemas are offered everywhere, so a host that cannot read a
+    // credential answers for itself here rather than by withholding them.
+    if !bridge_secrets::keychain_supported() {
+        return Err(format!(
+            "the GitHub tools are unavailable: this host ({}/{}) cannot read a credential",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ));
+    }
     let state = {
         let credentials = credentials.read().unwrap();
         let tools_config = tools_config.read().unwrap();
@@ -970,7 +965,6 @@ fn github_account(
 
 /// One gh call, racing the cancel signal. The gh child is killed when this
 /// future is dropped, so a cancelled turn leaves nothing running.
-#[cfg(target_os = "macos")]
 async fn run_github(
     name: &str,
     input: &Value,
@@ -1491,7 +1485,6 @@ async fn run_tool_round<B: Broker>(
             // credential is configured (the tools array must not vary), so
             // an unconfigured group is answered here, as an ordinary tool
             // error naming what is missing.
-            #[cfg(target_os = "macos")]
             name if bridge_tools_github::owns(name) => {
                 match github_account(credentials, tools_config) {
                     Err(reason) => (reason, true),
@@ -1576,7 +1569,6 @@ mod tests {
         assert!(names.contains(&"Skill".to_string()), "{names:?}");
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn the_github_tools_are_offered_with_no_credential_configured() {
         let names = offered_names();
@@ -1595,16 +1587,20 @@ mod tests {
         }
     }
 
-    /// Offered but unconfigured is answered when the tool is called, not by
-    /// withholding the schema.
-    #[cfg(target_os = "macos")]
+    /// Offered but unusable is answered when the tool is called, not by
+    /// withholding the schema. What makes it unusable differs by host, so
+    /// the assertion is that it says so, not which reason it gives.
     #[test]
     fn a_github_tool_with_nothing_configured_says_what_is_missing() {
         let credentials = std::sync::RwLock::new(crate::credentials::Credentials::default());
         let tools = std::sync::RwLock::new(crate::credentials::ToolsConfig::default());
         let error = github_account(&credentials, &tools).expect_err("nothing is configured");
-        assert!(error.contains("github"), "{error}");
-        assert!(error.contains("no credential is bound"), "{error}");
+        assert!(error.contains("GitHub tools are unavailable"), "{error}");
+        if bridge_secrets::keychain_supported() {
+            assert!(error.contains("no credential is bound"), "{error}");
+        } else {
+            assert!(error.contains("cannot read a credential"), "{error}");
+        }
     }
 
     fn offered_names() -> Vec<String> {

@@ -15,9 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Configuring a credential for a provider removes that provider's ambient environment from every Exec child, replacing it with whatever the exec group carries. For GitHub that covers GH_TOKEN, GITHUB_TOKEN and SSH_AUTH_SOCK.
 - The Skill tool is now offered whether or not a skills directory is set, so the tool array no longer changes when one arrives. Invoking it with no catalogue returns an error saying so.
 
 ### Fixed
 
 - AppendFile flushes its write before returning, so a reader that opens the file immediately after the append sees the appended content instead of an empty file.
+
+### Security
+
+- An Exec child can no longer authenticate to GitHub with anything the host was already logged in with. Its ambient GitHub credentials are removed and gh's session location is pointed somewhere empty, on every call, whether or not any credential is configured, so gh asks for a login instead of using the operator's own. What a call puts in its own env cannot override it. The pull request tools are the only route left.

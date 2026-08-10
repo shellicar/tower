@@ -231,19 +231,38 @@ than one.
 `warnings` array. A group's state is one of `unconfigured`, `disabled`,
 `missing` or `active`.
 
-#### What a credential does
+#### The only route to a pull request is the tool
 
-- **The privileged credential is provided only into the one gh child that
-  uses it**, at the moment that child is spawned, and exists nowhere else.
-- **Configuring any credential for a provider is what removes that
-  provider's ambient environment from Exec**, whichever group binds it. The
-  strip list is code belonging to the provider, never configuration: nobody
-  setting this up should have to know which variables gh reads. For github it
-  is `GH_TOKEN`, `GITHUB_TOKEN` and `SSH_AUTH_SOCK`, and the last matters
-  because an ssh agent would let git authenticate around the token entirely.
-- **What Exec then carries is only what the `exec` group binds.** A
+The six tools exist so that there is no other way to authenticate to GitHub.
+That holds only if every other route is closed and nothing in a tool call can
+reopen one, so the defence below is not configuration and cannot be turned
+off. A setting that disabled it would be the other route.
+
+- **Every Exec child loses every provider's ambient credentials, always**,
+  whether or not anything is configured. An unconfigured host is the
+  strictest state, not the most permissive.
+- **Every Exec child has each provider's session location pointed somewhere
+  empty.** Removing the variable is not enough: unset, the CLI falls back to
+  its real default, which is exactly where the operator's own login lives,
+  and on macOS that session's token is in the system keyring where no amount
+  of removing environment variables reaches. Overriding the location is what
+  closes it, and the CLI then fails closed by asking for a login.
+- **What a tool call asks for cannot override either.** A call's own `env` is
+  applied first, then the removals, then what the host forces, so a value
+  supplied by the caller can never be what the child authenticates as.
+- **What Exec carries beyond that is only what the `exec` group binds.** A
   credential it binds but that cannot be read fails the Exec call rather than
   letting it run without one.
+- **The privileged credential is provided only into the one gh child that
+  uses it**, at the moment that child is spawned, and exists nowhere else.
+
+Which variables each of these covers is code belonging to the provider, never
+configuration: the provider is the authority on its own CLI, and nobody
+setting up a credential should have to know what gh reads.
+
+Reading a credential needs macOS on Apple silicon. Elsewhere the tools are
+still offered and still answer for themselves, the defence above still
+applies in full, and nothing is injected in place of what it removed.
 
 #### Why this is not in the tools array
 
