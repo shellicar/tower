@@ -83,8 +83,9 @@ dictates when a change is visible.
   history per conversation. That's why a repoint surfaces to a running
   conversation as a catalogue delta on its next say, relative to *that
   conversation's own* last-seen state rather than a shared one, and to a new
-  spawn as the full catalogue. With no skills directory set, there is no
-  catalogue and the Skill tool is not offered.
+  spawn as the full catalogue. With no skills directory set there is no
+  catalogue, but the Skill tool is offered anyway (see "Why this is not in
+  the tools array") and invoking it returns an error saying so.
 - **system** is the API system prompt, read fresh each turn and **never
   persisted** to the record. A change reaches even a running conversation on
   its next turn. Because it is not in the record, a revived conversation takes
@@ -162,6 +163,101 @@ Missing `dir` itself is still an error, because there's no path to set at all:
 ```
 {"error": "skills needs dir"}
 ```
+
+### credentials
+
+Name the credentials this host holds. One cell, replaced whole: the line
+carries every credential, and whatever was there before is gone.
+
+```
+{"credentials": {
+  "github-privileged": { "provider": "github", "account": "gh-holder" },
+  "github-default":    { "provider": "github", "account": "gh-reader" }
+}}
+{"credentials": "ok", "warnings": []}
+```
+
+`account` names an item in the macOS Keychain under the service
+`@shellicar/credentials`, which is a constant of the build and not
+configurable. The secret is never held: it is read at the moment a child
+process is spawned, so a rotation takes effect on the next call and there is
+nothing that can go stale. There are no defaults and no environment
+variables; until this line arrives, nothing is configured.
+
+`provider` is a word from a closed set the build knows, currently `github`
+alone. An unknown one is rejected when the line arrives, because a typo that
+silently configures nothing is the failure this validation exists for:
+
+```
+{"error": "invalid credentials: credential \"x\" names unknown provider \"gitlab\"; known providers: github"}
+```
+
+`enabled` is optional and defaults to true. A disabled credential leaves
+every group binding it inactive.
+
+### tools
+
+Bind credentials to tool groups. One cell, replaced whole, same as
+`credentials`.
+
+```
+{"tools": {
+  "github": { "credentials": "github-privileged" },
+  "exec":   { "credentials": ["github-default"] }
+}}
+{"tools": "ok", "warnings": []}
+```
+
+A group name is likewise closed, currently `github` and `exec`, and an
+unknown one is rejected when the line arrives. `exec` takes a list where a
+group takes one, because exec can run anything and may need to carry several
+credentials at once. `enabled` is optional and defaults to true here too.
+
+A credential name that does not exist is different: it is accepted with a
+warning, and that group is simply not active. Neither line can be validated
+against the other's cell, which is exactly why the order they arrive in never
+matters. The two are resolved against each other only at the point of use, so
+both lines warn about the same thing:
+
+```
+{"tools": "ok", "warnings": ["tools group \"github\" names credential \"github-privileged\", which is not configured; the group is not active"]}
+```
+
+A warning is a string, as it already is on a `skills` write. The field is
+`warnings` rather than `warning` because these operations can produce more
+than one.
+
+`{"settings":{}}` reports the resolved state of both cells, plus the same
+`warnings` array. A group's state is one of `unconfigured`, `disabled`,
+`missing` or `active`.
+
+#### What a credential does
+
+- **The privileged credential is provided only into the one gh child that
+  uses it**, at the moment that child is spawned, and exists nowhere else.
+- **Configuring any credential for a provider is what removes that
+  provider's ambient environment from Exec**, whichever group binds it. The
+  strip list is code belonging to the provider, never configuration: nobody
+  setting this up should have to know which variables gh reads. For github it
+  is `GH_TOKEN`, `GITHUB_TOKEN` and `SSH_AUTH_SOCK`, and the last matters
+  because an ssh agent would let git authenticate around the token entirely.
+- **What Exec then carries is only what the `exec` group binds.** A
+  credential it binds but that cannot be read fails the Exec call rather than
+  letting it run without one.
+
+#### Why this is not in the tools array
+
+The tools array is part of the cached prompt prefix, ordered ahead of system
+and messages, so a single character changing in it misses the entire cache.
+Anything that can vary per query therefore does not belong in it.
+
+So the array is a constant of the build. All six GitHub tools are offered
+whether or not they are configured, and `Skill` is offered whether or not a
+skills directory is set; calling one that is not configured returns an
+ordinary tool error naming what is missing. Which groups are actually usable
+is told to the model in the conversation instead, by the mechanism the skills
+catalogue already uses: the full state on a new conversation's opening
+message, a delta on the next say of one already running.
 
 ### model
 
