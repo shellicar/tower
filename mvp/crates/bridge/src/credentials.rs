@@ -403,16 +403,19 @@ fn state_word(state: &GroupState) -> &'static str {
 /// decides whether their tools work at all. Exec is not among them; it runs
 /// whatever its credentials resolve to, so its state changes nothing the
 /// model would do differently.
+/// `keychain_supported` is passed in rather than read here, so both answers
+/// are testable on any host. The caller reads the platform once.
 pub fn conversation_state(
     credentials: &Credentials,
     tools: &ToolsConfig,
+    keychain_supported: bool,
 ) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     out.insert(
         "GitHub pull request tools".to_string(),
         describe(
             &resolve(credentials, tools.github.as_ref()),
-            bridge_secrets::keychain_supported(),
+            keychain_supported,
         ),
     );
     out
@@ -626,20 +629,35 @@ mod tests {
 
     #[test]
     fn a_conversation_is_told_a_group_it_cannot_use() {
-        let state = conversation_state(&Credentials::default(), &ToolsConfig::default());
+        let state = conversation_state(&Credentials::default(), &ToolsConfig::default(), true);
         let reminder = reminder(&state).expect("a conversation is always told the state");
         assert!(reminder.contains("GitHub pull request tools"), "{reminder}");
         assert!(reminder.contains("not configured"), "{reminder}");
     }
 
+    /// A host that cannot read a credential says so, rather than reporting
+    /// the configuration it would have used. The tools are offered there
+    /// too, so this line is the only thing that tells the model otherwise.
+    #[test]
+    fn a_host_that_cannot_read_a_credential_says_so_however_it_is_configured() {
+        let config = tools(json!({ "github": { "credentials": "github-privileged" } }));
+        let state = conversation_state(&two_credentials(), &config, false);
+        let status = &state["GitHub pull request tools"];
+        assert!(status.contains("cannot read credentials"), "{status}");
+        assert_ne!(
+            status, "available",
+            "a configured group must not read as usable here"
+        );
+    }
+
     #[test]
     fn a_delta_names_only_what_changed() {
-        let before = conversation_state(&Credentials::default(), &ToolsConfig::default());
+        let before = conversation_state(&Credentials::default(), &ToolsConfig::default(), true);
         assert!(delta(&before, &before).is_none());
 
         let credentials = two_credentials();
         let config = tools(json!({ "github": { "credentials": "github-privileged" } }));
-        let after = conversation_state(&credentials, &config);
+        let after = conversation_state(&credentials, &config, true);
         let delta = delta(&before, &after).expect("the change is announced");
         assert!(
             delta.contains("GitHub pull request tools: available"),

@@ -493,6 +493,7 @@ async fn accept_say<B: Broker, D: DeltaSink>(
     let availability = crate::credentials::conversation_state(
         &config.credentials.read().unwrap(),
         &config.tools.read().unwrap(),
+        bridge_secrets::keychain_supported(),
     );
     let availability_reminder = match tool_availability.as_ref() {
         None => {
