@@ -1015,10 +1015,14 @@ mod tests {
     #[tokio::test]
     async fn a_providers_ambient_variables_are_absent_while_its_credential_is_present() {
         let mut cancel = no_cancel();
-        let mut provide = crate::credentials::ambient_forced_env();
+        let configured = crate::credentials::parse_credentials(&json!({
+            "github-default": { "provider": "github", "account": "gh-reader" }
+        }))
+        .expect("valid credentials");
+        let mut provide = crate::credentials::active_forced_env(&configured);
         provide.push(("GH_TOKEN".to_string(), "the-configured-token".to_string()));
         let credentials = ExecCredentials {
-            strip: crate::credentials::ambient_strip_list(),
+            strip: crate::credentials::active_strip_list(&configured),
             provide,
         };
         let input = json!({
@@ -1059,26 +1063,25 @@ mod tests {
         );
     }
 
-    /// The case the whole correction turns on: nothing configured. The
-    /// child must still be unable to authenticate, because a route that
-    /// opens when nobody configured anything is not closed.
+    /// The case the rule turns on: a github credential exists, so the
+    /// provider is active and governs Exec, but nothing is bound to exec.
+    /// The child ends up with no way to authenticate at all, which is what
+    /// leaves the privileged tools as the only route on that host.
     #[tokio::test]
-    async fn an_unconfigured_host_still_denies_an_exec_child_every_ambient_credential() {
+    async fn a_provider_configured_for_the_tools_alone_still_denies_an_exec_child() {
         let mut cancel = no_cancel();
-        let resolved = crate::credentials::exec_credentials(
-            &crate::credentials::Credentials::default(),
-            &crate::credentials::ToolsConfig::default(),
-        )
-        .expect("an unconfigured host is not an error");
-        let input = json!({
-            "commands": [{
-                "program": "sh",
-                "args": ["-c", "echo \"GH_TOKEN=[$GH_TOKEN]\"; echo \"GITHUB_TOKEN=[$GITHUB_TOKEN]\"; echo \"SSH_AUTH_SOCK=[$SSH_AUTH_SOCK]\"; echo \"GH_CONFIG_DIR=[$GH_CONFIG_DIR]\""],
-                "env": { "GH_TOKEN": "ambient", "GITHUB_TOKEN": "ambient", "SSH_AUTH_SOCK": "/tmp/agent.sock" }
-            }]
-        });
+        let credentials = crate::credentials::parse_credentials(&json!({
+            "github-privileged": { "provider": "github", "account": "gh-holder" }
+        }))
+        .expect("valid credentials");
+        let config = crate::credentials::parse_tools(&json!({
+            "github": { "credentials": "github-privileged" }
+        }))
+        .expect("valid tools");
+        let resolved = crate::credentials::exec_credentials(&credentials, &config)
+            .expect("binding nothing to exec is not an error");
 
-        let (content, is_error) = run_input_with(input, &resolved, &mut cancel).await;
+        let (content, is_error) = run_input_with(probe(), &resolved, &mut cancel).await;
 
         assert!(!is_error, "{content}");
         assert!(content.contains("GH_TOKEN=[]"), "{content}");
@@ -1089,6 +1092,47 @@ mod tests {
             content.contains(&format!("GH_CONFIG_DIR=[{}]", forced.display())),
             "gh must find no session to fall back to: {content}"
         );
+    }
+
+    /// A host that configured nothing keeps the environment it always had.
+    /// Removing a route and replacing it are one act, so a provider nobody
+    /// opted into is not governed at all.
+    #[tokio::test]
+    async fn an_unconfigured_host_leaves_an_exec_child_alone() {
+        let mut cancel = no_cancel();
+        let resolved = crate::credentials::exec_credentials(
+            &crate::credentials::Credentials::default(),
+            &crate::credentials::ToolsConfig::default(),
+        )
+        .expect("an unconfigured host is not an error");
+
+        let (content, is_error) = run_input_with(probe(), &resolved, &mut cancel).await;
+
+        assert!(!is_error, "{content}");
+        assert!(content.contains("GH_TOKEN=[ambient]"), "{content}");
+        assert!(content.contains("GITHUB_TOKEN=[ambient]"), "{content}");
+        assert!(
+            content.contains("SSH_AUTH_SOCK=[/tmp/agent.sock]"),
+            "{content}"
+        );
+        // Whatever the host's own GH_CONFIG_DIR is, it is not overridden.
+        let forced = bridge_tools_github::dead_config_dir();
+        assert!(
+            !content.contains(&format!("GH_CONFIG_DIR=[{}]", forced.display())),
+            "an unconfigured provider must not be governed: {content}"
+        );
+    }
+
+    /// One command that reports what its own environment ended up as, with
+    /// the ambient values set on the call itself.
+    fn probe() -> serde_json::Value {
+        json!({
+            "commands": [{
+                "program": "sh",
+                "args": ["-c", "echo \"GH_TOKEN=[$GH_TOKEN]\"; echo \"GITHUB_TOKEN=[$GITHUB_TOKEN]\"; echo \"SSH_AUTH_SOCK=[$SSH_AUTH_SOCK]\"; echo \"GH_CONFIG_DIR=[$GH_CONFIG_DIR]\""],
+                "env": { "GH_TOKEN": "ambient", "GITHUB_TOKEN": "ambient", "SSH_AUTH_SOCK": "/tmp/agent.sock" }
+            }]
+        })
     }
 }
 

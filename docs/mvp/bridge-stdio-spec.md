@@ -233,24 +233,32 @@ than one.
 
 #### The only route to a pull request is the tool
 
-The six tools exist so that there is no other way to authenticate to GitHub.
-That holds only if every other route is closed and nothing in a tool call can
-reopen one, so the defence below is not configuration and cannot be turned
-off. A setting that disabled it would be the other route.
+The six tools exist so that there is no other way to authenticate to GitHub
+on a host that uses them. Configuring a credential for a provider is what
+makes that provider active, and an active provider's environment is governed
+for every Exec child from then on.
 
-- **Every Exec child loses every provider's ambient credentials, always**,
-  whether or not anything is configured. An unconfigured host is the
-  strictest state, not the most permissive.
-- **Every Exec child has each provider's session location pointed somewhere
-  empty.** Removing the variable is not enough: unset, the CLI falls back to
-  its real default, which is exactly where the operator's own login lives,
-  and on macOS that session's token is in the system keyring where no amount
-  of removing environment variables reaches. Overriding the location is what
+The `tools` mapping does not enter into that. It decides what Exec is given,
+never whether the provider's environment is governed, so a host that
+configures a github credential and binds it only to the privileged tools
+still has gh's environment taken off its Exec children with nothing put back.
+That is the case the rule exists for: otherwise the privileged tools would
+sit beside an Exec that authenticates as the operator.
+
+- **An active provider's ambient credentials come off every Exec child.**
+- **An active provider's session location is pointed somewhere empty.**
+  Removing the variable is not enough: unset, the CLI falls back to its real
+  default, which is exactly where the operator's own login lives, and on
+  macOS that session's token is in the system keyring where no amount of
+  removing environment variables reaches. Overriding the location is what
   closes it, and the CLI then fails closed by asking for a login.
-- **What a tool call asks for cannot override either.** A call's own `env` is
-  applied first, then the removals, then what the host forces, so a value
+- **A provider nobody configured is left alone entirely.** Removing a route
+  and replacing it are one act, not two, so a host that never opted into this
+  keeps the environment it always had.
+- **What a tool call asks for cannot override any of it.** A call's own `env`
+  is applied first, then the removals, then what the host forces, so a value
   supplied by the caller can never be what the child authenticates as.
-- **What Exec carries beyond that is only what the `exec` group binds.** A
+- **What Exec is given back is only what the `exec` group binds.** A
   credential it binds but that cannot be read fails the Exec call rather than
   letting it run without one.
 - **The privileged credential is provided only into the one gh child that

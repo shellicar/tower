@@ -23,4 +23,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- An Exec child can no longer authenticate to GitHub with anything the host was already logged in with. Its ambient GitHub credentials are removed and gh's session location is pointed somewhere empty, on every call, whether or not any credential is configured, so gh asks for a login instead of using the operator's own. What a call puts in its own env cannot override it. The pull request tools are the only route left.
+- Once a GitHub credential is configured, an Exec child can no longer authenticate as whoever the host was already logged in as: its ambient GitHub credentials are removed and gh's session location is pointed somewhere empty, so gh asks for a login instead of using the operator's own. This holds even when the credential is bound only to the pull request tools, which leaves those tools as the only route. A host that configures no credential is unaffected, and what a call puts in its own env can never override any of it.

@@ -31,11 +31,6 @@ pub enum Provider {
 impl Provider {
     pub const KNOWN: &'static [&'static str] = &["github"];
 
-    /// Every provider the build knows. Their ambient defence applies to
-    /// every Exec call whether or not anything is configured, so this is
-    /// iterated rather than derived from what happens to be in the cell.
-    pub const ALL: &'static [Provider] = &[Provider::Github];
-
     fn parse(word: &str) -> Option<Self> {
         match word {
             "github" => Some(Self::Github),
@@ -291,37 +286,53 @@ pub fn warnings(credentials: &Credentials, tools: &ToolsConfig) -> Vec<String> {
     out
 }
 
-/// What Exec's children get: every provider's ambient credentials removed,
-/// every provider's session location pointed somewhere empty, and then
-/// whatever the exec group carries.
+/// What Exec's children get: for every provider this host has credentials
+/// for, that provider's ambient credentials removed and its session location
+/// pointed somewhere empty, and then whatever the exec group carries.
+///
+/// A provider nobody configured is left alone entirely. Removing a route and
+/// replacing it are one act: a host that never opted into this keeps the
+/// environment it always had.
 #[derive(Debug, Clone, Default)]
 pub struct ExecCredentials {
     pub strip: Vec<String>,
     pub provide: Vec<(String, String)>,
 }
 
-/// The ambient defence, which is not configuration and does not depend on
-/// any. Every known provider's credential variables come off every Exec
-/// child, always.
+/// The providers this host has credentials for. Configuring a credential
+/// for a provider is what makes that provider active, and an active
+/// provider's env provider applies to every Exec child.
 ///
-/// This is deliberately not conditional on something being configured. A
-/// route that opens whenever nobody configured anything is not closed, and
-/// the whole point of the privileged tools is that there is no other way to
-/// authenticate. Turning the defence off is therefore not a setting: a
-/// setting for it would be the other route.
-pub fn ambient_strip_list() -> Vec<String> {
+/// Read off the credentials cell alone. Which group binds a credential does
+/// not enter into it: the `tools` mapping decides what Exec is given, never
+/// whether the provider's environment is governed at all. So a host that
+/// configures a github credential and binds it only to the privileged tools
+/// still has gh's ambient environment taken off its Exec children, with
+/// nothing put back.
+fn active_providers(credentials: &Credentials) -> BTreeSet<Provider> {
+    credentials
+        .0
+        .values()
+        .filter(|credential| credential.enabled)
+        .map(|credential| credential.provider)
+        .collect()
+}
+
+/// What an active provider's env provider removes.
+pub fn active_strip_list(credentials: &Credentials) -> Vec<String> {
     let mut names: BTreeSet<String> = BTreeSet::new();
-    for provider in Provider::ALL {
+    for provider in active_providers(credentials) {
         names.extend(provider.ambient_env().iter().map(|n| (*n).to_string()));
     }
     names.into_iter().collect()
 }
 
-/// The other half of the ambient defence: what must be forced rather than
-/// removed, because removing it only sends the CLI back to its real default.
-pub fn ambient_forced_env() -> Vec<(String, String)> {
-    Provider::ALL
-        .iter()
+/// The other half of an active provider's env provider: what must be forced
+/// rather than removed, because removing it only sends the CLI back to its
+/// real default.
+pub fn active_forced_env(credentials: &Credentials) -> Vec<(String, String)> {
+    active_providers(credentials)
+        .into_iter()
         .flat_map(|provider| provider.forced_env())
         .collect()
 }
@@ -332,14 +343,15 @@ pub fn ambient_forced_env() -> Vec<(String, String)> {
 /// was, long after the cause.
 ///
 /// An unsupported platform is not that case. There, nothing is injected and
-/// the call proceeds with the ambient defence alone, which is the strictest
-/// state and not an error: the child simply has no way to authenticate.
+/// the call proceeds with the active providers' env providers alone, which
+/// is the strictest state and not an error: the child simply has no way to
+/// authenticate.
 pub fn exec_credentials(
     credentials: &Credentials,
     tools: &ToolsConfig,
 ) -> Result<ExecCredentials, String> {
-    let strip = ambient_strip_list();
-    let mut provide = ambient_forced_env();
+    let strip = active_strip_list(credentials);
+    let mut provide = active_forced_env(credentials);
     if bridge_secrets::keychain_supported()
         && let Some(active) = resolve(credentials, tools.exec.as_ref()).active()
     {
@@ -577,14 +589,37 @@ mod tests {
         );
     }
 
-    /// The ambient defence is not configuration and does not wait for any.
-    /// A route that opens whenever nobody configured anything is not closed.
+    /// Configuring a credential for a provider is what makes that provider
+    /// active, and an active provider's env provider governs every Exec
+    /// child. Which group binds it does not enter into it: here nothing is
+    /// bound to exec at all.
     #[test]
-    fn a_providers_ambient_environment_goes_with_nothing_configured_at_all() {
-        let strip = ambient_strip_list();
+    fn a_configured_provider_governs_exec_whatever_the_tools_mapping_says() {
+        let credentials = creds(json!({
+            "github-privileged": { "provider": "github", "account": "gh-holder" }
+        }));
+        let strip = active_strip_list(&credentials);
         assert!(strip.contains(&"GH_TOKEN".to_string()), "{strip:?}");
         assert!(strip.contains(&"GITHUB_TOKEN".to_string()), "{strip:?}");
         assert!(strip.contains(&"SSH_AUTH_SOCK".to_string()), "{strip:?}");
+    }
+
+    /// A provider nobody configured is left alone entirely. Removing a route
+    /// and replacing it are one act, so a host that never opted in keeps the
+    /// environment it always had.
+    #[test]
+    fn an_unconfigured_provider_is_left_alone() {
+        let none = Credentials::default();
+        assert!(active_strip_list(&none).is_empty());
+        assert!(active_forced_env(&none).is_empty());
+    }
+
+    #[test]
+    fn a_disabled_credential_does_not_activate_its_provider() {
+        let credentials = creds(json!({
+            "github-privileged": { "provider": "github", "account": "gh-holder", "enabled": false }
+        }));
+        assert!(active_strip_list(&credentials).is_empty());
     }
 
     /// Removing the variables is not enough on its own: unset, gh reads the
@@ -593,7 +628,10 @@ mod tests {
     /// reaches. The location is forced somewhere empty instead.
     #[test]
     fn a_providers_session_location_is_forced_somewhere_with_no_session_in_it() {
-        let forced = ambient_forced_env();
+        let credentials = creds(json!({
+            "github-privileged": { "provider": "github", "account": "gh-holder" }
+        }));
+        let forced = active_forced_env(&credentials);
         let (name, value) = forced
             .iter()
             .find(|(name, _)| name == "GH_CONFIG_DIR")
@@ -613,18 +651,41 @@ mod tests {
         );
     }
 
-    /// Nothing configured is the strictest state, not the most permissive:
-    /// the defence is there and no credential is injected.
+    /// The case this rule exists for: github is configured, so the provider
+    /// is active and governs Exec, but nothing is bound to exec, so there is
+    /// nothing to put back. The route closes rather than staying open beside
+    /// the privileged tools.
     #[test]
-    fn nothing_configured_still_defends_and_injects_no_credential() {
-        let resolved = exec_credentials(&Credentials::default(), &ToolsConfig::default())
-            .expect("an unconfigured host is not an error");
+    fn a_provider_configured_for_the_tools_alone_closes_exec_with_nothing_put_back() {
+        let credentials = creds(json!({
+            "github-privileged": { "provider": "github", "account": "gh-holder" }
+        }));
+        let config = tools(json!({ "github": { "credentials": "github-privileged" } }));
+
+        let resolved = exec_credentials(&credentials, &config).expect("not an error");
+
         assert!(resolved.strip.contains(&"GH_TOKEN".to_string()));
         assert!(
-            !resolved.provide.iter().any(|(name, _)| name == "GH_TOKEN"),
-            "no credential should be injected: {:?}",
+            resolved
+                .provide
+                .iter()
+                .any(|(name, _)| name == "GH_CONFIG_DIR"),
+            "gh must find no session to fall back to: {:?}",
             resolved.provide
         );
+        assert!(
+            !resolved.provide.iter().any(|(name, _)| name == "GH_TOKEN"),
+            "nothing is bound to exec, so nothing is put back: {:?}",
+            resolved.provide
+        );
+    }
+
+    #[test]
+    fn an_unconfigured_host_changes_nothing_about_an_exec_child() {
+        let resolved = exec_credentials(&Credentials::default(), &ToolsConfig::default())
+            .expect("an unconfigured host is not an error");
+        assert!(resolved.strip.is_empty(), "{:?}", resolved.strip);
+        assert!(resolved.provide.is_empty(), "{:?}", resolved.provide);
     }
 
     #[test]
