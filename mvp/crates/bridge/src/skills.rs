@@ -184,7 +184,8 @@ fn split_frontmatter(text: &str) -> (&str, &str) {
     }
 }
 
-/// A content hash of a whole SKILL.md, for change detection across scans.
+/// A content hash of a body of text: a whole SKILL.md for change detection
+/// across scans, and the `settings` reply's summary of a text cell.
 /// Non-cryptographic (std DefaultHasher): the need is "did the bytes change",
 /// not integrity, so no new dependency is pulled for a SHA. DefaultHasher's
 /// output is not stable across Rust releases, so a value only ever means
