@@ -56,6 +56,7 @@ mod imaging;
 mod matcher;
 mod memory;
 mod memtools;
+mod model;
 mod mutate;
 mod objects;
 mod permissions;
@@ -542,7 +543,11 @@ struct Host<B: Broker, D: DeltaSink> {
     delta: D,
     world: String,
     instance: String,
-    default_model: Arc<RwLock<String>>,
+    /// The `model` cell (model.rs), merged into by the `model` control line
+    /// and read when a conversation is served. Nothing defaults it: until a
+    /// line fills in at least a name and a maxTokens, this world cannot
+    /// serve a conversation at all.
+    model: Arc<RwLock<model::Settings>>,
     auth: anthropic::Auth,
     /// The shared, keepalive-configured HTTP client (anthropic.rs's
     /// `build_http_client`) every conversation's messages-API calls share.
@@ -551,7 +556,6 @@ struct Host<B: Broker, D: DeltaSink> {
     system: Arc<RwLock<Option<String>>>,
     context: Arc<RwLock<Option<String>>>,
     attach_bucket: String,
-    thinking_budget: Option<i64>,
     refs: refs::RefStore,
     memory: memory::MemoryStore,
     history: history::HistoryStore,
@@ -595,14 +599,18 @@ struct Host<B: Broker, D: DeltaSink> {
 
 impl<B: Broker, D: DeltaSink> Host<B, D> {
     /// Build the config for a new or adopted conversation from the live
-    /// cells.
+    /// cells. `model_name` is the name a spawn or a service request named,
+    /// if it named one; the rest of the configuration comes from the cell.
+    /// Fails when the cell has no name and no maxTokens between them, which
+    /// is the one place that is checked.
     fn config(
         &self,
         conv: &str,
-        model: Arc<RwLock<String>>,
+        model_name: Option<&str>,
         cwd: Arc<RwLock<std::path::PathBuf>>,
-    ) -> agent::AgentConfig {
-        agent::AgentConfig {
+    ) -> Result<agent::AgentConfig, String> {
+        let model = self.model.read().unwrap().resolve(model_name)?;
+        Ok(agent::AgentConfig {
             conv: wire::ConversationId(conv.to_string()),
             model,
             system: Arc::clone(&self.system),
@@ -613,25 +621,19 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
             refs: Arc::clone(&self.refs),
             memory: Arc::clone(&self.memory),
             history: Arc::clone(&self.history),
-            thinking_budget: self.thinking_budget,
             attach: self.attach.clone(),
             cwd,
             permissions: Arc::clone(&self.permissions),
             credentials: Arc::clone(&self.credentials),
             tools: Arc::clone(&self.tools),
-        }
+        })
     }
 
     /// Carry out one control line, writing its single response to stdout.
     async fn handle(&self, value: serde_json::Value) {
         if let Some(spawn) = value.get("spawn") {
             let conv = uuid::Uuid::new_v4().to_string();
-            // A named model pins its own cell; none shares the live default,
-            // so a later `model` line reaches this conversation's next turn.
-            let model = match spawn.get("model").and_then(serde_json::Value::as_str) {
-                Some(m) => Arc::new(RwLock::new(m.to_string())),
-                None => Arc::clone(&self.default_model),
-            };
+            let model_name = spawn.get("model").and_then(serde_json::Value::as_str);
             let default_cwd = self.default_cwd.read().unwrap().clone();
             let cwd = match resolve_cwd(
                 spawn.get("cwd").and_then(serde_json::Value::as_str),
@@ -643,7 +645,16 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
                     return;
                 }
             };
-            let config = self.config(&conv, model, Arc::new(RwLock::new(cwd)));
+            let config = match self.config(&conv, model_name, Arc::new(RwLock::new(cwd))) {
+                Ok(config) => config,
+                Err(e) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("invalid model: {e}") })
+                    );
+                    return;
+                }
+            };
             match serve_conversation(
                 &self.broker,
                 self.delta.clone(),
@@ -705,11 +716,16 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
                     return;
                 }
             };
-            let config = self.config(
-                &conv,
-                Arc::clone(&self.default_model),
-                Arc::new(RwLock::new(cwd)),
-            );
+            let config = match self.config(&conv, None, Arc::new(RwLock::new(cwd))) {
+                Ok(config) => config,
+                Err(e) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("invalid model: {e}") })
+                    );
+                    return;
+                }
+            };
             match serve_conversation(
                 &self.broker,
                 self.delta.clone(),
@@ -863,16 +879,27 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
                 }
             }
         } else if let Some(model) = value.get("model") {
-            // The live default cell: new spawns that name no model take it,
-            // and every running conversation sharing it picks the change up
-            // on its next say. A spawn that named its own model stays pinned.
-            let Some(text) = model.as_str() else {
-                println!("{}", serde_json::json!({ "error": "model needs a string" }));
-                return;
-            };
-            *self.default_model.write().unwrap() = text.to_string();
-            eprintln!("bridge: default model set ({text})");
-            println!("{}", serde_json::json!({ "model": text }));
+            // One cell, MERGED rather than replaced: the line updates the
+            // fields it names and leaves the rest alone, and null clears an
+            // optional one. So the line is validated on the values it
+            // carries, and whether the cell is complete is asked when a
+            // conversation is served. New spawns take it; a conversation
+            // already running keeps what it was served with.
+            let merged = self.model.read().unwrap().merged(model);
+            match merged {
+                Ok(settings) => {
+                    *self.model.write().unwrap() = settings;
+                    let echo = self.model.read().unwrap().to_json();
+                    eprintln!("bridge: model set ({echo})");
+                    println!("{}", serde_json::json!({ "model": echo }));
+                }
+                Err(e) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("invalid model: {e}") })
+                    );
+                }
+            }
         } else if let Some(cwd) = value.get("cwd") {
             // The instance's own default cwd (cwd.rs); use `chdir` to move
             // a conversation that's already running.
@@ -1019,8 +1046,7 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
                         "world": self.world,
                         "instance": self.instance,
                         "cwd": self.default_cwd.read().unwrap().to_string_lossy(),
-                        "model": self.default_model.read().unwrap().clone(),
-                        "thinkingBudget": self.thinking_budget,
+                        "model": self.model.read().unwrap().to_json(),
                         "attachBucket": self.attach_bucket,
                         "skillsDir": skills_dir.to_string_lossy(),
                         "skillsDirExists": skills_dir_exists,
@@ -1224,13 +1250,19 @@ async fn handle_service<B: Broker, D: DeltaSink>(
             return wire::encode_rejected_detailed("invalid_cwd", &e);
         }
     };
-    // A named model pins its own cell; none shares the live default — same
-    // rule as a stdio spawn.
-    let model_cell = match model {
-        Some(m) => Arc::new(RwLock::new(m)),
-        None => Arc::clone(&host.default_model),
+    // A request that names a model supplies the name; the cell supplies the
+    // rest — same rule as a stdio spawn. A cell with no name and no
+    // maxTokens between them cannot serve anything, and this is where that
+    // is refused: name and maxTokens are both required, so the cell is only
+    // ever unset or whole, and refusing here leaves no unconfigured path
+    // behind it.
+    let config = match host.config(&conv, model.as_deref(), Arc::new(RwLock::new(resolved_cwd))) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("bridge: service {conv}: no model: {e}");
+            return wire::encode_rejected_detailed("no_model", &e);
+        }
     };
-    let config = host.config(&conv, model_cell, Arc::new(RwLock::new(resolved_cwd)));
     // The claim goes before the reply, never on the handed-off work: it is
     // what a retry from a sender that gave up waiting collides with, and a
     // claim taken only once the replay started would let that retry begin a
@@ -1527,7 +1559,6 @@ async fn main() -> anyhow::Result<()> {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
     // ANTHROPIC_API_KEY when set; otherwise the Claude Code OAuth token.
     let auth = anthropic::Auth::resolve()?;
-    let default_model = std::env::var("BRIDGE_MODEL").unwrap_or_else(|_| "claude-sonnet-5".into());
     // The world is a durable name for a place, deployer-chosen; the process
     // standing in it is disposable and mints a fresh instance id per boot.
     let world = std::env::var("BRIDGE_WORLD").unwrap_or_else(|_| "local".into());
@@ -1541,15 +1572,6 @@ async fn main() -> anyhow::Result<()> {
     // The transit object store attachments resolve from; must name the same
     // bucket the tower deployment uploads into.
     let attach_bucket = std::env::var("BRIDGE_ATTACH_BUCKET").unwrap_or_else(|_| "attach".into());
-    // Extended thinking: on by default; BRIDGE_THINKING_BUDGET=0 disables.
-    let thinking_budget = match std::env::var("BRIDGE_THINKING_BUDGET")
-        .ok()
-        .and_then(|v| v.parse::<i64>().ok())
-    {
-        Some(0) => None,
-        Some(n) => Some(n),
-        None => Some(4096),
-    };
     // The oversized-tool-output store: content-addressed, ephemeral is fine
     // (unlike conversation state, losing it across a restart is not data
     // loss, only a stale ref id). Defaults under the OS temp dir so no new
@@ -1669,7 +1691,6 @@ async fn main() -> anyhow::Result<()> {
     // Host: the shared config and live cells every control line reads. One
     // grammar, two delivery points — the -c batch, then live stdin — plus
     // the world's own NATS request loop.
-    let default_model = Arc::new(RwLock::new(default_model));
     let stream = std::env::var("BRIDGE_STREAM").unwrap_or_else(|_| "conv-approval".into());
     let stream_ephemeral =
         std::env::var("BRIDGE_STREAM_EPHEMERAL").unwrap_or_else(|_| "conv-ephemeral".into());
@@ -1679,7 +1700,9 @@ async fn main() -> anyhow::Result<()> {
         delta,
         world,
         instance,
-        default_model,
+        // Nothing defaults the model: until a `model` line names at least a
+        // name and a maxTokens, this instance refuses to serve anything.
+        model: Arc::new(RwLock::new(model::Settings::default())),
         refs: refs_store,
         memory: memory_store,
         history: history_store,
@@ -1695,7 +1718,6 @@ async fn main() -> anyhow::Result<()> {
         system: Arc::new(RwLock::new(None)),
         context: Arc::new(RwLock::new(None)),
         attach_bucket,
-        thinking_budget,
         permissions: Arc::new(RwLock::new(permissions::PermissionSet::strict_default())),
         // No defaults and no environment variables: until a `credentials`
         // and a `tools` line arrive, nothing is configured, every group is
@@ -1745,7 +1767,7 @@ async fn main() -> anyhow::Result<()> {
     eprintln!("bridge: tools: {}", tool_names.join(", "));
     eprintln!(
         "bridge: ready (model {}); spawn with {{\"spawn\":{{}}}} (optionally {{\"cwd\":\"...\"}})",
-        host.default_model.read().unwrap()
+        host.model.read().unwrap().to_json()
     );
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     while let Some(line) = lines.next_line().await? {
@@ -2427,6 +2449,64 @@ mod tests {
             !calls.iter().any(|c| c.starts_with("publish:")),
             "nothing undertaken on a rejected environment: {calls:?}"
         );
+    }
+
+    /// Nothing defaults the model, so a world whose cell was never filled in
+    /// refuses to serve rather than spawning something it cannot run a turn
+    /// for. Name and maxTokens are both required, so the cell is only ever
+    /// unset or whole, and refusing here leaves no unconfigured path behind
+    /// it.
+    #[tokio::test]
+    async fn service_with_an_unconfigured_model_is_rejected_no_model() {
+        let broker = FakeBroker::default();
+        seed_attachment(&broker, "conv-m", vec![]);
+        let scratch = TestScratch::new("service-no-model");
+        let host = host(&scratch, broker.clone());
+        *host.model.write().unwrap() = crate::model::Settings::default();
+
+        let reply = super::handle_service(&host, "conv-m".into(), None, None).await;
+
+        let value = reply_json(&reply);
+        assert_eq!(value["rejected"], true);
+        assert_eq!(value["reason"], "no_model");
+    }
+
+    /// A conversation is never left half-served by that refusal.
+    #[tokio::test]
+    async fn a_service_rejected_for_no_model_undertakes_nothing() {
+        let broker = FakeBroker::default();
+        seed_attachment(&broker, "conv-m2", vec![]);
+        let scratch = TestScratch::new("service-no-model-clean");
+        let host = host(&scratch, broker.clone());
+        *host.model.write().unwrap() = crate::model::Settings::default();
+
+        super::handle_service(&host, "conv-m2".into(), None, None).await;
+
+        let calls = broker.calls.lock().unwrap().clone();
+        assert!(
+            !calls.iter().any(|c| c.starts_with("publish:")),
+            "nothing undertaken on a rejected environment: {calls:?}"
+        );
+    }
+
+    /// The cell holds everything but the name; the request names it. The two
+    /// halves make a whole configuration, so the request is served.
+    #[tokio::test]
+    async fn service_naming_a_model_is_served_from_a_cell_that_has_no_name() {
+        let broker = FakeBroker::default();
+        seed_attachment(&broker, "conv-m3", vec![]);
+        seed_changes(&broker, "conv-m3", vec![]);
+        let scratch = TestScratch::new("service-model-pin");
+        let host = host(&scratch, broker.clone());
+        *host.model.write().unwrap() = crate::model::Settings::default()
+            .merged(&serde_json::json!({ "maxTokens": 8192 }))
+            .unwrap();
+
+        let reply =
+            super::handle_service(&host, "conv-m3".into(), None, Some("claude-opus-5".into()))
+                .await;
+
+        assert_eq!(reply_json(&reply), serde_json::json!({ "accepted": true }));
     }
 
     /// An omitted cwd falls to the world's own default — absence delegates.

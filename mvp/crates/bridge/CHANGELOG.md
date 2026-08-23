@@ -16,10 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The Skill tool is offered whether or not a skills directory is set.
+- The `model` control line takes an object naming the model, its max tokens, thinking mode, thinking display and effort level.
+
+### Removed
+
+- `BRIDGE_MODEL` and `BRIDGE_THINKING_BUDGET`. Bridge serves no conversation until a `model` control line names a model and a max token count.
 
 ### Fixed
 
 - AppendFile flushes its write before returning, so a reader that opens the file immediately after the append sees the appended content instead of an empty file.
+- Turns ask the messages API for adaptive thinking rather than a fixed token budget.
 
 ### Security
 
