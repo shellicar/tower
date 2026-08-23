@@ -82,10 +82,10 @@ mod tests {
 
     #[test]
     fn multiple_values_back_to_back_each_parse_separately() {
-        let batch = "{\"model\": \"a\"}\n{\"cwd\": \"/tmp\"}\n";
+        let batch = "{\"model\": {\"name\": \"a\"}}\n{\"cwd\": \"/tmp\"}\n";
         let results = parse_batch(batch);
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].as_ref().unwrap()["model"], "a");
+        assert_eq!(results[0].as_ref().unwrap()["model"]["name"], "a");
         assert_eq!(results[1].as_ref().unwrap()["cwd"], "/tmp");
     }
 
