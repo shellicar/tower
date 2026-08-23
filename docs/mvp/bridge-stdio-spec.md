@@ -430,8 +430,22 @@ That is the same reply with a `text` field added to each entry named. The
 entry's shape does not change with the request: it gains a field rather than
 becoming a string, so a caller parses one shape either way. Naming nothing,
 and `{"settings": {}}`, both give the summary. Naming a cell that is not set
-adds nothing to it, and a name with no body behind it is ignored rather than
-refused.
+adds nothing to it, because there is no body to add.
+
+`system` and `context` are the only entries with a body, and naming anything
+else is rejected rather than quietly doing nothing:
+
+```
+{"settings": {"include": ["skillsDir"]}}
+{"error": "settings include names unknown entry \"skillsDir\"; entries with a body: context, system"}
+```
+
+This is stricter than the wire contract, deliberately. Tolerance there exists
+so an old tower and a new bridge can coexist; stdio has no such skew, being an
+operator talking to their own local process, so a name that silently did
+nothing would only hand back a reply they go on to misread. An `include` that
+is not an array, or an entry named as something other than a string, is
+rejected the same way.
 
 ## What this v0 does not do
 
