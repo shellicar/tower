@@ -278,6 +278,22 @@ mod tests {
         assert_eq!(resolved[0]["exec"], "deny");
     }
 
+    /// The GitHub pull request tools carry no path arguments at all, so
+    /// their check reaches `resolve_set` with an empty set and lands on the
+    /// `unwrap_or` below the fold. Nothing anywhere declares that they
+    /// should ask: they ask because an empty fold has no maximum, and that
+    /// accident is currently the whole of what gates them. This test exists
+    /// so a change to that default cannot silently ungate them. It is not
+    /// evidence that asking is the designed behaviour.
+    #[test]
+    fn an_empty_path_set_asks_by_accident_and_that_is_all_that_gates_the_github_tools() {
+        // Even under a catch-all that allows everything: there is no path
+        // for the catch-all to match, so nothing allows it.
+        let set = parse(r#"[{ "match": "*", "default": "allow" }]"#);
+        let verdict = set.resolve_set(std::iter::empty(), "github", &cwd(), &home());
+        assert_eq!(verdict, Verdict::Ask);
+    }
+
     #[test]
     fn a_multi_path_action_resolves_to_its_strictest_member() {
         let set = parse(

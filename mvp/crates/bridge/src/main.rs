@@ -43,6 +43,7 @@
 mod agent;
 mod anthropic;
 mod approval;
+mod credentials;
 mod cwd;
 mod decisions;
 mod delete;
@@ -574,6 +575,12 @@ struct Host<B: Broker, D: DeltaSink> {
     /// `skills_root`. Strict-default until a line sets it: every gated
     /// operation asks, identical to bridge's behavior before this existed.
     permissions: Arc<RwLock<permissions::PermissionSet>>,
+    /// The `credentials` and `tools` cells (credentials.rs), each replaced
+    /// whole by its own control line. Held apart and resolved against each
+    /// other only at the point of use, which is why the two lines can arrive
+    /// in either order.
+    credentials: Arc<RwLock<credentials::Credentials>>,
+    tools: Arc<RwLock<credentials::ToolsConfig>>,
     /// The capture stream adopt and the `service` premise replay from
     /// (`BRIDGE_STREAM`), read once at boot — ambient env never reaches a
     /// call site.
@@ -610,6 +617,8 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
             attach: self.attach.clone(),
             cwd,
             permissions: Arc::clone(&self.permissions),
+            credentials: Arc::clone(&self.credentials),
+            tools: Arc::clone(&self.tools),
         }
     }
 
@@ -793,6 +802,66 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
                     );
                 }
             }
+        } else if let Some(creds) = value.get("credentials") {
+            // One cell, replaced whole, same discipline as `permissions`. An
+            // unknown provider is rejected here: a typo that silently
+            // configures nothing is the failure this validation exists for.
+            // A binding naming a credential this line just removed is only a
+            // warning, because the `tools` line may legitimately arrive
+            // first.
+            match credentials::parse_credentials(creds) {
+                Ok(parsed) => {
+                    *self.credentials.write().unwrap() = parsed;
+                    let warnings = credentials::warnings(
+                        &self.credentials.read().unwrap(),
+                        &self.tools.read().unwrap(),
+                    );
+                    for warning in &warnings {
+                        eprintln!("bridge: credentials warning: {warning}");
+                    }
+                    eprintln!(
+                        "bridge: credentials set ({} configured)",
+                        self.credentials.read().unwrap().0.len()
+                    );
+                    println!(
+                        "{}",
+                        serde_json::json!({ "credentials": "ok", "warnings": warnings })
+                    );
+                }
+                Err(e) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("invalid credentials: {e}") })
+                    );
+                }
+            }
+        } else if let Some(groups) = value.get("tools") {
+            // The other half, and the same shape: one cell replaced whole,
+            // an unknown group rejected, an unknown credential name warned
+            // about and the group left inactive.
+            match credentials::parse_tools(groups) {
+                Ok(parsed) => {
+                    *self.tools.write().unwrap() = parsed;
+                    let warnings = credentials::warnings(
+                        &self.credentials.read().unwrap(),
+                        &self.tools.read().unwrap(),
+                    );
+                    for warning in &warnings {
+                        eprintln!("bridge: tools warning: {warning}");
+                    }
+                    eprintln!("bridge: tool groups set");
+                    println!(
+                        "{}",
+                        serde_json::json!({ "tools": "ok", "warnings": warnings })
+                    );
+                }
+                Err(e) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("invalid tools: {e}") })
+                    );
+                }
+            }
         } else if let Some(model) = value.get("model") {
             // The live default cell: new spawns that name no model take it,
             // and every running conversation sharing it picks the change up
@@ -932,10 +1001,21 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
             let skills_dir_exists = std::fs::metadata(&skills_dir).is_ok_and(|m| m.is_dir());
             let system = self.system.read().unwrap().clone();
             let context = self.context.read().unwrap().clone();
+            let credentials = credentials::settings(
+                &self.credentials.read().unwrap(),
+                &self.tools.read().unwrap(),
+            );
+            let warnings = credentials::warnings(
+                &self.credentials.read().unwrap(),
+                &self.tools.read().unwrap(),
+            );
             println!(
                 "{}",
                 serde_json::json!({
+                    "warnings": warnings,
                     "settings": {
+                        "credentials": credentials["credentials"],
+                        "tools": credentials["tools"],
                         "world": self.world,
                         "instance": self.instance,
                         "cwd": self.default_cwd.read().unwrap().to_string_lossy(),
@@ -1617,6 +1697,11 @@ async fn main() -> anyhow::Result<()> {
         attach_bucket,
         thinking_budget,
         permissions: Arc::new(RwLock::new(permissions::PermissionSet::strict_default())),
+        // No defaults and no environment variables: until a `credentials`
+        // and a `tools` line arrive, nothing is configured, every group is
+        // inactive, and Exec's environment is untouched.
+        credentials: Arc::new(RwLock::new(credentials::Credentials::default())),
+        tools: Arc::new(RwLock::new(credentials::ToolsConfig::default())),
         stream,
         stream_ephemeral,
         liveness,
@@ -1657,10 +1742,7 @@ async fn main() -> anyhow::Result<()> {
         .iter()
         .filter_map(|t| t["name"].as_str().map(str::to_owned))
         .collect();
-    eprintln!(
-        "bridge: tools: {} (+ Skill once a catalogue is set)",
-        tool_names.join(", ")
-    );
+    eprintln!("bridge: tools: {}", tool_names.join(", "));
     eprintln!(
         "bridge: ready (model {}); spawn with {{\"spawn\":{{}}}} (optionally {{\"cwd\":\"...\"}})",
         host.default_model.read().unwrap()

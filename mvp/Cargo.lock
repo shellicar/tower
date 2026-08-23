@@ -265,7 +265,9 @@ dependencies = [
  "anyhow",
  "async-nats",
  "base64",
+ "bridge-secrets",
  "bridge-testkit",
+ "bridge-tools-github",
  "bytes",
  "futures",
  "image",
@@ -286,11 +288,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "bridge-secrets"
+version = "0.1.0"
+dependencies = [
+ "security-framework",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "bridge-testkit"
 version = "0.1.0"
 dependencies = [
  "bridge",
  "uuid",
+]
+
+[[package]]
+name = "bridge-tools-github"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bridge-secrets",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

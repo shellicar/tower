@@ -13,6 +13,11 @@ workspace = true
 # compaction.
 [dependencies]
 wire = { path = "../wire" }
+# The GitHub pull request tools and the Keychain read behind them. Depended
+# on unconditionally: whether a credential can be read is a runtime question,
+# so the tools, their flag mappings, and their tests exist on every platform.
+bridge-secrets = { path = "../bridge-secrets" }
+bridge-tools-github = { path = "../bridge-tools-github" }
 anyhow.workspace = true
 async-nats.workspace = true
 base64.workspace = true
