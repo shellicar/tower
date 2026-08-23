@@ -36,7 +36,12 @@ broker-run +command:
     # Blocks until the streams are converged; stream-init waits for the broker
     # itself, so nothing here has to poll for readiness.
     docker compose -f compose.test.yaml run --rm stream-init
-    NATS_URL='nats://127.0.0.1:31416' {{command}}
+    # Exported, not prefixed onto the command. A prefix covers the single
+    # command it prefixes, so the right-hand side of a `&&`, a `;` or a pipe
+    # would inherit the caller's environment and default back to 4222 — the
+    # one thing this recipe exists to prevent.
+    export NATS_URL='nats://127.0.0.1:31416'
+    {{command}}
 
 # Run towerd (env NATS_URL, TOWER_BIND, TOWER_BIND_LEPTOS, TOWER_DB all
 # default to the local deployment). Serves frontend-svelte/dist on TOWER_BIND
