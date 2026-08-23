@@ -923,7 +923,8 @@ async fn run_exec(
     );
     match resolved {
         Ok(resolved) => {
-            let results = crate::exec::run_commands(commands, &resolved, cancel).await;
+            let base = crate::exec::ambient_env();
+            let results = crate::exec::run_commands(commands, &base, &resolved, cancel).await;
             crate::exec::format_results(commands, &results)
         }
         Err(e) => (format!("exec credentials unavailable: {e}"), true),

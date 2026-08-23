@@ -7,6 +7,9 @@
 //! No timeout, deliberately: the human is the timeout. A running command is
 //! visible in tower and cancellable; the cancel signal is what kills it.
 
+use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
+
 use serde_json::{Value, json};
 use tokio::io::AsyncReadExt;
 use tokio::sync::watch;
@@ -265,6 +268,40 @@ impl CommandOutcome {
     }
 }
 
+/// The environment this bridge process carries, which is the base every Exec
+/// child starts from. The one place it is read: everything below takes the
+/// environment as a value, so what a child would get can be decided without
+/// spawning one.
+pub fn ambient_env() -> BTreeMap<OsString, OsString> {
+    std::env::vars_os().collect()
+}
+
+/// The environment an Exec child should have: the base, the call's own
+/// variables over it, then the resolved credentials' removals, then their
+/// forced values.
+///
+/// The order is the guarantee. The removals run after the call's own
+/// variables, so a call naming a stripped variable itself cannot decide what
+/// the child authenticates as, and the forced values run last so nothing the
+/// call asked for displaces them.
+pub fn child_env(
+    base: &BTreeMap<OsString, OsString>,
+    call_env: &std::collections::HashMap<String, String>,
+    credentials: &crate::credentials::ExecCredentials,
+) -> BTreeMap<OsString, OsString> {
+    let mut env = base.clone();
+    for (name, value) in call_env {
+        env.insert(name.into(), value.into());
+    }
+    for name in &credentials.strip {
+        env.remove(OsStr::new(name));
+    }
+    for (name, value) in &credentials.provide {
+        env.insert(name.into(), value.into());
+    }
+    env
+}
+
 /// Run the whole forward-op chain: group into pipelines at `|` boundaries,
 /// gate each pipeline's start on the previous one's exit per `&&`/`||`/absent,
 /// short-circuiting the rest on cancellation. Returns one outcome per input
@@ -272,6 +309,7 @@ impl CommandOutcome {
 /// this, never drops one.
 pub async fn run_commands(
     commands: &[ExecCommand],
+    base: &BTreeMap<OsString, OsString>,
     credentials: &crate::credentials::ExecCredentials,
     cancel: &mut watch::Receiver<bool>,
 ) -> Vec<CommandOutcome> {
@@ -303,7 +341,7 @@ pub async fn run_commands(
                 Some(ExecOp::Or) => !prev_ok,
             };
         if run_this {
-            let group_results = run_pipeline(group, credentials, cancel).await;
+            let group_results = run_pipeline(group, base, credentials, cancel).await;
             prev_ok = group_results.last().is_some_and(CommandOutcome::succeeded);
             if *cancel.borrow() {
                 skip_rest = true;
@@ -326,6 +364,7 @@ pub async fn run_commands(
 /// command is ignored — its stdout is already spoken for by the pipe.
 async fn run_pipeline(
     group: &[ExecCommand],
+    base: &BTreeMap<OsString, OsString>,
     credentials: &crate::credentials::ExecCredentials,
     cancel: &mut watch::Receiver<bool>,
 ) -> Vec<CommandOutcome> {
@@ -344,20 +383,8 @@ async fn run_pipeline(
         if let Some(cwd) = &c.cwd {
             cmd.current_dir(cwd);
         }
-        for (k, v) in &c.env {
-            cmd.env(k, v);
-        }
-        // Last, and after the call's own env: a configured provider's
-        // ambient variables go whatever the call asked for, and the
-        // credential this host carries is the one the child ends up with.
-        // Applied in the other order, a call naming GH_TOKEN itself would
-        // decide what the child authenticates as.
-        for name in &credentials.strip {
-            cmd.env_remove(name);
-        }
-        for (name, value) in &credentials.provide {
-            cmd.env(name, value);
-        }
+        cmd.env_clear();
+        cmd.envs(child_env(base, &c.env, credentials));
         cmd.stdin(next_stdin.take().unwrap_or_else(std::process::Stdio::null));
         // A file redirect on the terminal command bypasses capture; a
         // non-terminal command's stdout always feeds the pipe.
@@ -737,9 +764,11 @@ async fn run_child(
 
 #[cfg(test)]
 mod tests {
-    use super::{format_results, parse_commands, run_bash, run_commands};
+    use super::{ambient_env, child_env, format_results, parse_commands, run_bash, run_commands};
     use crate::credentials::ExecCredentials;
     use serde_json::json;
+    use std::collections::{BTreeMap, HashMap};
+    use std::ffi::{OsStr, OsString};
     use tokio::sync::watch;
 
     // A cancel receiver that never fires: the human is not cancelling.
@@ -815,16 +844,8 @@ mod tests {
         input: serde_json::Value,
         cancel: &mut watch::Receiver<bool>,
     ) -> (String, bool) {
-        run_input_with(input, &no_credentials(), cancel).await
-    }
-
-    async fn run_input_with(
-        input: serde_json::Value,
-        credentials: &ExecCredentials,
-        cancel: &mut watch::Receiver<bool>,
-    ) -> (String, bool) {
         let commands = parse_commands(&input).expect("valid commands");
-        let results = run_commands(&commands, credentials, cancel).await;
+        let results = run_commands(&commands, &ambient_env(), &no_credentials(), cancel).await;
         format_results(&commands, &results)
     }
 
@@ -1003,18 +1024,17 @@ mod tests {
             ]
         });
         let commands = parse_commands(&input).expect("valid commands");
-        let results = run_commands(&commands, &no_credentials(), &mut cancel).await;
+        let results = run_commands(&commands, &ambient_env(), &no_credentials(), &mut cancel).await;
         assert_eq!(results.len(), 2, "one result per input command, always");
     }
 
     /// The guarantee the whole credential model rests on: an Exec child
     /// cannot reach GitHub with anything but what this host handed it. The
-    /// ambient variables are set on the call itself here, which is the
+    /// provider's variables are set on the call itself here, which is the
     /// stronger case — they are removed after whatever set them, and a
-    /// genuinely inherited variable goes by that same removal.
-    #[tokio::test]
-    async fn a_providers_ambient_variables_are_absent_while_its_credential_is_present() {
-        let mut cancel = no_cancel();
+    /// variable inherited from the base goes by that same removal.
+    #[test]
+    fn a_providers_ambient_variables_are_absent_while_its_credential_is_present() {
         let configured = crate::credentials::parse_credentials(&json!({
             "github-default": { "provider": "github", "account": "gh-reader" }
         }))
@@ -1025,41 +1045,38 @@ mod tests {
             strip: crate::credentials::active_strip_list(&configured),
             provide,
         };
-        let input = json!({
-            "commands": [{
-                "program": "sh",
-                "args": ["-c", "echo \"GH_TOKEN=[$GH_TOKEN]\"; echo \"GITHUB_TOKEN=[$GITHUB_TOKEN]\"; echo \"SSH_AUTH_SOCK=[$SSH_AUTH_SOCK]\"; echo \"GH_CONFIG_DIR=[$GH_CONFIG_DIR]\"; echo \"PATH_SET=[${PATH:+yes}]\""],
-                "env": {
-                    "GH_TOKEN": "ambient",
-                    "GITHUB_TOKEN": "ambient",
-                    "SSH_AUTH_SOCK": "/tmp/agent.sock",
-                    "GH_CONFIG_DIR": "/the/operators/own/session"
-                }
-            }]
-        });
+        let mut call = ambient_call();
+        call.insert(
+            "GH_CONFIG_DIR".to_string(),
+            "/the/operators/own/session".to_string(),
+        );
 
-        let (content, is_error) = run_input_with(input, &credentials, &mut cancel).await;
+        let actual = child_env(&host_env(), &call, &credentials);
 
-        assert!(!is_error, "{content}");
-        assert!(
-            content.contains("GH_TOKEN=[the-configured-token]"),
-            "the configured credential is what the child carries: {content}"
+        assert_eq!(
+            value(&actual, "GH_TOKEN").as_deref(),
+            Some("the-configured-token"),
+            "the configured credential is what the child carries"
         );
-        assert!(
-            content.contains("GITHUB_TOKEN=[]"),
-            "GITHUB_TOKEN survived: {content}"
+        assert_eq!(
+            value(&actual, "GITHUB_TOKEN"),
+            None,
+            "GITHUB_TOKEN survived"
         );
-        assert!(
-            content.contains("SSH_AUTH_SOCK=[]"),
-            "an ssh agent would authenticate git around the token: {content}"
+        assert_eq!(
+            value(&actual, "SSH_AUTH_SOCK"),
+            None,
+            "an ssh agent would authenticate git around the token"
         );
-        assert!(
-            !content.contains("GH_CONFIG_DIR=[/the/operators/own/session]"),
-            "the call chose where gh reads its session: {content}"
+        assert_ne!(
+            value(&actual, "GH_CONFIG_DIR").as_deref(),
+            Some("/the/operators/own/session"),
+            "the call chose where gh reads its session"
         );
-        assert!(
-            content.contains("PATH_SET=[yes]"),
-            "only the provider's own variables are touched: {content}"
+        assert_eq!(
+            value(&actual, "PATH").as_deref(),
+            Some("/usr/bin"),
+            "only the provider's own variables are touched"
         );
     }
 
@@ -1067,9 +1084,8 @@ mod tests {
     /// provider is active and governs Exec, but nothing is bound to exec.
     /// The child ends up with no way to authenticate at all, which is what
     /// leaves the privileged tools as the only route on that host.
-    #[tokio::test]
-    async fn a_provider_configured_for_the_tools_alone_still_denies_an_exec_child() {
-        let mut cancel = no_cancel();
+    #[test]
+    fn a_provider_configured_for_the_tools_alone_still_denies_an_exec_child() {
         let credentials = crate::credentials::parse_credentials(&json!({
             "github-privileged": { "provider": "github", "account": "gh-holder" }
         }))
@@ -1081,58 +1097,75 @@ mod tests {
         let resolved = crate::credentials::exec_credentials(&credentials, &config)
             .expect("binding nothing to exec is not an error");
 
-        let (content, is_error) = run_input_with(probe(), &resolved, &mut cancel).await;
+        let actual = child_env(&host_env(), &ambient_call(), &resolved);
 
-        assert!(!is_error, "{content}");
-        assert!(content.contains("GH_TOKEN=[]"), "{content}");
-        assert!(content.contains("GITHUB_TOKEN=[]"), "{content}");
-        assert!(content.contains("SSH_AUTH_SOCK=[]"), "{content}");
-        let forced = bridge_tools_github::dead_config_dir();
-        assert!(
-            content.contains(&format!("GH_CONFIG_DIR=[{}]", forced.display())),
-            "gh must find no session to fall back to: {content}"
+        assert_eq!(value(&actual, "GH_TOKEN"), None);
+        assert_eq!(value(&actual, "GITHUB_TOKEN"), None);
+        assert_eq!(value(&actual, "SSH_AUTH_SOCK"), None);
+        let forced = bridge_tools_github::dead_config_dir()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            value(&actual, "GH_CONFIG_DIR"),
+            Some(forced),
+            "gh must find no session to fall back to"
         );
     }
 
     /// A host that configured nothing keeps the environment it always had.
     /// Removing a route and replacing it are one act, so a provider nobody
     /// opted into is not governed at all.
-    #[tokio::test]
-    async fn an_unconfigured_host_leaves_an_exec_child_alone() {
-        let mut cancel = no_cancel();
+    #[test]
+    fn an_unconfigured_host_leaves_an_exec_child_alone() {
         let resolved = crate::credentials::exec_credentials(
             &crate::credentials::Credentials::default(),
             &crate::credentials::ToolsConfig::default(),
         )
         .expect("an unconfigured host is not an error");
 
-        let (content, is_error) = run_input_with(probe(), &resolved, &mut cancel).await;
+        let actual = child_env(&host_env(), &ambient_call(), &resolved);
 
-        assert!(!is_error, "{content}");
-        assert!(content.contains("GH_TOKEN=[ambient]"), "{content}");
-        assert!(content.contains("GITHUB_TOKEN=[ambient]"), "{content}");
-        assert!(
-            content.contains("SSH_AUTH_SOCK=[/tmp/agent.sock]"),
-            "{content}"
+        assert_eq!(value(&actual, "GH_TOKEN").as_deref(), Some("ambient"));
+        assert_eq!(value(&actual, "GITHUB_TOKEN").as_deref(), Some("ambient"));
+        assert_eq!(
+            value(&actual, "SSH_AUTH_SOCK").as_deref(),
+            Some("/tmp/agent.sock")
         );
-        // Whatever the host's own GH_CONFIG_DIR is, it is not overridden.
-        let forced = bridge_tools_github::dead_config_dir();
-        assert!(
-            !content.contains(&format!("GH_CONFIG_DIR=[{}]", forced.display())),
-            "an unconfigured provider must not be governed: {content}"
+        assert_eq!(
+            value(&actual, "GH_CONFIG_DIR").as_deref(),
+            Some("/the/hosts/own/session"),
+            "an unconfigured provider must not be governed"
         );
     }
 
-    /// One command that reports what its own environment ended up as, with
-    /// the ambient values set on the call itself.
-    fn probe() -> serde_json::Value {
-        json!({
-            "commands": [{
-                "program": "sh",
-                "args": ["-c", "echo \"GH_TOKEN=[$GH_TOKEN]\"; echo \"GITHUB_TOKEN=[$GITHUB_TOKEN]\"; echo \"SSH_AUTH_SOCK=[$SSH_AUTH_SOCK]\"; echo \"GH_CONFIG_DIR=[$GH_CONFIG_DIR]\""],
-                "env": { "GH_TOKEN": "ambient", "GITHUB_TOKEN": "ambient", "SSH_AUTH_SOCK": "/tmp/agent.sock" }
-            }]
-        })
+    /// The base environment a test supplies for itself, in place of whatever
+    /// the bridge process happens to be carrying. Its own GH_CONFIG_DIR is
+    /// what an unconfigured host must be left with.
+    fn host_env() -> BTreeMap<OsString, OsString> {
+        [
+            ("PATH", "/usr/bin"),
+            ("GH_CONFIG_DIR", "/the/hosts/own/session"),
+        ]
+        .into_iter()
+        .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+        .collect()
+    }
+
+    /// A call that sets the provider's variables on itself.
+    fn ambient_call() -> HashMap<String, String> {
+        [
+            ("GH_TOKEN", "ambient"),
+            ("GITHUB_TOKEN", "ambient"),
+            ("SSH_AUTH_SOCK", "/tmp/agent.sock"),
+        ]
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect()
+    }
+
+    fn value(env: &BTreeMap<OsString, OsString>, name: &str) -> Option<String> {
+        env.get(OsStr::new(name))
+            .map(|v| v.to_string_lossy().into_owned())
     }
 }
 

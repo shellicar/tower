@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - `BRIDGE_MODEL` and `BRIDGE_THINKING_BUDGET`. Bridge serves no conversation until a `model` control line names a model and a max token count.
+- The environment an Exec child runs with is composed as a whole before the child is spawned: the call's own variables, then a configured provider's removals, then its forced values. What a child ends up with is unchanged.
 
 ### Fixed
 
