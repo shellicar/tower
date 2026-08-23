@@ -1,10 +1,10 @@
 //! `WriteMemory`/`ReadMemory`/`SearchMemory`/`DeleteMemory`/`MemoryTypes`:
-//! the model-facing surface over the shared engine (memory.rs). Write ops
-//! (`WriteMemory`/`DeleteMemory`) gate behind the same human approval as any
-//! mutation; read ops don't. `intent` is accepted on every schema and
-//! discarded \u2014 shown to a human watcher in the reference tool, never stored,
-//! never searched; the bridge has no such watcher surface yet, so it's
-//! simply ignored rather than persisted.
+//! the model-facing surface over the shared engine (memory.rs). All five run
+//! without human approval, the write ops included: the memory db is the
+//! agent's own record of itself, not the human's workspace. `intent` is
+//! accepted on every schema and discarded, shown to a human watcher in the
+//! reference tool but never stored and never searched; the bridge has no such
+//! watcher surface yet, so it's simply ignored rather than persisted.
 
 use serde_json::{Value, json};
 
