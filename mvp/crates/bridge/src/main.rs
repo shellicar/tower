@@ -105,6 +105,37 @@ pub(crate) fn expand_tilde(path: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(path)
 }
 
+/// The `settings` view of a text cell — the system prompt or the user
+/// context. Either runs to tens of kilobytes, and inlining both buried every
+/// other setting in the reply, so the entry summarises the body and carries
+/// it only when the request named this entry. The shape does not change with
+/// the request: an included body is an extra field on the same object.
+fn text_setting(text: Option<&str>, include: bool) -> serde_json::Value {
+    let Some(text) = text else {
+        return serde_json::json!({ "set": false });
+    };
+    let mut entry = serde_json::json!({
+        "set": true,
+        "bytes": text.len(),
+        "hash": format!("{:016x}", skills::content_hash(text)),
+    });
+    if include {
+        entry["text"] = serde_json::json!(text);
+    }
+    entry
+}
+
+/// Whether a `settings` request asked for one entry's body, as
+/// `{"settings": {"include": ["system", "context"]}}`. Naming nothing asks
+/// for nothing; a name with no body behind it is ignored rather than
+/// refused, the same tolerance every other unknown value gets.
+fn includes(settings: &serde_json::Value, name: &str) -> bool {
+    settings
+        .get("include")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|named| named.iter().any(|n| n.as_str() == Some(name)))
+}
+
 /// Fold one replayed frame into the tree's committed messages and the
 /// pending revisions map — the per-frame step both the streaming shell
 /// (`replay_conversation`) and the literal-batch test (`fold_replay`) share,
@@ -1020,7 +1051,7 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
                     println!("{}", serde_json::json!({ "error": "publish failed" }));
                 }
             }
-        } else if value.get("settings").is_some() {
+        } else if let Some(settings) = value.get("settings") {
             // A live snapshot of every control-line-settable cell plus the
             // static config — the read half of skills/system/context, which
             // until now could be set but never queried back.
@@ -1050,8 +1081,8 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
                         "attachBucket": self.attach_bucket,
                         "skillsDir": skills_dir.to_string_lossy(),
                         "skillsDirExists": skills_dir_exists,
-                        "system": system,
-                        "context": context,
+                        "system": text_setting(system.as_deref(), includes(settings, "system")),
+                        "context": text_setting(context.as_deref(), includes(settings, "context")),
                         "refsDb": self.refs_path.to_string_lossy(),
                         "memoryDb": self.memory_path.to_string_lossy(),
                         "historyDb": self.history_path.to_string_lossy(),
@@ -1782,8 +1813,8 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ServeOutcome, ServedCwds, decisions, expand_tilde, fold_replay, replay_conversation,
-        serve_conversation,
+        ServeOutcome, ServedCwds, decisions, expand_tilde, fold_replay, includes,
+        replay_conversation, serve_conversation, skills, text_setting,
     };
     use crate::anthropic::NoopDeltaSink;
     use crate::testsupport::config;
@@ -2231,6 +2262,82 @@ mod tests {
             expand_tilde("~foo/bar"),
             std::path::PathBuf::from("~foo/bar")
         );
+    }
+
+    // --- the `settings` reply's two text cells: a summary always, the body
+    // only when the request named the entry. ---
+
+    #[test]
+    fn a_set_text_setting_summarises_its_body_rather_than_carrying_it() {
+        let expected = serde_json::json!({
+            "set": true,
+            "bytes": 17,
+            "hash": format!("{:016x}", skills::content_hash("You are a teapot.")),
+        });
+        let actual = text_setting(Some("You are a teapot."), false);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_named_text_setting_gains_its_body_without_losing_the_summary() {
+        let expected = serde_json::json!({
+            "set": true,
+            "bytes": 17,
+            "hash": format!("{:016x}", skills::content_hash("You are a teapot.")),
+            "text": "You are a teapot.",
+        });
+        let actual = text_setting(Some("You are a teapot."), true);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn an_unset_text_setting_reports_no_body_even_when_named() {
+        let expected = serde_json::json!({ "set": false });
+        let actual = text_setting(None, true);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn the_summary_counts_the_bodys_bytes_not_its_characters() {
+        let expected = serde_json::json!(5);
+        let actual = text_setting(Some("café"), false)["bytes"].clone();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn the_summary_renders_its_hash_as_sixteen_lowercase_hex_digits() {
+        let hash = text_setting(Some("You are a teapot."), false)["hash"].clone();
+        let actual = hash.as_str().map(|h| {
+            h.len() == 16
+                && h.chars()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        });
+        let expected = Some(true);
+        assert_eq!(actual, expected, "hash was {hash}");
+    }
+
+    #[test]
+    fn a_request_naming_nothing_asks_for_no_body() {
+        let expected = false;
+        let actual = includes(&serde_json::json!({}), "system");
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_request_naming_one_entry_does_not_ask_for_the_other() {
+        let expected = false;
+        let actual = includes(&serde_json::json!({ "include": ["system"] }), "context");
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_request_naming_an_entry_asks_for_its_body() {
+        let expected = true;
+        let actual = includes(
+            &serde_json::json!({ "include": ["system", "context"] }),
+            "context",
+        );
+        assert_eq!(actual, expected);
     }
 
     // --- the world's `service` request (agent.md, "The premise for

@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - `BRIDGE_MODEL` and `BRIDGE_THINKING_BUDGET`. Bridge serves no conversation until a `model` control line names a model and a max token count.
+- The `settings` reply summarises the system prompt and the user context as a set flag, a byte count and a content hash instead of inlining them, so one query no longer buries every other setting in a wall of text. `{"settings": {"include": ["system", "context"]}}` adds the body back as a `text` field on each entry it names.
 
 ### Fixed
 

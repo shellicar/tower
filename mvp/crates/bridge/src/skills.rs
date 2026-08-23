@@ -186,8 +186,10 @@ fn split_frontmatter(text: &str) -> (&str, &str) {
 
 /// A content hash of a whole SKILL.md, for change detection across scans.
 /// Non-cryptographic (std DefaultHasher): the need is "did the bytes change",
-/// not integrity, so no new dependency is pulled for a SHA.
-fn content_hash(text: &str) -> u64 {
+/// not integrity, so no new dependency is pulled for a SHA. DefaultHasher's
+/// output is not stable across Rust releases, so a value only ever means
+/// something compared against another taken by the same build.
+pub(crate) fn content_hash(text: &str) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     text.hash(&mut hasher);

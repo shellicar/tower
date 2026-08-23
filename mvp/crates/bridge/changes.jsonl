@@ -7,3 +7,4 @@
 {"type":"change","category":"fixed","description":"Turns ask the messages API for adaptive thinking rather than a fixed token budget."}
 {"type":"change","category":"changed","description":"The `model` control line takes an object naming the model, its max tokens, thinking mode, thinking display and effort level."}
 {"type":"change","category":"removed","description":"`BRIDGE_MODEL` and `BRIDGE_THINKING_BUDGET`. Bridge serves no conversation until a `model` control line names a model and a max token count."}
+{"type":"change","category":"changed","description":"The `settings` reply summarises the system prompt and the user context as a set flag, a byte count and a content hash instead of inlining them, so one query no longer buries every other setting in a wall of text. `{\"settings\": {\"include\": [\"system\", \"context\"]}}` adds the body back as a `text` field on each entry it names."}
