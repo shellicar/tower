@@ -1423,9 +1423,9 @@ async fn run_tool_round<B: Broker>(
                 }
             }
             // All five memory tools run ungated, the two mutations included.
-            // The memory db is the agent's own record of itself, not the
-            // human's workspace, so a write there mutates nothing the human
-            // owns and nothing an approval would be protecting.
+            // The store is not conversation-scoped: it defaults to the file
+            // claude-sdk-cli uses, so a write or a retire here is visible to
+            // every other reader of that file.
             "WriteMemory" => crate::memtools::run_write_memory(memory, &block["input"]).await,
             "DeleteMemory" => crate::memtools::run_delete_memory(memory, &block["input"]),
             "ReadMemory" => crate::memtools::run_read_memory(memory, &block["input"]),
