@@ -144,14 +144,20 @@ only for what cargo can't do. Config env vars — towerd: `NATS_URL`,
 `TOWER_BIND`, `TOWER_BIND_LEPTOS`, `TOWER_DIST`, `TOWER_DIST_LEPTOS`,
 `TOWER_DB`, `TOWER_STREAM_AUDIT`, `TOWER_STREAM_DIAGNOSTIC`,
 `TOWER_STREAM_EPHEMERAL`, `TOWER_ATTACH_BUCKET`, `TOWER_ATTACH_TTL_S`;
-vite: `WEB_PORT`; bridge: `NATS_URL`, `BRIDGE_WORLD`, `BRIDGE_MODEL`,
+vite: `WEB_PORT`; bridge: `NATS_URL`, `BRIDGE_WORLD`,
 `BRIDGE_STREAM`, `BRIDGE_STREAM_EPHEMERAL`, `BRIDGE_ATTACH_BUCKET`,
-`BRIDGE_THINKING_BUDGET`,
 `BRIDGE_REFS_DB`, `BRIDGE_MEMORY_DB`, `BRIDGE_HISTORY_DB`
 (skills has no env var and no default: the directory is empty until a stdio
 `skills` control line sets it, re-scanned per say — the first say commits the
 full catalogue, later says a delta naming skills whose SKILL.md changed; the
 same control line repoints it live).
+
+The model has no env var and no default either. A `model` control line
+carries name, maxTokens, thinking, thinkingDisplay and effort; it MERGES
+rather than replacing, and until it names a model and a maxTokens bridge
+refuses to serve a conversation (`no_model`). Adaptive thinking, not a
+budget: the legacy `{"type":"enabled","budget_tokens":N}` shape produces
+worse thinking and is gone. docs/mvp/bridge-stdio-spec.md holds the rest.
 
 ## helm
 

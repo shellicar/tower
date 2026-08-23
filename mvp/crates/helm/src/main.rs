@@ -85,8 +85,9 @@ async fn main() -> anyhow::Result<()> {
     // Args: `--adopt <conv-id>` resumes an existing conversation (history
     // replayed over the attach fd); `-c <batch>` is bridge's own startup-config
     // grammar one layer up (config.rs) — one JSON object per line, applied in
-    // order right after spawn/adopt, before the first keystroke is read; a
-    // free argument is a one-shot say.
+    // order BEFORE the spawn/adopt, since bridge will not serve a conversation
+    // until a `model` line has named a model and a maxTokens, and nothing
+    // defaults them; a free argument is a one-shot say.
     let mut adopt: Option<String> = None;
     let mut one_shot: Option<String> = None;
     let mut config_batch: Option<String> = None;
@@ -102,10 +103,6 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let mut session = Session::spawn(&bridge_path).await?;
-    let conv_id = match &adopt {
-        Some(conv) => session.adopt_conversation(conv).await?,
-        None => session.spawn_conversation().await?,
-    };
 
     // Created here, before the alt screen, so the -c batch's outcomes have
     // somewhere to land (`l` reopens this later in-session) as well as
@@ -119,6 +116,11 @@ async fn main() -> anyhow::Result<()> {
             view_state.log_config(&line);
         }
     }
+
+    let conv_id = match &adopt {
+        Some(conv) => session.adopt_conversation(conv).await?,
+        None => session.spawn_conversation().await?,
+    };
 
     if let Some(text) = one_shot {
         session
@@ -479,11 +481,24 @@ async fn main() -> anyhow::Result<()> {
                                     (KeyCode::Enter, _) => {
                                         let model = drain(overlay).trim().to_string();
                                         if !model.is_empty() {
+                                            // A partial object: the line merges, so this
+                                            // names the model and leaves maxTokens,
+                                            // thinking and effort as configured. `j`
+                                            // paste mode is how the rest is set.
                                             let reply = session
-                                                .control(&serde_json::json!({ "model": model }))
+                                                .control(&serde_json::json!({
+                                                    "model": { "name": model }
+                                                }))
                                                 .await?;
-                                            note = match reply["model"].as_str() {
-                                                Some(m) => Some(format!("model → {m}")),
+                                            // A conversation's model is fixed when it is
+                                            // served, and helm serves one, at startup. So
+                                            // this reaches the host's cell and never the
+                                            // conversation on screen, and saying otherwise
+                                            // would be a lie.
+                                            note = match reply["model"]["name"].as_str() {
+                                                Some(m) => Some(format!(
+                                                    "host model → {m}; this conversation keeps the one it started on"
+                                                )),
                                                 None => Some(format!("model change failed: {reply}")),
                                             };
                                         }

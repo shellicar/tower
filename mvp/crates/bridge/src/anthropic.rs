@@ -9,8 +9,6 @@ use serde_json::{Value, json};
 
 use wire::ConversationId;
 
-pub const MAX_TOKENS: i64 = 8192;
-
 /// Built once at startup (main.rs) and threaded down through `AgentConfig`/
 /// `TurnContext` alongside the NATS client, `Auth`, and every other shared
 /// resource — the same pattern this crate already uses for state that many
@@ -281,22 +279,50 @@ pub struct TurnDone {
     pub output_tokens: i64,
 }
 
+/// The whole request body for one turn. Pulled out as a pure function so
+/// what bridge actually sends is a literal-value test rather than something
+/// only a live API call can catch.
+///
+/// `max_tokens` always rides. `thinking` and `output_config` are omitted
+/// entirely when unset, which is not the same as sent empty.
+fn request_body(
+    model: &crate::model::Resolved,
+    system: Vec<Value>,
+    messages: Vec<Value>,
+    tools: &[Value],
+) -> Value {
+    let mut body = json!({
+        "model": model.name,
+        "max_tokens": model.max_tokens,
+        "stream": true,
+        "system": system,
+        "messages": messages,
+    });
+    if !tools.is_empty() {
+        body["tools"] = json!(tools);
+    }
+    if let Some(thinking) = model.thinking_field() {
+        body["thinking"] = thinking;
+    }
+    if let Some(output_config) = model.output_config() {
+        body["output_config"] = output_config;
+    }
+    body
+}
+
 /// Stream one turn: publish `block`/`delta` as chunks arrive, accumulate the
 /// content blocks for the commit, and return the round's accounting.
 /// `tools` is the API `tools` array; empty = the no-tools call as before.
-/// `thinking_budget` enables extended thinking when Some — the stream and
-/// fold paths already carry thinking blocks; this is the ask.
 #[allow(clippy::too_many_arguments)]
 pub async fn stream_turn<D: DeltaSink>(
     sink: &D,
     http: &reqwest::Client,
     conv: &ConversationId,
     auth: &Auth,
-    model: &str,
+    model: &crate::model::Resolved,
     system: Option<&str>,
     messages: &[Value],
     tools: &[Value],
-    thinking_budget: Option<i64>,
     attach: &Option<bridge::attach::AttachHandle>,
 ) -> anyhow::Result<TurnDone> {
     // The system array always leads with the Agent SDK identity prefix;
@@ -327,25 +353,7 @@ pub async fn stream_turn<D: DeltaSink>(
     // Clone before marking: the caller's message tree is not ours to mutate.
     let mut messages = messages.to_vec();
     mark_message_cache_breakpoint(&mut messages);
-    let mut body = json!({
-        "model": model,
-        "max_tokens": MAX_TOKENS,
-        "stream": true,
-        "system": system_blocks,
-        "messages": messages,
-    });
-    if !tools.is_empty() {
-        body["tools"] = json!(tools);
-    }
-    if let Some(budget) = thinking_budget {
-        // The API requires budget < max_tokens; clamp rather than error — a
-        // misconfigured budget should degrade, not kill every turn.
-        let budget = budget.clamp(1024, MAX_TOKENS - 1024);
-        // `display: summarized` is required or newer models emit the signature
-        // with no thinking text — the block arrives empty and renders blank.
-        body["thinking"] =
-            json!({ "type": "enabled", "budget_tokens": budget, "display": "summarized" });
-    }
+    let body = request_body(model, system_blocks, messages, tools);
 
     let request = http
         .post("https://api.anthropic.com/v1/messages")
@@ -523,6 +531,88 @@ fn append_str(block: &mut Value, field: &str, chunk: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod request_body {
+        use super::*;
+        use crate::model::Settings;
+
+        fn body(line: Value) -> Value {
+            let model = Settings::default()
+                .merged(&json!({ "name": "claude-opus-5", "maxTokens": 120000 }))
+                .unwrap()
+                .merged(&line)
+                .unwrap()
+                .resolve(None)
+                .unwrap();
+            super::request_body(&model, vec![], vec![], &[])
+        }
+
+        #[test]
+        fn max_tokens_always_rides() {
+            let expected = json!(120000);
+
+            let actual = body(json!({}));
+
+            assert_eq!(actual["max_tokens"], expected);
+        }
+
+        #[test]
+        fn the_configured_name_is_the_model() {
+            let expected = json!("claude-opus-5");
+
+            let actual = body(json!({}));
+
+            assert_eq!(actual["model"], expected);
+        }
+
+        #[test]
+        fn adaptive_thinking_is_sent_exactly_as_configured() {
+            let expected = json!({ "type": "adaptive", "display": "summarized" });
+
+            let actual = body(json!({ "thinking": "adaptive", "thinkingDisplay": "summarized" }));
+
+            assert_eq!(actual["thinking"], expected);
+        }
+
+        #[test]
+        fn effort_is_sent_wrapped_as_output_config() {
+            let expected = json!({ "effort": "xhigh" });
+
+            let actual = body(json!({ "effort": "xhigh" }));
+
+            assert_eq!(actual["output_config"], expected);
+        }
+
+        /// Omitted, not empty: the key is absent from the body entirely.
+        #[test]
+        fn thinking_unset_omits_the_field_entirely() {
+            let expected = false;
+
+            let actual = body(json!({ "effort": "low" }));
+
+            assert_eq!(actual.get("thinking").is_some(), expected);
+        }
+
+        #[test]
+        fn effort_unset_omits_output_config_entirely() {
+            let expected = false;
+
+            let actual = body(json!({ "thinking": "adaptive" }));
+
+            assert_eq!(actual.get("output_config").is_some(), expected);
+        }
+
+        /// The legacy shape this replaced. It produced worse thinking than
+        /// adaptive mode, so nothing may reintroduce it.
+        #[test]
+        fn no_budget_tokens_is_ever_sent() {
+            let expected = false;
+
+            let actual = body(json!({ "thinking": "adaptive" }));
+
+            assert_eq!(actual["thinking"].get("budget_tokens").is_some(), expected);
+        }
+    }
 
     fn has_cache_control(block: &Value) -> bool {
         block.get("cache_control").is_some()

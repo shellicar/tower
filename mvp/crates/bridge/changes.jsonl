@@ -4,3 +4,6 @@
 {"type":"change","category":"added","description":"`credentials` and `tools` control lines name credentials and bind them to tool groups."}
 {"type":"change","category":"security","description":"Configuring a GitHub credential stops Exec children authenticating with the host's own gh login. A host that configures none is unaffected."}
 {"type":"change","category":"changed","description":"The Skill tool is offered whether or not a skills directory is set."}
+{"type":"change","category":"fixed","description":"Turns ask the messages API for adaptive thinking rather than a fixed token budget."}
+{"type":"change","category":"changed","description":"The `model` control line takes an object naming the model, its max tokens, thinking mode, thinking display and effort level."}
+{"type":"change","category":"removed","description":"`BRIDGE_MODEL` and `BRIDGE_THINKING_BUDGET`. Bridge serves no conversation until a `model` control line names a model and a max token count."}
