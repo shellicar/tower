@@ -83,8 +83,9 @@ dictates when a change is visible.
   history per conversation. That's why a repoint surfaces to a running
   conversation as a catalogue delta on its next say, relative to *that
   conversation's own* last-seen state rather than a shared one, and to a new
-  spawn as the full catalogue. With no skills directory set, there is no
-  catalogue and the Skill tool is not offered.
+  spawn as the full catalogue. With no skills directory set there is no
+  catalogue, but the Skill tool is offered anyway (see "Why this is not in
+  the tools array") and invoking it returns an error saying so.
 - **system** is the API system prompt, read fresh each turn and **never
   persisted** to the record. A change reaches even a running conversation on
   its next turn. Because it is not in the record, a revived conversation takes
@@ -162,6 +163,128 @@ Missing `dir` itself is still an error, because there's no path to set at all:
 ```
 {"error": "skills needs dir"}
 ```
+
+### credentials
+
+Name the credentials this host holds. One cell, replaced whole: the line
+carries every credential, and whatever was there before is gone.
+
+```
+{"credentials": {
+  "github-privileged": { "provider": "github", "account": "gh-holder" },
+  "github-default":    { "provider": "github", "account": "gh-reader" }
+}}
+{"credentials": "ok", "warnings": []}
+```
+
+`account` names an item in the macOS Keychain under the service
+`@shellicar/credentials`, which is a constant of the build and not
+configurable. The secret is never held: it is read at the moment a child
+process is spawned, so a rotation takes effect on the next call and there is
+nothing that can go stale. There are no defaults and no environment
+variables; until this line arrives, nothing is configured.
+
+`provider` is a word from a closed set the build knows, currently `github`
+alone. An unknown one is rejected when the line arrives, because a typo that
+silently configures nothing is the failure this validation exists for:
+
+```
+{"error": "invalid credentials: credential \"x\" names unknown provider \"gitlab\"; known providers: github"}
+```
+
+`enabled` is optional and defaults to true. A disabled credential leaves
+every group binding it inactive.
+
+### tools
+
+Bind credentials to tool groups. One cell, replaced whole, same as
+`credentials`.
+
+```
+{"tools": {
+  "github": { "credentials": "github-privileged" },
+  "exec":   { "credentials": ["github-default"] }
+}}
+{"tools": "ok", "warnings": []}
+```
+
+A group name is likewise closed, currently `github` and `exec`, and an
+unknown one is rejected when the line arrives. `exec` takes a list where a
+group takes one, because exec can run anything and may need to carry several
+credentials at once. `enabled` is optional and defaults to true here too.
+
+A credential name that does not exist is different: it is accepted with a
+warning, and that group is simply not active. Neither line can be validated
+against the other's cell, which is exactly why the order they arrive in never
+matters. The two are resolved against each other only at the point of use, so
+both lines warn about the same thing:
+
+```
+{"tools": "ok", "warnings": ["tools group \"github\" names credential \"github-privileged\", which is not configured; the group is not active"]}
+```
+
+A warning is a string, as it already is on a `skills` write. The field is
+`warnings` rather than `warning` because these operations can produce more
+than one.
+
+`{"settings":{}}` reports the resolved state of both cells, plus the same
+`warnings` array. A group's state is one of `unconfigured`, `disabled`,
+`missing` or `active`.
+
+#### The only route to a pull request is the tool
+
+The six tools exist so that there is no other way to authenticate to GitHub
+on a host that uses them. Configuring a credential for a provider is what
+makes that provider active, and an active provider's environment is governed
+for every Exec child from then on.
+
+The `tools` mapping does not enter into that. It decides what Exec is given,
+never whether the provider's environment is governed, so a host that
+configures a github credential and binds it only to the privileged tools
+still has gh's environment taken off its Exec children with nothing put back.
+That is the case the rule exists for: otherwise the privileged tools would
+sit beside an Exec that authenticates as the operator.
+
+- **An active provider's ambient credentials come off every Exec child.**
+- **An active provider's session location is pointed somewhere empty.**
+  Removing the variable is not enough: unset, the CLI falls back to its real
+  default, which is exactly where the operator's own login lives, and on
+  macOS that session's token is in the system keyring where no amount of
+  removing environment variables reaches. Overriding the location is what
+  closes it, and the CLI then fails closed by asking for a login.
+- **A provider nobody configured is left alone entirely.** Removing a route
+  and replacing it are one act, not two, so a host that never opted into this
+  keeps the environment it always had.
+- **What a tool call asks for cannot override any of it.** A call's own `env`
+  is applied first, then the removals, then what the host forces, so a value
+  supplied by the caller can never be what the child authenticates as.
+- **What Exec is given back is only what the `exec` group binds.** A
+  credential it binds but that cannot be read fails the Exec call rather than
+  letting it run without one.
+- **The privileged credential is provided only into the one gh child that
+  uses it**, at the moment that child is spawned, and exists nowhere else.
+
+Which variables each of these covers is code belonging to the provider, never
+configuration: the provider is the authority on its own CLI, and nobody
+setting up a credential should have to know what gh reads.
+
+Reading a credential needs macOS on Apple silicon. Elsewhere the tools are
+still offered and still answer for themselves, the defence above still
+applies in full, and nothing is injected in place of what it removed.
+
+#### Why this is not in the tools array
+
+The tools array is part of the cached prompt prefix, ordered ahead of system
+and messages, so a single character changing in it misses the entire cache.
+Anything that can vary per query therefore does not belong in it.
+
+So the array is a constant of the build. All six GitHub tools are offered
+whether or not they are configured, and `Skill` is offered whether or not a
+skills directory is set; calling one that is not configured returns an
+ordinary tool error naming what is missing. Which groups are actually usable
+is told to the model in the conversation instead, by the mechanism the skills
+catalogue already uses: the full state on a new conversation's opening
+message, a delta on the next say of one already running.
 
 ### model
 

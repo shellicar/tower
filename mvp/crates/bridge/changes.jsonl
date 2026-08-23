@@ -1,2 +1,6 @@
 {"type":"change","category":"added","description":"A world can be asked to serve a conversation over NATS: bridge answers agent.v1.{world}.requests.service, spawning, adopting, or taking over per the conversation's own attachment record, and rejects every other request leaf honestly."}
 {"type":"change","category":"fixed","description":"AppendFile flushes its write before returning, so a reader that opens the file immediately after the append sees the appended content instead of an empty file."}
+{"type":"change","category":"added","description":"Six GitHub pull request tools, each limited to a fixed set of gh flags: creating always drafts, reviewing cannot approve, and auto-merge is only queued or cleared."}
+{"type":"change","category":"added","description":"`credentials` and `tools` control lines name credentials and bind them to tool groups."}
+{"type":"change","category":"security","description":"Configuring a GitHub credential stops Exec children authenticating with the host's own gh login. A host that configures none is unaffected."}
+{"type":"change","category":"changed","description":"The Skill tool is offered whether or not a skills directory is set."}

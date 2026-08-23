@@ -56,8 +56,10 @@ deviations land in the doc first, then the code.
   reference), `code-architecture.md`, `orchestration-layer.md`,
   `multi-transport-architecture.md`, `tui-architecture.md`, `project-state.md`.
   Don't maintain it; don't guess past it either.
-- Spec changes ride their own PR, never bundled with code. One owner per
-  document per change; implementation PRs build to merged spec text.
+- A change to the wire contract (`docs/spec/`) rides its own PR, never bundled
+  with code. One owner per document per change; implementation PRs build to
+  merged spec text. Every other document, this file included, changes in the
+  same PR as the code it describes.
 
 You don't have to read them all. You do have to know they exist and reach for
 the right one instead of guessing.
