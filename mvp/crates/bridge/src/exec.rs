@@ -284,22 +284,55 @@ pub fn ambient_env() -> BTreeMap<OsString, OsString> {
 /// variables, so a call naming a stripped variable itself cannot decide what
 /// the child authenticates as, and the forced values run last so nothing the
 /// call asked for displaces them.
+///
+/// `case_insensitive_names` is how the platform reads a variable name, passed
+/// in rather than read here so both answers are testable on any host. Windows
+/// matches names without regard to case, so stripping GH_TOKEN has to take a
+/// host's `Gh_Token` with it; every other platform holds the two apart as
+/// different variables.
 pub fn child_env(
     base: &BTreeMap<OsString, OsString>,
     call_env: &std::collections::HashMap<String, String>,
     credentials: &crate::credentials::ExecCredentials,
+    case_insensitive_names: bool,
 ) -> BTreeMap<OsString, OsString> {
     let mut env = base.clone();
     for (name, value) in call_env {
-        env.insert(name.into(), value.into());
+        set(&mut env, name, value, case_insensitive_names);
     }
     for name in &credentials.strip {
-        env.remove(OsStr::new(name));
+        unset(&mut env, name, case_insensitive_names);
     }
     for (name, value) in &credentials.provide {
-        env.insert(name.into(), value.into());
+        set(&mut env, name, value, case_insensitive_names);
     }
     env
+}
+
+/// Case-preserving, like the platform itself: a name already in the
+/// environment keeps the spelling it arrived with and takes the new value, so
+/// the later layer wins whichever way either layer spelled it.
+fn set(env: &mut BTreeMap<OsString, OsString>, name: &str, value: &str, case_insensitive: bool) {
+    let key = match case_insensitive {
+        true => existing_name(env, name).unwrap_or_else(|| name.into()),
+        false => name.into(),
+    };
+    env.insert(key, value.into());
+}
+
+fn unset(env: &mut BTreeMap<OsString, OsString>, name: &str, case_insensitive: bool) {
+    match case_insensitive {
+        true => env.retain(|held, _| !held.eq_ignore_ascii_case(name)),
+        false => {
+            env.remove(OsStr::new(name));
+        }
+    }
+}
+
+fn existing_name(env: &BTreeMap<OsString, OsString>, name: &str) -> Option<OsString> {
+    env.keys()
+        .find(|held| held.eq_ignore_ascii_case(name))
+        .cloned()
 }
 
 /// Run the whole forward-op chain: group into pipelines at `|` boundaries,
@@ -384,7 +417,7 @@ async fn run_pipeline(
             cmd.current_dir(cwd);
         }
         cmd.env_clear();
-        cmd.envs(child_env(base, &c.env, credentials));
+        cmd.envs(child_env(base, &c.env, credentials, cfg!(windows)));
         cmd.stdin(next_stdin.take().unwrap_or_else(std::process::Stdio::null));
         // A file redirect on the terminal command bypasses capture; a
         // non-terminal command's stdout always feeds the pipe.
@@ -1051,7 +1084,7 @@ mod tests {
             "/the/operators/own/session".to_string(),
         );
 
-        let actual = child_env(&host_env(), &call, &credentials);
+        let actual = child_env(&host_env(), &call, &credentials, CASE_SENSITIVE);
 
         assert_eq!(
             value(&actual, "GH_TOKEN").as_deref(),
@@ -1097,7 +1130,7 @@ mod tests {
         let resolved = crate::credentials::exec_credentials(&credentials, &config)
             .expect("binding nothing to exec is not an error");
 
-        let actual = child_env(&host_env(), &ambient_call(), &resolved);
+        let actual = child_env(&host_env(), &ambient_call(), &resolved, CASE_SENSITIVE);
 
         assert_eq!(value(&actual, "GH_TOKEN"), None);
         assert_eq!(value(&actual, "GITHUB_TOKEN"), None);
@@ -1123,7 +1156,7 @@ mod tests {
         )
         .expect("an unconfigured host is not an error");
 
-        let actual = child_env(&host_env(), &ambient_call(), &resolved);
+        let actual = child_env(&host_env(), &ambient_call(), &resolved, CASE_SENSITIVE);
 
         assert_eq!(value(&actual, "GH_TOKEN").as_deref(), Some("ambient"));
         assert_eq!(value(&actual, "GITHUB_TOKEN").as_deref(), Some("ambient"));
@@ -1138,34 +1171,118 @@ mod tests {
         );
     }
 
+    /// Windows reads a variable name without regard to case, so a host's own
+    /// spelling of a stripped name is the same variable and goes with it.
+    #[test]
+    fn case_insensitive_names_strip_the_hosts_own_spelling() {
+        let credentials = ExecCredentials {
+            strip: vec!["GH_TOKEN".to_string()],
+            provide: Vec::new(),
+        };
+        let base = named_env(&[("Gh_Token", "the-hosts-own")]);
+        let expected: Vec<(String, String)> = Vec::new();
+
+        let actual = child_env(&base, &call_env(&[]), &credentials, CASE_INSENSITIVE);
+
+        assert_eq!(entries_named(&actual, "GH_TOKEN"), expected);
+    }
+
+    /// Everywhere else the two spellings are two different variables, and
+    /// only the one named is removed.
+    #[test]
+    fn case_sensitive_names_strip_the_name_as_written_alone() {
+        let credentials = ExecCredentials {
+            strip: vec!["GH_TOKEN".to_string()],
+            provide: Vec::new(),
+        };
+        let base = named_env(&[("Gh_Token", "the-hosts-own")]);
+        let expected = vec![("Gh_Token".to_string(), "the-hosts-own".to_string())];
+
+        let actual = child_env(&base, &call_env(&[]), &credentials, CASE_SENSITIVE);
+
+        assert_eq!(entries_named(&actual, "GH_TOKEN"), expected);
+    }
+
+    /// The later layer decides the value however either layer spelled the
+    /// name, and the environment keeps the spelling it already had.
+    #[test]
+    fn case_insensitive_names_let_a_call_replace_the_hosts_own_spelling() {
+        let base = named_env(&[("Path", "/the/hosts/bin")]);
+        let call = call_env(&[("PATH", "/the/calls/bin")]);
+        let expected = vec![("Path".to_string(), "/the/calls/bin".to_string())];
+
+        let actual = child_env(&base, &call, &no_credentials(), CASE_INSENSITIVE);
+
+        assert_eq!(entries_named(&actual, "PATH"), expected);
+    }
+
+    #[test]
+    fn case_sensitive_names_leave_a_differently_spelled_host_variable_beside_it() {
+        let base = named_env(&[("Path", "/the/hosts/bin")]);
+        let call = call_env(&[("PATH", "/the/calls/bin")]);
+        let expected = vec![
+            ("PATH".to_string(), "/the/calls/bin".to_string()),
+            ("Path".to_string(), "/the/hosts/bin".to_string()),
+        ];
+
+        let actual = child_env(&base, &call, &no_credentials(), CASE_SENSITIVE);
+
+        assert_eq!(entries_named(&actual, "PATH"), expected);
+    }
+
+    /// How Windows reads a variable name, and how everywhere else does.
+    const CASE_INSENSITIVE: bool = true;
+    const CASE_SENSITIVE: bool = false;
+
     /// The base environment a test supplies for itself, in place of whatever
     /// the bridge process happens to be carrying. Its own GH_CONFIG_DIR is
     /// what an unconfigured host must be left with.
     fn host_env() -> BTreeMap<OsString, OsString> {
-        [
+        named_env(&[
             ("PATH", "/usr/bin"),
             ("GH_CONFIG_DIR", "/the/hosts/own/session"),
-        ]
-        .into_iter()
-        .map(|(name, value)| (OsString::from(name), OsString::from(value)))
-        .collect()
+        ])
     }
 
     /// A call that sets the provider's variables on itself.
     fn ambient_call() -> HashMap<String, String> {
-        [
+        call_env(&[
             ("GH_TOKEN", "ambient"),
             ("GITHUB_TOKEN", "ambient"),
             ("SSH_AUTH_SOCK", "/tmp/agent.sock"),
-        ]
-        .into_iter()
-        .map(|(name, value)| (name.to_string(), value.to_string()))
-        .collect()
+        ])
+    }
+
+    fn named_env(pairs: &[(&str, &str)]) -> BTreeMap<OsString, OsString> {
+        pairs
+            .iter()
+            .map(|(name, value)| (OsString::from(*name), OsString::from(*value)))
+            .collect()
+    }
+
+    fn call_env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
+            .collect()
     }
 
     fn value(env: &BTreeMap<OsString, OsString>, name: &str) -> Option<String> {
         env.get(OsStr::new(name))
             .map(|v| v.to_string_lossy().into_owned())
+    }
+
+    /// Every entry the platform would read under this name, spelling and all.
+    fn entries_named(env: &BTreeMap<OsString, OsString>, name: &str) -> Vec<(String, String)> {
+        env.iter()
+            .filter(|(held, _)| held.eq_ignore_ascii_case(name))
+            .map(|(held, value)| {
+                (
+                    held.to_string_lossy().into_owned(),
+                    value.to_string_lossy().into_owned(),
+                )
+            })
+            .collect()
     }
 }
 
