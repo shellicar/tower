@@ -36,9 +36,10 @@ Non-stdio settings are environment variables, unchanged:
 | --- | --- | --- |
 | `NATS_URL` | The broker | `nats://127.0.0.1:4222` |
 | `BRIDGE_WORLD` | The agent world this instance joins | `local` |
-| `BRIDGE_MODEL` | Default model for a spawn that names none | `claude-sonnet-5` |
 | `BRIDGE_STREAM` | Capture stream `adopt` replays from | `conv-approval` |
-| `BRIDGE_THINKING_BUDGET` | Extended thinking token budget; `0` disables | on |
+
+The model is not among them. It is a control line and nothing else, and it
+has no default: see `model` below.
 
 There is no attachment-bucket setting. An attachment reference block carries
 its own bucket: an object is `server + bucket + id`, the server is `NATS_URL`,
@@ -73,7 +74,7 @@ dictates when a change is visible.
 | skills directory | `skills` | running conversations on their next say; new spawns whole |
 | system prompt | `system` | every conversation on its next turn |
 | user context | `context` | new spawns only; conversations already born keep theirs |
-| default model | `model` | new spawns only; a running conversation's model is fixed at birth |
+| model | `model` | new spawns only; a running conversation's model is fixed at birth |
 
 - **skills** is re-scanned per say. Two layers, scoped differently: the
   *directory* is per-process (`skills_root`, shared by every conversation this
@@ -90,11 +91,12 @@ dictates when a change is visible.
   persisted** to the record. A change reaches even a running conversation on
   its next turn. Because it is not in the record, a revived conversation takes
   the currently configured system prompt, not the one it was born with.
-- **model** is only ever read at spawn: a conversation's model is part of
-  its birth config, same footing as `context`. A repoint changes what the
-  *next* spawn naming no `model` gets; it cannot move a running
-  conversation onto a different model, and there is no way to do that over
-  stdio in v0.
+- **model** is only ever read when a conversation is served: its whole model
+  configuration is part of its birth config, same footing as `context`. A
+  change reaches the *next* spawn or service request; it cannot move a
+  running conversation onto a different model, and there is no way to do
+  that over stdio in v0. Unlike the other three, this cell is merged into
+  rather than replaced.
 - **context** is injected as a `<system-reminder>` block on a conversation's
   opening user message and **is committed** to the record. It is read once, at
   conversation birth. A later change affects only conversations spawned after
@@ -116,7 +118,9 @@ Create and serve a new conversation. Returns its id.
 {"conversationId": "…"}
 ```
 
-Optional `model` overrides `BRIDGE_MODEL` for this conversation:
+Optional `model` names the model for this conversation, in place of the
+`model` cell's own `name`. The rest of the configuration still comes from the
+cell:
 
 ```
 {"spawn": {"model": "claude-opus-5"}}
@@ -124,6 +128,13 @@ Optional `model` overrides `BRIDGE_MODEL` for this conversation:
 
 The system prompt and user context are host config, not spawn parameters: a
 spawn takes whatever the `system` and `context` cells hold at birth.
+
+A spawn is refused outright when the `model` cell has no name and no
+`maxTokens` between it and this line, because nothing defaults them:
+
+```
+{"error": "invalid model: no maxTokens is configured"}
+```
 
 ### adopt
 
@@ -288,15 +299,85 @@ message, a delta on the next say of one already running.
 
 ### model
 
-Set the default model a spawn takes when it names none, a live repoint of
-`BRIDGE_MODEL`.
+Configure the model this instance serves conversations with. One cell, but
+unlike `permissions`, `credentials` and `tools` this line **merges**: it
+updates the fields it names and leaves the rest alone. The reply echoes the
+whole cell, not the line.
 
 ```
-{"model": "claude-opus-5"}
-{"model": "claude-opus-5"}
+{"model": {"name": "claude-opus-5", "maxTokens": 120000, "thinking": "adaptive", "thinkingDisplay": "summarized", "effort": "xhigh"}}
+{"model": {"name": "claude-opus-5", "maxTokens": 120000, "thinking": "adaptive", "thinkingDisplay": "summarized", "effort": "xhigh"}}
 ```
 
-A `spawn` naming its own `model` is unaffected; this only changes the fallback.
+| Field | Required | Values |
+| --- | --- | --- |
+| `name` | yes | free text, never checked against a list |
+| `maxTokens` | yes | one or greater, no upper bound |
+| `thinking` | no | `adaptive` or `disabled` |
+| `thinkingDisplay` | no | `summarized` or `omitted` |
+| `effort` | no | `max`, `xhigh`, `high`, `medium`, `low` |
+
+Sending `null` for an optional field clears it. `name` and `maxTokens` are
+required of the *cell*, not of the line, so a later line can carry `effort`
+alone:
+
+```
+{"model": {"effort": "low"}}
+{"model": {"name": "claude-opus-5", "maxTokens": 120000, "thinking": "adaptive", "thinkingDisplay": "summarized", "effort": "low"}}
+```
+
+A line is validated on the values it carries. Anything that is not an object,
+an unrecognised field anywhere in it, or a bad value is rejected, and the cell
+is left exactly as it was:
+
+```
+{"error": "invalid model: unknown field \"budgetTokens\"; known fields: name, maxTokens, thinking, thinkingDisplay, effort"}
+```
+
+Nothing defaults, so until a line has filled in a name and a `maxTokens`, this
+instance cannot serve a conversation at all: `spawn` and `adopt` answer with an
+error, and a `service` request over NATS is rejected with reason `no_model`.
+Because both are required, the cell is only ever unset or whole, so refusing
+when a conversation is served leaves no unconfigured path behind it. That is
+also why the check is there and not on the say: a conversation that exists is
+always one bridge can run a turn for.
+
+#### What the request carries
+
+`max_tokens` always rides. The other two are omitted from the request body
+entirely when unset, which is not the same as sent empty.
+
+| Cell | Request |
+| --- | --- |
+| `thinking: adaptive`, no display | `"thinking": {"type": "adaptive"}` |
+| `thinking: adaptive`, display set | `"thinking": {"type": "adaptive", "display": "summarized"}` |
+| `thinking: disabled` | `"thinking": {"type": "disabled"}`, the display dropped |
+| `thinking` unset | no `thinking` field, and no display either |
+| `effort` set | `"output_config": {"effort": "xhigh"}` |
+| `effort` unset | no `output_config` field |
+
+`thinking` and `thinkingDisplay` are two flat fields rather than one object
+mirroring the API's, and that is the merge's doing. A display is invalid
+alongside `disabled` at the API, so with a display already set, switching
+thinking to `disabled` one field at a time would otherwise leave bridge
+rejecting a configuration reached legitimately. Bridge holds what was meant and
+drops the display when it renders the request. It never rejects a combination.
+
+#### Where the line is drawn
+
+Bridge knows the shape of a request; the API owns what a given model will
+accept. That is what makes `name` free text while `thinking`,
+`thinkingDisplay` and `effort` are closed sets, and it is deliberately not the
+tolerance rule that governs the wire.
+
+Model names change constantly. Checking one against a list would only mean
+bridge has to be rebuilt to reach a model that already works, so it never is.
+A new effort level or thinking mode arrives with a feature release and is rare,
+so a closed set that must be updated to adopt one is worth the cost: it catches
+a typo when the line arrives instead of on the first turn.
+
+Which efforts a given model supports, and that Opus 5 refuses disabled thinking
+at `xhigh` or `max` effort, are the API's to reject and never bridge's to know.
 
 ### system
 

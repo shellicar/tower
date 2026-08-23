@@ -4,3 +4,6 @@
 {"type":"change","category":"added","description":"`credentials` and `tools` control lines name credentials and bind them to tool groups."}
 {"type":"change","category":"security","description":"Configuring a GitHub credential stops Exec children authenticating with the host's own gh login. A host that configures none is unaffected."}
 {"type":"change","category":"changed","description":"The Skill tool is offered whether or not a skills directory is set."}
+{"type":"change","category":"fixed","description":"Turns ask for adaptive thinking instead of a fixed token budget, which is what the current models reason best under. The legacy extended-thinking request is gone."}
+{"type":"change","category":"changed","description":"The `model` control line takes an object naming the model, its max tokens, thinking mode, thinking display and effort level. It merges, so a line updates only the fields it carries and null clears an optional one, and the reply echoes the whole cell."}
+{"type":"change","category":"removed","description":"BRIDGE_MODEL, its claude-sonnet-5 default, and BRIDGE_THINKING_BUDGET. Nothing defaults the model: a host that has not sent a `model` line naming a model and a max token count is refused when it asks for a conversation to be served, with reason `no_model`."}

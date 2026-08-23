@@ -16,10 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The Skill tool is offered whether or not a skills directory is set.
+- The `model` control line takes an object naming the model, its max tokens, thinking mode, thinking display and effort level. It merges, so a line updates only the fields it carries and null clears an optional one, and the reply echoes the whole cell.
+
+### Removed
+
+- BRIDGE_MODEL, its claude-sonnet-5 default, and BRIDGE_THINKING_BUDGET. Nothing defaults the model: a host that has not sent a `model` line naming a model and a max token count is refused when it asks for a conversation to be served, with reason `no_model`.
 
 ### Fixed
 
 - AppendFile flushes its write before returning, so a reader that opens the file immediately after the append sees the appended content instead of an empty file.
+- Turns ask for adaptive thinking instead of a fixed token budget, which is what the current models reason best under. The legacy extended-thinking request is gone.
 
 ### Security
 
