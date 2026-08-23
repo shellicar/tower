@@ -70,12 +70,14 @@ pub fn static_tool_schemas() -> Vec<Value> {
 
 pub struct AgentConfig {
     pub conv: ConversationId,
-    /// The model cell. A spawn that named no model shares the host's live
-    /// default, so a stdio `model` line reaches its next turn; a spawn that
-    /// named one is pinned to its own cell. The model is an instance fact,
-    /// not a conversation attribute — `turn.started` states what served each
-    /// turn.
-    pub model: Arc<std::sync::RwLock<String>>,
+    /// This conversation's whole model configuration, resolved from the
+    /// host's `model` cell when the conversation was served and fixed from
+    /// then on — a spawn or service request that named a model supplied the
+    /// name, the cell supplied the rest. Completeness was checked there, so
+    /// nothing downstream of it can be unconfigured. The model is an
+    /// instance fact, not a conversation attribute: `turn.started` states
+    /// what served each turn.
+    pub model: crate::model::Resolved,
     /// The system prompt cell, shared and read fresh each turn so a stdio
     /// `system` control line reaches even a running conversation. Never
     /// persisted to the record.
@@ -102,8 +104,6 @@ pub struct AgentConfig {
     /// The shared history index (history.rs), best-effort-written on every
     /// committed message and read by SearchHistory/ReadHistory.
     pub history: crate::history::HistoryStore,
-    /// Extended thinking budget; None = thinking off.
-    pub thinking_budget: Option<i64>,
     /// The local TUI's attach handle, if this instance was spawned with one.
     /// None for every tower-spawned instance — NATS carries every event
     /// regardless; this is purely an additional local mirror.
@@ -549,9 +549,7 @@ async fn accept_say<B: Broker, D: DeltaSink>(
         broker: broker.clone(),
         sink: sink.clone(),
         conv: config.conv.clone(),
-        // Read fresh per query: a stdio `model` line reaches even a running
-        // conversation, here, on its next say.
-        model: config.model.read().unwrap().clone(),
+        model: config.model.clone(),
         system: Arc::clone(&config.system),
         auth: config.auth.clone(),
         http: config.http.clone(),
@@ -563,7 +561,6 @@ async fn accept_say<B: Broker, D: DeltaSink>(
         refs: crate::refs::RefStore::clone(&config.refs),
         memory: crate::memory::MemoryStore::clone(&config.memory),
         history_store: crate::history::HistoryStore::clone(&config.history),
-        thinking_budget: config.thinking_budget,
         attach: config.attach.clone(),
         // Read fresh per say, same discipline as `model`.
         cwd: config.cwd.read().unwrap().clone(),
@@ -589,7 +586,7 @@ struct TurnContext<B: Broker, D: DeltaSink> {
     broker: B,
     sink: D,
     conv: ConversationId,
-    model: String,
+    model: crate::model::Resolved,
     system: Arc<std::sync::RwLock<Option<String>>>,
     auth: crate::anthropic::Auth,
     http: reqwest::Client,
@@ -602,7 +599,6 @@ struct TurnContext<B: Broker, D: DeltaSink> {
     refs: crate::refs::RefStore,
     memory: crate::memory::MemoryStore,
     history_store: crate::history::HistoryStore,
-    thinking_budget: Option<i64>,
     attach: Option<bridge::attach::AttachHandle>,
     cwd: std::path::PathBuf,
     permissions: Arc<std::sync::RwLock<crate::permissions::PermissionSet>>,
@@ -657,7 +653,6 @@ async fn run_query<B: Broker, D: DeltaSink>(
         refs,
         memory,
         history_store,
-        thinking_budget,
         attach,
         cwd,
         permissions,
@@ -689,8 +684,10 @@ async fn run_query<B: Broker, D: DeltaSink>(
             json!({
                 "ts": now_iso(),
                 "queryId": query, "turnId": turn_id,
-                "service": "anthropic.messages", "model": model,
-                "thinking": thinking_budget.is_some(), "maxTokens": anthropic::MAX_TOKENS,
+                "service": "anthropic.messages", "model": model.name,
+                "thinking": model.thinking == Some(crate::model::Thinking::Adaptive),
+                "effort": model.effort.map(crate::model::Effort::name),
+                "maxTokens": model.max_tokens,
             }),
         )
         .await;
@@ -711,7 +708,6 @@ async fn run_query<B: Broker, D: DeltaSink>(
                 system.as_deref(),
                 &history,
                 &tools,
-                *thinking_budget,
                 attach,
             ) => outcome,
             _ = cancelled(&mut cancel) => {
@@ -763,7 +759,7 @@ async fn run_query<B: Broker, D: DeltaSink>(
             json!({
                 "ts": now_iso(),
                 "queryId": query, "turnId": turn_id,
-                "service": "anthropic.messages", "model": model,
+                "service": "anthropic.messages", "model": model.name,
                 "inputTokens": done.input_tokens,
                 "cacheCreationTokens": done.cache_creation_tokens,
                 "cacheCreation5mTokens": done.cache_creation_5m_tokens,
