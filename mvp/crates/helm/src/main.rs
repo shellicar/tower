@@ -490,8 +490,15 @@ async fn main() -> anyhow::Result<()> {
                                                     "model": { "name": model }
                                                 }))
                                                 .await?;
+                                            // A conversation's model is fixed when it is
+                                            // served, and helm serves one, at startup. So
+                                            // this reaches the host's cell and never the
+                                            // conversation on screen, and saying otherwise
+                                            // would be a lie.
                                             note = match reply["model"]["name"].as_str() {
-                                                Some(m) => Some(format!("model → {m}")),
+                                                Some(m) => Some(format!(
+                                                    "host model → {m}; this conversation keeps the one it started on"
+                                                )),
                                                 None => Some(format!("model change failed: {reply}")),
                                             };
                                         }

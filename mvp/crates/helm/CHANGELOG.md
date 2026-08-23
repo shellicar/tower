@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The `m` command changes the model name only.
+- A `cwd` line in a `-c` configuration batch now sets the directory the conversation runs in.
 
 ### Fixed
 

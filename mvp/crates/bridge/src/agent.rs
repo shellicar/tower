@@ -606,6 +606,23 @@ struct TurnContext<B: Broker, D: DeltaSink> {
     tools_config: Arc<std::sync::RwLock<crate::credentials::ToolsConfig>>,
 }
 
+/// The `turn.started` payload: the request's inputs as asked. An effort that
+/// is not set is absent rather than null, because the schema admits a missing
+/// key and never a null one.
+fn turn_started(query: &str, turn_id: &str, model: &crate::model::Resolved) -> Value {
+    let mut payload = json!({
+        "ts": now_iso(),
+        "queryId": query, "turnId": turn_id,
+        "service": "anthropic.messages", "model": model.name,
+        "thinking": model.thinking == Some(crate::model::Thinking::Adaptive),
+        "maxTokens": model.max_tokens,
+    });
+    if let Some(effort) = model.effort {
+        payload["effort"] = json!(effort.name());
+    }
+    payload
+}
+
 /// Resolves when the cancel signal flips; never resolves if it never does
 /// (a dropped sender means nobody can cancel any more, not "cancelled").
 /// Shared with exec (a running command races it) and approval (a pending
@@ -681,14 +698,7 @@ async fn run_query<B: Broker, D: DeltaSink>(
     loop {
         pubr.event(
             "telemetry.turn.started",
-            json!({
-                "ts": now_iso(),
-                "queryId": query, "turnId": turn_id,
-                "service": "anthropic.messages", "model": model.name,
-                "thinking": model.thinking == Some(crate::model::Thinking::Adaptive),
-                "effort": model.effort.map(crate::model::Effort::name),
-                "maxTokens": model.max_tokens,
-            }),
+            turn_started(query, &turn_id, model),
         )
         .await;
 
@@ -1556,6 +1566,67 @@ mod tests {
     use bridge::broker::BrokerMessage;
     use bridge_testkit::{FakeBroker, FakeSubscription, TestScratch};
     use std::collections::VecDeque;
+
+    mod turn_started {
+        use super::*;
+
+        fn payload(line: serde_json::Value) -> Value {
+            let model = crate::testsupport::model_settings()
+                .merged(&line)
+                .unwrap()
+                .resolve(None)
+                .unwrap();
+            super::super::turn_started("q1", "t1", &model)
+        }
+
+        /// Absent, never null: conversation.md types this field as optional,
+        /// which admits a missing key and rejects a null one, and every
+        /// fixture omits it.
+        #[test]
+        fn an_effort_that_is_not_set_is_absent_from_the_frame() {
+            let expected = false;
+
+            let actual = payload(json!({}));
+
+            assert_eq!(actual.get("effort").is_some(), expected);
+        }
+
+        #[test]
+        fn a_configured_effort_rides_the_frame() {
+            let expected = json!("xhigh");
+
+            let actual = payload(json!({ "effort": "xhigh" }));
+
+            assert_eq!(actual["effort"], expected);
+        }
+
+        #[test]
+        fn adaptive_thinking_reports_thinking() {
+            let expected = json!(true);
+
+            let actual = payload(json!({ "thinking": "adaptive" }));
+
+            assert_eq!(actual["thinking"], expected);
+        }
+
+        #[test]
+        fn disabled_thinking_reports_no_thinking() {
+            let expected = json!(false);
+
+            let actual = payload(json!({ "thinking": "disabled" }));
+
+            assert_eq!(actual["thinking"], expected);
+        }
+
+        #[test]
+        fn the_configured_max_tokens_rides_the_frame() {
+            let expected = json!(8192);
+
+            let actual = payload(json!({}));
+
+            assert_eq!(actual["maxTokens"], expected);
+        }
+    }
 
     /// The tools array heads the cached prompt prefix, so it must be a
     /// constant of the build. `static_tool_schemas` takes no arguments at
