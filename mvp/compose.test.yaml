@@ -1,0 +1,38 @@
+# Tower's own broker, for a run that genuinely needs a real one. Never the
+# fleet's: compose.yaml is the deployment, on 4222, with a data volume behind
+# it, and anything published to a conv subject there is permanent.
+#
+# 31416 so no slip of the finger reaches 4222, and below 49152 deliberately:
+# macOS hands out 49152 and up as ephemeral ports, so a port up there gets
+# taken out from under this at random. It is not the skills repo's 31415
+# either, so both test brokers can be up at once without fighting for a port.
+#
+# The project is named here rather than inferred from the directory, so a
+# teardown provably reaches this and nothing else on the machine.
+name: tower-test
+
+services:
+  # No volume: the container is the whole of its state, so a teardown leaves
+  # nothing behind and every run starts empty. No restart policy either — the
+  # opposite of the deployment's `unless-stopped`, because a test broker that
+  # comes back by itself is one nobody remembers is running. No monitoring
+  # port, so nothing here can collide with the deployment's 8222.
+  nats:
+    image: nats:latest
+    command: ['-js', '-sd', '/tmp/jetstream']
+    ports:
+      - '31416:4222'
+
+  # The same stream-init the deployment runs, against the same subject layout,
+  # so a run here exercises the routing the real broker has instead of a
+  # broker with no streams at all. On an empty broker it just creates the
+  # three; its release and backfill phases find nothing to do.
+  stream-init:
+    image: natsio/nats-box:latest
+    depends_on:
+      - nats
+    volumes:
+      - ./stream-init.sh:/stream-init.sh:ro
+    entrypoint:
+      - sh
+      - /stream-init.sh

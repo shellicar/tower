@@ -13,6 +13,31 @@ check:
     cargo clippy --workspace
     cargo fmt --check
 
+# Run a command against tower's OWN broker (compose.test.yaml, 31416), brought
+# up before it and taken down after it. The url is fixed here rather than read
+# from the environment, so no inherited NATS_URL can aim the run at the fleet's
+# broker on 4222. The Broker fake covers ordinary tests; reach for this only
+# when a run genuinely needs a real broker.
+#
+#     just broker-run 'cargo test -p bridge -- --ignored'
+broker-run +command:
+    #!/bin/sh
+    set -eu
+    # One teardown point: every catchable signal routes through exit, so the
+    # EXIT trap is the only place the container comes down, and it comes down
+    # whether the run passed, failed or was interrupted. `down` is scoped by
+    # the project name compose.test.yaml declares, so it reaches that broker
+    # and can reach nothing else. SIGKILL cannot be caught by anything.
+    trap 'status=$?; docker compose -f compose.test.yaml down >/dev/null 2>&1; exit $status' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    trap 'exit 129' HUP
+    docker compose -f compose.test.yaml up -d nats
+    # Blocks until the streams are converged; stream-init waits for the broker
+    # itself, so nothing here has to poll for readiness.
+    docker compose -f compose.test.yaml run --rm stream-init
+    NATS_URL='nats://127.0.0.1:31416' {{command}}
+
 # Run towerd (env NATS_URL, TOWER_BIND, TOWER_BIND_LEPTOS, TOWER_DB all
 # default to the local deployment). Serves frontend-svelte/dist on TOWER_BIND
 # and frontend-leptos/dist on TOWER_BIND_LEPTOS — see `just frontend`.
