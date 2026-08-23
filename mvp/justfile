@@ -28,7 +28,7 @@ broker-run +command:
     # whether the run passed, failed or was interrupted. `down` is scoped by
     # the project name compose.test.yaml declares, so it reaches that broker
     # and can reach nothing else. SIGKILL cannot be caught by anything.
-    trap 'status=$?; docker compose -f compose.test.yaml down >/dev/null 2>&1; exit $status' EXIT
+    trap 'status=$?; docker compose -f compose.test.yaml down; exit $status' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
     trap 'exit 129' HUP
@@ -41,6 +41,13 @@ broker-run +command:
     # would inherit the caller's environment and default back to 4222 — the
     # one thing this recipe exists to prevent.
     export NATS_URL='nats://127.0.0.1:31416'
+    # The broker is not the only real thing a run can reach: bridge's memory
+    # and history stores default to ~/.claude, which it shares with
+    # claude-sdk-cli, and it writes to them. Scratch paths here, so what the
+    # recipe isolates is everything a run through it opens.
+    export BRIDGE_REFS_DB='/tmp/tower-test-refs.db'
+    export BRIDGE_MEMORY_DB='/tmp/tower-test-memory.db'
+    export BRIDGE_HISTORY_DB='/tmp/tower-test-history.db'
     {{command}}
 
 # Run towerd (env NATS_URL, TOWER_BIND, TOWER_BIND_LEPTOS, TOWER_DB all
