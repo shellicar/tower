@@ -123,9 +123,9 @@ pub struct AgentConfig {
     pub credentials: Arc<std::sync::RwLock<crate::credentials::Credentials>>,
     pub tools: Arc<std::sync::RwLock<crate::credentials::ToolsConfig>>,
     /// The connect-phase retry policy (retry.rs), a cell a `retry` control
-    /// line replaces whole. Read at the moment a connect failure has to be
-    /// decided on, so a change reaches a turn already in flight; unset means
-    /// no retrying at all.
+    /// line replaces whole. Read when a connect failure has to be decided on,
+    /// so a change reaches the next failure of a conversation already running;
+    /// unset means no retrying at all.
     pub retry: crate::anthropic::RetryCell,
 }
 

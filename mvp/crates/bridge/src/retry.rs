@@ -33,7 +33,7 @@ pub struct RetryPolicy {
 /// out of scope and has no representation here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectFailure {
-    /// dns, socket, timeout: never reached a server.
+    /// dns, socket, tls: the request never reached a server.
     NoResponse,
     Status {
         code: u16,

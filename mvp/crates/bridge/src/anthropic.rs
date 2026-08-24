@@ -13,9 +13,10 @@ use wire::ConversationId;
 
 use crate::retry::{ConnectFailure, RetryPolicy};
 
-/// The live `retry` cell. Read at the moment a failure has to be decided on
-/// rather than captured when a query starts, so a policy set or cleared over
-/// stdio reaches a turn already in flight.
+/// The live `retry` cell. Read when a failure has to be decided on rather
+/// than captured when a query starts, so a policy set or cleared over stdio
+/// reaches the next failure of a conversation already running. A wait already
+/// under way was computed before it began and runs to its full length.
 pub type RetryCell = Arc<RwLock<Option<RetryPolicy>>>;
 
 /// Built once at startup (main.rs) and threaded down through `AgentConfig`/

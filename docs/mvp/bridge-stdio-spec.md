@@ -75,7 +75,7 @@ dictates when a change is visible.
 | system prompt | `system` | every conversation on its next turn |
 | user context | `context` | new spawns only; conversations already born keep theirs |
 | model | `model` | new spawns only; a running conversation's model is fixed at birth |
-| retry policy | `retry` | every conversation at once, including a turn already in flight |
+| retry policy | `retry` | every conversation on its next connect failure |
 
 - **skills** is re-scanned per say. Two layers, scoped differently: the
   *directory* is per-process (`skills_root`, shared by every conversation this
@@ -98,9 +98,11 @@ dictates when a change is visible.
   running conversation onto a different model, and there is no way to do
   that over stdio in v0. Unlike the other three, this cell is merged into
   rather than replaced.
-- **retry** is read at the moment a model request fails on the way out,
-  rather than captured when a query starts, so setting or clearing it reaches
-  a turn that is already waiting to be retried.
+- **retry** is read when a model request fails, not captured when a query
+  starts, so setting or clearing it reaches a conversation that is already
+  running. It does not reach a wait already under way: that wait was computed
+  before it began and runs to its full length, and a line arriving mid-wait
+  applies to the next failure. A cancel is what ends a turn parked in a wait.
 - **context** is injected as a `<system-reminder>` block on a conversation's
   opening user message and **is committed** to the record. It is read once, at
   conversation birth. A later change affects only conversations spawned after
@@ -455,7 +457,7 @@ outside, the only difference is a turn that took longer.
 
 | Failure | Retried |
 | --- | --- |
-| no response at all: dns, socket, timeout | always |
+| no response at all: dns, socket, tls | always |
 | 4xx | never, except 429 |
 | 429 | always |
 | 5xx | always |

@@ -1,7 +1,7 @@
 #!/bin/sh
-# A throwaway probe, not product code — the shell counterpart to
-# attach_probe.rs: drives bridge's connect-phase retry (retry.rs) against a
-# network that is not there, and shows what the console actually says.
+# A throwaway probe, not product code: drives bridge's connect-phase retry
+# (retry.rs) against a network that is not there, and shows what the console
+# actually says.
 #
 # Every outbound HTTP request is aimed at a port nothing listens on, so the
 # messages call never reaches a server and every attempt is the `NoResponse`
@@ -12,7 +12,7 @@
 #
 #     cargo build -p bridge
 #     RETRY_LINE='{"retry":{"maxRetries":3,"baseDelayMs":500,"maxDelayMs":4000,"retryAfterCapMs":60000}}' \
-#       just broker-run 'sh crates/bridge/examples/retry_probe.sh'
+#       just broker-run 'sh scripts/retry-probe.sh'
 #
 # RETRY_LINE   the control line to send; empty sends none, which is bridge's
 #              behaviour before any retrying existed (one attempt, then abort)
