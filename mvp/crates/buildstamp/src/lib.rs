@@ -137,12 +137,8 @@ fn workspace_root(dep_info: &Path) -> Option<PathBuf> {
 
 /// Only a status that ran and reported nothing certifies clean.
 fn certified_clean(repo: &Path, paths: &[PathBuf]) -> bool {
-    let mut status = Command::new("git");
-    status
-        .current_dir(repo)
-        .arg("status")
-        .arg("--porcelain")
-        .arg("--");
+    let mut status = git_command(repo);
+    status.arg("status").arg("--porcelain").arg("--");
     for path in paths {
         status.arg(path);
     }
@@ -152,12 +148,26 @@ fn certified_clean(repo: &Path, paths: &[PathBuf]) -> bool {
     }
 }
 
-fn git(dir: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new("git")
+/// Git, with the settings this check refuses to inherit.
+///
+/// `status.showUntrackedFiles=no` in a user's config would hide exactly the
+/// files the design rests on noticing, and the stamp would then certify clean
+/// over a file nobody committed. A claim about a commit must not depend on
+/// settings on the machine that made it.
+///
+/// `--no-optional-locks` because a build script has no business writing the
+/// index, which `git status` otherwise does to refresh it.
+fn git_command(dir: &Path) -> Command {
+    let mut command = Command::new("git");
+    command
         .current_dir(dir)
-        .args(args)
-        .output()
-        .ok()?;
+        .arg("--no-optional-locks")
+        .args(["-c", "status.showUntrackedFiles=normal"]);
+    command
+}
+
+fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    let out = git_command(dir).args(args).output().ok()?;
     if !out.status.success() {
         return None;
     }

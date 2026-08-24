@@ -54,3 +54,39 @@ each pass cost 1.7s with nothing changed; after it, 0.13s.
 A bare `cargo build` is still stamped. With nothing handed in, the build script
 falls back to the dep-info the previous build left, which is at worst one build
 stale, and never silently unstamped.
+
+## Boundaries
+
+Where the stamp stops being able to tell. Several of these answer clean where
+dirty would be better. That is recorded here rather than closed: whether to
+close any of them is a separate decision.
+
+"Want" is what the stamp would ideally say. "Does" is what it says, run rather
+than reasoned unless the row says otherwise.
+
+| what you do | want | does | pinned by |
+| --- | --- | --- | --- |
+| edit a crate's own Cargo.toml, lockfile unmoved | dirty | clean | `boundary::misses_a_crate_manifest_edit_that_leaves_the_lockfile_alone` |
+| edit the workspace Cargo.toml | dirty | dirty | `boundary::counts_a_workspace_manifest_edit` |
+| edit a crate's build.rs | dirty | dirty | `boundary::counts_an_edit_to_the_build_script` |
+| edit a compiled file that a gitignore rule matches | dirty | clean | `boundary::misses_a_compiled_file_a_gitignore_rule_matches` |
+| add a module, then a bare cargo build with no stamp handed in | dirty | clean, until a build recomputes the stamp | `boundary::a_bare_build_misses_a_module_added_since_the_last_one` |
+| compile a source that resolves outside git's toplevel | dirty | clean | `boundary::misses_a_compiled_source_that_lies_outside_the_repository` |
+| reach the repository by a differently-cased path | dirty when dirty | clean always | read from the source, not run |
+| rename a compiled file's case only, without committing | one answer | clean on macOS; dirty on Linux | run on macOS; the Linux half is reasoned, not run |
+| run with `status.showUntrackedFiles=no` in a user's config | dirty | dirty | `boundary::counts_an_untracked_file_though_a_config_turns_untracked_reporting_off` |
+| unreadable dep-info, no git, or a failed git call | dirty | dirty | `boundary::refuses_to_certify_when_the_record_cannot_be_read` |
+
+Three of these were predictions before this pass. The gitignore row and the
+config row came out as predicted. The case-only rename came out clean on
+macOS, where `core.ignorecase` is true and git reports nothing; on Linux the
+recorded path stops resolving, so git reports it deleted and the answer is
+dirty, which makes this the one row whose answer depends on the machine.
+
+The config row reads dirty only because the check now passes
+`status.showUntrackedFiles=normal` itself. Measured before that change, a
+user's `status.showUntrackedFiles=no` hid an untracked compiled file and the
+stamp certified clean over it. A claim about a commit must not depend on
+settings on the machine that made it, so the check no longer inherits them,
+and it passes `--no-optional-locks` too, since a build script has no business
+writing the index.
