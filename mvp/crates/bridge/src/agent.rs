@@ -911,6 +911,7 @@ fn permission_verdict(
 /// rather than letting it run without one.
 async fn run_exec(
     commands: &[crate::exec::ExecCommand],
+    timeout: std::time::Duration,
     credentials: &std::sync::RwLock<crate::credentials::Credentials>,
     tools_config: &std::sync::RwLock<crate::credentials::ToolsConfig>,
     cancel: &mut watch::Receiver<bool>,
@@ -924,7 +925,8 @@ async fn run_exec(
     match resolved {
         Ok(resolved) => {
             let base = crate::exec::ambient_env();
-            let results = crate::exec::run_commands(commands, &base, &resolved, cancel).await;
+            let results =
+                crate::exec::run_commands(commands, timeout, &base, &resolved, cancel).await;
             crate::exec::format_results(commands, &results)
         }
         Err(e) => (format!("exec credentials unavailable: {e}"), true),
@@ -1134,55 +1136,84 @@ async fn run_tool_round<B: Broker>(
             // strictest verdict across every command in the call, not just
             // the first. Parsing happens before the check, once, so the
             // Approved arm never has to re-parse what's already known good.
-            "Exec" => match crate::exec::parse_commands(&block["input"]) {
-                Ok(mut commands) => {
-                    let call_cwds: Vec<std::path::PathBuf> = commands
-                        .iter()
-                        .map(|c| match &c.cwd {
-                            Some(c) => resolve_against(cwd, c),
-                            None => cwd.to_path_buf(),
-                        })
-                        .collect();
-                    // Bind every command's cwd to its resolved value:
-                    // unset, exec.rs leaves the child to inherit the bridge
-                    // process's own directory, not this conversation's.
-                    for (c, resolved) in commands.iter_mut().zip(&call_cwds) {
-                        c.cwd = Some(resolved.to_string_lossy().into_owned());
-                    }
-                    match permission_verdict(permissions, cwd, &home, "exec", &call_cwds) {
-                        crate::permissions::Verdict::Deny => {
-                            ("denied by permissions policy".to_string(), true)
-                        }
-                        crate::permissions::Verdict::Allow => {
-                            run_exec(&commands, credentials, tools_config, cancel).await
-                        }
-                        crate::permissions::Verdict::Ask => {
-                            let approval_id = uuid::Uuid::new_v4().to_string();
-                            let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
-                            let correlation = json!({
-                                "conversationId": pubr.conv().0,
-                                "queryId": query,
-                                "turnId": turn_id,
-                                "toolUseId": id,
-                            });
-                            match crate::approval::gate(
-                                pubr.broker(),
-                                pubr.attach(),
-                                &approval_id,
-                                &ask,
-                                &correlation,
-                                cancel,
-                            )
-                            .await
-                            {
-                                crate::approval::Verdict::Approved => {
-                                    run_exec(&commands, credentials, tools_config, cancel).await
+            "Exec" => match crate::exec::parse_call(&block["input"]) {
+                Ok(mut call) => {
+                    // The ceiling is read before the gate, so a call that
+                    // cannot run never asks a human to approve it.
+                    let ceiling = tools_config
+                        .read()
+                        .unwrap()
+                        .exec
+                        .as_ref()
+                        .and_then(|binding| binding.max_timeout_s);
+                    match crate::exec::resolve_timeout(call.timeout_s, ceiling) {
+                        Err(e) => (e, true),
+                        Ok(timeout) => {
+                            let call_cwds: Vec<std::path::PathBuf> = call
+                                .commands
+                                .iter()
+                                .map(|c| match &c.cwd {
+                                    Some(c) => resolve_against(cwd, c),
+                                    None => cwd.to_path_buf(),
+                                })
+                                .collect();
+                            // Bind every command's cwd to its resolved value:
+                            // unset, exec.rs leaves the child to inherit the
+                            // bridge process's own directory, not this
+                            // conversation's.
+                            for (c, resolved) in call.commands.iter_mut().zip(&call_cwds) {
+                                c.cwd = Some(resolved.to_string_lossy().into_owned());
+                            }
+                            match permission_verdict(permissions, cwd, &home, "exec", &call_cwds) {
+                                crate::permissions::Verdict::Deny => {
+                                    ("denied by permissions policy".to_string(), true)
                                 }
-                                crate::approval::Verdict::Denied { by } => {
-                                    (format!("denied by {by}"), true)
+                                crate::permissions::Verdict::Allow => {
+                                    run_exec(
+                                        &call.commands,
+                                        timeout,
+                                        credentials,
+                                        tools_config,
+                                        cancel,
+                                    )
+                                    .await
                                 }
-                                crate::approval::Verdict::Cancelled => {
-                                    ("cancelled by user before approval".to_string(), true)
+                                crate::permissions::Verdict::Ask => {
+                                    let approval_id = uuid::Uuid::new_v4().to_string();
+                                    let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                                    let correlation = json!({
+                                        "conversationId": pubr.conv().0,
+                                        "queryId": query,
+                                        "turnId": turn_id,
+                                        "toolUseId": id,
+                                    });
+                                    match crate::approval::gate(
+                                        pubr.broker(),
+                                        pubr.attach(),
+                                        &approval_id,
+                                        &ask,
+                                        &correlation,
+                                        cancel,
+                                    )
+                                    .await
+                                    {
+                                        crate::approval::Verdict::Approved => {
+                                            run_exec(
+                                                &call.commands,
+                                                timeout,
+                                                credentials,
+                                                tools_config,
+                                                cancel,
+                                            )
+                                            .await
+                                        }
+                                        crate::approval::Verdict::Denied { by } => {
+                                            (format!("denied by {by}"), true)
+                                        }
+                                        crate::approval::Verdict::Cancelled => {
+                                            ("cancelled by user before approval".to_string(), true)
+                                        }
+                                    }
                                 }
                             }
                         }

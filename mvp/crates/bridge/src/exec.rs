@@ -14,31 +14,31 @@ use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 
 use serde_json::{Value, json};
+use std::num::NonZeroU32;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::sync::watch;
 
-/// The ceiling on an `Exec` call's stated timeout: `BRIDGE_EXEC_MAX_TIMEOUT`
-/// in whole seconds, unset (or unreadable, or zero) meaning no ceiling at all.
-/// Read once so the number the schema advertises at startup stays the number
-/// enforced for the life of the process.
-///
-/// Ambient env belongs at the composition root (CLAUDE.md), and this is not
-/// it: threading the value from main.rs runs through agent.rs, which another
-/// branch owns right now. Revisit when that branch lands.
-fn max_timeout() -> Option<Duration> {
-    static MAX: std::sync::OnceLock<Option<Duration>> = std::sync::OnceLock::new();
-    *MAX.get_or_init(|| parse_max(std::env::var("BRIDGE_EXEC_MAX_TIMEOUT").ok()))
+/// One `Exec` call as the model asked for it: the commands, and the time the
+/// caller says the whole call may take. The ceiling that may cut the ask down
+/// is not here, because it belongs to the host rather than the call.
+#[derive(Debug, Clone)]
+pub struct ExecCall {
+    pub commands: Vec<ExecCommand>,
+    pub timeout_s: NonZeroU32,
 }
 
-/// Anything that is not a positive whole number of seconds means no ceiling: a
-/// bridge that cannot read its own configuration should not invent a limit the
-/// caller was never told about.
-fn parse_max(configured: Option<String>) -> Option<Duration> {
-    configured
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .filter(|secs| *secs > 0)
-        .map(Duration::from_secs)
+/// What the call may actually run for, given what this host allows. Refused
+/// rather than clamped: a clamped call leaves the caller planning against a
+/// number that will never happen, and it never learns the limit exists.
+pub fn resolve_timeout(asked: NonZeroU32, ceiling: Option<NonZeroU32>) -> Result<Duration, String> {
+    match ceiling {
+        Some(ceiling) if asked > ceiling => Err(format!(
+            "timeout of {asked}s exceeds this host's maximum of {ceiling}s. Ask for {ceiling}s or \
+             less, or run the work in a form that finishes inside it."
+        )),
+        _ => Ok(Duration::from_secs(u64::from(asked.get()))),
+    }
 }
 
 /// Combined output cap. Nothing near this belongs in a model request; the
@@ -75,31 +75,13 @@ pub fn bash_schema() -> Value {
     })
 }
 
+/// Every word of this is a constant of the build, the ceiling included: the
+/// tools array heads the cached prompt prefix, so text that varied with what a
+/// host configured would cost that host its whole prefix the moment it did.
+/// The description says a maximum may exist and what happens when a call
+/// exceeds it, which is what the model needs to recognise the refusal; only the
+/// refusal itself names the number.
 pub fn exec_schema() -> Value {
-    exec_schema_with(max_timeout())
-}
-
-/// The maximum is interpolated rather than described in the abstract: a caller
-/// that cannot read the limit cannot choose a value inside it, and the limit is
-/// per-machine. With none configured the schema says nothing about one, so what
-/// the caller reads is true of the bridge it is actually talking to.
-fn exec_schema_with(max: Option<Duration>) -> Value {
-    let timeout_description = format!(
-        "Seconds this whole call may run before every command in it is killed. \
-        Required, and it is your own expectation: state the time you think the \
-        work needs, so a call that runs past it tells you the expectation was \
-        wrong. A local command (reading a file, a git status) is done in \
-        seconds; reaching the network, installing, or building can want \
-        minutes.{}",
-        match max {
-            Some(max) => format!(
-                " The maximum on this bridge is {} seconds. A call asking for \
-                more is rejected, not reduced to the maximum.",
-                max.as_secs()
-            ),
-            None => String::new(),
-        }
-    );
     json!({
         "name": "Exec",
         "description": "Run a sequence of programs directly (no shell): each command joins \
@@ -166,7 +148,13 @@ fn exec_schema_with(max: Option<Duration>) -> Value {
                 "timeout": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": timeout_description
+                    "description": "Seconds this whole call may run before every command in it is \
+                        killed. Required, and it is your own expectation: state the time you think \
+                        the work needs, so a call that runs past it tells you the expectation was \
+                        wrong. A local command (reading a file, a git status) is done in seconds; \
+                        reaching the network, installing, or building can want minutes. A host may \
+                        set a maximum: a call asking for longer than that host allows is refused \
+                        before anything runs, and the refusal names the limit."
                 }
             },
             "required": ["commands", "timeout"],
@@ -210,9 +198,6 @@ pub struct ExecCommand {
     pub env: std::collections::HashMap<String, String>,
     pub op: Option<ExecOp>,
     pub redirect: Option<ExecRedirect>,
-    /// The whole call's bound, copied onto every command in it. The timeout is
-    /// stated once per call, but parsing and running share only this type.
-    pub timeout: Duration,
 }
 
 /// Absent op (`None` on the command) means sequential — there is no `Seq`
@@ -244,7 +229,7 @@ pub struct ExecRedirect {
 
 /// Parse one command from its JSON block. `op`/`redirect` absent is fine —
 /// tolerant of a missing optional field, never of a malformed required one.
-fn parse_command(v: &Value, timeout: Duration) -> Result<ExecCommand, String> {
+fn parse_command(v: &Value) -> Result<ExecCommand, String> {
     let program = v["program"]
         .as_str()
         .ok_or("command missing \"program\"")?
@@ -281,50 +266,39 @@ fn parse_command(v: &Value, timeout: Duration) -> Result<ExecCommand, String> {
         env,
         op,
         redirect,
-        timeout,
     })
 }
 
-/// The call's timeout: required, whole seconds, and rejected outright when it
-/// asks for more than the machine allows. Rejected rather than clamped, because
-/// a clamped call leaves the caller planning against a number that will never
-/// happen.
-fn parse_timeout(input: &Value, max: Option<Duration>) -> Result<Duration, String> {
+/// The call's timeout as asked for: required, and whole positive seconds. The
+/// type refuses zero and anything negative on its own; absence and a malformed
+/// value are refused here, before any command runs.
+fn parse_timeout(input: &Value) -> Result<NonZeroU32, String> {
     let secs = input["timeout"]
         .as_u64()
+        .and_then(|secs| u32::try_from(secs).ok())
         .ok_or(
             "missing or malformed \"timeout\": whole seconds this call may run before it is killed",
         )?;
-    if secs == 0 {
-        return Err("\"timeout\" must be at least 1 second".to_string());
-    }
-    match max {
-        Some(max) if secs > max.as_secs() => Err(format!(
-            "\"timeout\" of {secs}s exceeds this bridge's maximum of {}s. Ask for {}s or less, \
-             or run the work in a form that finishes inside it.",
-            max.as_secs(),
-            max.as_secs()
-        )),
-        _ => Ok(Duration::from_secs(secs)),
-    }
+    NonZeroU32::new(secs).ok_or_else(|| "\"timeout\" must be at least 1 second".to_string())
 }
 
-/// Parse the `Exec` tool's whole `commands` array. Request-level: a malformed
-/// array fails the call before anything runs, per composition-model.md's
-/// request-level-vs-item-level split — there is no per-item result to hang a
-/// parse failure on until commands actually start.
-pub fn parse_commands(input: &Value) -> Result<Vec<ExecCommand>, String> {
-    parse_call(input, max_timeout())
-}
-
-fn parse_call(input: &Value, max: Option<Duration>) -> Result<Vec<ExecCommand>, String> {
-    let timeout = parse_timeout(input, max)?;
-    input["commands"]
+/// Parse the `Exec` tool's whole input: the commands, and the timeout the call
+/// states. Request-level: a malformed array or a missing timeout fails the call
+/// before anything runs, per composition-model.md's request-level-vs-item-level
+/// split — there is no per-item result to hang a parse failure on until
+/// commands actually start.
+pub fn parse_call(input: &Value) -> Result<ExecCall, String> {
+    let timeout_s = parse_timeout(input)?;
+    let commands = input["commands"]
         .as_array()
         .ok_or("missing \"commands\"")?
         .iter()
-        .map(|v| parse_command(v, timeout))
-        .collect()
+        .map(parse_command)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ExecCall {
+        commands,
+        timeout_s,
+    })
 }
 
 /// One command's outcome within a run — the item-level result `Exec`'s array
@@ -437,17 +411,15 @@ fn existing_name(env: &BTreeMap<OsString, OsString>, name: &str) -> Option<OsStr
 /// this, never drops one.
 pub async fn run_commands(
     commands: &[ExecCommand],
+    timeout: Duration,
     base: &BTreeMap<OsString, OsString>,
     credentials: &crate::credentials::ExecCredentials,
     cancel: &mut watch::Receiver<bool>,
 ) -> Vec<CommandOutcome> {
-    let Some(first) = commands.first() else {
-        return Vec::new();
-    };
     // One deadline for the whole call, not one per command: the caller stated
     // what the call may take. It starts here rather than at parse time, so a
     // wait for human approval spends the human's time, not the command's.
-    let deadline = tokio::time::Instant::now() + first.timeout;
+    let deadline = tokio::time::Instant::now() + timeout;
     let mut results: Vec<CommandOutcome> = Vec::with_capacity(commands.len());
     let mut i = 0;
     // Whether the previous pipeline's terminal command succeeded — gates the
@@ -476,7 +448,8 @@ pub async fn run_commands(
                 Some(ExecOp::Or) => !prev_ok,
             };
         if run_this {
-            let group_results = run_pipeline(group, base, credentials, cancel, deadline).await;
+            let group_results =
+                run_pipeline(group, timeout, base, credentials, cancel, deadline).await;
             prev_ok = group_results.last().is_some_and(CommandOutcome::succeeded);
             if *cancel.borrow() || group_results.iter().any(|r| r.timed_out.is_some()) {
                 skip_rest = true;
@@ -499,6 +472,7 @@ pub async fn run_commands(
 /// command is ignored — its stdout is already spoken for by the pipe.
 async fn run_pipeline(
     group: &[ExecCommand],
+    timeout: Duration,
     base: &BTreeMap<OsString, OsString>,
     credentials: &crate::credentials::ExecCredentials,
     cancel: &mut watch::Receiver<bool>,
@@ -694,7 +668,7 @@ async fn run_pipeline(
             },
             skipped: false,
             timed_out: match ending {
-                Ending::TimedOut => Some(group[idx].timeout),
+                Ending::TimedOut => Some(timeout),
                 Ending::Ran | Ending::Cancelled => None,
             },
         });
@@ -942,8 +916,8 @@ async fn run_child(
 #[cfg(test)]
 mod tests {
     use super::{
-        Duration, ambient_env, child_env, exec_schema_with, format_results, parse_call, run_bash,
-        run_commands,
+        Duration, NonZeroU32, ambient_env, child_env, exec_schema, format_results, parse_call,
+        resolve_timeout, run_bash, run_commands,
     };
     use crate::credentials::ExecCredentials;
     use serde_json::json;
@@ -951,10 +925,8 @@ mod tests {
     use std::ffi::{OsStr, OsString};
     use tokio::sync::watch;
 
-    // No maximum configured, so a test states whatever timeout it needs and the
-    // machine running the suite cannot change the answer.
-    fn parse(input: &serde_json::Value) -> Result<Vec<super::ExecCommand>, String> {
-        parse_call(input, None)
+    fn seconds(n: u32) -> NonZeroU32 {
+        NonZeroU32::new(n).expect("a positive number of seconds")
     }
 
     // A cancel receiver that never fires: the human is not cancelling.
@@ -1031,13 +1003,22 @@ mod tests {
         cancel: &mut watch::Receiver<bool>,
     ) -> (String, bool) {
         // A timeout is required, so a test that isn't about the timeout gets one
-        // generous enough never to fire.
+        // generous enough never to fire. No ceiling: what a host allows is not
+        // what these tests are about.
         if input["timeout"].is_null() {
             input["timeout"] = json!(30);
         }
-        let commands = parse(&input).expect("valid commands");
-        let results = run_commands(&commands, &ambient_env(), &no_credentials(), cancel).await;
-        format_results(&commands, &results)
+        let call = parse_call(&input).expect("valid commands");
+        let timeout = resolve_timeout(call.timeout_s, None).expect("no ceiling");
+        let results = run_commands(
+            &call.commands,
+            timeout,
+            &ambient_env(),
+            &no_credentials(),
+            cancel,
+        )
+        .await;
+        format_results(&call.commands, &results)
     }
 
     #[tokio::test]
@@ -1212,13 +1193,18 @@ mod tests {
             "commands": [
                 { "program": "false", "op": "&&" },
                 { "program": "echo", "args": ["a"] }
-            ]
+            ],
+            "timeout": 30
         });
-        let commands = parse(&json!({
-            "commands": input["commands"], "timeout": 30
-        }))
-        .expect("valid commands");
-        let results = run_commands(&commands, &ambient_env(), &no_credentials(), &mut cancel).await;
+        let call = parse_call(&input).expect("valid commands");
+        let results = run_commands(
+            &call.commands,
+            Duration::from_secs(30),
+            &ambient_env(),
+            &no_credentials(),
+            &mut cancel,
+        )
+        .await;
         assert_eq!(results.len(), 2, "one result per input command, always");
     }
 
@@ -1526,49 +1512,95 @@ mod tests {
     }
 
     #[test]
-    fn a_call_without_a_timeout_is_rejected() {
-        let actual = parse(&json!({ "commands": [{ "program": "echo" }] }));
+    fn a_call_without_a_timeout_is_refused() {
+        let actual = parse_call(&json!({ "commands": [{ "program": "echo" }] }));
 
         assert!(actual.is_err());
     }
 
     #[test]
-    fn a_timeout_over_the_maximum_is_rejected_rather_than_clamped() {
-        let input = json!({ "commands": [{ "program": "echo" }], "timeout": 1800 });
+    fn a_timeout_of_zero_is_refused() {
+        let actual = parse_call(&json!({ "commands": [{ "program": "echo" }], "timeout": 0 }));
 
-        let actual = parse_call(&input, Some(Duration::from_secs(900)));
+        assert!(actual.is_err());
+    }
 
-        let message = actual.expect_err("over the maximum");
+    #[test]
+    fn a_negative_timeout_is_refused() {
+        let actual = parse_call(&json!({ "commands": [{ "program": "echo" }], "timeout": -30 }));
+
+        assert!(actual.is_err());
+    }
+
+    #[test]
+    fn a_call_keeps_the_timeout_it_asked_for() {
+        let expected = seconds(30);
+
+        let actual = parse_call(&json!({ "commands": [{ "program": "echo" }], "timeout": 30 }))
+            .expect("valid call")
+            .timeout_s;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn with_no_ceiling_the_call_runs_for_what_it_asked_for() {
+        let expected = Duration::from_secs(30);
+
+        let actual = resolve_timeout(seconds(30), None);
+
+        assert_eq!(actual.expect("no ceiling"), expected);
+    }
+
+    #[test]
+    fn with_no_ceiling_even_an_extravagant_timeout_stands() {
+        let expected = Duration::from_secs(86400);
+
+        let actual = resolve_timeout(seconds(86400), None);
+
+        assert_eq!(actual.expect("no ceiling"), expected);
+    }
+
+    #[test]
+    fn a_timeout_under_the_ceiling_is_left_alone() {
+        let expected = Duration::from_secs(30);
+
+        let actual = resolve_timeout(seconds(30), Some(seconds(900)));
+
+        assert_eq!(actual.expect("under the ceiling"), expected);
+    }
+
+    #[test]
+    fn a_timeout_at_the_ceiling_is_allowed() {
+        let expected = Duration::from_secs(900);
+
+        let actual = resolve_timeout(seconds(900), Some(seconds(900)));
+
+        assert_eq!(actual.expect("at the ceiling"), expected);
+    }
+
+    #[test]
+    fn a_timeout_over_the_ceiling_is_refused_rather_than_clamped() {
+        let actual = resolve_timeout(seconds(901), Some(seconds(900)));
+
+        assert!(actual.is_err());
+    }
+
+    #[test]
+    fn a_refusal_names_the_ceiling_the_host_allows() {
+        let actual = resolve_timeout(seconds(901), Some(seconds(900))).expect_err("over");
+
         assert!(
-            message.contains("1800") && message.contains("900"),
-            "the rejection names neither what was asked nor what is allowed: {message:?}"
+            actual.contains("900"),
+            "the caller cannot see what it may ask for: {actual:?}"
         );
     }
 
+    /// The tools array heads the cached prompt prefix, so one host's
+    /// configuration showing up in it would cost that host the whole prefix.
     #[test]
-    fn a_timeout_at_the_maximum_is_accepted() {
-        let input = json!({ "commands": [{ "program": "echo" }], "timeout": 900 });
-
-        let actual = parse_call(&input, Some(Duration::from_secs(900)));
-
-        assert_eq!(
-            actual.expect("at the maximum")[0].timeout,
-            Duration::from_secs(900)
-        );
-    }
-
-    #[test]
-    fn with_no_maximum_configured_any_timeout_is_accepted() {
-        let input = json!({ "commands": [{ "program": "echo" }], "timeout": 86400 });
-
-        let actual = parse_call(&input, None);
-
-        assert!(actual.is_ok());
-    }
-
-    #[test]
-    fn the_schema_states_the_configured_maximum() {
-        let schema = exec_schema_with(Some(Duration::from_secs(900)));
+    fn the_schema_never_names_a_number_a_host_configured() {
+        let schema = exec_schema();
 
         let actual = schema["input_schema"]["properties"]["timeout"]["description"]
             .as_str()
@@ -1576,14 +1608,14 @@ mod tests {
             .to_owned();
 
         assert!(
-            actual.contains("900 seconds"),
-            "a caller cannot see the limit it must choose inside: {actual:?}"
+            !actual.contains("900"),
+            "a host's own ceiling reached the cached prefix: {actual:?}"
         );
     }
 
     #[test]
-    fn the_schema_claims_no_maximum_when_none_is_configured() {
-        let schema = exec_schema_with(None);
+    fn the_schema_warns_that_a_maximum_may_apply() {
+        let schema = exec_schema();
 
         let actual = schema["input_schema"]["properties"]["timeout"]["description"]
             .as_str()
@@ -1591,45 +1623,16 @@ mod tests {
             .to_owned();
 
         assert!(
-            !actual.contains("maximum"),
-            "a limit is advertised that this bridge does not enforce: {actual:?}"
+            actual.contains("maximum") && actual.contains("refused"),
+            "the model cannot know the refusal exists before it meets one: {actual:?}"
         );
-    }
-
-    #[test]
-    fn a_configured_maximum_is_read_as_seconds() {
-        let expected = Some(Duration::from_secs(900));
-
-        let actual = super::parse_max(Some("900".to_string()));
-
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn an_unset_or_unreadable_maximum_is_no_maximum() {
-        for configured in [None, Some(String::new()), Some("soon".to_string())] {
-            let expected = None;
-
-            let actual = super::parse_max(configured.clone());
-
-            assert_eq!(actual, expected, "from {configured:?}");
-        }
-    }
-
-    #[test]
-    fn a_maximum_of_zero_is_no_maximum_rather_than_a_call_that_cannot_run() {
-        let expected = None;
-
-        let actual = super::parse_max(Some("0".to_string()));
-
-        assert_eq!(actual, expected);
     }
 
     #[test]
     fn the_schema_requires_a_timeout() {
         let expected = json!(["commands", "timeout"]);
 
-        let actual = exec_schema_with(None)["input_schema"]["required"].clone();
+        let actual = exec_schema()["input_schema"]["required"].clone();
 
         assert_eq!(actual, expected);
     }

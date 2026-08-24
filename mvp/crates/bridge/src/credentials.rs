@@ -18,6 +18,7 @@
 //! provider is what applies it.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroU32;
 
 use serde_json::{Value, json};
 
@@ -97,6 +98,11 @@ pub struct Credentials(pub BTreeMap<String, Credential>);
 pub struct Binding {
     pub credentials: Vec<String>,
     pub enabled: bool,
+    /// The exec group's ceiling on an `Exec` call's stated timeout, in whole
+    /// seconds. Absent means no ceiling. Only the exec group reads it: a
+    /// timeout is a property of running a command, which is the only thing
+    /// that group does.
+    pub max_timeout_s: Option<NonZeroU32>,
 }
 
 /// The `tools` cell. A group absent from the line is unconfigured, not
@@ -225,10 +231,29 @@ fn parse_binding(entry: &Value, group: &str, arity: Arity) -> Result<Binding, St
             .collect::<Result<Vec<_>, _>>()?,
     };
     let enabled = enabled_field(object.get("enabled"), &format!("tools group {group:?}"))?;
+    let max_timeout_s = max_timeout_field(object.get("max_timeout_s"), group)?;
     Ok(Binding {
         credentials,
         enabled,
+        max_timeout_s,
     })
+}
+
+/// Absent is no ceiling. A value that is present but cannot be a ceiling is
+/// rejected rather than dropped: a host that meant to bound its calls and
+/// mistyped the number would otherwise run unbounded and never be told.
+fn max_timeout_field(value: Option<&Value>, group: &str) -> Result<Option<NonZeroU32>, String> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_u64()
+            .and_then(|secs| u32::try_from(secs).ok())
+            .and_then(NonZeroU32::new)
+            .map(Some)
+            .ok_or_else(|| {
+                format!("tools group {group:?} needs a whole number of seconds above zero for max_timeout_s")
+            }),
+    }
 }
 
 /// `enabled` defaults to true wherever it appears.
@@ -549,6 +574,45 @@ mod tests {
 
         assert!(parse_tools(&json!({ "github": { "credentials": ["a"] } })).is_err());
         assert!(parse_tools(&json!({ "exec": { "credentials": "a" } })).is_err());
+    }
+
+    #[test]
+    fn the_exec_group_carries_the_ceiling_it_was_given() {
+        let expected = Some(NonZeroU32::new(900).expect("positive"));
+
+        let actual = tools(json!({
+            "exec": { "credentials": [], "max_timeout_s": 900 }
+        }))
+        .exec
+        .expect("an exec binding")
+        .max_timeout_s;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn an_exec_group_without_a_ceiling_has_none() {
+        let expected = None;
+
+        let actual = tools(json!({ "exec": { "credentials": [] } }))
+            .exec
+            .expect("an exec binding")
+            .max_timeout_s;
+
+        assert_eq!(actual, expected);
+    }
+
+    /// A mistyped ceiling would otherwise leave the host running unbounded
+    /// while believing it had set a limit.
+    #[test]
+    fn a_ceiling_that_cannot_be_a_number_of_seconds_is_rejected() {
+        for bad in [json!(0), json!(-1), json!("900"), json!(1.5)] {
+            let actual = parse_tools(&json!({
+                "exec": { "credentials": [], "max_timeout_s": bad }
+            }));
+
+            assert!(actual.is_err(), "accepted {bad}");
+        }
     }
 
     /// Neither line can be validated against the other's cell, so an unknown
