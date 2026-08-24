@@ -12,12 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A world can be asked to serve a conversation over NATS: bridge answers agent.v1.{world}.requests.service, spawning, adopting, or taking over per the conversation's own attachment record, and rejects every other request leaf honestly.
 - Six GitHub pull request tools, each limited to a fixed set of gh flags: creating always drafts, reviewing cannot approve, and auto-merge is only queued or cleared.
 - `credentials` and `tools` control lines name credentials and bind them to tool groups.
+- A `settings` request can name the system prompt or the user context to get its full text.
 
 ### Changed
 
 - The Skill tool is offered whether or not a skills directory is set.
 - The `model` control line takes an object naming the model, its max tokens, thinking mode, thinking display and effort level.
-- The `settings` reply summarises the system prompt and the user context as a set flag, a byte count and a content hash instead of inlining them, so one query no longer buries every other setting in a wall of text. `{"settings": {"include": ["system", "context"]}}` adds the body back as a `text` field on each entry it names.
+- The `settings` reply summarises the system prompt and the user context as a set flag, a byte count and a content hash.
 
 ### Removed
 
