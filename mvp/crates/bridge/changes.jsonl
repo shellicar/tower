@@ -9,3 +9,4 @@
 {"type":"change","category":"removed","description":"`BRIDGE_MODEL` and `BRIDGE_THINKING_BUDGET`. Bridge serves no conversation until a `model` control line names a model and a max token count."}
 {"type":"change","category":"changed","description":"The `settings` reply summarises the system prompt and the user context as a set flag, a byte count and a content hash."}
 {"type":"change","category":"added","description":"A `settings` request can name the system prompt or the user context to get its full text."}
+{"type":"change","category":"changed","description":"Writing and deleting a memory no longer raises an approval. All five memory tools now run without asking."}
