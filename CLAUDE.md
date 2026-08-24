@@ -159,6 +159,15 @@ refuses to serve a conversation (`no_model`). Adaptive thinking, not a
 budget: the legacy `{"type":"enabled","budget_tokens":N}` shape produces
 worse thinking and is gone. docs/mvp/bridge-stdio-spec.md holds the rest.
 
+The connect-phase retry policy has no default either. A `retry` control line
+carries maxRetries, baseDelayMs, maxDelayMs and retryAfterCapMs; it REPLACES
+rather than merging (a policy is one strategy), all four are required, `null`
+clears it, and no line at all means no retrying — bridge as it behaved before
+it existed. Scope is the request up to and including the response status:
+once the stream has yielded anything the turn is past retrying. Classify by
+class, never by enumerated status code — 4xx never except 429, 5xx always, no
+response always — because the documentation has already moved under this once.
+
 ## helm
 
 The terminal client (`mvp/crates/helm`): one bridge, spawned as a child,

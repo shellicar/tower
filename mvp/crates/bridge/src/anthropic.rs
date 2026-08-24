@@ -4,10 +4,20 @@
 //! markers, not typed deltas). Hand-rolled SSE: the format is `event:` and
 //! `data:` lines, and a dependency is a decision this doesn't earn.
 
+use std::sync::{Arc, RwLock};
+
 use futures::StreamExt;
 use serde_json::{Value, json};
 
 use wire::ConversationId;
+
+use crate::retry::{ConnectFailure, RetryPolicy};
+
+/// The live `retry` cell. Read when a failure has to be decided on rather
+/// than captured when a query starts, so a policy set or cleared over stdio
+/// reaches the next failure of a conversation already running. A wait already
+/// under way was computed before it began and runs to its full length.
+pub type RetryCell = Arc<RwLock<Option<RetryPolicy>>>;
 
 /// Built once at startup (main.rs) and threaded down through `AgentConfig`/
 /// `TurnContext` alongside the NATS client, `Auth`, and every other shared
@@ -310,6 +320,89 @@ fn request_body(
     body
 }
 
+/// The connect phase: the request up to and including the response status,
+/// retried under whatever policy the `retry` cell holds at the moment each
+/// failure lands. A response that has begun streaming is past this point and
+/// is never retried, because a partial stream cannot be replayed into the
+/// same turn.
+///
+/// A retry is this turn attempted again, not a new one: the ids are the
+/// caller's and nothing is published here, so from outside the only
+/// difference is a turn that took longer.
+///
+/// Retrying only inserts attempts ahead of the failure path and never alters
+/// it. With no policy the first failure goes down it exactly as before this
+/// existed; with an exhausted policy the last one does, and it is the last
+/// attempt's error that surfaces, since that is the state the request was in
+/// when bridge gave up. The earlier attempts are in the console log.
+///
+/// A cancel needs nothing here: the caller races this whole future against
+/// the cancel signal, so dropping it abandons a backoff wait mid-sleep.
+async fn connect(
+    http: &reqwest::Client,
+    auth: &Auth,
+    body: &Value,
+    conv: &ConversationId,
+    retry: &RetryCell,
+) -> anyhow::Result<reqwest::Response> {
+    let mut attempt: u32 = 1;
+    loop {
+        let request = http
+            .post("https://api.anthropic.com/v1/messages")
+            .header("anthropic-version", "2023-06-01")
+            .json(body);
+        // An auth failure is local configuration rather than a connect
+        // failure — it has no representation in ConnectFailure — so it
+        // surfaces immediately, as it always did.
+        let sent = auth.apply(request, http).await?.send().await;
+
+        let (failure, reported, error) = match sent {
+            Ok(response) if response.status().is_success() => return Ok(response),
+            Ok(response) => {
+                let status = response.status();
+                let retry_after = response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(crate::retry::parse_retry_after);
+                let text = response.text().await.unwrap_or_default();
+                (
+                    ConnectFailure::Status {
+                        code: status.as_u16(),
+                        retry_after,
+                    },
+                    crate::retry::describe(status.as_u16(), &text, retry_after),
+                    anyhow::anyhow!("messages API {status}: {text}"),
+                )
+            }
+            Err(e) => {
+                let error = anyhow::Error::new(e);
+                let reported = format!("no response: {error:#}");
+                (ConnectFailure::NoResponse, reported, error)
+            }
+        };
+
+        let policy = *retry.read().unwrap();
+        let wait = policy.and_then(|policy| {
+            crate::retry::next_delay(&failure, attempt, &policy, crate::retry::jitter_fraction())
+        });
+        let Some(wait) = wait else {
+            eprintln!(
+                "bridge[{}]: connect attempt {attempt} failed: {reported}; giving up",
+                conv.0
+            );
+            return Err(error);
+        };
+        eprintln!(
+            "bridge[{}]: connect attempt {attempt} failed: {reported}; retrying in {}ms",
+            conv.0,
+            wait.as_millis()
+        );
+        tokio::time::sleep(wait).await;
+        attempt += 1;
+    }
+}
+
 /// Stream one turn: publish `block`/`delta` as chunks arrive, accumulate the
 /// content blocks for the commit, and return the round's accounting.
 /// `tools` is the API `tools` array; empty = the no-tools call as before.
@@ -324,6 +417,7 @@ pub async fn stream_turn<D: DeltaSink>(
     messages: &[Value],
     tools: &[Value],
     attach: &Option<bridge::attach::AttachHandle>,
+    retry: &RetryCell,
 ) -> anyhow::Result<TurnDone> {
     // The system array always leads with the Agent SDK identity prefix;
     // subscription (OAuth) access requires it. The spawn's own system prompt
@@ -355,16 +449,7 @@ pub async fn stream_turn<D: DeltaSink>(
     mark_message_cache_breakpoint(&mut messages);
     let body = request_body(model, system_blocks, messages, tools);
 
-    let request = http
-        .post("https://api.anthropic.com/v1/messages")
-        .header("anthropic-version", "2023-06-01")
-        .json(&body);
-    let response = auth.apply(request, http).await?.send().await?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let text = response.text().await.unwrap_or_default();
-        anyhow::bail!("messages API {status}: {text}");
-    }
+    let response = connect(http, auth, &body, conv, retry).await?;
 
     // v2's one deliberately flat subject: delta and block keep their body
     // `type`; the leaf does not spell it here. Deltas mirror onto the attach
@@ -531,6 +616,183 @@ fn append_str(block: &mut Value, field: &str, chunk: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The connect loop against a stand-in for the whole network: an HTTP
+    /// proxy every request is routed to, whose only behaviour is to accept
+    /// the connection and drop it. The messages API is never reached, so
+    /// every attempt fails as `NoResponse`, and the accept count is exactly
+    /// the number of attempts the loop made.
+    mod connecting {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        use bridge_testkit::TestScratch;
+
+        use super::*;
+
+        async fn dead_network() -> (reqwest::Client, Arc<AtomicU32>) {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let attempts = Arc::new(AtomicU32::new(0));
+            let counter = Arc::clone(&attempts);
+            tokio::spawn(async move {
+                while let Ok((stream, _)) = listener.accept().await {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    drop(stream);
+                }
+            });
+            let client = reqwest::Client::builder()
+                .proxy(reqwest::Proxy::all(format!("http://{address}")).unwrap())
+                .build()
+                .unwrap();
+            (client, attempts)
+        }
+
+        /// A credential the request can be signed with that costs no network:
+        /// an unexpired token in a scratch file, so nothing here reaches the
+        /// refresh endpoint or the ambient environment.
+        fn auth(scratch: &TestScratch) -> Auth {
+            let path = scratch.path("credentials.json");
+            std::fs::write(
+                &path,
+                r#"{"claudeAiOauth":{"accessToken":"t","refreshToken":"r","expiresAt":99999999999999}}"#,
+            )
+            .unwrap();
+            Auth::OAuth {
+                path: path.to_string_lossy().to_string(),
+            }
+        }
+
+        /// Short enough to run at full speed, and still doubling: 10ms, 20ms,
+        /// 40ms across three retries.
+        fn policy(max_retries: u32) -> RetryCell {
+            Arc::new(RwLock::new(
+                crate::retry::parse(&json!({
+                    "maxRetries": max_retries,
+                    "baseDelayMs": 10,
+                    "maxDelayMs": 40,
+                    "retryAfterCapMs": 1000,
+                }))
+                .unwrap(),
+            ))
+        }
+
+        async fn attempts_made(retry: &RetryCell, scratch: &TestScratch) -> u32 {
+            let (http, attempts) = dead_network().await;
+            let outcome = connect(
+                &http,
+                &auth(scratch),
+                &json!({}),
+                &ConversationId("conv-retry".to_string()),
+                retry,
+            )
+            .await;
+
+            assert!(outcome.is_err(), "the dead network cannot succeed");
+            attempts.load(Ordering::SeqCst)
+        }
+
+        /// Bridge exactly as it behaved before any of this existed.
+        #[tokio::test]
+        async fn with_no_policy_the_first_failure_ends_the_turn() {
+            let expected = 1;
+            let scratch = TestScratch::new("connect-no-policy");
+
+            let actual = attempts_made(&Arc::new(RwLock::new(None)), &scratch).await;
+
+            assert_eq!(actual, expected);
+        }
+
+        /// Three retries inserted ahead of the failure path: four attempts,
+        /// then the same abort as before.
+        #[tokio::test]
+        async fn a_policy_inserts_exactly_its_retries_ahead_of_the_failure() {
+            let expected = 4;
+            let scratch = TestScratch::new("connect-retries");
+
+            let actual = attempts_made(&policy(3), &scratch).await;
+
+            assert_eq!(actual, expected);
+        }
+
+        /// The cell is read at the moment each failure is decided on, not
+        /// captured when the turn started, so clearing it mid-backoff stops
+        /// the retrying there and then.
+        #[tokio::test]
+        async fn clearing_the_policy_mid_flight_stops_the_retrying() {
+            let expected = 1;
+            let scratch = TestScratch::new("connect-cleared");
+            let retry = policy(10);
+            *retry.write().unwrap() = None;
+
+            let actual = attempts_made(&retry, &scratch).await;
+
+            assert_eq!(actual, expected);
+        }
+
+        /// What surfaces when the policy is exhausted is the failed attempt's
+        /// own error, not something the retrying invented on top of it. A
+        /// request that never reached a server has no status, so the status
+        /// wording must be nowhere in it.
+        #[tokio::test]
+        async fn giving_up_surfaces_the_connect_failure_itself() {
+            let expected = false;
+            let scratch = TestScratch::new("connect-error");
+            let (http, _) = dead_network().await;
+
+            let error = connect(
+                &http,
+                &auth(&scratch),
+                &json!({}),
+                &ConversationId("conv-retry".to_string()),
+                &policy(1),
+            )
+            .await
+            .expect_err("the dead network cannot succeed");
+            let actual = format!("{error:#}").contains("messages API");
+
+            assert_eq!(actual, expected, "{error:#}");
+        }
+
+        /// The caller races this future against the cancel signal, so a
+        /// cancel during a backoff wait takes effect immediately rather than
+        /// after the wait. Ten minutes of backoff, abandoned at once.
+        #[tokio::test]
+        async fn a_cancel_during_a_backoff_wait_takes_effect_immediately() {
+            let expected = Some(true);
+            let scratch = TestScratch::new("connect-cancel");
+            let (http, _) = dead_network().await;
+            let parked = Arc::new(RwLock::new(
+                crate::retry::parse(&json!({
+                    "maxRetries": 10,
+                    "baseDelayMs": 600000,
+                    "maxDelayMs": 600000,
+                    "retryAfterCapMs": 600000,
+                }))
+                .unwrap(),
+            ));
+            let (tx, mut cancel) = tokio::sync::watch::channel(false);
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                let _ = tx.send(true);
+            });
+            let auth = auth(&scratch);
+            let body = json!({});
+            let conv = ConversationId("conv-retry".to_string());
+
+            // Bounded so a cancel that does wait out the backoff fails here
+            // rather than hanging the suite for the ten minutes it asked for.
+            let actual = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                tokio::select! {
+                    _ = connect(&http, &auth, &body, &conv, &parked) => false,
+                    _ = crate::agent::cancelled(&mut cancel) => true,
+                }
+            })
+            .await
+            .ok();
+
+            assert_eq!(actual, expected);
+        }
+    }
 
     mod request_body {
         use super::*;
