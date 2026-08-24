@@ -64,9 +64,9 @@ the bridge keeps serving what was already spawned until it is killed.
 
 ## Live configuration
 
-Four control lines set values held in shared cells and repointed while the
+Five control lines set values held in shared cells and repointed while the
 bridge runs. A repoint never touches anything already committed to a
-conversation's record; the four differ by where the value lands, and that
+conversation's record; the five differ by where the value lands, and that
 dictates when a change is visible.
 
 | Cell | Control line | Reaches |
@@ -75,6 +75,7 @@ dictates when a change is visible.
 | system prompt | `system` | every conversation on its next turn |
 | user context | `context` | new spawns only; conversations already born keep theirs |
 | model | `model` | new spawns only; a running conversation's model is fixed at birth |
+| retry policy | `retry` | every conversation at once, including a turn already in flight |
 
 - **skills** is re-scanned per say. Two layers, scoped differently: the
   *directory* is per-process (`skills_root`, shared by every conversation this
@@ -97,6 +98,9 @@ dictates when a change is visible.
   running conversation onto a different model, and there is no way to do
   that over stdio in v0. Unlike the other three, this cell is merged into
   rather than replaced.
+- **retry** is read at the moment a model request fails on the way out,
+  rather than captured when a query starts, so setting or clearing it reaches
+  a turn that is already waiting to be retried.
 - **context** is injected as a `<system-reminder>` block on a conversation's
   opening user message and **is committed** to the record. It is read once, at
   conversation birth. A later change affects only conversations spawned after
@@ -408,6 +412,79 @@ a typo when the line arrives instead of on the first turn.
 Which efforts a given model supports, and that Opus 5 refuses disabled thinking
 at `xhigh` or `max` effort, are the API's to reject and never bridge's to know.
 
+### retry
+
+Configure what bridge does when a model request fails on the way out. Beside
+the `model` line and independent of it.
+
+```
+{"retry": {"maxRetries": 10, "baseDelayMs": 500, "maxDelayMs": 32000, "retryAfterCapMs": 60000}}
+{"retry": {"maxRetries": 10, "baseDelayMs": 500, "maxDelayMs": 32000, "retryAfterCapMs": 60000}}
+```
+
+| Field | Values |
+| --- | --- |
+| `maxRetries` | how many retries before the turn is abandoned; one or greater |
+| `baseDelayMs` | the first wait, and the unit the backoff doubles from; one or greater |
+| `maxDelayMs` | the ceiling the doubling stops at; one or greater, and not below `baseDelayMs` |
+| `retryAfterCapMs` | the longest a `retry-after` is honoured for; one or greater |
+
+Unlike `model`, this line **replaces** the cell wholesale, because a policy is
+one strategy and half of one mixed with half of another is not a strategy.
+Bridge holds no default for any field, so every field is required and a line
+missing one is refused with a message naming what was wrong:
+
+```
+{"retry": {"maxRetries": 10, "baseDelayMs": 500, "maxDelayMs": 32000}}
+{"error": "invalid retry: retryAfterCapMs is required; every field is: maxRetries, baseDelayMs, maxDelayMs, retryAfterCapMs"}
+```
+
+`{"retry": null}` clears the policy. No line at all means there is no policy
+and therefore no retrying, which is bridge exactly as it behaved before this
+existed.
+
+#### What is retried
+
+The connect phase alone: the request up to and including the response status.
+Once the stream has yielded anything the turn is past this point and is never
+retried, because a partial stream cannot be replayed into the same turn.
+
+A retry is one turn attempted again, not a new request. Same query id, same
+turn id, same message id, and nothing new published on any subject. From
+outside, the only difference is a turn that took longer.
+
+| Failure | Retried |
+| --- | --- |
+| no response at all: dns, socket, timeout | always |
+| 4xx | never, except 429 |
+| 429 | always |
+| 5xx | always |
+
+That is the whole of the rule. It deliberately does not enumerate documented
+status codes: the documentation has already changed under this code once, and
+a rule written as a class stays correct when it changes again.
+
+The wait is `baseDelayMs` doubled per attempt, capped at `maxDelayMs`, plus up
+to half `baseDelayMs` of jitter so a host running many conversations does not
+retry them in lockstep. A `retry-after` header is honoured as sent rather than
+computed, capped at `retryAfterCapMs` so a long one cannot park a
+conversation. The header says how long to wait, never whether to keep going,
+so `maxRetries` still ends it.
+
+When the retries run out the turn is abandoned exactly as it was before any of
+this existed, and it is the last attempt's error that surfaces, since that is
+the state the request was in when bridge gave up. A cancel during a backoff
+wait takes effect immediately, not after the wait.
+
+Every attempt is logged to stderr: the attempt number, the status or the
+connection error, what the body called the error and its details, the
+`retry-after` if there was one, and how long bridge is about to wait. A tier
+spend cap is called out by name there, because it is a `rate_limit_error` 429
+like any other in every visible respect and only
+`error.details.error_code` (`enforced_spend_limit_reached`) tells it apart. It
+changes no behaviour: it retries and gives up like any other 429. The console
+is the only place any of this appears; nothing goes on the wire.
+
 ### system
 
 Set the system prompt.
@@ -430,7 +507,8 @@ Set the user context injected at the start of each new conversation.
 
 Report the live state of every cell a control line can set, plus the static
 config the host was launched with. This is the read half of `skills`,
-`system`, `context`, `model`, `cwd`, `permissions`, `credentials` and `tools`.
+`system`, `context`, `model`, `retry`, `cwd`, `permissions`, `credentials` and
+`tools`.
 
 ```
 {"settings": {}}

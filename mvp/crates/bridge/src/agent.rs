@@ -122,6 +122,11 @@ pub struct AgentConfig {
     /// which is what makes the order they arrive in irrelevant.
     pub credentials: Arc<std::sync::RwLock<crate::credentials::Credentials>>,
     pub tools: Arc<std::sync::RwLock<crate::credentials::ToolsConfig>>,
+    /// The connect-phase retry policy (retry.rs), a cell a `retry` control
+    /// line replaces whole. Read at the moment a connect failure has to be
+    /// decided on, so a change reaches a turn already in flight; unset means
+    /// no retrying at all.
+    pub retry: crate::anthropic::RetryCell,
 }
 
 /// Subscribe to the conversation's requests. main calls this BEFORE
@@ -567,6 +572,7 @@ async fn accept_say<B: Broker, D: DeltaSink>(
         permissions: Arc::clone(&config.permissions),
         credentials: Arc::clone(&config.credentials),
         tools_config: Arc::clone(&config.tools),
+        retry: Arc::clone(&config.retry),
     };
     let done = done_tx.clone();
     let q = query.clone();
@@ -604,6 +610,7 @@ struct TurnContext<B: Broker, D: DeltaSink> {
     permissions: Arc<std::sync::RwLock<crate::permissions::PermissionSet>>,
     credentials: Arc<std::sync::RwLock<crate::credentials::Credentials>>,
     tools_config: Arc<std::sync::RwLock<crate::credentials::ToolsConfig>>,
+    retry: crate::anthropic::RetryCell,
 }
 
 /// The `turn.started` payload: the request's inputs as asked. An effort that
@@ -675,6 +682,7 @@ async fn run_query<B: Broker, D: DeltaSink>(
         permissions,
         credentials,
         tools_config,
+        retry,
     } = &ctx;
     let pubr = Publisher::new(broker, conv, history_store, attach.clone());
 
@@ -719,6 +727,7 @@ async fn run_query<B: Broker, D: DeltaSink>(
                 &history,
                 &tools,
                 attach,
+                retry,
             ) => outcome,
             _ = cancelled(&mut cancel) => {
                 pubr.event(

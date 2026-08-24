@@ -64,6 +64,7 @@ mod pipe;
 mod read;
 mod readfile;
 mod refs;
+mod retry;
 mod service;
 mod skills;
 mod slice;
@@ -641,6 +642,11 @@ struct Host<B: Broker, D: DeltaSink> {
     /// in either order.
     credentials: Arc<RwLock<credentials::Credentials>>,
     tools: Arc<RwLock<credentials::ToolsConfig>>,
+    /// The connect-phase retry policy (retry.rs), set by the `retry` control
+    /// line and read whenever a model request fails on the way out. Nothing
+    /// defaults it: with no line there is no policy and no retrying, which is
+    /// bridge exactly as it behaved before this cell existed.
+    retry: Arc<RwLock<Option<retry::RetryPolicy>>>,
     /// The capture stream adopt and the `service` premise replay from
     /// (`BRIDGE_STREAM`), read once at boot — ambient env never reaches a
     /// call site.
@@ -682,6 +688,7 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
             permissions: Arc::clone(&self.permissions),
             credentials: Arc::clone(&self.credentials),
             tools: Arc::clone(&self.tools),
+            retry: Arc::clone(&self.retry),
         })
     }
 
@@ -721,6 +728,7 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
                 "memoryDb": self.memory_path.to_string_lossy(),
                 "historyDb": self.history_path.to_string_lossy(),
                 "permissions": self.permissions.read().unwrap().resolved(),
+                "retry": retry::to_json(self.retry.read().unwrap().as_ref()),
             }
         }))
     }
@@ -993,6 +1001,26 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
                     println!(
                         "{}",
                         serde_json::json!({ "error": format!("invalid model: {e}") })
+                    );
+                }
+            }
+        } else if let Some(line) = value.get("retry") {
+            // One cell, REPLACED whole, beside the model line and independent
+            // of it: a policy is one strategy, and half of one mixed with
+            // half of another is not a strategy. Read at the moment a connect
+            // failure has to be decided on, so this reaches a turn already in
+            // flight; `null` clears it and leaves bridge not retrying at all.
+            match retry::parse(line) {
+                Ok(policy) => {
+                    *self.retry.write().unwrap() = policy;
+                    let echo = retry::to_json(policy.as_ref());
+                    eprintln!("bridge: retry set ({echo})");
+                    println!("{}", serde_json::json!({ "retry": echo }));
+                }
+                Err(e) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("invalid retry: {e}") })
                     );
                 }
             }
@@ -1781,6 +1809,10 @@ async fn main() -> anyhow::Result<()> {
         context: Arc::new(RwLock::new(None)),
         attach_bucket,
         permissions: Arc::new(RwLock::new(permissions::PermissionSet::strict_default())),
+        // Nothing defaults the retry policy either: until a `retry` line sets
+        // one, a model request that fails on the way out ends the query on
+        // the first failure, exactly as before.
+        retry: Arc::new(RwLock::new(None)),
         // No defaults and no environment variables: until a `credentials`
         // and a `tools` line arrive, nothing is configured, every group is
         // inactive, and Exec's environment is untouched.

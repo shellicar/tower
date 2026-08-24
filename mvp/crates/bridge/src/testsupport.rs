@@ -42,6 +42,7 @@ pub(crate) fn config(conv: &str, scratch: &TestScratch) -> crate::agent::AgentCo
         )),
         credentials: Arc::new(RwLock::new(crate::credentials::Credentials::default())),
         tools: Arc::new(RwLock::new(crate::credentials::ToolsConfig::default())),
+        retry: Arc::new(RwLock::new(None)),
     }
 }
 
@@ -79,6 +80,7 @@ pub(crate) fn host(
         )),
         credentials: Arc::new(RwLock::new(crate::credentials::Credentials::default())),
         tools: Arc::new(RwLock::new(crate::credentials::ToolsConfig::default())),
+        retry: Arc::new(RwLock::new(None)),
         stream: "conv-approval".to_string(),
         stream_ephemeral: "conv-ephemeral".to_string(),
         liveness: Arc::new(std::sync::Mutex::new(crate::service::WorldLiveness::new())),
