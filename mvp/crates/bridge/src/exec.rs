@@ -163,19 +163,30 @@ pub fn exec_schema() -> Value {
     })
 }
 
-/// Kill the child's whole process group: SIGTERM, a 500ms grace, SIGKILL.
-/// A program that ignores TERM is reaped by the KILL and reports it; honest.
+/// Kill whole process groups: SIGTERM to every one, a single 500ms grace,
+/// then SIGKILL to every one. A program that ignores TERM is reaped by the
+/// KILL and reports it; honest.
+///
+/// The grace is per kill, never per group. Waiting once per group in turn
+/// multiplies it by the number of things being killed, so a call would outlive
+/// its own deadline by longer the more commands it chained. Every kill in this
+/// module goes through here for that reason, one process group or many.
+///
 /// Unix-only; the Windows seam is a Job Object with KILL_ON_JOB_CLOSE, which
 /// also closes the orphan gap POSIX leaves open (a hard-killed bridge cannot
 /// run this function; its command trees outlive it, visibly stranded).
 #[cfg(unix)]
-async fn group_kill(pgid: i32) {
-    unsafe {
-        libc::kill(-pgid, libc::SIGTERM);
+async fn groups_kill(pgids: &[i32]) {
+    for pgid in pgids {
+        unsafe {
+            libc::kill(-*pgid, libc::SIGTERM);
+        }
     }
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    unsafe {
-        libc::kill(-pgid, libc::SIGKILL);
+    for pgid in pgids {
+        unsafe {
+            libc::kill(-*pgid, libc::SIGKILL);
+        }
     }
 }
 
@@ -708,25 +719,6 @@ async fn kill_and_reap(
     statuses
 }
 
-/// One grace for the whole call: TERM every group, wait once, then KILL every
-/// group. Granting each group its own grace in turn would multiply the wait by
-/// the number of commands, so a call would outlive its own deadline by longer
-/// the more commands it chained.
-#[cfg(unix)]
-async fn groups_kill(pgids: &[i32]) {
-    for pgid in pgids {
-        unsafe {
-            libc::kill(-*pgid, libc::SIGTERM);
-        }
-    }
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    for pgid in pgids {
-        unsafe {
-            libc::kill(-*pgid, libc::SIGKILL);
-        }
-    }
-}
-
 /// Feed one child's stdout directly into the next child's stdin as an OS
 /// pipe — no buffering through this process.
 #[cfg(unix)]
@@ -766,11 +758,11 @@ fn spawn_drain(
 
 #[cfg(unix)]
 async fn children_kill(children: &mut [tokio::process::Child]) {
-    for child in children.iter() {
-        if let Some(id) = child.id() {
-            group_kill(id as i32).await;
-        }
-    }
+    let pgids: Vec<i32> = children
+        .iter()
+        .filter_map(|child| child.id().map(|id| id as i32))
+        .collect();
+    groups_kill(&pgids).await;
 }
 #[cfg(not(unix))]
 async fn children_kill(_children: &mut [tokio::process::Child]) {}
@@ -901,7 +893,7 @@ async fn run_child(
         _ = crate::agent::cancelled(cancel) => {
             if let Some(pgid) = pgid {
                 #[cfg(unix)]
-                group_kill(pgid).await;
+                groups_kill(&[pgid]).await;
             }
             (child.wait().await, true)
         }
@@ -1598,6 +1590,32 @@ mod tests {
         assert!(
             actual < Duration::from_millis(2500),
             "the grace was paid per command: {actual:?}, {content:?}"
+        );
+    }
+
+    /// The other site that kills several things at once: a spawn failure tears
+    /// down whatever already started, and that teardown gets one grace too.
+    #[tokio::test]
+    async fn a_spawn_failure_kills_what_started_with_one_grace() {
+        let mut cancel = no_cancel();
+        let input = json!({
+            "commands": [
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "no-such-program-on-this-machine" }
+            ],
+            "timeout": 30
+        });
+
+        let started = std::time::Instant::now();
+        let (content, is_error) = run_input(input, &mut cancel).await;
+        let actual = started.elapsed();
+
+        assert!(
+            actual < Duration::from_millis(1500),
+            "the grace was paid per child: {actual:?}, {is_error}, {content:?}"
         );
     }
 
