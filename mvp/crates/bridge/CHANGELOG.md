@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `credentials` and `tools` control lines name credentials and bind them to tool groups.
 - A `settings` request can name the system prompt or the user context to get its full text.
 - The tools line's exec group takes max_timeout_s, refusing any Exec call that asks to run longer than the host allows.
-- Retry a model request that fails before its stream starts.
+- Add retries to the Anthropic HTTP client, instead of ending a conversation on one failed request.
 
 ### Changed
 
