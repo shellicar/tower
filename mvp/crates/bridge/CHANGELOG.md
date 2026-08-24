@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The tools line's exec group takes max_timeout_s, refusing any Exec call that asks to run longer than the host allows.
 - A `retry` control line configures what bridge does when a model request fails on the way out. One transient failure on the connect phase no longer ends a conversation's query: bridge waits and attempts the same turn again, with the same ids and nothing new published. 4xx never retries except 429, 5xx and no-response always do, a `retry-after` is honoured up to a cap, and every attempt is logged to the console. With no line there is no policy and no retrying, exactly as before.
 - A `retry` control line makes bridge retry a model request that fails before its stream starts, so one transient failure no longer ends a conversation's query.
+- Retry a model request that fails before its stream starts.
 
 ### Changed
 
