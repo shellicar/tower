@@ -637,7 +637,15 @@ async fn run_pipeline(
             (kill_and_reap(&mut children, &pgids).await, Ending::Cancelled)
         }
         _ = tokio::time::sleep_until(deadline) => {
-            (kill_and_reap(&mut children, &pgids).await, Ending::TimedOut)
+            // Who was already dead when the deadline arrived, before the kill
+            // makes every child look the same. `wait` after this returns the
+            // status `try_wait` cached, so reaping here costs the caller
+            // nothing.
+            let finished: Vec<bool> = children
+                .iter_mut()
+                .map(|child| matches!(child.try_wait(), Ok(Some(_))))
+                .collect();
+            (kill_and_reap(&mut children, &pgids).await, Ending::TimedOut { finished })
         }
     };
 
@@ -662,14 +670,16 @@ async fn run_pipeline(
             stdout,
             stderr,
             status,
-            spawn_error: match ending {
+            spawn_error: match &ending {
                 Ending::Cancelled => Some("cancelled by user".to_string()),
-                Ending::Ran | Ending::TimedOut => None,
+                Ending::Ran | Ending::TimedOut { .. } => None,
             },
             skipped: false,
-            timed_out: match ending {
-                Ending::TimedOut => Some(timeout),
-                Ending::Ran | Ending::Cancelled => None,
+            // Only what the kill actually killed: a command that had already
+            // exited reports the status it exited with.
+            timed_out: match &ending {
+                Ending::TimedOut { finished } if !finished[idx] => Some(timeout),
+                _ => None,
             },
         });
     }
@@ -677,10 +687,12 @@ async fn run_pipeline(
 }
 
 /// How a pipeline stopped: on its own, or because something killed it.
+/// `TimedOut` carries which children were already finished when the deadline
+/// arrived, one flag per child in spawn order.
 enum Ending {
     Ran,
     Cancelled,
-    TimedOut,
+    TimedOut { finished: Vec<bool> },
 }
 
 async fn kill_and_reap(
@@ -688,14 +700,31 @@ async fn kill_and_reap(
     pgids: &[i32],
 ) -> Vec<std::io::Result<std::process::ExitStatus>> {
     #[cfg(unix)]
-    for pgid in pgids {
-        group_kill(*pgid).await;
-    }
+    groups_kill(pgids).await;
     let mut statuses = Vec::with_capacity(children.len());
     for child in children.iter_mut() {
         statuses.push(child.wait().await);
     }
     statuses
+}
+
+/// One grace for the whole call: TERM every group, wait once, then KILL every
+/// group. Granting each group its own grace in turn would multiply the wait by
+/// the number of commands, so a call would outlive its own deadline by longer
+/// the more commands it chained.
+#[cfg(unix)]
+async fn groups_kill(pgids: &[i32]) {
+    for pgid in pgids {
+        unsafe {
+            libc::kill(-*pgid, libc::SIGTERM);
+        }
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    for pgid in pgids {
+        unsafe {
+            libc::kill(-*pgid, libc::SIGKILL);
+        }
+    }
 }
 
 /// Feed one child's stdout directly into the next child's stdin as an OS
@@ -1508,6 +1537,67 @@ mod tests {
         assert!(
             content.contains("Running it again unchanged will hit the same limit"),
             "the result gives the model nothing to act on: {content:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_command_that_finished_before_the_deadline_reports_its_own_status() {
+        let mut cancel = no_cancel();
+        let input = json!({
+            "commands": [
+                { "program": "printf", "args": ["x"], "op": "|" },
+                { "program": "sleep", "args": ["30"] }
+            ],
+            "timeout": 1
+        });
+        let (content, _) = run_input(input, &mut cancel).await;
+        assert!(
+            content.contains("exit status: 0"),
+            "a command that had already exited lost its status: {content:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_the_commands_the_timeout_killed_are_reported_as_killed() {
+        let expected = 1;
+        let mut cancel = no_cancel();
+        let input = json!({
+            "commands": [
+                { "program": "printf", "args": ["x"], "op": "|" },
+                { "program": "sleep", "args": ["30"] }
+            ],
+            "timeout": 1
+        });
+
+        let (content, _) = run_input(input, &mut cancel).await;
+        let actual = content.matches("killed: exceeded").count();
+
+        assert_eq!(actual, expected, "in: {content:?}");
+    }
+
+    /// One grace for the whole call, not one per command: five commands used to
+    /// cost five 500ms waits, so the call outran its own deadline by 2.5s.
+    #[tokio::test]
+    async fn the_kill_grace_does_not_grow_with_the_number_of_commands() {
+        let mut cancel = no_cancel();
+        let input = json!({
+            "commands": [
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "sleep", "args": ["30"] }
+            ],
+            "timeout": 1
+        });
+
+        let started = std::time::Instant::now();
+        let (content, _) = run_input(input, &mut cancel).await;
+        let actual = started.elapsed();
+
+        assert!(
+            actual < Duration::from_millis(2500),
+            "the grace was paid per command: {actual:?}, {content:?}"
         );
     }
 
