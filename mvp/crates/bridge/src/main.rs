@@ -105,6 +105,62 @@ pub(crate) fn expand_tilde(path: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(path)
 }
 
+/// The `settings` view of a text cell — the system prompt or the user
+/// context. Either runs to tens of kilobytes, and inlining both buried every
+/// other setting in the reply, so the entry summarises the body and carries
+/// it only when the request named this entry. The shape does not change with
+/// the request: an included body is an extra field on the same object.
+fn text_setting(text: Option<&str>, include: bool) -> serde_json::Value {
+    let Some(text) = text else {
+        return serde_json::json!({ "set": false });
+    };
+    let mut entry = serde_json::json!({
+        "set": true,
+        "bytes": text.len(),
+        "hash": format!("{:016x}", skills::content_hash(text)),
+    });
+    if include {
+        entry["text"] = serde_json::json!(text);
+    }
+    entry
+}
+
+/// The `settings` entries that have a body to ask for, sorted so the error
+/// naming them reads the same every time.
+const BODIED_SETTINGS: [&str; 2] = ["context", "system"];
+
+/// The entries a `settings` request asked the bodies of, as
+/// `{"settings": {"include": ["system", "context"]}}`. Naming nothing asks
+/// for nothing.
+///
+/// An unrecognised name is rejected, not swallowed. The wire contract's
+/// tolerance rule does not reach here: that exists so an old tower and a new
+/// bridge can coexist, and stdio has no such skew, being an operator talking
+/// to their own local process. A name that quietly did nothing would hand
+/// back a reply they go on to misread.
+fn included(settings: &serde_json::Value) -> Result<Vec<&str>, String> {
+    let Some(include) = settings.get("include") else {
+        return Ok(Vec::new());
+    };
+    let Some(named) = include.as_array() else {
+        return Err("settings include needs an array of entry names".to_string());
+    };
+    let mut wanted = Vec::new();
+    for name in named {
+        let Some(name) = name.as_str() else {
+            return Err("settings include needs each entry named as a string".to_string());
+        };
+        if !BODIED_SETTINGS.contains(&name) {
+            return Err(format!(
+                "settings include names unknown entry \"{name}\"; entries with a body: {}",
+                BODIED_SETTINGS.join(", ")
+            ));
+        }
+        wanted.push(name);
+    }
+    Ok(wanted)
+}
+
 /// Fold one replayed frame into the tree's committed messages and the
 /// pending revisions map — the per-frame step both the streaming shell
 /// (`replay_conversation`) and the literal-batch test (`fold_replay`) share,
@@ -629,6 +685,46 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
         })
     }
 
+    /// A live snapshot of every control-line-settable cell plus the static
+    /// config: the read half of skills/system/context, which before this
+    /// could be set but never queried back. Errors when the request names an
+    /// entry that has no body to ask for.
+    fn settings_reply(&self, settings: &serde_json::Value) -> Result<serde_json::Value, String> {
+        let wanted = included(settings)?;
+        let skills_dir = self.skills_root.read().unwrap().clone();
+        let skills_dir_exists = std::fs::metadata(&skills_dir).is_ok_and(|m| m.is_dir());
+        let system = self.system.read().unwrap().clone();
+        let context = self.context.read().unwrap().clone();
+        let credentials = credentials::settings(
+            &self.credentials.read().unwrap(),
+            &self.tools.read().unwrap(),
+        );
+        let warnings = credentials::warnings(
+            &self.credentials.read().unwrap(),
+            &self.tools.read().unwrap(),
+        );
+        Ok(serde_json::json!({
+            "warnings": warnings,
+            "settings": {
+                "credentials": credentials["credentials"],
+                "tools": credentials["tools"],
+                "world": self.world,
+                "instance": self.instance,
+                "cwd": self.default_cwd.read().unwrap().to_string_lossy(),
+                "model": self.model.read().unwrap().to_json(),
+                "attachBucket": self.attach_bucket,
+                "skillsDir": skills_dir.to_string_lossy(),
+                "skillsDirExists": skills_dir_exists,
+                "system": text_setting(system.as_deref(), wanted.contains(&"system")),
+                "context": text_setting(context.as_deref(), wanted.contains(&"context")),
+                "refsDb": self.refs_path.to_string_lossy(),
+                "memoryDb": self.memory_path.to_string_lossy(),
+                "historyDb": self.history_path.to_string_lossy(),
+                "permissions": self.permissions.read().unwrap().resolved(),
+            }
+        }))
+    }
+
     /// Carry out one control line, writing its single response to stdout.
     async fn handle(&self, value: serde_json::Value) {
         if let Some(spawn) = value.get("spawn") {
@@ -1020,45 +1116,11 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
                     println!("{}", serde_json::json!({ "error": "publish failed" }));
                 }
             }
-        } else if value.get("settings").is_some() {
-            // A live snapshot of every control-line-settable cell plus the
-            // static config — the read half of skills/system/context, which
-            // until now could be set but never queried back.
-            let skills_dir = self.skills_root.read().unwrap().clone();
-            let skills_dir_exists = std::fs::metadata(&skills_dir).is_ok_and(|m| m.is_dir());
-            let system = self.system.read().unwrap().clone();
-            let context = self.context.read().unwrap().clone();
-            let credentials = credentials::settings(
-                &self.credentials.read().unwrap(),
-                &self.tools.read().unwrap(),
-            );
-            let warnings = credentials::warnings(
-                &self.credentials.read().unwrap(),
-                &self.tools.read().unwrap(),
-            );
-            println!(
-                "{}",
-                serde_json::json!({
-                    "warnings": warnings,
-                    "settings": {
-                        "credentials": credentials["credentials"],
-                        "tools": credentials["tools"],
-                        "world": self.world,
-                        "instance": self.instance,
-                        "cwd": self.default_cwd.read().unwrap().to_string_lossy(),
-                        "model": self.model.read().unwrap().to_json(),
-                        "attachBucket": self.attach_bucket,
-                        "skillsDir": skills_dir.to_string_lossy(),
-                        "skillsDirExists": skills_dir_exists,
-                        "system": system,
-                        "context": context,
-                        "refsDb": self.refs_path.to_string_lossy(),
-                        "memoryDb": self.memory_path.to_string_lossy(),
-                        "historyDb": self.history_path.to_string_lossy(),
-                        "permissions": self.permissions.read().unwrap().resolved(),
-                    }
-                })
-            );
+        } else if let Some(settings) = value.get("settings") {
+            match self.settings_reply(settings) {
+                Ok(reply) => println!("{reply}"),
+                Err(e) => println!("{}", serde_json::json!({ "error": e })),
+            }
         } else {
             println!("{}", serde_json::json!({ "error": "unsupported" }));
         }
@@ -1782,8 +1844,8 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ServeOutcome, ServedCwds, decisions, expand_tilde, fold_replay, replay_conversation,
-        serve_conversation,
+        ServeOutcome, ServedCwds, decisions, expand_tilde, fold_replay, included,
+        replay_conversation, serve_conversation, skills, text_setting,
     };
     use crate::anthropic::NoopDeltaSink;
     use crate::testsupport::config;
@@ -2231,6 +2293,155 @@ mod tests {
             expand_tilde("~foo/bar"),
             std::path::PathBuf::from("~foo/bar")
         );
+    }
+
+    // --- the `settings` reply's two text cells: a summary always, the body
+    // only when the request named the entry. ---
+
+    #[test]
+    fn a_set_text_setting_summarises_its_body_rather_than_carrying_it() {
+        let expected = serde_json::json!({
+            "set": true,
+            "bytes": 17,
+            "hash": format!("{:016x}", skills::content_hash("You are a teapot.")),
+        });
+        let actual = text_setting(Some("You are a teapot."), false);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_named_text_setting_gains_its_body_without_losing_the_summary() {
+        let expected = serde_json::json!({
+            "set": true,
+            "bytes": 17,
+            "hash": format!("{:016x}", skills::content_hash("You are a teapot.")),
+            "text": "You are a teapot.",
+        });
+        let actual = text_setting(Some("You are a teapot."), true);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn an_unset_text_setting_reports_no_body_even_when_named() {
+        let expected = serde_json::json!({ "set": false });
+        let actual = text_setting(None, true);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn the_summary_counts_the_bodys_bytes_not_its_characters() {
+        let expected = serde_json::json!(5);
+        let actual = text_setting(Some("café"), false)["bytes"].clone();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn the_summary_renders_its_hash_as_sixteen_lowercase_hex_digits() {
+        let hash = text_setting(Some("You are a teapot."), false)["hash"].clone();
+        let actual = hash.as_str().map(|h| {
+            h.len() == 16
+                && h.chars()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        });
+        let expected = Some(true);
+        assert_eq!(actual, expected, "hash was {hash}");
+    }
+
+    #[test]
+    fn a_request_naming_nothing_asks_for_no_body() {
+        let request = serde_json::json!({});
+        let expected: Result<Vec<&str>, String> = Ok(Vec::new());
+        let actual = included(&request);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_request_asks_for_exactly_the_entries_it_names() {
+        let request = serde_json::json!({ "include": ["system"] });
+        let expected: Result<Vec<&str>, String> = Ok(vec!["system"]);
+        let actual = included(&request);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_request_naming_an_unknown_entry_is_rejected_saying_which_have_a_body() {
+        let request = serde_json::json!({ "include": ["skillsDir"] });
+        let expected = Err(
+            "settings include names unknown entry \"skillsDir\"; entries with a body: context, system"
+                .to_string(),
+        );
+        let actual = included(&request);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_request_whose_include_is_not_an_array_is_rejected() {
+        let request = serde_json::json!({ "include": "system" });
+        let expected = Err("settings include needs an array of entry names".to_string());
+        let actual = included(&request);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_request_naming_an_entry_as_something_other_than_a_string_is_rejected() {
+        let request = serde_json::json!({ "include": [7] });
+        let expected = Err("settings include needs each entry named as a string".to_string());
+        let actual = included(&request);
+        assert_eq!(actual, expected);
+    }
+
+    // Through the reply, not the pieces: the two entries are told apart by
+    // their own names, so transposing them at the call sites fails here.
+
+    #[test]
+    fn the_reply_gives_each_entry_its_own_body() {
+        let scratch = TestScratch::new("settings-reply-both");
+        let host = host(&scratch, FakeBroker::default());
+        *host.system.write().unwrap() = Some("the system prompt".to_string());
+        *host.context.write().unwrap() = Some("the user context".to_string());
+
+        let reply = host
+            .settings_reply(&serde_json::json!({ "include": ["system", "context"] }))
+            .expect("naming both known entries is a valid request");
+
+        let expected = serde_json::json!(["the system prompt", "the user context"]);
+        let actual = serde_json::json!([
+            reply["settings"]["system"]["text"],
+            reply["settings"]["context"]["text"],
+        ]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn the_reply_carries_only_the_body_the_request_named() {
+        let scratch = TestScratch::new("settings-reply-one");
+        let host = host(&scratch, FakeBroker::default());
+        *host.system.write().unwrap() = Some("the system prompt".to_string());
+        *host.context.write().unwrap() = Some("the user context".to_string());
+
+        let reply = host
+            .settings_reply(&serde_json::json!({ "include": ["system"] }))
+            .expect("naming one known entry is a valid request");
+
+        let expected = serde_json::json!(["the system prompt", null]);
+        let actual = serde_json::json!([
+            reply["settings"]["system"]["text"],
+            reply["settings"]["context"]["text"],
+        ]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn the_reply_is_refused_when_the_request_names_an_entry_with_no_body() {
+        let scratch = TestScratch::new("settings-reply-unknown");
+        let host = host(&scratch, FakeBroker::default());
+
+        let expected = Err(
+            "settings include names unknown entry \"model\"; entries with a body: context, system"
+                .to_string(),
+        );
+        let actual = host.settings_reply(&serde_json::json!({ "include": ["model"] }));
+        assert_eq!(actual, expected);
     }
 
     // --- the world's `service` request (agent.md, "The premise for
