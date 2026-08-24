@@ -1422,64 +1422,12 @@ async fn run_tool_round<B: Broker>(
                     }
                 }
             }
-            // WriteMemory/DeleteMemory mutate: gated like every other mutation.
-            "WriteMemory" => {
-                let approval_id = uuid::Uuid::new_v4().to_string();
-                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
-                let correlation = json!({
-                    "conversationId": pubr.conv().0,
-                    "queryId": query,
-                    "turnId": turn_id,
-                    "toolUseId": id,
-                });
-                match crate::approval::gate(
-                    pubr.broker(),
-                    pubr.attach(),
-                    &approval_id,
-                    &ask,
-                    &correlation,
-                    cancel,
-                )
-                .await
-                {
-                    crate::approval::Verdict::Approved => {
-                        crate::memtools::run_write_memory(memory, &block["input"]).await
-                    }
-                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
-                    crate::approval::Verdict::Cancelled => {
-                        ("cancelled by user before approval".to_string(), true)
-                    }
-                }
-            }
-            "DeleteMemory" => {
-                let approval_id = uuid::Uuid::new_v4().to_string();
-                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
-                let correlation = json!({
-                    "conversationId": pubr.conv().0,
-                    "queryId": query,
-                    "turnId": turn_id,
-                    "toolUseId": id,
-                });
-                match crate::approval::gate(
-                    pubr.broker(),
-                    pubr.attach(),
-                    &approval_id,
-                    &ask,
-                    &correlation,
-                    cancel,
-                )
-                .await
-                {
-                    crate::approval::Verdict::Approved => {
-                        crate::memtools::run_delete_memory(memory, &block["input"])
-                    }
-                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
-                    crate::approval::Verdict::Cancelled => {
-                        ("cancelled by user before approval".to_string(), true)
-                    }
-                }
-            }
-            // ReadMemory/SearchMemory/MemoryTypes are read-only: no approval gate.
+            // All five memory tools run ungated, the two mutations included.
+            // The store is not conversation-scoped: it defaults to the file
+            // claude-sdk-cli uses, so a write or a retire here is visible to
+            // every other reader of that file.
+            "WriteMemory" => crate::memtools::run_write_memory(memory, &block["input"]).await,
+            "DeleteMemory" => crate::memtools::run_delete_memory(memory, &block["input"]),
             "ReadMemory" => crate::memtools::run_read_memory(memory, &block["input"]),
             "SearchMemory" => crate::memtools::run_search_memory(memory, &block["input"]),
             "MemoryTypes" => crate::memtools::run_memory_types(memory),
@@ -1719,5 +1667,104 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&payload).unwrap();
         assert_eq!(value["rejected"], true);
         assert_eq!(value["reason"], "not_found");
+    }
+
+    /// One tool round over fresh stores with nothing on the wire to answer
+    /// an approval: a gated tool comes back cancelled instead of run, so the
+    /// result content alone separates gated from ungated.
+    async fn memory_tool_round(content: Vec<Value>) -> (Vec<Value>, FakeBroker) {
+        let broker = FakeBroker::default();
+        let scratch = TestScratch::new("memory-tools");
+        let conv = ConversationId("conv-mem".to_string());
+        let history = crate::history::open(&scratch.path("history.db")).unwrap();
+        let refs = crate::refs::open(&scratch.path("refs.db")).unwrap();
+        let memory = crate::memory::open(&scratch.path("memory.db")).unwrap();
+        let skills = Skills::scan(std::path::PathBuf::new());
+        let permissions =
+            std::sync::RwLock::new(crate::permissions::PermissionSet::strict_default());
+        let credentials = std::sync::RwLock::new(crate::credentials::Credentials::default());
+        let tools_config = std::sync::RwLock::new(crate::credentials::ToolsConfig::default());
+        let pubr = Publisher::new(&broker, &conv, &history, None);
+        let (_cancel_tx, mut cancel) = watch::channel(false);
+        let results = run_tool_round(
+            &pubr,
+            &skills,
+            &refs,
+            &memory,
+            &history,
+            &static_tool_schemas(),
+            "q-1",
+            "t-1",
+            &content,
+            &mut cancel,
+            &std::env::temp_dir(),
+            &permissions,
+            &credentials,
+            &tools_config,
+        )
+        .await;
+        (results, broker)
+    }
+
+    fn tool_use(id: &str, name: &str, input: Value) -> Value {
+        json!({ "type": "tool_use", "id": id, "name": name, "input": input })
+    }
+
+    #[tokio::test]
+    async fn writing_a_memory_runs_without_asking_for_approval() {
+        let (results, _) = memory_tool_round(vec![tool_use(
+            "tu-1",
+            "WriteMemory",
+            json!({ "title": "A title", "type": "trap", "body": "A body" }),
+        )])
+        .await;
+
+        let expected = "wrote memory ";
+        let actual = results[0]["content"].as_str().expect("a text tool_result");
+
+        assert!(actual.starts_with(expected), "{actual}");
+    }
+
+    #[tokio::test]
+    async fn deleting_a_memory_runs_without_asking_for_approval() {
+        let (results, _) = memory_tool_round(vec![tool_use(
+            "tu-1",
+            "DeleteMemory",
+            json!({ "id": "mem-1", "intent": "proving the tool runs" }),
+        )])
+        .await;
+
+        let expected = "retired memory mem-1";
+        let actual = results[0]["content"].as_str().expect("a text tool_result");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn no_memory_tool_raises_an_approval() {
+        let (_, broker) = memory_tool_round(vec![
+            tool_use(
+                "tu-1",
+                "WriteMemory",
+                json!({ "title": "A title", "type": "trap", "body": "A body" }),
+            ),
+            tool_use("tu-2", "ReadMemory", json!({ "id": "mem-1" })),
+            tool_use("tu-3", "SearchMemory", json!({ "query": "title" })),
+            tool_use("tu-4", "DeleteMemory", json!({ "id": "mem-1" })),
+            tool_use("tu-5", "MemoryTypes", json!({})),
+        ])
+        .await;
+
+        let expected: Vec<String> = Vec::new();
+        let actual: Vec<String> = broker
+            .published
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(subject, _)| subject.clone())
+            .filter(|subject| subject.starts_with("approval.v1."))
+            .collect();
+
+        assert_eq!(actual, expected);
     }
 }
