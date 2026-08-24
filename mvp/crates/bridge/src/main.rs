@@ -56,6 +56,7 @@ mod imaging;
 mod matcher;
 mod memory;
 mod memtools;
+mod model;
 mod mutate;
 mod objects;
 mod permissions;
@@ -63,6 +64,7 @@ mod pipe;
 mod read;
 mod readfile;
 mod refs;
+mod retry;
 mod service;
 mod skills;
 mod slice;
@@ -102,6 +104,62 @@ pub(crate) fn expand_tilde(path: &str) -> std::path::PathBuf {
         return std::path::PathBuf::from(home);
     }
     std::path::PathBuf::from(path)
+}
+
+/// The `settings` view of a text cell — the system prompt or the user
+/// context. Either runs to tens of kilobytes, and inlining both buried every
+/// other setting in the reply, so the entry summarises the body and carries
+/// it only when the request named this entry. The shape does not change with
+/// the request: an included body is an extra field on the same object.
+fn text_setting(text: Option<&str>, include: bool) -> serde_json::Value {
+    let Some(text) = text else {
+        return serde_json::json!({ "set": false });
+    };
+    let mut entry = serde_json::json!({
+        "set": true,
+        "bytes": text.len(),
+        "hash": format!("{:016x}", skills::content_hash(text)),
+    });
+    if include {
+        entry["text"] = serde_json::json!(text);
+    }
+    entry
+}
+
+/// The `settings` entries that have a body to ask for, sorted so the error
+/// naming them reads the same every time.
+const BODIED_SETTINGS: [&str; 2] = ["context", "system"];
+
+/// The entries a `settings` request asked the bodies of, as
+/// `{"settings": {"include": ["system", "context"]}}`. Naming nothing asks
+/// for nothing.
+///
+/// An unrecognised name is rejected, not swallowed. The wire contract's
+/// tolerance rule does not reach here: that exists so an old tower and a new
+/// bridge can coexist, and stdio has no such skew, being an operator talking
+/// to their own local process. A name that quietly did nothing would hand
+/// back a reply they go on to misread.
+fn included(settings: &serde_json::Value) -> Result<Vec<&str>, String> {
+    let Some(include) = settings.get("include") else {
+        return Ok(Vec::new());
+    };
+    let Some(named) = include.as_array() else {
+        return Err("settings include needs an array of entry names".to_string());
+    };
+    let mut wanted = Vec::new();
+    for name in named {
+        let Some(name) = name.as_str() else {
+            return Err("settings include needs each entry named as a string".to_string());
+        };
+        if !BODIED_SETTINGS.contains(&name) {
+            return Err(format!(
+                "settings include names unknown entry \"{name}\"; entries with a body: {}",
+                BODIED_SETTINGS.join(", ")
+            ));
+        }
+        wanted.push(name);
+    }
+    Ok(wanted)
 }
 
 /// Fold one replayed frame into the tree's committed messages and the
@@ -542,7 +600,11 @@ struct Host<B: Broker, D: DeltaSink> {
     delta: D,
     world: String,
     instance: String,
-    default_model: Arc<RwLock<String>>,
+    /// The `model` cell (model.rs), merged into by the `model` control line
+    /// and read when a conversation is served. Nothing defaults it: until a
+    /// line fills in at least a name and a maxTokens, this world cannot
+    /// serve a conversation at all.
+    model: Arc<RwLock<model::Settings>>,
     auth: anthropic::Auth,
     /// The shared, keepalive-configured HTTP client (anthropic.rs's
     /// `build_http_client`) every conversation's messages-API calls share.
@@ -551,7 +613,6 @@ struct Host<B: Broker, D: DeltaSink> {
     system: Arc<RwLock<Option<String>>>,
     context: Arc<RwLock<Option<String>>>,
     attach_bucket: String,
-    thinking_budget: Option<i64>,
     refs: refs::RefStore,
     memory: memory::MemoryStore,
     history: history::HistoryStore,
@@ -581,6 +642,11 @@ struct Host<B: Broker, D: DeltaSink> {
     /// in either order.
     credentials: Arc<RwLock<credentials::Credentials>>,
     tools: Arc<RwLock<credentials::ToolsConfig>>,
+    /// The connect-phase retry policy (retry.rs), set by the `retry` control
+    /// line and read whenever a model request fails on the way out. Nothing
+    /// defaults it: with no line there is no policy and no retrying, which is
+    /// bridge exactly as it behaved before this cell existed.
+    retry: Arc<RwLock<Option<retry::RetryPolicy>>>,
     /// The capture stream adopt and the `service` premise replay from
     /// (`BRIDGE_STREAM`), read once at boot — ambient env never reaches a
     /// call site.
@@ -595,14 +661,18 @@ struct Host<B: Broker, D: DeltaSink> {
 
 impl<B: Broker, D: DeltaSink> Host<B, D> {
     /// Build the config for a new or adopted conversation from the live
-    /// cells.
+    /// cells. `model_name` is the name a spawn or a service request named,
+    /// if it named one; the rest of the configuration comes from the cell.
+    /// Fails when the cell has no name and no maxTokens between them, which
+    /// is the one place that is checked.
     fn config(
         &self,
         conv: &str,
-        model: Arc<RwLock<String>>,
+        model_name: Option<&str>,
         cwd: Arc<RwLock<std::path::PathBuf>>,
-    ) -> agent::AgentConfig {
-        agent::AgentConfig {
+    ) -> Result<agent::AgentConfig, String> {
+        let model = self.model.read().unwrap().resolve(model_name)?;
+        Ok(agent::AgentConfig {
             conv: wire::ConversationId(conv.to_string()),
             model,
             system: Arc::clone(&self.system),
@@ -613,25 +683,61 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
             refs: Arc::clone(&self.refs),
             memory: Arc::clone(&self.memory),
             history: Arc::clone(&self.history),
-            thinking_budget: self.thinking_budget,
             attach: self.attach.clone(),
             cwd,
             permissions: Arc::clone(&self.permissions),
             credentials: Arc::clone(&self.credentials),
             tools: Arc::clone(&self.tools),
-        }
+            retry: Arc::clone(&self.retry),
+        })
+    }
+
+    /// A live snapshot of every control-line-settable cell plus the static
+    /// config: the read half of skills/system/context, which before this
+    /// could be set but never queried back. Errors when the request names an
+    /// entry that has no body to ask for.
+    fn settings_reply(&self, settings: &serde_json::Value) -> Result<serde_json::Value, String> {
+        let wanted = included(settings)?;
+        let skills_dir = self.skills_root.read().unwrap().clone();
+        let skills_dir_exists = std::fs::metadata(&skills_dir).is_ok_and(|m| m.is_dir());
+        let system = self.system.read().unwrap().clone();
+        let context = self.context.read().unwrap().clone();
+        let credentials = credentials::settings(
+            &self.credentials.read().unwrap(),
+            &self.tools.read().unwrap(),
+        );
+        let warnings = credentials::warnings(
+            &self.credentials.read().unwrap(),
+            &self.tools.read().unwrap(),
+        );
+        Ok(serde_json::json!({
+            "warnings": warnings,
+            "settings": {
+                "credentials": credentials["credentials"],
+                "tools": credentials["tools"],
+                "world": self.world,
+                "instance": self.instance,
+                "cwd": self.default_cwd.read().unwrap().to_string_lossy(),
+                "model": self.model.read().unwrap().to_json(),
+                "attachBucket": self.attach_bucket,
+                "skillsDir": skills_dir.to_string_lossy(),
+                "skillsDirExists": skills_dir_exists,
+                "system": text_setting(system.as_deref(), wanted.contains(&"system")),
+                "context": text_setting(context.as_deref(), wanted.contains(&"context")),
+                "refsDb": self.refs_path.to_string_lossy(),
+                "memoryDb": self.memory_path.to_string_lossy(),
+                "historyDb": self.history_path.to_string_lossy(),
+                "permissions": self.permissions.read().unwrap().resolved(),
+                "retry": retry::to_json(self.retry.read().unwrap().as_ref()),
+            }
+        }))
     }
 
     /// Carry out one control line, writing its single response to stdout.
     async fn handle(&self, value: serde_json::Value) {
         if let Some(spawn) = value.get("spawn") {
             let conv = uuid::Uuid::new_v4().to_string();
-            // A named model pins its own cell; none shares the live default,
-            // so a later `model` line reaches this conversation's next turn.
-            let model = match spawn.get("model").and_then(serde_json::Value::as_str) {
-                Some(m) => Arc::new(RwLock::new(m.to_string())),
-                None => Arc::clone(&self.default_model),
-            };
+            let model_name = spawn.get("model").and_then(serde_json::Value::as_str);
             let default_cwd = self.default_cwd.read().unwrap().clone();
             let cwd = match resolve_cwd(
                 spawn.get("cwd").and_then(serde_json::Value::as_str),
@@ -643,7 +749,16 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
                     return;
                 }
             };
-            let config = self.config(&conv, model, Arc::new(RwLock::new(cwd)));
+            let config = match self.config(&conv, model_name, Arc::new(RwLock::new(cwd))) {
+                Ok(config) => config,
+                Err(e) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("invalid model: {e}") })
+                    );
+                    return;
+                }
+            };
             match serve_conversation(
                 &self.broker,
                 self.delta.clone(),
@@ -705,11 +820,16 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
                     return;
                 }
             };
-            let config = self.config(
-                &conv,
-                Arc::clone(&self.default_model),
-                Arc::new(RwLock::new(cwd)),
-            );
+            let config = match self.config(&conv, None, Arc::new(RwLock::new(cwd))) {
+                Ok(config) => config,
+                Err(e) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("invalid model: {e}") })
+                    );
+                    return;
+                }
+            };
             match serve_conversation(
                 &self.broker,
                 self.delta.clone(),
@@ -863,16 +983,47 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
                 }
             }
         } else if let Some(model) = value.get("model") {
-            // The live default cell: new spawns that name no model take it,
-            // and every running conversation sharing it picks the change up
-            // on its next say. A spawn that named its own model stays pinned.
-            let Some(text) = model.as_str() else {
-                println!("{}", serde_json::json!({ "error": "model needs a string" }));
-                return;
-            };
-            *self.default_model.write().unwrap() = text.to_string();
-            eprintln!("bridge: default model set ({text})");
-            println!("{}", serde_json::json!({ "model": text }));
+            // One cell, MERGED rather than replaced: the line updates the
+            // fields it names and leaves the rest alone, and null clears an
+            // optional one. So the line is validated on the values it
+            // carries, and whether the cell is complete is asked when a
+            // conversation is served. New spawns take it; a conversation
+            // already running keeps what it was served with.
+            let merged = self.model.read().unwrap().merged(model);
+            match merged {
+                Ok(settings) => {
+                    *self.model.write().unwrap() = settings;
+                    let echo = self.model.read().unwrap().to_json();
+                    eprintln!("bridge: model set ({echo})");
+                    println!("{}", serde_json::json!({ "model": echo }));
+                }
+                Err(e) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("invalid model: {e}") })
+                    );
+                }
+            }
+        } else if let Some(line) = value.get("retry") {
+            // One cell, REPLACED whole, beside the model line and independent
+            // of it: a policy is one strategy, and half of one mixed with
+            // half of another is not a strategy. Read at the moment a connect
+            // failure has to be decided on, so this reaches a turn already in
+            // flight; `null` clears it and leaves bridge not retrying at all.
+            match retry::parse(line) {
+                Ok(policy) => {
+                    *self.retry.write().unwrap() = policy;
+                    let echo = retry::to_json(policy.as_ref());
+                    eprintln!("bridge: retry set ({echo})");
+                    println!("{}", serde_json::json!({ "retry": echo }));
+                }
+                Err(e) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({ "error": format!("invalid retry: {e}") })
+                    );
+                }
+            }
         } else if let Some(cwd) = value.get("cwd") {
             // The instance's own default cwd (cwd.rs); use `chdir` to move
             // a conversation that's already running.
@@ -993,46 +1144,11 @@ impl<B: Broker, D: DeltaSink> Host<B, D> {
                     println!("{}", serde_json::json!({ "error": "publish failed" }));
                 }
             }
-        } else if value.get("settings").is_some() {
-            // A live snapshot of every control-line-settable cell plus the
-            // static config — the read half of skills/system/context, which
-            // until now could be set but never queried back.
-            let skills_dir = self.skills_root.read().unwrap().clone();
-            let skills_dir_exists = std::fs::metadata(&skills_dir).is_ok_and(|m| m.is_dir());
-            let system = self.system.read().unwrap().clone();
-            let context = self.context.read().unwrap().clone();
-            let credentials = credentials::settings(
-                &self.credentials.read().unwrap(),
-                &self.tools.read().unwrap(),
-            );
-            let warnings = credentials::warnings(
-                &self.credentials.read().unwrap(),
-                &self.tools.read().unwrap(),
-            );
-            println!(
-                "{}",
-                serde_json::json!({
-                    "warnings": warnings,
-                    "settings": {
-                        "credentials": credentials["credentials"],
-                        "tools": credentials["tools"],
-                        "world": self.world,
-                        "instance": self.instance,
-                        "cwd": self.default_cwd.read().unwrap().to_string_lossy(),
-                        "model": self.default_model.read().unwrap().clone(),
-                        "thinkingBudget": self.thinking_budget,
-                        "attachBucket": self.attach_bucket,
-                        "skillsDir": skills_dir.to_string_lossy(),
-                        "skillsDirExists": skills_dir_exists,
-                        "system": system,
-                        "context": context,
-                        "refsDb": self.refs_path.to_string_lossy(),
-                        "memoryDb": self.memory_path.to_string_lossy(),
-                        "historyDb": self.history_path.to_string_lossy(),
-                        "permissions": self.permissions.read().unwrap().resolved(),
-                    }
-                })
-            );
+        } else if let Some(settings) = value.get("settings") {
+            match self.settings_reply(settings) {
+                Ok(reply) => println!("{reply}"),
+                Err(e) => println!("{}", serde_json::json!({ "error": e })),
+            }
         } else {
             println!("{}", serde_json::json!({ "error": "unsupported" }));
         }
@@ -1224,13 +1340,19 @@ async fn handle_service<B: Broker, D: DeltaSink>(
             return wire::encode_rejected_detailed("invalid_cwd", &e);
         }
     };
-    // A named model pins its own cell; none shares the live default — same
-    // rule as a stdio spawn.
-    let model_cell = match model {
-        Some(m) => Arc::new(RwLock::new(m)),
-        None => Arc::clone(&host.default_model),
+    // A request that names a model supplies the name; the cell supplies the
+    // rest — same rule as a stdio spawn. A cell with no name and no
+    // maxTokens between them cannot serve anything, and this is where that
+    // is refused: name and maxTokens are both required, so the cell is only
+    // ever unset or whole, and refusing here leaves no unconfigured path
+    // behind it.
+    let config = match host.config(&conv, model.as_deref(), Arc::new(RwLock::new(resolved_cwd))) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("bridge: service {conv}: no model: {e}");
+            return wire::encode_rejected_detailed("no_model", &e);
+        }
     };
-    let config = host.config(&conv, model_cell, Arc::new(RwLock::new(resolved_cwd)));
     // The claim goes before the reply, never on the handed-off work: it is
     // what a retry from a sender that gave up waiting collides with, and a
     // claim taken only once the replay started would let that retry begin a
@@ -1527,7 +1649,6 @@ async fn main() -> anyhow::Result<()> {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
     // ANTHROPIC_API_KEY when set; otherwise the Claude Code OAuth token.
     let auth = anthropic::Auth::resolve()?;
-    let default_model = std::env::var("BRIDGE_MODEL").unwrap_or_else(|_| "claude-sonnet-5".into());
     // The world is a durable name for a place, deployer-chosen; the process
     // standing in it is disposable and mints a fresh instance id per boot.
     let world = std::env::var("BRIDGE_WORLD").unwrap_or_else(|_| "local".into());
@@ -1541,15 +1662,6 @@ async fn main() -> anyhow::Result<()> {
     // The transit object store attachments resolve from; must name the same
     // bucket the tower deployment uploads into.
     let attach_bucket = std::env::var("BRIDGE_ATTACH_BUCKET").unwrap_or_else(|_| "attach".into());
-    // Extended thinking: on by default; BRIDGE_THINKING_BUDGET=0 disables.
-    let thinking_budget = match std::env::var("BRIDGE_THINKING_BUDGET")
-        .ok()
-        .and_then(|v| v.parse::<i64>().ok())
-    {
-        Some(0) => None,
-        Some(n) => Some(n),
-        None => Some(4096),
-    };
     // The oversized-tool-output store: content-addressed, ephemeral is fine
     // (unlike conversation state, losing it across a restart is not data
     // loss, only a stale ref id). Defaults under the OS temp dir so no new
@@ -1669,7 +1781,6 @@ async fn main() -> anyhow::Result<()> {
     // Host: the shared config and live cells every control line reads. One
     // grammar, two delivery points — the -c batch, then live stdin — plus
     // the world's own NATS request loop.
-    let default_model = Arc::new(RwLock::new(default_model));
     let stream = std::env::var("BRIDGE_STREAM").unwrap_or_else(|_| "conv-approval".into());
     let stream_ephemeral =
         std::env::var("BRIDGE_STREAM_EPHEMERAL").unwrap_or_else(|_| "conv-ephemeral".into());
@@ -1679,7 +1790,9 @@ async fn main() -> anyhow::Result<()> {
         delta,
         world,
         instance,
-        default_model,
+        // Nothing defaults the model: until a `model` line names at least a
+        // name and a maxTokens, this instance refuses to serve anything.
+        model: Arc::new(RwLock::new(model::Settings::default())),
         refs: refs_store,
         memory: memory_store,
         history: history_store,
@@ -1695,8 +1808,11 @@ async fn main() -> anyhow::Result<()> {
         system: Arc::new(RwLock::new(None)),
         context: Arc::new(RwLock::new(None)),
         attach_bucket,
-        thinking_budget,
         permissions: Arc::new(RwLock::new(permissions::PermissionSet::strict_default())),
+        // Nothing defaults the retry policy either: until a `retry` line sets
+        // one, a model request that fails on the way out ends the query on
+        // the first failure, exactly as before.
+        retry: Arc::new(RwLock::new(None)),
         // No defaults and no environment variables: until a `credentials`
         // and a `tools` line arrive, nothing is configured, every group is
         // inactive, and Exec's environment is untouched.
@@ -1745,7 +1861,7 @@ async fn main() -> anyhow::Result<()> {
     eprintln!("bridge: tools: {}", tool_names.join(", "));
     eprintln!(
         "bridge: ready (model {}); spawn with {{\"spawn\":{{}}}} (optionally {{\"cwd\":\"...\"}})",
-        host.default_model.read().unwrap()
+        host.model.read().unwrap().to_json()
     );
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     while let Some(line) = lines.next_line().await? {
@@ -1760,8 +1876,8 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ServeOutcome, ServedCwds, decisions, expand_tilde, fold_replay, replay_conversation,
-        serve_conversation,
+        ServeOutcome, ServedCwds, decisions, expand_tilde, fold_replay, included,
+        replay_conversation, serve_conversation, skills, text_setting,
     };
     use crate::anthropic::NoopDeltaSink;
     use crate::testsupport::config;
@@ -2211,6 +2327,190 @@ mod tests {
         );
     }
 
+    // --- the `settings` reply's two text cells: a summary always, the body
+    // only when the request named the entry. ---
+
+    #[test]
+    fn a_set_text_setting_summarises_its_body_rather_than_carrying_it() {
+        let expected = serde_json::json!({
+            "set": true,
+            "bytes": 17,
+            "hash": format!("{:016x}", skills::content_hash("You are a teapot.")),
+        });
+        let actual = text_setting(Some("You are a teapot."), false);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_named_text_setting_gains_its_body_without_losing_the_summary() {
+        let expected = serde_json::json!({
+            "set": true,
+            "bytes": 17,
+            "hash": format!("{:016x}", skills::content_hash("You are a teapot.")),
+            "text": "You are a teapot.",
+        });
+        let actual = text_setting(Some("You are a teapot."), true);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn an_unset_text_setting_reports_no_body_even_when_named() {
+        let expected = serde_json::json!({ "set": false });
+        let actual = text_setting(None, true);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn the_summary_counts_the_bodys_bytes_not_its_characters() {
+        let expected = serde_json::json!(5);
+        let actual = text_setting(Some("café"), false)["bytes"].clone();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn the_summary_renders_its_hash_as_sixteen_lowercase_hex_digits() {
+        let hash = text_setting(Some("You are a teapot."), false)["hash"].clone();
+        let actual = hash.as_str().map(|h| {
+            h.len() == 16
+                && h.chars()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        });
+        let expected = Some(true);
+        assert_eq!(actual, expected, "hash was {hash}");
+    }
+
+    #[test]
+    fn a_request_naming_nothing_asks_for_no_body() {
+        let request = serde_json::json!({});
+        let expected: Result<Vec<&str>, String> = Ok(Vec::new());
+        let actual = included(&request);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_request_asks_for_exactly_the_entries_it_names() {
+        let request = serde_json::json!({ "include": ["system"] });
+        let expected: Result<Vec<&str>, String> = Ok(vec!["system"]);
+        let actual = included(&request);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_request_naming_an_unknown_entry_is_rejected_saying_which_have_a_body() {
+        let request = serde_json::json!({ "include": ["skillsDir"] });
+        let expected = Err(
+            "settings include names unknown entry \"skillsDir\"; entries with a body: context, system"
+                .to_string(),
+        );
+        let actual = included(&request);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_request_whose_include_is_not_an_array_is_rejected() {
+        let request = serde_json::json!({ "include": "system" });
+        let expected = Err("settings include needs an array of entry names".to_string());
+        let actual = included(&request);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_request_naming_an_entry_as_something_other_than_a_string_is_rejected() {
+        let request = serde_json::json!({ "include": [7] });
+        let expected = Err("settings include needs each entry named as a string".to_string());
+        let actual = included(&request);
+        assert_eq!(actual, expected);
+    }
+
+    // Through the reply, not the pieces: the two entries are told apart by
+    // their own names, so transposing them at the call sites fails here.
+
+    #[test]
+    fn the_reply_gives_each_entry_its_own_body() {
+        let scratch = TestScratch::new("settings-reply-both");
+        let host = host(&scratch, FakeBroker::default());
+        *host.system.write().unwrap() = Some("the system prompt".to_string());
+        *host.context.write().unwrap() = Some("the user context".to_string());
+
+        let reply = host
+            .settings_reply(&serde_json::json!({ "include": ["system", "context"] }))
+            .expect("naming both known entries is a valid request");
+
+        let expected = serde_json::json!(["the system prompt", "the user context"]);
+        let actual = serde_json::json!([
+            reply["settings"]["system"]["text"],
+            reply["settings"]["context"]["text"],
+        ]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn the_reply_carries_only_the_body_the_request_named() {
+        let scratch = TestScratch::new("settings-reply-one");
+        let host = host(&scratch, FakeBroker::default());
+        *host.system.write().unwrap() = Some("the system prompt".to_string());
+        *host.context.write().unwrap() = Some("the user context".to_string());
+
+        let reply = host
+            .settings_reply(&serde_json::json!({ "include": ["system"] }))
+            .expect("naming one known entry is a valid request");
+
+        let expected = serde_json::json!(["the system prompt", null]);
+        let actual = serde_json::json!([
+            reply["settings"]["system"]["text"],
+            reply["settings"]["context"]["text"],
+        ]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn the_reply_is_refused_when_the_request_names_an_entry_with_no_body() {
+        let scratch = TestScratch::new("settings-reply-unknown");
+        let host = host(&scratch, FakeBroker::default());
+
+        let expected = Err(
+            "settings include names unknown entry \"model\"; entries with a body: context, system"
+                .to_string(),
+        );
+        let actual = host.settings_reply(&serde_json::json!({ "include": ["model"] }));
+        assert_eq!(actual, expected);
+    }
+
+    /// Nothing defaults the retry policy, and the reply says so rather than
+    /// omitting the entry, so a caller can tell "no retrying" from "this
+    /// bridge is too old to have the cell".
+    #[test]
+    fn the_reply_reports_no_retry_policy_as_null() {
+        let expected = serde_json::Value::Null;
+        let scratch = TestScratch::new("settings-retry-unset");
+        let host = host(&scratch, FakeBroker::default());
+
+        let reply = host
+            .settings_reply(&serde_json::json!({}))
+            .expect("an empty settings request is valid");
+
+        assert_eq!(reply["settings"]["retry"], expected);
+    }
+
+    #[test]
+    fn the_reply_carries_the_whole_retry_policy_once_a_line_has_set_one() {
+        let expected = serde_json::json!({
+            "maxRetries": 10,
+            "baseDelayMs": 500,
+            "maxDelayMs": 32000,
+            "retryAfterCapMs": 60000,
+        });
+        let scratch = TestScratch::new("settings-retry-set");
+        let host = host(&scratch, FakeBroker::default());
+        *host.retry.write().unwrap() = crate::retry::parse(&expected).unwrap();
+
+        let reply = host
+            .settings_reply(&serde_json::json!({}))
+            .expect("an empty settings request is valid");
+
+        assert_eq!(reply["settings"]["retry"], expected);
+    }
+
     // --- the world's `service` request (agent.md, "The premise for
     // `service`") — every premise arm, plus reply shape and environment
     // strictness, scripted through the FakeBroker. ---
@@ -2427,6 +2727,64 @@ mod tests {
             !calls.iter().any(|c| c.starts_with("publish:")),
             "nothing undertaken on a rejected environment: {calls:?}"
         );
+    }
+
+    /// Nothing defaults the model, so a world whose cell was never filled in
+    /// refuses to serve rather than spawning something it cannot run a turn
+    /// for. Name and maxTokens are both required, so the cell is only ever
+    /// unset or whole, and refusing here leaves no unconfigured path behind
+    /// it.
+    #[tokio::test]
+    async fn service_with_an_unconfigured_model_is_rejected_no_model() {
+        let broker = FakeBroker::default();
+        seed_attachment(&broker, "conv-m", vec![]);
+        let scratch = TestScratch::new("service-no-model");
+        let host = host(&scratch, broker.clone());
+        *host.model.write().unwrap() = crate::model::Settings::default();
+
+        let reply = super::handle_service(&host, "conv-m".into(), None, None).await;
+
+        let value = reply_json(&reply);
+        assert_eq!(value["rejected"], true);
+        assert_eq!(value["reason"], "no_model");
+    }
+
+    /// A conversation is never left half-served by that refusal.
+    #[tokio::test]
+    async fn a_service_rejected_for_no_model_undertakes_nothing() {
+        let broker = FakeBroker::default();
+        seed_attachment(&broker, "conv-m2", vec![]);
+        let scratch = TestScratch::new("service-no-model-clean");
+        let host = host(&scratch, broker.clone());
+        *host.model.write().unwrap() = crate::model::Settings::default();
+
+        super::handle_service(&host, "conv-m2".into(), None, None).await;
+
+        let calls = broker.calls.lock().unwrap().clone();
+        assert!(
+            !calls.iter().any(|c| c.starts_with("publish:")),
+            "nothing undertaken on a rejected environment: {calls:?}"
+        );
+    }
+
+    /// The cell holds everything but the name; the request names it. The two
+    /// halves make a whole configuration, so the request is served.
+    #[tokio::test]
+    async fn service_naming_a_model_is_served_from_a_cell_that_has_no_name() {
+        let broker = FakeBroker::default();
+        seed_attachment(&broker, "conv-m3", vec![]);
+        seed_changes(&broker, "conv-m3", vec![]);
+        let scratch = TestScratch::new("service-model-pin");
+        let host = host(&scratch, broker.clone());
+        *host.model.write().unwrap() = crate::model::Settings::default()
+            .merged(&serde_json::json!({ "maxTokens": 8192 }))
+            .unwrap();
+
+        let reply =
+            super::handle_service(&host, "conv-m3".into(), None, Some("claude-opus-5".into()))
+                .await;
+
+        assert_eq!(reply_json(&reply), serde_json::json!({ "accepted": true }));
     }
 
     /// An omitted cwd falls to the world's own default — absence delegates.

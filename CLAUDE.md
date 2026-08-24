@@ -144,14 +144,29 @@ only for what cargo can't do. Config env vars — towerd: `NATS_URL`,
 `TOWER_BIND`, `TOWER_BIND_LEPTOS`, `TOWER_DIST`, `TOWER_DIST_LEPTOS`,
 `TOWER_DB`, `TOWER_STREAM_AUDIT`, `TOWER_STREAM_DIAGNOSTIC`,
 `TOWER_STREAM_EPHEMERAL`, `TOWER_ATTACH_BUCKET`, `TOWER_ATTACH_TTL_S`;
-vite: `WEB_PORT`; bridge: `NATS_URL`, `BRIDGE_WORLD`, `BRIDGE_MODEL`,
+vite: `WEB_PORT`; bridge: `NATS_URL`, `BRIDGE_WORLD`,
 `BRIDGE_STREAM`, `BRIDGE_STREAM_EPHEMERAL`, `BRIDGE_ATTACH_BUCKET`,
-`BRIDGE_THINKING_BUDGET`,
 `BRIDGE_REFS_DB`, `BRIDGE_MEMORY_DB`, `BRIDGE_HISTORY_DB`
 (skills has no env var and no default: the directory is empty until a stdio
 `skills` control line sets it, re-scanned per say — the first say commits the
 full catalogue, later says a delta naming skills whose SKILL.md changed; the
 same control line repoints it live).
+
+The model has no env var and no default either. A `model` control line
+carries name, maxTokens, thinking, thinkingDisplay and effort; it MERGES
+rather than replacing, and until it names a model and a maxTokens bridge
+refuses to serve a conversation (`no_model`). Adaptive thinking, not a
+budget: the legacy `{"type":"enabled","budget_tokens":N}` shape produces
+worse thinking and is gone. docs/mvp/bridge-stdio-spec.md holds the rest.
+
+The connect-phase retry policy has no default either. A `retry` control line
+carries maxRetries, baseDelayMs, maxDelayMs and retryAfterCapMs; it REPLACES
+rather than merging (a policy is one strategy), all four are required, `null`
+clears it, and no line at all means no retrying — bridge as it behaved before
+it existed. Scope is the request up to and including the response status:
+once the stream has yielded anything the turn is past retrying. Classify by
+class, never by enumerated status code — 4xx never except 429, 5xx always, no
+response always — because the documentation has already moved under this once.
 
 ## helm
 
@@ -208,6 +223,12 @@ decision made in the brief, never invented by the operator.
 
 - `wire` folds: pure tests, inputs from `docs/spec/scenarios.md` fixtures.
 - Components: literal values through the seams. The only fake is `Broker`.
+- Never the fleet's broker. The `Broker` fake is the answer; a run that
+  genuinely needs a real one gets tower's own via `just broker-run '<cmd>'`
+  (mvp/compose.test.yaml, 31416, up and down around the run). An unset
+  `NATS_URL` defaults to 4222, so a process started without thinking about it
+  lands on the live deployment — and conv subjects are keyed by conversation
+  id, not by world, so what it publishes there is permanent.
 - One integration check: compose broker, scripted publisher, WS client asserts.
 - Fix lands twice: code + fixture, same commit.
 

@@ -8,12 +8,25 @@ use std::sync::{Arc, RwLock};
 
 use bridge_testkit::{FakeBroker, TestScratch};
 
+/// A whole model cell, the shape a `model` control line has to fill in
+/// before this instance will serve anything.
+pub(crate) fn model_settings() -> crate::model::Settings {
+    crate::model::Settings::default()
+        .merged(&serde_json::json!({
+            "name": "claude-sonnet-5",
+            "maxTokens": 8192,
+            "thinking": "adaptive",
+            "thinkingDisplay": "summarized",
+        }))
+        .expect("a literal, valid model line")
+}
+
 /// A minimal, literal `AgentConfig` pointed at a test's own scratch dir —
 /// every test that drives `serve_conversation`/`agent::run` needs one.
 pub(crate) fn config(conv: &str, scratch: &TestScratch) -> crate::agent::AgentConfig {
     crate::agent::AgentConfig {
         conv: wire::ConversationId(conv.to_string()),
-        model: Arc::new(RwLock::new("claude-sonnet-5".to_string())),
+        model: model_settings().resolve(None).expect("a whole cell"),
         system: Arc::new(RwLock::new(None)),
         context: Arc::new(RwLock::new(None)),
         auth: crate::anthropic::Auth::ApiKey,
@@ -22,7 +35,6 @@ pub(crate) fn config(conv: &str, scratch: &TestScratch) -> crate::agent::AgentCo
         refs: crate::refs::open(&scratch.path("refs.db")).unwrap(),
         memory: crate::memory::open(&scratch.path("memory.db")).unwrap(),
         history: crate::history::open(&scratch.path("history.db")).unwrap(),
-        thinking_budget: None,
         attach: None,
         cwd: Arc::new(RwLock::new(std::env::temp_dir())),
         permissions: Arc::new(RwLock::new(
@@ -30,6 +42,7 @@ pub(crate) fn config(conv: &str, scratch: &TestScratch) -> crate::agent::AgentCo
         )),
         credentials: Arc::new(RwLock::new(crate::credentials::Credentials::default())),
         tools: Arc::new(RwLock::new(crate::credentials::ToolsConfig::default())),
+        retry: Arc::new(RwLock::new(None)),
     }
 }
 
@@ -46,14 +59,13 @@ pub(crate) fn host(
         delta: crate::anthropic::NoopDeltaSink,
         world: "mac".to_string(),
         instance: "inst-me".to_string(),
-        default_model: Arc::new(RwLock::new("claude-sonnet-5".to_string())),
+        model: Arc::new(RwLock::new(model_settings())),
         auth: crate::anthropic::Auth::ApiKey,
         http: reqwest::Client::new(),
         skills_root: Arc::new(RwLock::new(std::path::PathBuf::new())),
         system: Arc::new(RwLock::new(None)),
         context: Arc::new(RwLock::new(None)),
         attach_bucket: "attach".to_string(),
-        thinking_budget: None,
         refs: crate::refs::open(&scratch.path("refs.db")).unwrap(),
         memory: crate::memory::open(&scratch.path("memory.db")).unwrap(),
         history: crate::history::open(&scratch.path("history.db")).unwrap(),
@@ -68,6 +80,7 @@ pub(crate) fn host(
         )),
         credentials: Arc::new(RwLock::new(crate::credentials::Credentials::default())),
         tools: Arc::new(RwLock::new(crate::credentials::ToolsConfig::default())),
+        retry: Arc::new(RwLock::new(None)),
         stream: "conv-approval".to_string(),
         stream_ephemeral: "conv-ephemeral".to_string(),
         liveness: Arc::new(std::sync::Mutex::new(crate::service::WorldLiveness::new())),
