@@ -214,7 +214,7 @@ Bind credentials to tool groups. One cell, replaced whole, same as
 ```
 {"tools": {
   "github": { "credentials": "github-privileged" },
-  "exec":   { "credentials": ["github-default"] }
+  "exec":   { "credentials": ["github-default"], "max_timeout_s": 900 }
 }}
 {"tools": "ok", "warnings": []}
 ```
@@ -223,6 +223,35 @@ A group name is likewise closed, currently `github` and `exec`, and an
 unknown one is rejected when the line arrives. `exec` takes a list where a
 group takes one, because exec can run anything and may need to carry several
 credentials at once. `enabled` is optional and defaults to true here too.
+
+`max_timeout_s` is the exec group's alone: the longest an `Exec` call may ask
+to run for, in whole seconds. Absent, this host bounds nothing and a call runs
+for whatever it asked for. Present, it must be a whole number of seconds above
+zero, and a value that cannot be one is rejected when the line arrives rather
+than dropped, because a mistyped ceiling would otherwise leave the host
+running unbounded while believing it had set a limit. A field a group does not
+have is rejected the same way an unknown group name is, so `max_timeout_s`
+written under `github` is refused rather than accepted and ignored.
+
+`{"settings":{}}` reports the exec group's `max_timeout_s`, null when the host
+bounds nothing, so the ceiling a bridge is enforcing can be read back rather
+than discovered by having a call refused.
+
+Every `Exec` call states its own `timeout` and is required to: a stated
+timeout is the caller's expectation, so when it fires it tells the caller its
+model of the command was wrong, where a default absorbs that silently. A call
+asking for longer than this host allows is refused before anything runs, and
+the refusal names the limit. It is refused rather than reduced to the limit,
+because a call quietly cut to 900s while its caller believes it has 1800s
+plans against a number that will never happen.
+
+The limit's value is not in the `Exec` schema, and the schema's wording is
+identical on every host whatever it has configured. The tools array heads the
+cached prompt prefix (below), so a description carrying this host's number
+would cost that host the entire prefix the moment the number changed. The
+schema says only that a maximum may apply and that a call exceeding it is
+refused, which is what the model needs to recognise the refusal when it
+arrives.
 
 A credential name that does not exist is different: it is accepted with a
 warning, and that group is simply not active. Neither line can be validated
