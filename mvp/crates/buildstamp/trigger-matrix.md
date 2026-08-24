@@ -1,49 +1,56 @@
 # Trigger matrix
 
-What buildstamp resolves is unit tested. What cargo does with the
-`rerun-if-changed` lines it emits is not: whether a build script re-runs is
-cargo's own behaviour, and the only way to know is to build, edit, build again
-and read the stamp. That is this checklist.
+`tests/stamp.rs` is the proof. It drives cargo against a scratch repository
+and asserts what the built binary says it is: clean, after editing a compiled
+file, after adding an untracked file a module references, after editing a file
+nothing compiles, after a commit, and with no stamp handed in at all. Run it
+with `cargo test -p buildstamp`.
 
-A stamp that says clean when the tree was not is the failure worth catching,
-and the two rows that catch it are the unstaged edit (rows 2 and 3, where the
-code recompiles and a script naming only the git paths would still report the
-old stamp) and the edit to an unrelated crate (row 4, where a stamp scoped to
-the whole repo would report dirty for work this binary does not contain).
+What that test cannot reach is this workspace: four real binaries, two of them
+sharing crates, one built by trunk for a different target, and the two-build
+flow that `just` runs. Those are the rows below, and they are worth walking
+after anything touches the build.
 
 ## Running it
 
-Against bridge, from a clean tree at a commit whose short hash is H. Each row
-starts from that clean state, so undo the previous row's edit first.
-
 ```sh
 cd mvp
-cargo build -p bridge
+just build
 NATS_URL=nats://127.0.0.1:1 ./target/debug/bridge 2>&1 | head -1
 ```
 
-The unreachable NATS port is deliberate: the banner prints before the broker is
-dialled, so bridge names its build and then exits without touching a real
-broker.
+The unreachable NATS port is deliberate: bridge names its build before it
+dials a broker, so it says what it is and then exits without touching one.
+towerd takes `TOWER_DB=/tmp/scratch.db` alongside. helm holds the terminal, so
+read its stamp with `strings target/debug/helm | grep <hash>` instead.
 
 ## Last run
 
-macOS, 2026-08-02, in a linked worktree (`.git` is a file), H = `0ec2a77`.
+macOS, 2026-08-24, in a linked worktree, at `352de0a`.
 
-| what you do | expected stamp | observed |
+| what you do | expected | observed |
 | --- | --- | --- |
-| build clean | `H` | `0ec2a77` |
-| edit a file in bridge itself, do not stage, rebuild | `H-dirty` | `0ec2a77-dirty` |
-| edit a file in a path dependency (`wire`), do not stage, rebuild | `H-dirty` | `0ec2a77-dirty` |
-| edit a file in a crate bridge does not depend on (`towerd`), rebuild | `H` | `0ec2a77` |
-| add an untracked `.rs` inside bridge, rebuild | `H-dirty` | `0ec2a77-dirty` |
-| edit a file outside `mvp/` (a doc), rebuild | `H` | `0ec2a77` |
-| stage any of the dirty rows above, rebuild | `H-dirty` | `0ec2a77-dirty` |
-| revert everything, rebuild | `H` | `0ec2a77` |
-| commit a change, rebuild touching nothing else | the new hash, clean | recorded below |
+| `just build` on a committed tree | every binary names the commit | `352de0a` for bridge, towerd, helm, leptos |
+| leave an untracked `.rs` in `crates/bridge/src` that no module declares | clean, since nothing compiles it | `352de0a` |
+| edit a file bridge compiles | bridge dirty | `352de0a-dirty` |
+| ... and read towerd in the same build | towerd untouched, and not even recompiled | `352de0a`, its build time unchanged |
+| revert the edit, `just build` | clean again | `352de0a` |
+| `just build` twice over, nothing changed | no crate recompiles | both builds 0.13s, nothing compiled |
+| `just frontend` (trunk, wasm target) | the wasm carries the stamp | `352de0a`, found in `dist/*.wasm` |
+| release two-pass, as CI runs it | the release binary names the commit | `352de0a` |
 
-The last row moves H, so it is recorded after the fact: committing this file
-took the tree to `dffdf7f`, and the next `cargo build -p bridge`, with nothing
-else touched, stamped `dffdf7f` clean. That commit touched no file bridge
-compiles, so the rebuild came from the worktree's own `HEAD` alone, which is
-the path a hardcoded `.git/HEAD` would have missed here.
+## Why two builds
+
+The first build is what makes cargo write `target/<profile>/<binary>.d`, the
+list of files that binary was compiled from. The stamp is computed from that
+list, and the second build bakes it in.
+
+Both builds are handed a stamp, and the first is handed whatever the previous
+build left behind. That is not decoration: a variable that flips between set
+and unset is a change like any other, so handing a stamp to only the second
+build recompiles every stamped crate on every build. Measured before the fix,
+each pass cost 1.7s with nothing changed; after it, 0.13s.
+
+A bare `cargo build` is still stamped. With nothing handed in, the build script
+falls back to the dep-info the previous build left, which is at worst one build
+stale, and never silently unstamped.

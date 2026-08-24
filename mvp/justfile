@@ -2,16 +2,25 @@
 
 # Build every crate, stamped. Two builds: the first records what each binary
 # compiles (target/<profile>/<binary>.d), the second bakes in the stamp
-# computed from it. The second only recompiles the crates whose stamp
-# actually changed, and nothing at all when none did.
+# computed from that record.
+#
+# Both builds are handed a stamp, and the first is handed the one the last
+# build left behind. A variable that flips between set and unset is a change
+# like any other, and would recompile every stamped crate on every build; this
+# way nothing recompiles unless the stamp itself moved.
 build:
     #!/bin/sh
     set -eu
+    stamp() { cargo run -q -p buildstamp -- "$1"; }
+    hand_out() {
+        BUILDSTAMP_BRIDGE=$(stamp target/debug/bridge.d)
+        BUILDSTAMP_TOWERD=$(stamp target/debug/towerd.d)
+        BUILDSTAMP_HELM=$(stamp target/debug/helm.d)
+        export BUILDSTAMP_BRIDGE BUILDSTAMP_TOWERD BUILDSTAMP_HELM
+    }
+    hand_out
     cargo build --workspace
-    BUILDSTAMP_BRIDGE=$(cargo run -q -p buildstamp -- target/debug/bridge.d)
-    BUILDSTAMP_TOWERD=$(cargo run -q -p buildstamp -- target/debug/towerd.d)
-    BUILDSTAMP_HELM=$(cargo run -q -p buildstamp -- target/debug/helm.d)
-    export BUILDSTAMP_BRIDGE BUILDSTAMP_TOWERD BUILDSTAMP_HELM
+    hand_out
     cargo build --workspace
 
 # Test every crate.
@@ -81,9 +90,12 @@ frontend:
     #!/bin/sh
     set -eu
     cd frontend-svelte && pnpm install && pnpm build
-    cd ../frontend-leptos && trunk build
-    BUILDSTAMP_FRONTEND_LEPTOS=$(cargo run -q -p buildstamp --manifest-path ../Cargo.toml -- ../target/wasm32-unknown-unknown/debug/tower-frontend-leptos.d)
+    cd ../frontend-leptos
+    leptos_stamp() { cargo run -q -p buildstamp --manifest-path ../Cargo.toml -- ../target/wasm32-unknown-unknown/debug/tower-frontend-leptos.d; }
+    BUILDSTAMP_FRONTEND_LEPTOS=$(leptos_stamp)
     export BUILDSTAMP_FRONTEND_LEPTOS
+    trunk build
+    BUILDSTAMP_FRONTEND_LEPTOS=$(leptos_stamp)
     trunk build
 
 # Title conversations from their own content, through bridge's model client.
