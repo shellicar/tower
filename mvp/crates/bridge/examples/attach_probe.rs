@@ -56,6 +56,16 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Nothing defaults the model, so a model line comes before the spawn or
+    // adopt — bridge refuses to serve a conversation until the cell names at
+    // least a model and a maxTokens.
+    stdin.write_all(
+        b"{\"model\":{\"name\":\"claude-sonnet-5\",\"maxTokens\":8192,\"thinking\":\"adaptive\",\"thinkingDisplay\":\"summarized\"}}\n",
+    )?;
+    let mut model_reply = String::new();
+    stdout.read_line(&mut model_reply)?;
+    println!("attach_probe: model reply: {}", model_reply.trim_end());
+
     // With an argv conversation id: adopt it and watch the replayed history
     // arrive over the attach channel (no say is sent). Without: spawn fresh.
     let adopt_target = std::env::args().nth(1);

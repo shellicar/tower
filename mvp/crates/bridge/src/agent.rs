@@ -25,13 +25,22 @@ use crate::decisions::{CancelDecision, Conversation, Message, QueryEnd, SayDecis
 use crate::skills::Skills;
 use bridge::broker::{Broker, BrokerError, BrokerSubscription};
 
-/// Every tool schema offered on every turn, except `Skill` (gated on a
-/// non-empty catalogue — conversation-specific, not static). The one source
-/// both `run_query`'s per-turn tool list and main.rs's startup log read
-/// from, so what's printed at boot and what's actually offered can never
-/// drift apart. Bash is deliberately absent (kept in exec.rs, not deleted).
+/// Every tool schema offered on every turn, without exception. The one
+/// source both `run_query`'s per-turn tool list and main.rs's startup log
+/// read from, so what's printed at boot and what's actually offered can
+/// never drift apart. Bash is deliberately absent (kept in exec.rs, not
+/// deleted).
+///
+/// Nothing here varies with configuration, and that is the point. The tools
+/// array is ordered ahead of system and messages in the cached prompt
+/// prefix, so one character different in it misses the entire cache. A tool
+/// that appeared only once something was configured would cost every
+/// conversation the whole prefix the moment it was. So `Skill` is offered
+/// with no catalogue and the GitHub tools are offered with no credential;
+/// each answers for itself when called, and what is actually available is
+/// told to the model in the conversation instead.
 pub fn static_tool_schemas() -> Vec<Value> {
-    vec![
+    let mut schemas = vec![
         crate::exec::exec_schema(),
         crate::read::read_schema(),
         crate::find::find_schema(),
@@ -53,17 +62,22 @@ pub fn static_tool_schemas() -> Vec<Value> {
         crate::memtools::memory_types_schema(),
         crate::historytools::search_history_schema(),
         crate::historytools::read_history_schema(),
-    ]
+        crate::skills::skill_schema(),
+    ];
+    schemas.extend(bridge_tools_github::schemas());
+    schemas
 }
 
 pub struct AgentConfig {
     pub conv: ConversationId,
-    /// The model cell. A spawn that named no model shares the host's live
-    /// default, so a stdio `model` line reaches its next turn; a spawn that
-    /// named one is pinned to its own cell. The model is an instance fact,
-    /// not a conversation attribute — `turn.started` states what served each
-    /// turn.
-    pub model: Arc<std::sync::RwLock<String>>,
+    /// This conversation's whole model configuration, resolved from the
+    /// host's `model` cell when the conversation was served and fixed from
+    /// then on — a spawn or service request that named a model supplied the
+    /// name, the cell supplied the rest. Completeness was checked there, so
+    /// nothing downstream of it can be unconfigured. The model is an
+    /// instance fact, not a conversation attribute: `turn.started` states
+    /// what served each turn.
+    pub model: crate::model::Resolved,
     /// The system prompt cell, shared and read fresh each turn so a stdio
     /// `system` control line reaches even a running conversation. Never
     /// persisted to the record.
@@ -90,8 +104,6 @@ pub struct AgentConfig {
     /// The shared history index (history.rs), best-effort-written on every
     /// committed message and read by SearchHistory/ReadHistory.
     pub history: crate::history::HistoryStore,
-    /// Extended thinking budget; None = thinking off.
-    pub thinking_budget: Option<i64>,
     /// The local TUI's attach handle, if this instance was spawned with one.
     /// None for every tower-spawned instance — NATS carries every event
     /// regardless; this is purely an additional local mirror.
@@ -103,6 +115,18 @@ pub struct AgentConfig {
     /// The path-scoped permission matrix (permissions.rs), shared and live-
     /// repointable by a `permissions` control line.
     pub permissions: Arc<std::sync::RwLock<crate::permissions::PermissionSet>>,
+    /// The configured credentials and the tool groups binding them
+    /// (credentials.rs), each a cell a control line replaces whole. Read
+    /// fresh at each use, so a reconfiguration reaches a running
+    /// conversation; the two are resolved against each other at that point,
+    /// which is what makes the order they arrive in irrelevant.
+    pub credentials: Arc<std::sync::RwLock<crate::credentials::Credentials>>,
+    pub tools: Arc<std::sync::RwLock<crate::credentials::ToolsConfig>>,
+    /// The connect-phase retry policy (retry.rs), a cell a `retry` control
+    /// line replaces whole. Read when a connect failure has to be decided on,
+    /// so a change reaches the next failure of a conversation already running;
+    /// unset means no retrying at all.
+    pub retry: crate::anthropic::RetryCell,
 }
 
 /// Subscribe to the conversation's requests. main calls this BEFORE
@@ -256,6 +280,10 @@ pub async fn run<B: Broker, D: DeltaSink>(
     // The delta baseline: name→content-hash from the last scan. None until the
     // first say records it (which stays silent; the full catalogue leads instead).
     let mut skill_hashes: Option<HashMap<String, u64>> = None;
+    // The same discipline for tool availability: what this conversation was
+    // last told about which tool groups it can actually use. None until the
+    // first say, which leads with the full state.
+    let mut tool_availability: Option<std::collections::BTreeMap<String, String>> = None;
     let (done_tx, mut done_rx) = mpsc::channel::<(String, QueryEnd)>(8);
 
     loop {
@@ -317,6 +345,7 @@ pub async fn run<B: Broker, D: DeltaSink>(
                                 &config,
                                 &mut conversation,
                                 &mut skill_hashes,
+                                &mut tool_availability,
                                 &done_tx,
                                 text,
                                 from,
@@ -392,6 +421,7 @@ async fn accept_say<B: Broker, D: DeltaSink>(
     config: &AgentConfig,
     conversation: &mut Conversation,
     skill_hashes: &mut Option<HashMap<String, u64>>,
+    tool_availability: &mut Option<std::collections::BTreeMap<String, String>>,
     done_tx: &mpsc::Sender<(String, QueryEnd)>,
     text: String,
     from: Value,
@@ -459,6 +489,31 @@ async fn accept_say<B: Broker, D: DeltaSink>(
     if let Some(reminder) = reminder {
         content.push(json!({ "type": "text", "text": reminder }));
     }
+    // Which tool groups this conversation can actually use, on the same
+    // footing as the skills catalogue: the full state at birth, a delta on
+    // any later say whose answer changed. The tools array itself cannot
+    // carry this (it is the cached prefix, and must not vary), so the
+    // conversation is where the model learns that calling one of them today
+    // would only return an error.
+    let availability = crate::credentials::conversation_state(
+        &config.credentials.read().unwrap(),
+        &config.tools.read().unwrap(),
+        bridge_secrets::keychain_supported(),
+    );
+    let availability_reminder = match tool_availability.as_ref() {
+        None => {
+            if birth {
+                crate::credentials::reminder(&availability)
+            } else {
+                None
+            }
+        }
+        Some(previous) => crate::credentials::delta(previous, &availability),
+    };
+    *tool_availability = Some(availability);
+    if let Some(reminder) = availability_reminder {
+        content.push(json!({ "type": "text", "text": reminder }));
+    }
     // The user-context block sits after the catalogue and, like it, only at
     // birth; committed to the record, so revive replays it and no restart can
     // invalidate it.
@@ -499,9 +554,7 @@ async fn accept_say<B: Broker, D: DeltaSink>(
         broker: broker.clone(),
         sink: sink.clone(),
         conv: config.conv.clone(),
-        // Read fresh per query: a stdio `model` line reaches even a running
-        // conversation, here, on its next say.
-        model: config.model.read().unwrap().clone(),
+        model: config.model.clone(),
         system: Arc::clone(&config.system),
         auth: config.auth.clone(),
         http: config.http.clone(),
@@ -513,11 +566,13 @@ async fn accept_say<B: Broker, D: DeltaSink>(
         refs: crate::refs::RefStore::clone(&config.refs),
         memory: crate::memory::MemoryStore::clone(&config.memory),
         history_store: crate::history::HistoryStore::clone(&config.history),
-        thinking_budget: config.thinking_budget,
         attach: config.attach.clone(),
         // Read fresh per say, same discipline as `model`.
         cwd: config.cwd.read().unwrap().clone(),
         permissions: Arc::clone(&config.permissions),
+        credentials: Arc::clone(&config.credentials),
+        tools_config: Arc::clone(&config.tools),
+        retry: Arc::clone(&config.retry),
     };
     let done = done_tx.clone();
     let q = query.clone();
@@ -537,7 +592,7 @@ struct TurnContext<B: Broker, D: DeltaSink> {
     broker: B,
     sink: D,
     conv: ConversationId,
-    model: String,
+    model: crate::model::Resolved,
     system: Arc<std::sync::RwLock<Option<String>>>,
     auth: crate::anthropic::Auth,
     http: reqwest::Client,
@@ -550,10 +605,29 @@ struct TurnContext<B: Broker, D: DeltaSink> {
     refs: crate::refs::RefStore,
     memory: crate::memory::MemoryStore,
     history_store: crate::history::HistoryStore,
-    thinking_budget: Option<i64>,
     attach: Option<bridge::attach::AttachHandle>,
     cwd: std::path::PathBuf,
     permissions: Arc<std::sync::RwLock<crate::permissions::PermissionSet>>,
+    credentials: Arc<std::sync::RwLock<crate::credentials::Credentials>>,
+    tools_config: Arc<std::sync::RwLock<crate::credentials::ToolsConfig>>,
+    retry: crate::anthropic::RetryCell,
+}
+
+/// The `turn.started` payload: the request's inputs as asked. An effort that
+/// is not set is absent rather than null, because the schema admits a missing
+/// key and never a null one.
+fn turn_started(query: &str, turn_id: &str, model: &crate::model::Resolved) -> Value {
+    let mut payload = json!({
+        "ts": now_iso(),
+        "queryId": query, "turnId": turn_id,
+        "service": "anthropic.messages", "model": model.name,
+        "thinking": model.thinking == Some(crate::model::Thinking::Adaptive),
+        "maxTokens": model.max_tokens,
+    });
+    if let Some(effort) = model.effort {
+        payload["effort"] = json!(effort.name());
+    }
+    payload
 }
 
 /// Resolves when the cancel signal flips; never resolves if it never does
@@ -603,21 +677,20 @@ async fn run_query<B: Broker, D: DeltaSink>(
         refs,
         memory,
         history_store,
-        thinking_budget,
         attach,
         cwd,
         permissions,
+        credentials,
+        tools_config,
+        retry,
     } = &ctx;
     let pubr = Publisher::new(broker, conv, history_store, attach.clone());
 
-    // Skill only when a catalogue exists; every other tool is always this
-    // same list (static_tool_schemas) — the one source main.rs's startup log
-    // reads from too, so what's printed and what's actually offered can never
-    // drift apart.
-    let mut tools: Vec<Value> = static_tool_schemas();
-    if !skills.is_empty() {
-        tools.push(skills.tool_schema());
-    }
+    // Always the same list (static_tool_schemas) — the one source main.rs's
+    // startup log reads from too, so what's printed and what's actually
+    // offered can never drift apart, and the cached prompt prefix this array
+    // heads is never invalidated by configuration.
+    let tools: Vec<Value> = static_tool_schemas();
 
     let mut committed: Vec<Message> = Vec::new();
     // The say rides pending and commits with the FIRST turn's result: words
@@ -633,12 +706,7 @@ async fn run_query<B: Broker, D: DeltaSink>(
     loop {
         pubr.event(
             "telemetry.turn.started",
-            json!({
-                "ts": now_iso(),
-                "queryId": query, "turnId": turn_id,
-                "service": "anthropic.messages", "model": model,
-                "thinking": thinking_budget.is_some(), "maxTokens": anthropic::MAX_TOKENS,
-            }),
+            turn_started(query, &turn_id, model),
         )
         .await;
 
@@ -658,8 +726,8 @@ async fn run_query<B: Broker, D: DeltaSink>(
                 system.as_deref(),
                 &history,
                 &tools,
-                *thinking_budget,
                 attach,
+                retry,
             ) => outcome,
             _ = cancelled(&mut cancel) => {
                 pubr.event(
@@ -710,7 +778,7 @@ async fn run_query<B: Broker, D: DeltaSink>(
             json!({
                 "ts": now_iso(),
                 "queryId": query, "turnId": turn_id,
-                "service": "anthropic.messages", "model": model,
+                "service": "anthropic.messages", "model": model.name,
                 "inputTokens": done.input_tokens,
                 "cacheCreationTokens": done.cache_creation_tokens,
                 "cacheCreation5mTokens": done.cache_creation_5m_tokens,
@@ -793,6 +861,8 @@ async fn run_query<B: Broker, D: DeltaSink>(
             &mut cancel,
             cwd,
             permissions,
+            credentials,
+            tools_config,
         )
         .await;
 
@@ -843,6 +913,90 @@ fn permission_verdict(
     )
 }
 
+/// One `Exec` call, with whatever the exec tool group carries. The
+/// credentials are resolved and read here, immediately before the children
+/// are spawned: nothing holds a secret between calls, so a rotation takes
+/// effect on the next one. A credential that cannot be read fails the call
+/// rather than letting it run without one.
+async fn run_exec(
+    commands: &[crate::exec::ExecCommand],
+    timeout: std::time::Duration,
+    credentials: &std::sync::RwLock<crate::credentials::Credentials>,
+    tools_config: &std::sync::RwLock<crate::credentials::ToolsConfig>,
+    cancel: &mut watch::Receiver<bool>,
+) -> (String, bool) {
+    // Resolved into an owned value first: the two read guards must not be
+    // alive across the await below.
+    let resolved = crate::credentials::exec_credentials(
+        &credentials.read().unwrap(),
+        &tools_config.read().unwrap(),
+    );
+    match resolved {
+        Ok(resolved) => {
+            let base = crate::exec::ambient_env();
+            let results =
+                crate::exec::run_commands(commands, timeout, &base, &resolved, cancel).await;
+            crate::exec::format_results(commands, &results)
+        }
+        Err(e) => (format!("exec credentials unavailable: {e}"), true),
+    }
+}
+
+/// The Keychain account the github tool group binds right now, or the reason
+/// there is none. Resolved per call, so a `credentials` or `tools` line
+/// reaches a conversation already under way.
+fn github_account(
+    credentials: &std::sync::RwLock<crate::credentials::Credentials>,
+    tools_config: &std::sync::RwLock<crate::credentials::ToolsConfig>,
+) -> Result<String, String> {
+    // The schemas are offered everywhere, so a host that cannot read a
+    // credential answers for itself here rather than by withholding them.
+    if !bridge_secrets::keychain_supported() {
+        return Err(format!(
+            "the GitHub tools are unavailable: this host ({}/{}) cannot read a credential",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ));
+    }
+    let state = {
+        let credentials = credentials.read().unwrap();
+        let tools_config = tools_config.read().unwrap();
+        crate::credentials::resolve(&credentials, tools_config.github.as_ref())
+    };
+    match state {
+        crate::credentials::GroupState::Active(bound) => bound
+            .first()
+            .map(|credential| credential.account.clone())
+            .ok_or_else(|| "the \"github\" tool group binds no credential".to_string()),
+        crate::credentials::GroupState::Unconfigured => Err(
+            "the GitHub tools are unavailable: no credential is bound to the \"github\" tool group"
+                .to_string(),
+        ),
+        crate::credentials::GroupState::Disabled => Err(
+            "the GitHub tools are unavailable: the \"github\" tool group is turned off".to_string(),
+        ),
+        crate::credentials::GroupState::Missing(names) => Err(format!(
+            "the GitHub tools are unavailable: the \"github\" tool group names credential {}, which is not configured",
+            names.join(", ")
+        )),
+    }
+}
+
+/// One gh call, racing the cancel signal. The gh child is killed when this
+/// future is dropped, so a cancelled turn leaves nothing running.
+async fn run_github(
+    name: &str,
+    input: &Value,
+    cwd: &std::path::Path,
+    account: &str,
+    cancel: &mut watch::Receiver<bool>,
+) -> (String, bool) {
+    tokio::select! {
+        result = bridge_tools_github::run(name, input, cwd, account) => result,
+        _ = cancelled(cancel) => ("cancelled by user".to_string(), true),
+    }
+}
+
 /// One tool round: execute every `tool_use` block in the just-committed
 /// assistant turn and return the `tool_result` blocks, in order. The action
 /// is published as telemetry before it runs (`input` included - the action
@@ -863,6 +1017,8 @@ async fn run_tool_round<B: Broker>(
     cancel: &mut watch::Receiver<bool>,
     cwd: &std::path::Path,
     permissions: &std::sync::RwLock<crate::permissions::PermissionSet>,
+    credentials: &std::sync::RwLock<crate::credentials::Credentials>,
+    tools_config: &std::sync::RwLock<crate::credentials::ToolsConfig>,
 ) -> Vec<Value> {
     let home = bridge::home::home_dir()
         .map(std::path::PathBuf::from)
@@ -989,58 +1145,84 @@ async fn run_tool_round<B: Broker>(
             // strictest verdict across every command in the call, not just
             // the first. Parsing happens before the check, once, so the
             // Approved arm never has to re-parse what's already known good.
-            "Exec" => match crate::exec::parse_commands(&block["input"]) {
-                Ok(mut commands) => {
-                    let call_cwds: Vec<std::path::PathBuf> = commands
-                        .iter()
-                        .map(|c| match &c.cwd {
-                            Some(c) => resolve_against(cwd, c),
-                            None => cwd.to_path_buf(),
-                        })
-                        .collect();
-                    // Bind every command's cwd to its resolved value:
-                    // unset, exec.rs leaves the child to inherit the bridge
-                    // process's own directory, not this conversation's.
-                    for (c, resolved) in commands.iter_mut().zip(&call_cwds) {
-                        c.cwd = Some(resolved.to_string_lossy().into_owned());
-                    }
-                    match permission_verdict(permissions, cwd, &home, "exec", &call_cwds) {
-                        crate::permissions::Verdict::Deny => {
-                            ("denied by permissions policy".to_string(), true)
-                        }
-                        crate::permissions::Verdict::Allow => {
-                            let results = crate::exec::run_commands(&commands, cancel).await;
-                            crate::exec::format_results(&commands, &results)
-                        }
-                        crate::permissions::Verdict::Ask => {
-                            let approval_id = uuid::Uuid::new_v4().to_string();
-                            let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
-                            let correlation = json!({
-                                "conversationId": pubr.conv().0,
-                                "queryId": query,
-                                "turnId": turn_id,
-                                "toolUseId": id,
-                            });
-                            match crate::approval::gate(
-                                pubr.broker(),
-                                pubr.attach(),
-                                &approval_id,
-                                &ask,
-                                &correlation,
-                                cancel,
-                            )
-                            .await
-                            {
-                                crate::approval::Verdict::Approved => {
-                                    let results =
-                                        crate::exec::run_commands(&commands, cancel).await;
-                                    crate::exec::format_results(&commands, &results)
+            "Exec" => match crate::exec::parse_call(&block["input"]) {
+                Ok(mut call) => {
+                    // The ceiling is read before the gate, so a call that
+                    // cannot run never asks a human to approve it.
+                    let ceiling = tools_config
+                        .read()
+                        .unwrap()
+                        .exec
+                        .as_ref()
+                        .and_then(|binding| binding.max_timeout_s);
+                    match crate::exec::resolve_timeout(call.timeout_s, ceiling) {
+                        Err(e) => (e, true),
+                        Ok(timeout) => {
+                            let call_cwds: Vec<std::path::PathBuf> = call
+                                .commands
+                                .iter()
+                                .map(|c| match &c.cwd {
+                                    Some(c) => resolve_against(cwd, c),
+                                    None => cwd.to_path_buf(),
+                                })
+                                .collect();
+                            // Bind every command's cwd to its resolved value:
+                            // unset, exec.rs leaves the child to inherit the
+                            // bridge process's own directory, not this
+                            // conversation's.
+                            for (c, resolved) in call.commands.iter_mut().zip(&call_cwds) {
+                                c.cwd = Some(resolved.to_string_lossy().into_owned());
+                            }
+                            match permission_verdict(permissions, cwd, &home, "exec", &call_cwds) {
+                                crate::permissions::Verdict::Deny => {
+                                    ("denied by permissions policy".to_string(), true)
                                 }
-                                crate::approval::Verdict::Denied { by } => {
-                                    (format!("denied by {by}"), true)
+                                crate::permissions::Verdict::Allow => {
+                                    run_exec(
+                                        &call.commands,
+                                        timeout,
+                                        credentials,
+                                        tools_config,
+                                        cancel,
+                                    )
+                                    .await
                                 }
-                                crate::approval::Verdict::Cancelled => {
-                                    ("cancelled by user before approval".to_string(), true)
+                                crate::permissions::Verdict::Ask => {
+                                    let approval_id = uuid::Uuid::new_v4().to_string();
+                                    let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                                    let correlation = json!({
+                                        "conversationId": pubr.conv().0,
+                                        "queryId": query,
+                                        "turnId": turn_id,
+                                        "toolUseId": id,
+                                    });
+                                    match crate::approval::gate(
+                                        pubr.broker(),
+                                        pubr.attach(),
+                                        &approval_id,
+                                        &ask,
+                                        &correlation,
+                                        cancel,
+                                    )
+                                    .await
+                                    {
+                                        crate::approval::Verdict::Approved => {
+                                            run_exec(
+                                                &call.commands,
+                                                timeout,
+                                                credentials,
+                                                tools_config,
+                                                cancel,
+                                            )
+                                            .await
+                                        }
+                                        crate::approval::Verdict::Denied { by } => {
+                                            (format!("denied by {by}"), true)
+                                        }
+                                        crate::approval::Verdict::Cancelled => {
+                                            ("cancelled by user before approval".to_string(), true)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1281,64 +1463,12 @@ async fn run_tool_round<B: Broker>(
                     }
                 }
             }
-            // WriteMemory/DeleteMemory mutate: gated like every other mutation.
-            "WriteMemory" => {
-                let approval_id = uuid::Uuid::new_v4().to_string();
-                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
-                let correlation = json!({
-                    "conversationId": pubr.conv().0,
-                    "queryId": query,
-                    "turnId": turn_id,
-                    "toolUseId": id,
-                });
-                match crate::approval::gate(
-                    pubr.broker(),
-                    pubr.attach(),
-                    &approval_id,
-                    &ask,
-                    &correlation,
-                    cancel,
-                )
-                .await
-                {
-                    crate::approval::Verdict::Approved => {
-                        crate::memtools::run_write_memory(memory, &block["input"]).await
-                    }
-                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
-                    crate::approval::Verdict::Cancelled => {
-                        ("cancelled by user before approval".to_string(), true)
-                    }
-                }
-            }
-            "DeleteMemory" => {
-                let approval_id = uuid::Uuid::new_v4().to_string();
-                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
-                let correlation = json!({
-                    "conversationId": pubr.conv().0,
-                    "queryId": query,
-                    "turnId": turn_id,
-                    "toolUseId": id,
-                });
-                match crate::approval::gate(
-                    pubr.broker(),
-                    pubr.attach(),
-                    &approval_id,
-                    &ask,
-                    &correlation,
-                    cancel,
-                )
-                .await
-                {
-                    crate::approval::Verdict::Approved => {
-                        crate::memtools::run_delete_memory(memory, &block["input"])
-                    }
-                    crate::approval::Verdict::Denied { by } => (format!("denied by {by}"), true),
-                    crate::approval::Verdict::Cancelled => {
-                        ("cancelled by user before approval".to_string(), true)
-                    }
-                }
-            }
-            // ReadMemory/SearchMemory/MemoryTypes are read-only: no approval gate.
+            // All five memory tools run ungated, the two mutations included.
+            // The store is not conversation-scoped: it defaults to the file
+            // claude-sdk-cli uses, so a write or a retire here is visible to
+            // every other reader of that file.
+            "WriteMemory" => crate::memtools::run_write_memory(memory, &block["input"]).await,
+            "DeleteMemory" => crate::memtools::run_delete_memory(memory, &block["input"]),
             "ReadMemory" => crate::memtools::run_read_memory(memory, &block["input"]),
             "SearchMemory" => crate::memtools::run_search_memory(memory, &block["input"]),
             "MemoryTypes" => crate::memtools::run_memory_types(memory),
@@ -1347,6 +1477,60 @@ async fn run_tool_round<B: Broker>(
                 crate::historytools::run_search_history(history_store, &block["input"])
             }
             "ReadHistory" => crate::historytools::run_read_history(history_store, &block["input"]),
+            // The six GitHub pull request tools. Offered whether or not a
+            // credential is configured (the tools array must not vary), so
+            // an unconfigured group is answered here, as an ordinary tool
+            // error naming what is missing.
+            name if bridge_tools_github::owns(name) => {
+                match github_account(credentials, tools_config) {
+                    Err(reason) => (reason, true),
+                    Ok(account) => {
+                        let here = match block["input"]["cwd"].as_str() {
+                            Some(raw) => resolve_against(cwd, raw),
+                            None => cwd.to_path_buf(),
+                        };
+                        match permission_verdict(permissions, cwd, &home, "github", &[]) {
+                            crate::permissions::Verdict::Deny => {
+                                ("denied by permissions policy".to_string(), true)
+                            }
+                            crate::permissions::Verdict::Allow => {
+                                run_github(name, &block["input"], &here, &account, cancel).await
+                            }
+                            crate::permissions::Verdict::Ask => {
+                                let approval_id = uuid::Uuid::new_v4().to_string();
+                                let ask = json!({ "type": "tool_use", "name": name, "input": block["input"] });
+                                let correlation = json!({
+                                    "conversationId": pubr.conv().0,
+                                    "queryId": query,
+                                    "turnId": turn_id,
+                                    "toolUseId": id,
+                                });
+                                match crate::approval::gate(
+                                    pubr.broker(),
+                                    pubr.attach(),
+                                    &approval_id,
+                                    &ask,
+                                    &correlation,
+                                    cancel,
+                                )
+                                .await
+                                {
+                                    crate::approval::Verdict::Approved => {
+                                        run_github(name, &block["input"], &here, &account, cancel)
+                                            .await
+                                    }
+                                    crate::approval::Verdict::Denied { by } => {
+                                        (format!("denied by {by}"), true)
+                                    }
+                                    crate::approval::Verdict::Cancelled => {
+                                        ("cancelled by user before approval".to_string(), true)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             other => (format!("unknown tool {other:?}"), true),
         };
         // Walk and replace: anything over the oversized threshold is stashed
@@ -1371,6 +1555,117 @@ mod tests {
     use bridge::broker::BrokerMessage;
     use bridge_testkit::{FakeBroker, FakeSubscription, TestScratch};
     use std::collections::VecDeque;
+
+    mod turn_started {
+        use super::*;
+
+        fn payload(line: serde_json::Value) -> Value {
+            let model = crate::testsupport::model_settings()
+                .merged(&line)
+                .unwrap()
+                .resolve(None)
+                .unwrap();
+            super::super::turn_started("q1", "t1", &model)
+        }
+
+        /// Absent, never null: conversation.md types this field as optional,
+        /// which admits a missing key and rejects a null one, and every
+        /// fixture omits it.
+        #[test]
+        fn an_effort_that_is_not_set_is_absent_from_the_frame() {
+            let expected = false;
+
+            let actual = payload(json!({}));
+
+            assert_eq!(actual.get("effort").is_some(), expected);
+        }
+
+        #[test]
+        fn a_configured_effort_rides_the_frame() {
+            let expected = json!("xhigh");
+
+            let actual = payload(json!({ "effort": "xhigh" }));
+
+            assert_eq!(actual["effort"], expected);
+        }
+
+        #[test]
+        fn adaptive_thinking_reports_thinking() {
+            let expected = json!(true);
+
+            let actual = payload(json!({ "thinking": "adaptive" }));
+
+            assert_eq!(actual["thinking"], expected);
+        }
+
+        #[test]
+        fn disabled_thinking_reports_no_thinking() {
+            let expected = json!(false);
+
+            let actual = payload(json!({ "thinking": "disabled" }));
+
+            assert_eq!(actual["thinking"], expected);
+        }
+
+        #[test]
+        fn the_configured_max_tokens_rides_the_frame() {
+            let expected = json!(8192);
+
+            let actual = payload(json!({}));
+
+            assert_eq!(actual["maxTokens"], expected);
+        }
+    }
+
+    /// The tools array heads the cached prompt prefix, so it must be a
+    /// constant of the build. `static_tool_schemas` takes no arguments at
+    /// all, which is the guarantee: there is nothing it could vary with.
+    #[test]
+    fn skill_is_offered_with_no_catalogue_configured() {
+        let names = offered_names();
+        assert!(names.contains(&"Skill".to_string()), "{names:?}");
+    }
+
+    #[test]
+    fn the_github_tools_are_offered_with_no_credential_configured() {
+        let names = offered_names();
+        for tool in [
+            "GitHub_PullRequest_Create",
+            "GitHub_PullRequest_Ready",
+            "GitHub_PullRequest_Edit",
+            "GitHub_PullRequest_Comment",
+            "GitHub_PullRequest_AutoMerge",
+            "GitHub_PullRequest_Review",
+        ] {
+            assert!(
+                names.contains(&tool.to_string()),
+                "{tool} absent: {names:?}"
+            );
+        }
+    }
+
+    /// Offered but unusable is answered when the tool is called, not by
+    /// withholding the schema. What makes it unusable differs by host, so
+    /// the assertion is that it says so, not which reason it gives.
+    #[test]
+    fn a_github_tool_with_nothing_configured_says_what_is_missing() {
+        let credentials = std::sync::RwLock::new(crate::credentials::Credentials::default());
+        let tools = std::sync::RwLock::new(crate::credentials::ToolsConfig::default());
+        let error = github_account(&credentials, &tools).expect_err("nothing is configured");
+        assert!(error.contains("GitHub tools are unavailable"), "{error}");
+        if bridge_secrets::keychain_supported() {
+            assert!(error.contains("no credential is bound"), "{error}");
+        } else {
+            assert!(error.contains("cannot read a credential"), "{error}");
+        }
+    }
+
+    fn offered_names() -> Vec<String> {
+        static_tool_schemas()
+            .iter()
+            .filter_map(|t| t["name"].as_str().map(str::to_owned))
+            .collect()
+    }
 
     /// The request loop's reply shape for a cancel naming a query this
     /// servicer never started: `rejected: not_found`, published to the
@@ -1413,5 +1708,104 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&payload).unwrap();
         assert_eq!(value["rejected"], true);
         assert_eq!(value["reason"], "not_found");
+    }
+
+    /// One tool round over fresh stores with nothing on the wire to answer
+    /// an approval: a gated tool comes back cancelled instead of run, so the
+    /// result content alone separates gated from ungated.
+    async fn memory_tool_round(content: Vec<Value>) -> (Vec<Value>, FakeBroker) {
+        let broker = FakeBroker::default();
+        let scratch = TestScratch::new("memory-tools");
+        let conv = ConversationId("conv-mem".to_string());
+        let history = crate::history::open(&scratch.path("history.db")).unwrap();
+        let refs = crate::refs::open(&scratch.path("refs.db")).unwrap();
+        let memory = crate::memory::open(&scratch.path("memory.db")).unwrap();
+        let skills = Skills::scan(std::path::PathBuf::new());
+        let permissions =
+            std::sync::RwLock::new(crate::permissions::PermissionSet::strict_default());
+        let credentials = std::sync::RwLock::new(crate::credentials::Credentials::default());
+        let tools_config = std::sync::RwLock::new(crate::credentials::ToolsConfig::default());
+        let pubr = Publisher::new(&broker, &conv, &history, None);
+        let (_cancel_tx, mut cancel) = watch::channel(false);
+        let results = run_tool_round(
+            &pubr,
+            &skills,
+            &refs,
+            &memory,
+            &history,
+            &static_tool_schemas(),
+            "q-1",
+            "t-1",
+            &content,
+            &mut cancel,
+            &std::env::temp_dir(),
+            &permissions,
+            &credentials,
+            &tools_config,
+        )
+        .await;
+        (results, broker)
+    }
+
+    fn tool_use(id: &str, name: &str, input: Value) -> Value {
+        json!({ "type": "tool_use", "id": id, "name": name, "input": input })
+    }
+
+    #[tokio::test]
+    async fn writing_a_memory_runs_without_asking_for_approval() {
+        let (results, _) = memory_tool_round(vec![tool_use(
+            "tu-1",
+            "WriteMemory",
+            json!({ "title": "A title", "type": "trap", "body": "A body" }),
+        )])
+        .await;
+
+        let expected = "wrote memory ";
+        let actual = results[0]["content"].as_str().expect("a text tool_result");
+
+        assert!(actual.starts_with(expected), "{actual}");
+    }
+
+    #[tokio::test]
+    async fn deleting_a_memory_runs_without_asking_for_approval() {
+        let (results, _) = memory_tool_round(vec![tool_use(
+            "tu-1",
+            "DeleteMemory",
+            json!({ "id": "mem-1", "intent": "proving the tool runs" }),
+        )])
+        .await;
+
+        let expected = "retired memory mem-1";
+        let actual = results[0]["content"].as_str().expect("a text tool_result");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn no_memory_tool_raises_an_approval() {
+        let (_, broker) = memory_tool_round(vec![
+            tool_use(
+                "tu-1",
+                "WriteMemory",
+                json!({ "title": "A title", "type": "trap", "body": "A body" }),
+            ),
+            tool_use("tu-2", "ReadMemory", json!({ "id": "mem-1" })),
+            tool_use("tu-3", "SearchMemory", json!({ "query": "title" })),
+            tool_use("tu-4", "DeleteMemory", json!({ "id": "mem-1" })),
+            tool_use("tu-5", "MemoryTypes", json!({})),
+        ])
+        .await;
+
+        let expected: Vec<String> = Vec::new();
+        let actual: Vec<String> = broker
+            .published
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(subject, _)| subject.clone())
+            .filter(|subject| subject.starts_with("approval.v1."))
+            .collect();
+
+        assert_eq!(actual, expected);
     }
 }
