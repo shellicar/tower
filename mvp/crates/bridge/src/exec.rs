@@ -4,15 +4,42 @@
 //! hangs), stdout/stderr piped, no PTY anywhere. The child leads its own
 //! process group so cancellation kills the whole tree, not just the shell.
 //!
-//! No timeout, deliberately: the human is the timeout. A running command is
-//! visible in tower and cancellable; the cancel signal is what kills it.
+//! Cancellation is one bound on a running command: it is visible in tower and
+//! the cancel signal kills it. `Exec` carries a second, stated by the caller,
+//! because the human is not always watching: a child that never exits blocks
+//! the turn, which leaves the query open and the conversation unable to be
+//! spoken to until someone kills the process by hand.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 
 use serde_json::{Value, json};
+use std::num::NonZeroU32;
+use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::sync::watch;
+
+/// One `Exec` call as the model asked for it: the commands, and the time the
+/// caller says the whole call may take. The ceiling that may cut the ask down
+/// is not here, because it belongs to the host rather than the call.
+#[derive(Debug, Clone)]
+pub struct ExecCall {
+    pub commands: Vec<ExecCommand>,
+    pub timeout_s: NonZeroU32,
+}
+
+/// What the call may actually run for, given what this host allows. Refused
+/// rather than clamped: a clamped call leaves the caller planning against a
+/// number that will never happen, and it never learns the limit exists.
+pub fn resolve_timeout(asked: NonZeroU32, ceiling: Option<NonZeroU32>) -> Result<Duration, String> {
+    match ceiling {
+        Some(ceiling) if asked > ceiling => Err(format!(
+            "timeout of {asked}s exceeds this host's maximum of {ceiling}s. Ask for {ceiling}s or \
+             less, or run the work in a form that finishes inside it."
+        )),
+        _ => Ok(Duration::from_secs(u64::from(asked.get()))),
+    }
+}
 
 /// Combined output cap. Nothing near this belongs in a model request; the
 /// stored side is towerd's ref externalisation, but the model-facing result
@@ -48,6 +75,12 @@ pub fn bash_schema() -> Value {
     })
 }
 
+/// Every word of this is a constant of the build, the ceiling included: the
+/// tools array heads the cached prompt prefix, so text that varied with what a
+/// host configured would cost that host its whole prefix the moment it did.
+/// The description says a maximum may exist and what happens when a call
+/// exceeds it, which is what the model needs to recognise the refusal; only the
+/// refusal itself names the number.
 pub fn exec_schema() -> Value {
     json!({
         "name": "Exec",
@@ -58,8 +91,9 @@ pub fn exec_schema() -> Value {
             tightest, then \"&&\"/\"||\" (equal, left to right). Omit op on the last command. \
             Structured — no shell string to parse or quote. Non-interactive: stdin is closed \
             on the first command of each pipeline, so a command that prompts fails rather \
-            than hangs. Combined output is capped at 100 KB. The whole call requires one \
-            human approval before any of it runs.",
+            than hangs. Combined output is capped at 100 KB. Every call states a `timeout`, and \
+            the whole call is killed and returns an error when it fires. The whole \
+            call requires one human approval before any of it runs.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -110,27 +144,49 @@ pub fn exec_schema() -> Value {
                         "required": ["program"],
                         "additionalProperties": false
                     }
+                },
+                "timeout": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Seconds this whole call may run before every command in it is \
+                        killed. Required, and it is your own expectation: state the time you think \
+                        the work needs, so a call that runs past it tells you the expectation was \
+                        wrong. A local command (reading a file, a git status) is done in seconds; \
+                        reaching the network, installing, or building can want minutes. A host may \
+                        set a maximum: a call asking for longer than that host allows is refused \
+                        before anything runs, and the refusal names the limit."
                 }
             },
-            "required": ["commands"],
+            "required": ["commands", "timeout"],
             "additionalProperties": false
         }
     })
 }
 
-/// Kill the child's whole process group: SIGTERM, a 500ms grace, SIGKILL.
-/// A program that ignores TERM is reaped by the KILL and reports it; honest.
+/// Kill whole process groups: SIGTERM to every one, a single 500ms grace,
+/// then SIGKILL to every one. A program that ignores TERM is reaped by the
+/// KILL and reports it; honest.
+///
+/// The grace is per kill, never per group. Waiting once per group in turn
+/// multiplies it by the number of things being killed, so a call would outlive
+/// its own deadline by longer the more commands it chained. Every kill in this
+/// module goes through here for that reason, one process group or many.
+///
 /// Unix-only; the Windows seam is a Job Object with KILL_ON_JOB_CLOSE, which
 /// also closes the orphan gap POSIX leaves open (a hard-killed bridge cannot
 /// run this function; its command trees outlive it, visibly stranded).
 #[cfg(unix)]
-async fn group_kill(pgid: i32) {
-    unsafe {
-        libc::kill(-pgid, libc::SIGTERM);
+async fn groups_kill(pgids: &[i32]) {
+    for pgid in pgids {
+        unsafe {
+            libc::kill(-*pgid, libc::SIGTERM);
+        }
     }
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    unsafe {
-        libc::kill(-pgid, libc::SIGKILL);
+    for pgid in pgids {
+        unsafe {
+            libc::kill(-*pgid, libc::SIGKILL);
+        }
     }
 }
 
@@ -224,17 +280,36 @@ fn parse_command(v: &Value) -> Result<ExecCommand, String> {
     })
 }
 
-/// Parse the `Exec` tool's whole `commands` array. Request-level: a malformed
-/// array fails the call before anything runs, per composition-model.md's
-/// request-level-vs-item-level split — there is no per-item result to hang a
-/// parse failure on until commands actually start.
-pub fn parse_commands(input: &Value) -> Result<Vec<ExecCommand>, String> {
-    input["commands"]
+/// The call's timeout as asked for: required, and whole positive seconds. The
+/// type refuses zero and anything negative on its own; absence and a malformed
+/// value are refused here, before any command runs.
+fn parse_timeout(input: &Value) -> Result<NonZeroU32, String> {
+    let secs = input["timeout"]
+        .as_u64()
+        .and_then(|secs| u32::try_from(secs).ok())
+        .ok_or(
+            "missing or malformed \"timeout\": whole seconds this call may run before it is killed",
+        )?;
+    NonZeroU32::new(secs).ok_or_else(|| "\"timeout\" must be at least 1 second".to_string())
+}
+
+/// Parse the `Exec` tool's whole input: the commands, and the timeout the call
+/// states. Request-level: a malformed array or a missing timeout fails the call
+/// before anything runs, per composition-model.md's request-level-vs-item-level
+/// split — there is no per-item result to hang a parse failure on until
+/// commands actually start.
+pub fn parse_call(input: &Value) -> Result<ExecCall, String> {
+    let timeout_s = parse_timeout(input)?;
+    let commands = input["commands"]
         .as_array()
         .ok_or("missing \"commands\"")?
         .iter()
         .map(parse_command)
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ExecCall {
+        commands,
+        timeout_s,
+    })
 }
 
 /// One command's outcome within a run — the item-level result `Exec`'s array
@@ -248,6 +323,10 @@ pub(crate) struct CommandOutcome {
     status: Option<std::process::ExitStatus>,
     spawn_error: Option<String>,
     skipped: bool,
+    /// Set to the call's timeout when this command was killed for exceeding
+    /// it. Carries the value so the result can name the number the caller
+    /// itself chose.
+    timed_out: Option<Duration>,
 }
 
 impl CommandOutcome {
@@ -258,6 +337,7 @@ impl CommandOutcome {
             status: None,
             spawn_error: None,
             skipped: true,
+            timed_out: None,
         }
     }
 
@@ -342,10 +422,15 @@ fn existing_name(env: &BTreeMap<OsString, OsString>, name: &str) -> Option<OsStr
 /// this, never drops one.
 pub async fn run_commands(
     commands: &[ExecCommand],
+    timeout: Duration,
     base: &BTreeMap<OsString, OsString>,
     credentials: &crate::credentials::ExecCredentials,
     cancel: &mut watch::Receiver<bool>,
 ) -> Vec<CommandOutcome> {
+    // One deadline for the whole call, not one per command: the caller stated
+    // what the call may take. It starts here rather than at parse time, so a
+    // wait for human approval spends the human's time, not the command's.
+    let deadline = tokio::time::Instant::now() + timeout;
     let mut results: Vec<CommandOutcome> = Vec::with_capacity(commands.len());
     let mut i = 0;
     // Whether the previous pipeline's terminal command succeeded — gates the
@@ -374,9 +459,10 @@ pub async fn run_commands(
                 Some(ExecOp::Or) => !prev_ok,
             };
         if run_this {
-            let group_results = run_pipeline(group, base, credentials, cancel).await;
+            let group_results =
+                run_pipeline(group, timeout, base, credentials, cancel, deadline).await;
             prev_ok = group_results.last().is_some_and(CommandOutcome::succeeded);
-            if *cancel.borrow() {
+            if *cancel.borrow() || group_results.iter().any(|r| r.timed_out.is_some()) {
                 skip_rest = true;
             }
             results.extend(group_results);
@@ -397,9 +483,11 @@ pub async fn run_commands(
 /// command is ignored — its stdout is already spoken for by the pipe.
 async fn run_pipeline(
     group: &[ExecCommand],
+    timeout: Duration,
     base: &BTreeMap<OsString, OsString>,
     credentials: &crate::credentials::ExecCredentials,
     cancel: &mut watch::Receiver<bool>,
+    deadline: tokio::time::Instant,
 ) -> Vec<CommandOutcome> {
     let n = group.len();
     let mut children: Vec<tokio::process::Child> = Vec::with_capacity(n);
@@ -439,6 +527,7 @@ async fn run_pipeline(
                         status: None,
                         spawn_error: Some(format!("failed to open redirect {path}: {e}")),
                         skipped: false,
+                        timed_out: None,
                     });
                     out.extend((idx + 1..n).map(|_| CommandOutcome::skipped()));
                     return out;
@@ -475,6 +564,7 @@ async fn run_pipeline(
                         status: None,
                         spawn_error: Some(format!("failed to open redirect {path}: {e}")),
                         skipped: false,
+                        timed_out: None,
                     });
                     out.extend((idx + 1..n).map(|_| CommandOutcome::skipped()));
                     return out;
@@ -517,6 +607,7 @@ async fn run_pipeline(
                     status: None,
                     spawn_error: Some(format!("failed to spawn {}: {e}", c.program)),
                     skipped: false,
+                    timed_out: None,
                 });
                 out.extend((idx + 1..n).map(|_| CommandOutcome::skipped()));
                 return out;
@@ -548,18 +639,24 @@ async fn run_pipeline(
         }
         statuses
     };
-    let (statuses, cancelled) = tokio::select! {
-        statuses = wait_all => (statuses, false),
+    // Cancellation and the deadline end the run the same way: kill the whole
+    // process group, then reap, so the outcomes still report what each command
+    // produced before it died.
+    let (statuses, ending) = tokio::select! {
+        statuses = wait_all => (statuses, Ending::Ran),
         _ = crate::agent::cancelled(cancel) => {
-            #[cfg(unix)]
-            for pgid in &pgids {
-                group_kill(*pgid).await;
-            }
-            let mut statuses = Vec::with_capacity(children.len());
-            for child in &mut children {
-                statuses.push(child.wait().await);
-            }
-            (statuses, true)
+            (kill_and_reap(&mut children, &pgids).await, Ending::Cancelled)
+        }
+        _ = tokio::time::sleep_until(deadline) => {
+            // Who was already dead when the deadline arrived, before the kill
+            // makes every child look the same. `wait` after this returns the
+            // status `try_wait` cached, so reaping here costs the caller
+            // nothing.
+            let finished: Vec<bool> = children
+                .iter_mut()
+                .map(|child| matches!(child.try_wait(), Ok(Some(_))))
+                .collect();
+            (kill_and_reap(&mut children, &pgids).await, Ending::TimedOut { finished })
         }
     };
 
@@ -584,15 +681,42 @@ async fn run_pipeline(
             stdout,
             stderr,
             status,
-            spawn_error: if cancelled {
-                Some("cancelled by user".to_string())
-            } else {
-                None
+            spawn_error: match &ending {
+                Ending::Cancelled => Some("cancelled by user".to_string()),
+                Ending::Ran | Ending::TimedOut { .. } => None,
             },
             skipped: false,
+            // Only what the kill actually killed: a command that had already
+            // exited reports the status it exited with.
+            timed_out: match &ending {
+                Ending::TimedOut { finished } if !finished[idx] => Some(timeout),
+                _ => None,
+            },
         });
     }
     out
+}
+
+/// How a pipeline stopped: on its own, or because something killed it.
+/// `TimedOut` carries which children were already finished when the deadline
+/// arrived, one flag per child in spawn order.
+enum Ending {
+    Ran,
+    Cancelled,
+    TimedOut { finished: Vec<bool> },
+}
+
+async fn kill_and_reap(
+    children: &mut [tokio::process::Child],
+    pgids: &[i32],
+) -> Vec<std::io::Result<std::process::ExitStatus>> {
+    #[cfg(unix)]
+    groups_kill(pgids).await;
+    let mut statuses = Vec::with_capacity(children.len());
+    for child in children.iter_mut() {
+        statuses.push(child.wait().await);
+    }
+    statuses
 }
 
 /// Feed one child's stdout directly into the next child's stdin as an OS
@@ -634,11 +758,11 @@ fn spawn_drain(
 
 #[cfg(unix)]
 async fn children_kill(children: &mut [tokio::process::Child]) {
-    for child in children.iter() {
-        if let Some(id) = child.id() {
-            group_kill(id as i32).await;
-        }
-    }
+    let pgids: Vec<i32> = children
+        .iter()
+        .filter_map(|child| child.id().map(|id| id as i32))
+        .collect();
+    groups_kill(&pgids).await;
 }
 #[cfg(not(unix))]
 async fn children_kill(_children: &mut [tokio::process::Child]) {}
@@ -653,6 +777,7 @@ pub fn format_results(commands: &[ExecCommand], results: &[CommandOutcome]) -> (
     let mut budget = MAX_OUTPUT_BYTES;
     let mut truncated = false;
     let mut any_error = false;
+    let mut timed_out: Option<Duration> = None;
 
     for (i, (cmd, r)) in commands.iter().zip(results).enumerate() {
         let label = format!("$ {} {}", cmd.program, cmd.args.join(" "));
@@ -679,7 +804,11 @@ pub fn format_results(commands: &[ExecCommand], results: &[CommandOutcome]) -> (
             }
             budget -= take;
         }
-        let verdict = if let Some(e) = &r.spawn_error {
+        let verdict = if let Some(limit) = r.timed_out {
+            any_error = true;
+            timed_out = Some(limit);
+            format!("killed: exceeded the {}s timeout", limit.as_secs())
+        } else if let Some(e) = &r.spawn_error {
             any_error = true;
             e.clone()
         } else {
@@ -700,6 +829,16 @@ pub fn format_results(commands: &[ExecCommand], results: &[CommandOutcome]) -> (
     }
     if truncated {
         content.push_str("[output truncated at 100 KB combined]\n");
+    }
+    // The model reads this and decides the next move, so say what the limit was
+    // and that repeating the call unchanged will hit it again.
+    if let Some(limit) = timed_out {
+        content.push_str(&format!(
+            "[the call exceeded its {}s timeout and was killed. Running it again unchanged will \
+             hit the same limit: change what it does, bound its work, or state a timeout that \
+             matches what the command really needs.]\n",
+            limit.as_secs()
+        ));
     }
     (content.trim_end().to_string(), any_error)
 }
@@ -754,7 +893,7 @@ async fn run_child(
         _ = crate::agent::cancelled(cancel) => {
             if let Some(pgid) = pgid {
                 #[cfg(unix)]
-                group_kill(pgid).await;
+                groups_kill(&[pgid]).await;
             }
             (child.wait().await, true)
         }
@@ -797,12 +936,19 @@ async fn run_child(
 
 #[cfg(test)]
 mod tests {
-    use super::{ambient_env, child_env, format_results, parse_commands, run_bash, run_commands};
+    use super::{
+        Duration, NonZeroU32, ambient_env, child_env, exec_schema, format_results, parse_call,
+        resolve_timeout, run_bash, run_commands,
+    };
     use crate::credentials::ExecCredentials;
     use serde_json::json;
     use std::collections::{BTreeMap, HashMap};
     use std::ffi::{OsStr, OsString};
     use tokio::sync::watch;
+
+    fn seconds(n: u32) -> NonZeroU32 {
+        NonZeroU32::new(n).expect("a positive number of seconds")
+    }
 
     // A cancel receiver that never fires: the human is not cancelling.
     fn no_cancel() -> watch::Receiver<bool> {
@@ -874,12 +1020,26 @@ mod tests {
     // Runs a full Exec call end to end: parse -> run -> format, the same path
     // agent.rs takes. `input` is the tool's raw `{"commands": [...]}` JSON.
     async fn run_input(
-        input: serde_json::Value,
+        mut input: serde_json::Value,
         cancel: &mut watch::Receiver<bool>,
     ) -> (String, bool) {
-        let commands = parse_commands(&input).expect("valid commands");
-        let results = run_commands(&commands, &ambient_env(), &no_credentials(), cancel).await;
-        format_results(&commands, &results)
+        // A timeout is required, so a test that isn't about the timeout gets one
+        // generous enough never to fire. No ceiling: what a host allows is not
+        // what these tests are about.
+        if input["timeout"].is_null() {
+            input["timeout"] = json!(30);
+        }
+        let call = parse_call(&input).expect("valid commands");
+        let timeout = resolve_timeout(call.timeout_s, None).expect("no ceiling");
+        let results = run_commands(
+            &call.commands,
+            timeout,
+            &ambient_env(),
+            &no_credentials(),
+            cancel,
+        )
+        .await;
+        format_results(&call.commands, &results)
     }
 
     #[tokio::test]
@@ -1054,10 +1214,18 @@ mod tests {
             "commands": [
                 { "program": "false", "op": "&&" },
                 { "program": "echo", "args": ["a"] }
-            ]
+            ],
+            "timeout": 30
         });
-        let commands = parse_commands(&input).expect("valid commands");
-        let results = run_commands(&commands, &ambient_env(), &no_credentials(), &mut cancel).await;
+        let call = parse_call(&input).expect("valid commands");
+        let results = run_commands(
+            &call.commands,
+            Duration::from_secs(30),
+            &ambient_env(),
+            &no_credentials(),
+            &mut cancel,
+        )
+        .await;
         assert_eq!(results.len(), 2, "one result per input command, always");
     }
 
@@ -1283,6 +1451,298 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    #[tokio::test]
+    async fn a_command_that_outlives_its_timeout_is_killed_and_names_the_value() {
+        let mut cancel = no_cancel();
+        let input = json!({
+            "commands": [{ "program": "sleep", "args": ["30"] }],
+            "timeout": 1
+        });
+        let (content, is_error) = run_input(input, &mut cancel).await;
+        assert!(is_error, "a timeout is an error: {content:?}");
+        assert!(
+            content.contains("exceeded the 1s timeout"),
+            "the timeout it was given is not named: {content:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_command_inside_its_timeout_is_untouched() {
+        let mut cancel = no_cancel();
+        let input = json!({
+            "commands": [{ "program": "echo", "args": ["quick"] }],
+            "timeout": 30
+        });
+        let (content, is_error) = run_input(input, &mut cancel).await;
+        assert!(!is_error);
+        assert!(content.contains("quick"), "stdout absent: {content:?}");
+    }
+
+    #[tokio::test]
+    async fn the_timeout_bounds_the_whole_call_not_each_command() {
+        let mut cancel = no_cancel();
+        // Two seconds each against a three second bound: per-command the pair
+        // would both finish, so surviving the first and dying in the second is
+        // what proves the deadline spans the call.
+        let input = json!({
+            "commands": [
+                { "program": "sleep", "args": ["2"] },
+                { "program": "sleep", "args": ["2"] }
+            ],
+            "timeout": 3
+        });
+        let (content, is_error) = run_input(input, &mut cancel).await;
+        assert!(is_error);
+        assert!(
+            content.contains("exceeded the 3s timeout"),
+            "the call was not killed at its own bound: {content:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_timeout_leaves_the_rest_of_the_chain_unrun() {
+        let mut cancel = no_cancel();
+        let input = json!({
+            "commands": [
+                { "program": "sleep", "args": ["30"] },
+                { "program": "echo", "args": ["after"] }
+            ],
+            "timeout": 1
+        });
+        let (content, _) = run_input(input, &mut cancel).await;
+        assert!(
+            content.contains("(skipped)"),
+            "a command after the timeout still ran: {content:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_timed_out_call_says_that_repeating_it_will_not_help() {
+        let mut cancel = no_cancel();
+        let input = json!({
+            "commands": [{ "program": "sleep", "args": ["30"] }],
+            "timeout": 1
+        });
+        let (content, _) = run_input(input, &mut cancel).await;
+        assert!(
+            content.contains("Running it again unchanged will hit the same limit"),
+            "the result gives the model nothing to act on: {content:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_command_that_finished_before_the_deadline_reports_its_own_status() {
+        let mut cancel = no_cancel();
+        let input = json!({
+            "commands": [
+                { "program": "printf", "args": ["x"], "op": "|" },
+                { "program": "sleep", "args": ["30"] }
+            ],
+            "timeout": 1
+        });
+        let (content, _) = run_input(input, &mut cancel).await;
+        assert!(
+            content.contains("exit status: 0"),
+            "a command that had already exited lost its status: {content:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_the_commands_the_timeout_killed_are_reported_as_killed() {
+        let expected = 1;
+        let mut cancel = no_cancel();
+        let input = json!({
+            "commands": [
+                { "program": "printf", "args": ["x"], "op": "|" },
+                { "program": "sleep", "args": ["30"] }
+            ],
+            "timeout": 1
+        });
+
+        let (content, _) = run_input(input, &mut cancel).await;
+        let actual = content.matches("killed: exceeded").count();
+
+        assert_eq!(actual, expected, "in: {content:?}");
+    }
+
+    /// One grace for the whole call, not one per command: five commands used to
+    /// cost five 500ms waits, so the call outran its own deadline by 2.5s.
+    #[tokio::test]
+    async fn the_kill_grace_does_not_grow_with_the_number_of_commands() {
+        let mut cancel = no_cancel();
+        let input = json!({
+            "commands": [
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "sleep", "args": ["30"] }
+            ],
+            "timeout": 1
+        });
+
+        let started = std::time::Instant::now();
+        let (content, _) = run_input(input, &mut cancel).await;
+        let actual = started.elapsed();
+
+        assert!(
+            actual < Duration::from_millis(2500),
+            "the grace was paid per command: {actual:?}, {content:?}"
+        );
+    }
+
+    /// The other site that kills several things at once: a spawn failure tears
+    /// down whatever already started, and that teardown gets one grace too.
+    #[tokio::test]
+    async fn a_spawn_failure_kills_what_started_with_one_grace() {
+        let mut cancel = no_cancel();
+        let input = json!({
+            "commands": [
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "sleep", "args": ["30"], "op": "|" },
+                { "program": "no-such-program-on-this-machine" }
+            ],
+            "timeout": 30
+        });
+
+        let started = std::time::Instant::now();
+        let (content, is_error) = run_input(input, &mut cancel).await;
+        let actual = started.elapsed();
+
+        assert!(
+            actual < Duration::from_millis(1500),
+            "the grace was paid per child: {actual:?}, {is_error}, {content:?}"
+        );
+    }
+
+    #[test]
+    fn a_call_without_a_timeout_is_refused() {
+        let actual = parse_call(&json!({ "commands": [{ "program": "echo" }] }));
+
+        assert!(actual.is_err());
+    }
+
+    #[test]
+    fn a_timeout_of_zero_is_refused() {
+        let actual = parse_call(&json!({ "commands": [{ "program": "echo" }], "timeout": 0 }));
+
+        assert!(actual.is_err());
+    }
+
+    #[test]
+    fn a_negative_timeout_is_refused() {
+        let actual = parse_call(&json!({ "commands": [{ "program": "echo" }], "timeout": -30 }));
+
+        assert!(actual.is_err());
+    }
+
+    #[test]
+    fn a_call_keeps_the_timeout_it_asked_for() {
+        let expected = seconds(30);
+
+        let actual = parse_call(&json!({ "commands": [{ "program": "echo" }], "timeout": 30 }))
+            .expect("valid call")
+            .timeout_s;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn with_no_ceiling_the_call_runs_for_what_it_asked_for() {
+        let expected = Duration::from_secs(30);
+
+        let actual = resolve_timeout(seconds(30), None);
+
+        assert_eq!(actual.expect("no ceiling"), expected);
+    }
+
+    #[test]
+    fn with_no_ceiling_even_an_extravagant_timeout_stands() {
+        let expected = Duration::from_secs(86400);
+
+        let actual = resolve_timeout(seconds(86400), None);
+
+        assert_eq!(actual.expect("no ceiling"), expected);
+    }
+
+    #[test]
+    fn a_timeout_under_the_ceiling_is_left_alone() {
+        let expected = Duration::from_secs(30);
+
+        let actual = resolve_timeout(seconds(30), Some(seconds(900)));
+
+        assert_eq!(actual.expect("under the ceiling"), expected);
+    }
+
+    #[test]
+    fn a_timeout_at_the_ceiling_is_allowed() {
+        let expected = Duration::from_secs(900);
+
+        let actual = resolve_timeout(seconds(900), Some(seconds(900)));
+
+        assert_eq!(actual.expect("at the ceiling"), expected);
+    }
+
+    #[test]
+    fn a_timeout_over_the_ceiling_is_refused_rather_than_clamped() {
+        let actual = resolve_timeout(seconds(901), Some(seconds(900)));
+
+        assert!(actual.is_err());
+    }
+
+    #[test]
+    fn a_refusal_names_the_ceiling_the_host_allows() {
+        let actual = resolve_timeout(seconds(901), Some(seconds(900))).expect_err("over");
+
+        assert!(
+            actual.contains("900"),
+            "the caller cannot see what it may ask for: {actual:?}"
+        );
+    }
+
+    /// The tools array heads the cached prompt prefix, so one host's
+    /// configuration showing up in it would cost that host the whole prefix.
+    #[test]
+    fn the_schema_never_names_a_number_a_host_configured() {
+        let schema = exec_schema();
+
+        let actual = schema["input_schema"]["properties"]["timeout"]["description"]
+            .as_str()
+            .expect("timeout is described")
+            .to_owned();
+
+        assert!(
+            !actual.contains("900"),
+            "a host's own ceiling reached the cached prefix: {actual:?}"
+        );
+    }
+
+    #[test]
+    fn the_schema_warns_that_a_maximum_may_apply() {
+        let schema = exec_schema();
+
+        let actual = schema["input_schema"]["properties"]["timeout"]["description"]
+            .as_str()
+            .expect("timeout is described")
+            .to_owned();
+
+        assert!(
+            actual.contains("maximum") && actual.contains("refused"),
+            "the model cannot know the refusal exists before it meets one: {actual:?}"
+        );
+    }
+
+    #[test]
+    fn the_schema_requires_a_timeout() {
+        let expected = json!(["commands", "timeout"]);
+
+        let actual = exec_schema()["input_schema"]["required"].clone();
+
+        assert_eq!(actual, expected);
     }
 }
 

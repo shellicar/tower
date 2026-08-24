@@ -18,6 +18,7 @@
 //! provider is what applies it.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroU32;
 
 use serde_json::{Value, json};
 
@@ -97,6 +98,11 @@ pub struct Credentials(pub BTreeMap<String, Credential>);
 pub struct Binding {
     pub credentials: Vec<String>,
     pub enabled: bool,
+    /// The exec group's ceiling on an `Exec` call's stated timeout, in whole
+    /// seconds. Absent means no ceiling. Only the exec group reads it: a
+    /// timeout is a property of running a command, which is the only thing
+    /// that group does.
+    pub max_timeout_s: Option<NonZeroU32>,
 }
 
 /// The `tools` cell. A group absent from the line is unconfigured, not
@@ -201,6 +207,15 @@ fn parse_binding(entry: &Value, group: &str, arity: Arity) -> Result<Binding, St
     let object = entry
         .as_object()
         .ok_or_else(|| format!("tools group {group:?} must be an object"))?;
+    let known = known_fields(group);
+    for field in object.keys() {
+        if !known.contains(&field.as_str()) {
+            return Err(format!(
+                "tools group {group:?} has unknown field {field:?}; known fields: {}",
+                known.join(", ")
+            ));
+        }
+    }
     let named = object
         .get("credentials")
         .ok_or_else(|| format!("tools group {group:?} needs credentials"))?;
@@ -225,10 +240,41 @@ fn parse_binding(entry: &Value, group: &str, arity: Arity) -> Result<Binding, St
             .collect::<Result<Vec<_>, _>>()?,
     };
     let enabled = enabled_field(object.get("enabled"), &format!("tools group {group:?}"))?;
+    let max_timeout_s = max_timeout_field(object.get("max_timeout_s"), group)?;
     Ok(Binding {
         credentials,
         enabled,
+        max_timeout_s,
     })
+}
+
+/// What a group's binding may carry. Closed, like the group names themselves:
+/// a field this group does not have is rejected when the line arrives, so
+/// `max_timeout_s` written under the wrong group is refused rather than
+/// silently configuring nothing.
+fn known_fields(group: &str) -> Vec<&'static str> {
+    let mut fields = vec!["credentials", "enabled"];
+    if group == "exec" {
+        fields.push("max_timeout_s");
+    }
+    fields
+}
+
+/// Absent is no ceiling. A value that is present but cannot be a ceiling is
+/// rejected rather than dropped: a host that meant to bound its calls and
+/// mistyped the number would otherwise run unbounded and never be told.
+fn max_timeout_field(value: Option<&Value>, group: &str) -> Result<Option<NonZeroU32>, String> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_u64()
+            .and_then(|secs| u32::try_from(secs).ok())
+            .and_then(NonZeroU32::new)
+            .map(Some)
+            .ok_or_else(|| {
+                format!("tools group {group:?} needs a whole number of seconds above zero for max_timeout_s")
+            }),
+    }
 }
 
 /// `enabled` defaults to true wherever it appears.
@@ -389,14 +435,20 @@ pub fn settings(credentials: &Credentials, tools: &ToolsConfig) -> Value {
         .into_iter()
         .map(|(group, binding)| {
             let state = resolve(credentials, binding.as_ref());
-            (
-                group,
-                json!({
-                    "credentials": binding.as_ref().map(|b| b.credentials.clone()).unwrap_or_default(),
-                    "enabled": binding.as_ref().is_none_or(|b| b.enabled),
-                    "state": state_word(&state),
-                }),
-            )
+            let mut reported = json!({
+                "credentials": binding.as_ref().map(|b| b.credentials.clone()).unwrap_or_default(),
+                "enabled": binding.as_ref().is_none_or(|b| b.enabled),
+                "state": state_word(&state),
+            });
+            // Only exec has a ceiling, so only exec reports one. Null says the
+            // host bounds nothing, which is a different answer from absent.
+            if group == "exec" {
+                reported["max_timeout_s"] = match binding.as_ref().and_then(|b| b.max_timeout_s) {
+                    Some(seconds) => json!(seconds.get()),
+                    None => Value::Null,
+                };
+            }
+            (group, reported)
         })
         .collect();
     json!({ "credentials": configured, "tools": groups })
@@ -549,6 +601,85 @@ mod tests {
 
         assert!(parse_tools(&json!({ "github": { "credentials": ["a"] } })).is_err());
         assert!(parse_tools(&json!({ "exec": { "credentials": "a" } })).is_err());
+    }
+
+    #[test]
+    fn the_exec_group_carries_the_ceiling_it_was_given() {
+        let expected = Some(NonZeroU32::new(900).expect("positive"));
+
+        let actual = tools(json!({
+            "exec": { "credentials": [], "max_timeout_s": 900 }
+        }))
+        .exec
+        .expect("an exec binding")
+        .max_timeout_s;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn an_exec_group_without_a_ceiling_has_none() {
+        let expected = None;
+
+        let actual = tools(json!({ "exec": { "credentials": [] } }))
+            .exec
+            .expect("an exec binding")
+            .max_timeout_s;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_ceiling_on_a_group_that_has_none_is_rejected() {
+        let actual = parse_tools(&json!({
+            "github": { "credentials": "github-privileged", "max_timeout_s": 900 }
+        }));
+
+        assert!(actual.is_err());
+    }
+
+    #[test]
+    fn an_unknown_field_in_a_tools_group_is_rejected() {
+        let actual = parse_tools(&json!({
+            "exec": { "credentials": [], "max_timeout": 900 }
+        }));
+
+        assert!(actual.is_err());
+    }
+
+    #[test]
+    fn settings_reports_the_ceiling_the_exec_group_carries() {
+        let expected = json!(900);
+
+        let config = tools(json!({ "exec": { "credentials": [], "max_timeout_s": 900 } }));
+        let actual =
+            settings(&Credentials::default(), &config)["tools"]["exec"]["max_timeout_s"].clone();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn settings_reports_no_ceiling_as_null() {
+        let expected = json!(null);
+
+        let config = tools(json!({ "exec": { "credentials": [] } }));
+        let actual =
+            settings(&Credentials::default(), &config)["tools"]["exec"]["max_timeout_s"].clone();
+
+        assert_eq!(actual, expected);
+    }
+
+    /// A mistyped ceiling would otherwise leave the host running unbounded
+    /// while believing it had set a limit.
+    #[test]
+    fn a_ceiling_that_cannot_be_a_number_of_seconds_is_rejected() {
+        for bad in [json!(0), json!(-1), json!("900"), json!(1.5)] {
+            let actual = parse_tools(&json!({
+                "exec": { "credentials": [], "max_timeout_s": bad }
+            }));
+
+            assert!(actual.is_err(), "accepted {bad}");
+        }
     }
 
     /// Neither line can be validated against the other's cell, so an unknown

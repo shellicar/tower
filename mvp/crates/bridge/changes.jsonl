@@ -11,3 +11,5 @@
 {"type":"change","category":"added","description":"A `settings` request can name the system prompt or the user context to get its full text."}
 {"type":"change","category":"changed","description":"Writing and deleting a memory no longer raises an approval. All five memory tools now run without asking."}
 {"type":"change","category":"changed","description":"The environment an Exec child runs with is composed as a whole before the child is spawned: the call's own variables, then a configured provider's removals, then its forced values. What a child ends up with is unchanged."}
+{"type":"change","category":"changed","description":"An Exec call states how many seconds it may run, and is killed and returned as an error when it passes."}
+{"type":"change","category":"added","description":"The tools line's exec group takes max_timeout_s, refusing any Exec call that asks to run longer than the host allows."}
