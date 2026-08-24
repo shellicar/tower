@@ -2476,6 +2476,41 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
+    /// Nothing defaults the retry policy, and the reply says so rather than
+    /// omitting the entry, so a caller can tell "no retrying" from "this
+    /// bridge is too old to have the cell".
+    #[test]
+    fn the_reply_reports_no_retry_policy_as_null() {
+        let expected = serde_json::Value::Null;
+        let scratch = TestScratch::new("settings-retry-unset");
+        let host = host(&scratch, FakeBroker::default());
+
+        let reply = host
+            .settings_reply(&serde_json::json!({}))
+            .expect("an empty settings request is valid");
+
+        assert_eq!(reply["settings"]["retry"], expected);
+    }
+
+    #[test]
+    fn the_reply_carries_the_whole_retry_policy_once_a_line_has_set_one() {
+        let expected = serde_json::json!({
+            "maxRetries": 10,
+            "baseDelayMs": 500,
+            "maxDelayMs": 32000,
+            "retryAfterCapMs": 60000,
+        });
+        let scratch = TestScratch::new("settings-retry-set");
+        let host = host(&scratch, FakeBroker::default());
+        *host.retry.write().unwrap() = crate::retry::parse(&expected).unwrap();
+
+        let reply = host
+            .settings_reply(&serde_json::json!({}))
+            .expect("an empty settings request is valid");
+
+        assert_eq!(reply["settings"]["retry"], expected);
+    }
+
     // --- the world's `service` request (agent.md, "The premise for
     // `service`") — every premise arm, plus reply shape and environment
     // strictness, scripted through the FakeBroker. ---

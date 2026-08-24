@@ -728,15 +728,17 @@ mod tests {
             assert_eq!(actual, expected);
         }
 
-        /// What surfaces when the policy is exhausted is the last attempt's
-        /// own error, which is the state the request was in when bridge gave
-        /// up.
+        /// What surfaces when the policy is exhausted is the failed attempt's
+        /// own error, not something the retrying invented on top of it. A
+        /// request that never reached a server has no status, so the status
+        /// wording must be nowhere in it.
         #[tokio::test]
-        async fn the_error_that_surfaces_is_the_last_attempts_own() {
+        async fn giving_up_surfaces_the_connect_failure_itself() {
+            let expected = false;
             let scratch = TestScratch::new("connect-error");
             let (http, _) = dead_network().await;
 
-            let actual = connect(
+            let error = connect(
                 &http,
                 &auth(&scratch),
                 &json!({}),
@@ -745,11 +747,9 @@ mod tests {
             )
             .await
             .expect_err("the dead network cannot succeed");
+            let actual = format!("{error:#}").contains("messages API");
 
-            assert!(
-                !format!("{actual:#}").contains("messages API"),
-                "a request that never reached a server has no status: {actual:#}"
-            );
+            assert_eq!(actual, expected, "{error:#}");
         }
 
         /// The caller races this future against the cancel signal, so a
@@ -757,6 +757,7 @@ mod tests {
         /// after the wait. Ten minutes of backoff, abandoned at once.
         #[tokio::test]
         async fn a_cancel_during_a_backoff_wait_takes_effect_immediately() {
+            let expected = Some(true);
             let scratch = TestScratch::new("connect-cancel");
             let (http, _) = dead_network().await;
             let parked = Arc::new(RwLock::new(
@@ -777,18 +778,18 @@ mod tests {
             let body = json!({});
             let conv = ConversationId("conv-retry".to_string());
 
-            let started = std::time::Instant::now();
-            let cancelled = tokio::select! {
-                _ = connect(&http, &auth, &body, &conv, &parked) => false,
-                _ = crate::agent::cancelled(&mut cancel) => true,
-            };
+            // Bounded so a cancel that does wait out the backoff fails here
+            // rather than hanging the suite for the ten minutes it asked for.
+            let actual = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                tokio::select! {
+                    _ = connect(&http, &auth, &body, &conv, &parked) => false,
+                    _ = crate::agent::cancelled(&mut cancel) => true,
+                }
+            })
+            .await
+            .ok();
 
-            assert!(cancelled, "the backoff wait must lose the race");
-            assert!(
-                started.elapsed() < std::time::Duration::from_secs(5),
-                "the cancel waited out the backoff: {:?}",
-                started.elapsed()
-            );
+            assert_eq!(actual, expected);
         }
     }
 
