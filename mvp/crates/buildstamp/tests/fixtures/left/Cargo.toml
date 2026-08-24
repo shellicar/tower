@@ -1,8 +1,0 @@
-# Not a real crate: a manifest fixture for the footprint resolution test.
-[package]
-name = "left"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies.shared]
-path = "../shared"

@@ -1,5 +1,0 @@
-# Not a real crate: a manifest fixture for the footprint resolution test.
-[package]
-name = "buildstamp"
-version = "0.1.0"
-edition = "2024"
