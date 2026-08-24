@@ -397,6 +397,56 @@ Set the user context injected at the start of each new conversation.
 {"context": "set"}
 ```
 
+### settings
+
+Report the live state of every cell a control line can set, plus the static
+config the host was launched with. This is the read half of `skills`,
+`system`, `context`, `model`, `cwd`, `permissions`, `credentials` and `tools`.
+
+```
+{"settings": {}}
+{"warnings": [], "settings": {"system": {"set": true, "bytes": 4821, "hash": "…"}, "context": {"set": true, "bytes": 12903, "hash": "…"}, "model": "claude-sonnet-5", …}}
+```
+
+`system` and `context` hold bodies that run to tens of kilobytes, so the reply
+summarises them instead of inlining them: one query would otherwise return a
+wall of text with every other setting buried in it. `bytes` counts the body's
+bytes, not its characters. A cell nobody has set reports `{"set": false}` and
+nothing else.
+
+`hash` tells two bodies apart without carrying either, so a caller that queries
+twice knows from an unchanged hash that the body is unchanged. It is the same
+non-cryptographic content hash the skills catalogue uses for change detection,
+rendered as sixteen hex digits, so it is not reproducible outside the running
+host and only means something against another value from that same host.
+
+A body is returned when the request asks for it by name:
+
+```
+{"settings": {"include": ["system", "context"]}}
+```
+
+That is the same reply with a `text` field added to each entry named. The
+entry's shape does not change with the request: it gains a field rather than
+becoming a string, so a caller parses one shape either way. Naming nothing,
+and `{"settings": {}}`, both give the summary. Naming a cell that is not set
+adds nothing to it, because there is no body to add.
+
+`system` and `context` are the only entries with a body, and naming anything
+else is rejected rather than quietly doing nothing:
+
+```
+{"settings": {"include": ["skillsDir"]}}
+{"error": "settings include names unknown entry \"skillsDir\"; entries with a body: context, system"}
+```
+
+This is stricter than the wire contract, deliberately. Tolerance there exists
+so an old tower and a new bridge can coexist; stdio has no such skew, being an
+operator talking to their own local process, so a name that silently did
+nothing would only hand back a reply they go on to misread. An `include` that
+is not an array, or an entry named as something other than a string, is
+rejected the same way.
+
 ## What this v0 does not do
 
 - No persistence: conversations are tasks, and they die with the host. `adopt`

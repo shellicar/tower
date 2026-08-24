@@ -214,6 +214,12 @@ decision made in the brief, never invented by the operator.
 
 - `wire` folds: pure tests, inputs from `docs/spec/scenarios.md` fixtures.
 - Components: literal values through the seams. The only fake is `Broker`.
+- Never the fleet's broker. The `Broker` fake is the answer; a run that
+  genuinely needs a real one gets tower's own via `just broker-run '<cmd>'`
+  (mvp/compose.test.yaml, 31416, up and down around the run). An unset
+  `NATS_URL` defaults to 4222, so a process started without thinking about it
+  lands on the live deployment — and conv subjects are keyed by conversation
+  id, not by world, so what it publishes there is permanent.
 - One integration check: compose broker, scripted publisher, WS client asserts.
 - Fix lands twice: code + fixture, same commit.
 
