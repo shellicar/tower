@@ -207,6 +207,15 @@ fn parse_binding(entry: &Value, group: &str, arity: Arity) -> Result<Binding, St
     let object = entry
         .as_object()
         .ok_or_else(|| format!("tools group {group:?} must be an object"))?;
+    let known = known_fields(group);
+    for field in object.keys() {
+        if !known.contains(&field.as_str()) {
+            return Err(format!(
+                "tools group {group:?} has unknown field {field:?}; known fields: {}",
+                known.join(", ")
+            ));
+        }
+    }
     let named = object
         .get("credentials")
         .ok_or_else(|| format!("tools group {group:?} needs credentials"))?;
@@ -237,6 +246,18 @@ fn parse_binding(entry: &Value, group: &str, arity: Arity) -> Result<Binding, St
         enabled,
         max_timeout_s,
     })
+}
+
+/// What a group's binding may carry. Closed, like the group names themselves:
+/// a field this group does not have is rejected when the line arrives, so
+/// `max_timeout_s` written under the wrong group is refused rather than
+/// silently configuring nothing.
+fn known_fields(group: &str) -> Vec<&'static str> {
+    let mut fields = vec!["credentials", "enabled"];
+    if group == "exec" {
+        fields.push("max_timeout_s");
+    }
+    fields
 }
 
 /// Absent is no ceiling. A value that is present but cannot be a ceiling is
@@ -414,14 +435,20 @@ pub fn settings(credentials: &Credentials, tools: &ToolsConfig) -> Value {
         .into_iter()
         .map(|(group, binding)| {
             let state = resolve(credentials, binding.as_ref());
-            (
-                group,
-                json!({
-                    "credentials": binding.as_ref().map(|b| b.credentials.clone()).unwrap_or_default(),
-                    "enabled": binding.as_ref().is_none_or(|b| b.enabled),
-                    "state": state_word(&state),
-                }),
-            )
+            let mut reported = json!({
+                "credentials": binding.as_ref().map(|b| b.credentials.clone()).unwrap_or_default(),
+                "enabled": binding.as_ref().is_none_or(|b| b.enabled),
+                "state": state_word(&state),
+            });
+            // Only exec has a ceiling, so only exec reports one. Null says the
+            // host bounds nothing, which is a different answer from absent.
+            if group == "exec" {
+                reported["max_timeout_s"] = match binding.as_ref().and_then(|b| b.max_timeout_s) {
+                    Some(seconds) => json!(seconds.get()),
+                    None => Value::Null,
+                };
+            }
+            (group, reported)
         })
         .collect();
     json!({ "credentials": configured, "tools": groups })
@@ -598,6 +625,46 @@ mod tests {
             .exec
             .expect("an exec binding")
             .max_timeout_s;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_ceiling_on_a_group_that_has_none_is_rejected() {
+        let actual = parse_tools(&json!({
+            "github": { "credentials": "github-privileged", "max_timeout_s": 900 }
+        }));
+
+        assert!(actual.is_err());
+    }
+
+    #[test]
+    fn an_unknown_field_in_a_tools_group_is_rejected() {
+        let actual = parse_tools(&json!({
+            "exec": { "credentials": [], "max_timeout": 900 }
+        }));
+
+        assert!(actual.is_err());
+    }
+
+    #[test]
+    fn settings_reports_the_ceiling_the_exec_group_carries() {
+        let expected = json!(900);
+
+        let config = tools(json!({ "exec": { "credentials": [], "max_timeout_s": 900 } }));
+        let actual =
+            settings(&Credentials::default(), &config)["tools"]["exec"]["max_timeout_s"].clone();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn settings_reports_no_ceiling_as_null() {
+        let expected = json!(null);
+
+        let config = tools(json!({ "exec": { "credentials": [] } }));
+        let actual =
+            settings(&Credentials::default(), &config)["tools"]["exec"]["max_timeout_s"].clone();
 
         assert_eq!(actual, expected);
     }

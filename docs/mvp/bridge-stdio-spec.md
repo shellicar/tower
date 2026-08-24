@@ -229,7 +229,13 @@ to run for, in whole seconds. Absent, this host bounds nothing and a call runs
 for whatever it asked for. Present, it must be a whole number of seconds above
 zero, and a value that cannot be one is rejected when the line arrives rather
 than dropped, because a mistyped ceiling would otherwise leave the host
-running unbounded while believing it had set a limit.
+running unbounded while believing it had set a limit. A field a group does not
+have is rejected the same way an unknown group name is, so `max_timeout_s`
+written under `github` is refused rather than accepted and ignored.
+
+`{"settings":{}}` reports the exec group's `max_timeout_s`, null when the host
+bounds nothing, so the ceiling a bridge is enforcing can be read back rather
+than discovered by having a call refused.
 
 Every `Exec` call states its own `timeout` and is required to: a stated
 timeout is the caller's expectation, so when it fires it tells the caller its
