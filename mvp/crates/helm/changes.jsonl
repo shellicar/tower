@@ -1,0 +1,3 @@
+{"type":"change","category":"fixed","description":"A `-c` configuration batch is applied before the conversation is created."}
+{"type":"change","category":"changed","description":"The `m` command changes the model name only."}
+{"type":"change","category":"changed","description":"A `cwd` line in a `-c` configuration batch now sets the directory the conversation runs in."}

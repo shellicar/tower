@@ -75,10 +75,6 @@ impl Skills {
         Skills { list }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.list.is_empty()
-    }
-
     /// The availability block, committed onto the conversation's first user
     /// message so the record shows what the model saw.
     pub fn reminder(&self) -> Option<String> {
@@ -125,9 +121,38 @@ impl Skills {
         ))
     }
 
-    /// The Skill tool, for the API's `tools` array.
-    pub fn tool_schema(&self) -> Value {
-        json!({
+    /// Invoke: read the skill fresh (the catalogue is static, the body is
+    /// whatever is on disk now) and return it with the frontmatter stripped.
+    /// Unknown names and unreadable files are `Err`; the tool_result carries
+    /// the message with `is_error`.
+    pub fn invoke(&self, name: &str) -> Result<String, String> {
+        if self.list.is_empty() {
+            return Err(
+                "no skills catalogue is configured; set one with the `skills` control line"
+                    .to_string(),
+            );
+        }
+        let Some(skill) = self.list.iter().find(|s| s.name == name) else {
+            let names: Vec<&str> = self.list.iter().map(|s| s.name.as_str()).collect();
+            return Err(format!(
+                "unknown skill {name:?}; available: {}",
+                names.join(", ")
+            ));
+        };
+        let text = std::fs::read_to_string(&skill.path)
+            .map_err(|e| format!("skill {name} unreadable: {e}"))?;
+        let (_, body) = split_frontmatter(&text);
+        Ok(body.trim_start().to_string())
+    }
+}
+
+/// The Skill tool, always offered. It carries no per-conversation content,
+/// so it belongs in the static tool array like every other schema: the array
+/// is the head of the cached prompt prefix, and a tool that appears only
+/// once a catalogue exists would miss the cache for every conversation that
+/// gained one. With no catalogue, invoking it is an ordinary tool error.
+pub fn skill_schema() -> Value {
+    json!({
             "name": "Skill",
             "description": "Load a skill's instructions into the conversation. \
                 Available skills are listed in a system-reminder block; invoke \
@@ -144,26 +169,7 @@ impl Skills {
                 "required": ["skill"],
                 "additionalProperties": false
             }
-        })
-    }
-
-    /// Invoke: read the skill fresh (the catalogue is static, the body is
-    /// whatever is on disk now) and return it with the frontmatter stripped.
-    /// Unknown names and unreadable files are `Err`; the tool_result carries
-    /// the message with `is_error`.
-    pub fn invoke(&self, name: &str) -> Result<String, String> {
-        let Some(skill) = self.list.iter().find(|s| s.name == name) else {
-            let names: Vec<&str> = self.list.iter().map(|s| s.name.as_str()).collect();
-            return Err(format!(
-                "unknown skill {name:?}; available: {}",
-                names.join(", ")
-            ));
-        };
-        let text = std::fs::read_to_string(&skill.path)
-            .map_err(|e| format!("skill {name} unreadable: {e}"))?;
-        let (_, body) = split_frontmatter(&text);
-        Ok(body.trim_start().to_string())
-    }
+    })
 }
 
 /// `---\n{front}\n---\n{body}` → (front, body); no frontmatter → ("", whole).
@@ -178,10 +184,13 @@ fn split_frontmatter(text: &str) -> (&str, &str) {
     }
 }
 
-/// A content hash of a whole SKILL.md, for change detection across scans.
+/// A content hash of a body of text: a whole SKILL.md for change detection
+/// across scans, and the `settings` reply's summary of a text cell.
 /// Non-cryptographic (std DefaultHasher): the need is "did the bytes change",
-/// not integrity, so no new dependency is pulled for a SHA.
-fn content_hash(text: &str) -> u64 {
+/// not integrity, so no new dependency is pulled for a SHA. DefaultHasher's
+/// output is not stable across Rust releases, so a value only ever means
+/// something compared against another taken by the same build.
+pub(crate) fn content_hash(text: &str) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     text.hash(&mut hasher);
@@ -257,8 +266,21 @@ mod tests {
     #[test]
     fn empty_catalogue_has_no_reminder() {
         let skills = Skills::scan(std::env::temp_dir().join("bridge-skills-test-missing"));
-        assert!(skills.is_empty());
         assert!(skills.reminder().is_none());
+    }
+
+    /// Skill is offered whether or not a catalogue exists, so invoking it
+    /// without one has to answer for itself rather than be prevented.
+    #[test]
+    fn invoking_with_no_catalogue_is_an_error_naming_what_is_missing() {
+        let skills = Skills::scan(std::env::temp_dir().join("bridge-skills-test-no-catalogue"));
+        let error = skills
+            .invoke("anything")
+            .expect_err("there is nothing to load");
+        assert!(
+            error.contains("no skills catalogue is configured"),
+            "{error}"
+        );
     }
 
     #[test]
