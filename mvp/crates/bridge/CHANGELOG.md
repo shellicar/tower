@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `model` control line takes an object naming the model, its max tokens, thinking mode, thinking display and effort level.
 - The `settings` reply summarises the system prompt and the user context as a set flag, a byte count and a content hash.
 - Writing and deleting a memory no longer raises an approval. All five memory tools now run without asking.
+- The environment an Exec child runs with is composed as a whole before the child is spawned: the call's own variables, then a configured provider's removals, then its forced values. What a child ends up with is unchanged.
 
 ### Removed
 

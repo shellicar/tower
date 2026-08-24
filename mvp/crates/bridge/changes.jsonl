@@ -10,3 +10,4 @@
 {"type":"change","category":"changed","description":"The `settings` reply summarises the system prompt and the user context as a set flag, a byte count and a content hash."}
 {"type":"change","category":"added","description":"A `settings` request can name the system prompt or the user context to get its full text."}
 {"type":"change","category":"changed","description":"Writing and deleting a memory no longer raises an approval. All five memory tools now run without asking."}
+{"type":"change","category":"changed","description":"The environment an Exec child runs with is composed as a whole before the child is spawned: the call's own variables, then a configured provider's removals, then its forced values. What a child ends up with is unchanged."}
