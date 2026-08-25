@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 const PALETTE = ["#8ec07c", "#83a598", "#d3869b", "#fabd2f", "#fe8019", "#b8bb26", "#7fc7ff", "#d65d0e", "#b16286", "#689d6a"];
 const US = "\u001f";
 const REPOS = "/repos/";
-const DEFAULT_DB = "/Users/stephen/repos/@shellicar/tower--frontend-show-cwd/mvp/tower-v2.db";
+const DEFAULT_DB = "tower-v2.db";
 const BUCKET = process.env.NATS_REPORTING_BUCKET ?? "reporting-lines";
 const PERSONAL_REPOS: Record<string, string> = { "/Volumes/ato": "ato", "/Users/stephen/dotfiles": "dotfiles" };
 
@@ -17,14 +17,15 @@ if (args.includes("--help") || args.includes("-h")) {
     "usage: node tag-conversations.mts [--db <path>] [--apply]\n\n" +
       "Tags each conversation with org, repo, worktree and role, derived from the\n" +
       "working directory tower recorded for it and from the reporting-lines bucket.\n" +
-      "Prints the plan and exits. --apply prints the same plan, then writes it.\n",
+      "Prints the plan and exits. --apply prints the same plan, then writes it.\n" +
+      "--db defaults to $TOWER_DB, then tower-v2.db in the working directory.\n",
   );
   process.exit(0);
 }
 
 const apply = args.includes("--apply");
 const dbFlag = args.indexOf("--db");
-const db = dbFlag >= 0 ? args[dbFlag + 1] : DEFAULT_DB;
+const db = dbFlag >= 0 ? args[dbFlag + 1] : (process.env.TOWER_DB ?? DEFAULT_DB);
 
 if (!db) {
   process.stderr.write("--db needs a path\n");
