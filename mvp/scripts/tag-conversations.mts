@@ -7,16 +7,20 @@ const REPOS = "/repos/";
 const DEFAULT_DB = "tower-v2.db";
 const BUCKET = process.env.NATS_REPORTING_BUCKET ?? "reporting-lines";
 const PERSONAL_REPOS: Record<string, string> = { "/Volumes/ato": "ato", "/Users/stephen/dotfiles": "dotfiles" };
+const DIR_KEYS = ["org", "project", "repo", "worktree"] as const;
 
 type Tag = { conv: string; key: string; value: string };
+type Dir = { convs: string[]; org: string; project: string; repo: string; worktree: string };
 
 const args = process.argv.slice(2);
 
 if (args.includes("--help") || args.includes("-h")) {
   process.stdout.write(
     "usage: node tag-conversations.mts [--db <path>] [--apply]\n\n" +
-      "Tags each conversation with org, repo, worktree and role, derived from the\n" +
-      "working directory tower recorded for it and from the reporting-lines bucket.\n" +
+      "Tags each conversation with org, project, repo, worktree and role. The org is\n" +
+      "the first directory under /repos/, the project and repo come from the git remote\n" +
+      "of the working directory tower recorded, and the role comes from the\n" +
+      "reporting-lines bucket.\n" +
       "Prints the plan and exits. --apply prints the same plan, then writes it.\n" +
       "--db defaults to $TOWER_DB, then tower-v2.db in the working directory.\n",
   );
@@ -38,13 +42,38 @@ const query = (statement: string): string[][] =>
     .filter((line) => line.length > 0)
     .map((line) => line.split(US));
 
-const derive = (cwd: string): { org: string; repo: string; worktree: string } => {
+const git = (cwd: string, gitArgs: string[]): string => {
+  try {
+    return execFileSync("git", gitArgs, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    return "";
+  }
+};
+
+// Azure DevOps nests a project between the org and the repo and marks it with _git; GitHub does not.
+const fromRemote = (url: string): { project: string; repo: string } => {
+  const segments = new URL(url).pathname
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map(decodeURIComponent);
+  const at = segments.indexOf("_git");
+  if (at > 0) return { project: segments[at - 1] ?? "", repo: segments[at + 1] ?? "" };
+  return { project: "", repo: (segments[segments.length - 1] ?? "").replace(/\.git$/, "") };
+};
+
+const derive = (cwd: string): { org: string; project: string; repo: string; worktree: string } => {
   const at = cwd.indexOf(REPOS);
-  if (at < 0) return { org: "personal", repo: PERSONAL_REPOS[cwd] ?? "", worktree: "" };
-  const [org = "", dir = ""] = cwd.slice(at + REPOS.length).split("/");
-  const sep = dir.indexOf("--");
-  if (sep < 0) return { org, repo: dir, worktree: "" };
-  return { org, repo: dir.slice(0, sep), worktree: dir.slice(sep + 2) };
+  if (at < 0) return { org: "personal", project: "", repo: PERSONAL_REPOS[cwd] ?? "", worktree: "" };
+  const [org = ""] = cwd.slice(at + REPOS.length).split("/");
+  const root = git(cwd, ["rev-parse", "--show-toplevel"]);
+  if (!root) return { org, project: "", repo: "", worktree: "" };
+  const name = root.slice(root.lastIndexOf("/") + 1);
+  const sep = name.indexOf("--");
+  const worktree = sep < 0 ? "" : name.slice(sep + 2);
+  const url = git(cwd, ["remote", "get-url", "origin"]);
+  if (!url) return { org, project: "", repo: "", worktree };
+  const { project, repo } = fromRemote(url);
+  return { org, project, repo, worktree };
 };
 
 const reportingLines = (): { workers: string[]; owners: string[] } => {
@@ -115,14 +144,15 @@ const attachments = query(
 
 const planned: Tag[] = [];
 const orgOf = new Map<string, string>();
+const byDir = new Map<string, Dir>();
 
 for (const [conv, cwd] of attachments) {
   if (!conv || !cwd || !known.has(conv)) continue;
-  const { org, repo, worktree } = derive(cwd);
-  orgOf.set(conv, org);
-  if (org) planned.push({ conv, key: "org", value: org });
-  if (repo) planned.push({ conv, key: "repo", value: repo });
-  if (worktree) planned.push({ conv, key: "worktree", value: worktree });
+  const entry = byDir.get(cwd) ?? { convs: [], ...derive(cwd) };
+  byDir.set(cwd, entry);
+  entry.convs.push(conv);
+  orgOf.set(conv, entry.org);
+  for (const key of DIR_KEYS) if (entry[key]) planned.push({ conv, key, value: entry[key] });
 }
 
 const { workers, owners } = reportingLines();
@@ -152,12 +182,23 @@ const tally = (key: string): [string, number][] => {
 process.stdout.write(`database ${db}\n`);
 process.stdout.write(`${orgOf.size} conversations have a recorded working directory\n`);
 
-for (const key of ["org", "repo", "role", "pr"]) {
+for (const key of ["org", "project", "repo", "role", "pr"]) {
   process.stdout.write(`\n${key}\n`);
   for (const [value, count] of tally(key)) process.stdout.write(`  ${value.padEnd(34)} ${count}\n`);
 }
 
 process.stdout.write(`\nworktree ${planned.filter((tag) => tag.key === "worktree").length} tags\n`);
+
+const pending = new Set(changes.map((tag) => `${tag.conv}${US}${tag.key}`));
+
+process.stdout.write("\ndirectories, * marks one with rows to write\n");
+for (const [dir, entry] of [...byDir.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+  const derived = DIR_KEYS.filter((key) => entry[key])
+    .map((key) => `${key}=${entry[key]}`)
+    .join(" ");
+  const writes = entry.convs.some((conv) => DIR_KEYS.some((key) => pending.has(`${conv}${US}${key}`)));
+  process.stdout.write(`  ${writes ? "*" : " "} ${String(entry.convs.length).padStart(2)}  ${dir}  ${derived}\n`);
+}
 process.stdout.write(`\n${changes.length} rows to write, ${planned.length - changes.length} already correct, ${removals.length} stale pr rows to remove\n`);
 
 if (!apply) {
