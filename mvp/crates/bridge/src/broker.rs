@@ -159,6 +159,28 @@ pub trait Broker: Clone + Send + Sync + 'static {
 #[derive(Clone)]
 pub struct NatsBroker {
     pub client: async_nats::Client,
+    /// Frames one fetch asks for — a page size, not a ceiling on the replay.
+    /// See `replay_batch_size`.
+    pub replay_batch: usize,
+}
+
+/// Frames per fetch when nothing configures it. Comfortably under the cap
+/// nats-server applies to a single fetch, so a page is never truncated in
+/// the first place; the paging below is what makes the whole backlog arrive
+/// regardless.
+pub const DEFAULT_REPLAY_BATCH: usize = 500;
+
+/// Resolve `BRIDGE_REPLAY_BATCH`. A value that cannot be a batch — zero,
+/// negative, not a number — takes the default rather than failing the boot:
+/// this only ever changes how many round trips a replay costs, never what it
+/// returns, so there is nothing here worth refusing to start over. Setting it
+/// small (100 against a thousand-frame conversation) is what forces the
+/// paging to iterate.
+pub fn replay_batch_size(configured: Option<&str>) -> usize {
+    configured
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|batch| *batch > 0)
+        .unwrap_or(DEFAULT_REPLAY_BATCH)
 }
 
 pub struct NatsSubscription(async_nats::Subscriber);
@@ -175,52 +197,107 @@ impl BrokerSubscription for NatsSubscription {
 }
 
 /// Whether an empty backlog is worth reaching for the client at all — pure,
-/// so the guard against calling `fetch().max_messages(0)` (unproven
-/// semantics; never exercised pre-refactor either, since the old code took
-/// the same `pending == 0` early return) is provable without a live broker.
+/// so the early return on nothing pending (which spares a fresh spawn a
+/// round trip that could only come back empty) is provable without a live
+/// broker. The count itself no longer sizes anything: a fetch asks for a
+/// page, and pages repeat until the backlog is drained.
 #[derive(Debug, PartialEq)]
 enum ReplayPlan {
     Empty,
-    Fetch(usize),
+    Page,
 }
 
 fn replay_plan(pending: usize) -> ReplayPlan {
     if pending == 0 {
         ReplayPlan::Empty
     } else {
-        ReplayPlan::Fetch(pending)
+        ReplayPlan::Page
     }
 }
 
+/// Whether a finished batch proves the backlog is drained. Only an empty one
+/// does. The server caps a single fetch well below what was asked for and
+/// says nothing at all about having done so — no error, no status — so a
+/// short batch is byte-for-byte indistinguishable from the end of the
+/// stream, and reading it as the end is what silently truncated an adopted
+/// conversation.
+fn backlog_drained(delivered: usize) -> bool {
+    delivered == 0
+}
+
+type PullConsumer =
+    async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>;
+
 /// A replay's live source: either nothing was pending at consumer creation
-/// (`Empty`, ending immediately), or the JetStream pull consumer's own
-/// message stream, mapped frame by frame. A read failure is surfaced, not
-/// swallowed — `Some(Err(_))`, never folded into "the backlog ended".
+/// (`Empty`, ending immediately), or the JetStream pull consumer drained a
+/// page at a time. A read failure is surfaced, not swallowed —
+/// `Some(Err(_))`, never folded into "the backlog ended".
 pub enum NatsReplay {
     Empty,
-    Batch(Box<async_nats::jetstream::consumer::pull::Batch>),
+    Paged(Box<PagedReplay>),
+}
+
+/// One pull consumer, drained by repeated fetches. Holding the consumer
+/// rather than a single batch is the whole point: a fetch returns what the
+/// server felt like giving, and only a batch that yields nothing at all
+/// proves there is no more.
+pub struct PagedReplay {
+    consumer: PullConsumer,
+    batch: Option<Box<async_nats::jetstream::consumer::pull::Batch>>,
+    batch_size: usize,
+    /// Frames the batch in hand has yielded so far — the one number that
+    /// distinguishes a capped batch from the end of the stream.
+    delivered: usize,
 }
 
 impl BrokerReplay for NatsReplay {
     async fn next(&mut self) -> Option<Result<BrokerMessage, BrokerError>> {
         use futures::StreamExt;
-        match self {
-            NatsReplay::Empty => None,
-            NatsReplay::Batch(batch) => {
-                let msg = batch.next().await?;
-                Some(match msg {
-                    // `msg` derefs to the raw message (it also carries the
-                    // ack context), so `payload` can't move out of it —
-                    // `Bytes::clone` is a refcount bump, not a copy.
-                    Ok(msg) => Ok(BrokerMessage {
+        let NatsReplay::Paged(paged) = self else {
+            return None;
+        };
+        loop {
+            if paged.batch.is_none() {
+                let fetched = paged
+                    .consumer
+                    .fetch()
+                    .max_messages(paged.batch_size)
+                    .messages()
+                    .await;
+                match fetched {
+                    Ok(batch) => {
+                        paged.delivered = 0;
+                        paged.batch = Some(Box::new(batch));
+                    }
+                    // A page that cannot even be asked for ends the replay
+                    // loudly. Reading it as the end is the very fault this
+                    // paging exists to close.
+                    Err(e) => return Some(Err(BrokerError::ReplaySetup(Box::new(e)))),
+                }
+            }
+            let batch = paged.batch.as_mut().expect("a page was just fetched");
+            match batch.next().await {
+                // `msg` derefs to the raw message (it also carries the ack
+                // context), so `payload` can't move out of it —
+                // `Bytes::clone` is a refcount bump, not a copy.
+                Some(Ok(msg)) => {
+                    paged.delivered += 1;
+                    return Some(Ok(BrokerMessage {
                         subject: msg.subject.to_string(),
                         payload: msg.payload.clone(),
                         reply: None,
-                    }),
-                    // Batch's Item error is already `async_nats::Error`
-                    // (`Box<dyn Error + Send + Sync>`) — no double-boxing.
-                    Err(e) => Err(BrokerError::ReplayRead(e)),
-                })
+                    }));
+                }
+                // Batch's Item error is already `async_nats::Error`
+                // (`Box<dyn Error + Send + Sync>`) — no double-boxing.
+                Some(Err(e)) => return Some(Err(BrokerError::ReplayRead(e))),
+                None => {
+                    let drained = backlog_drained(paged.delivered);
+                    paged.batch = None;
+                    if drained {
+                        return None;
+                    }
+                }
             }
         }
     }
@@ -347,42 +424,95 @@ impl NatsBroker {
                 // `inactive_threshold: 5s` back from the server. Not a
                 // behaviour change; re-verify if the pinned image moves.
                 inactive_threshold: std::time::Duration::from_secs(5),
+                // Nothing acks a replayed frame, and with the default
+                // explicit policy the server would start redelivering each
+                // unacked page after ack_wait — duplicates folded into the
+                // tree. A replay reads the record, it does not consume it.
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::None,
                 ..Default::default()
             })
             .await
             .map_err(|e| BrokerError::ReplaySetup(Box::new(e)))?;
-        // num_pending at creation is the full backlog. An empty one never
-        // reaches for `fetch().max_messages(0)` — its semantics are
-        // unproven here and untested pre-refactor too, since the old code
-        // took this same early return before ever calling fetch.
+        // num_pending at creation answers one question only: is there
+        // anything at all? It never sizes the read. Asking for the whole
+        // backlog in one fetch is exactly what failed — the server handed
+        // back its own capped count with no error, and the replay ended
+        // there, hundreds of frames short.
         let pending = consumer.cached_info().num_pending as usize;
         match replay_plan(pending) {
             ReplayPlan::Empty => Ok(NatsReplay::Empty),
-            ReplayPlan::Fetch(pending) => {
-                let messages = consumer
-                    .fetch()
-                    .max_messages(pending)
-                    .messages()
-                    .await
-                    .map_err(|e| BrokerError::ReplaySetup(Box::new(e)))?;
-                Ok(NatsReplay::Batch(Box::new(messages)))
-            }
+            ReplayPlan::Page => Ok(NatsReplay::Paged(Box::new(PagedReplay {
+                consumer,
+                batch: None,
+                batch_size: self.replay_batch,
+                delivered: 0,
+            }))),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ReplayPlan, replay_plan};
+    use super::{DEFAULT_REPLAY_BATCH, ReplayPlan, backlog_drained, replay_batch_size, replay_plan};
 
     #[test]
     fn replay_plan_is_empty_when_nothing_is_pending() {
-        assert_eq!(replay_plan(0), ReplayPlan::Empty);
+        let expected = ReplayPlan::Empty;
+        let actual = replay_plan(0);
+        assert_eq!(expected, actual);
     }
 
     #[test]
-    fn replay_plan_fetches_the_pending_count_otherwise() {
-        assert_eq!(replay_plan(5), ReplayPlan::Fetch(5));
+    fn replay_plan_pages_when_anything_is_pending() {
+        let expected = ReplayPlan::Page;
+        let actual = replay_plan(5);
+        assert_eq!(expected, actual);
+    }
+
+    /// The fault this paging closes: asked for 1243 frames, nats-server
+    /// delivered 1000 and reported nothing. Treating that short batch as the
+    /// end left an adopted conversation 233 messages behind its own record,
+    /// and every say against the real tip was rejected as stale.
+    #[test]
+    fn a_short_batch_does_not_prove_the_backlog_is_drained() {
+        let expected = false;
+        let actual = backlog_drained(1000);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn a_batch_that_delivers_nothing_proves_the_backlog_is_drained() {
+        let expected = true;
+        let actual = backlog_drained(0);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn the_replay_batch_takes_the_default_when_nothing_configures_it() {
+        let expected = DEFAULT_REPLAY_BATCH;
+        let actual = replay_batch_size(None);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn the_replay_batch_takes_the_configured_size() {
+        let expected = 100;
+        let actual = replay_batch_size(Some("100"));
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn a_zero_replay_batch_takes_the_default() {
+        let expected = DEFAULT_REPLAY_BATCH;
+        let actual = replay_batch_size(Some("0"));
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn an_unparseable_replay_batch_takes_the_default() {
+        let expected = DEFAULT_REPLAY_BATCH;
+        let actual = replay_batch_size(Some("lots"));
+        assert_eq!(expected, actual);
     }
 
     /// CLAUDE.md's Errors rule pinned: a log site never renders a bare

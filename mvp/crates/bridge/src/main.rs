@@ -264,8 +264,10 @@ async fn replay_conversation<B: Broker>(
         .context("adopt needs the capture")?;
     let mut messages = Vec::new();
     let mut revisions = std::collections::HashMap::new();
+    let mut frames = 0usize;
     while let Some(msg) = replay.next().await {
         let msg = msg?;
+        frames += 1;
         // History reaches an attached client as the same envelopes the live
         // tee sends — the record replayed, not a second history protocol.
         // The client's fold rebuilds the conversation exactly as fold_one
@@ -274,6 +276,12 @@ async fn replay_conversation<B: Broker>(
         fold_one(&msg, &mut messages, &mut revisions);
     }
     apply_revisions(&mut messages, &mut revisions);
+    // Frames and messages differ when the fold skipped something; either
+    // count falling short of the record is a truncated tree.
+    eprintln!(
+        "bridge[{conv}]: replayed {frames} frame(s) from {stream_name} → {} message(s)",
+        messages.len()
+    );
     Ok(messages)
 }
 
@@ -1399,11 +1407,16 @@ async fn handle_service<B: Broker, D: DeltaSink>(
                     return;
                 }
             };
+        let adopted = messages.len();
         let conversation = if messages.is_empty() {
             decisions::Conversation::default()
         } else {
             decisions::Conversation::adopt(messages)
         };
+        eprintln!(
+            "bridge[{conv}]: adopted {adopted} message(s), tip {:?}",
+            conversation.tip()
+        );
         if let ServeOutcome::Failed(detail) = serve_subscribed(
             &host.broker,
             host.delta.clone(),
@@ -1704,8 +1717,15 @@ async fn main() -> anyhow::Result<()> {
             "could not reach NATS at {nats_url} — is it running? (docker compose up -d, or set NATS_URL)"
         )
     })?; // fail-fast
+    // How many frames one replay fetch asks for. Only the number of round
+    // trips changes; the whole backlog arrives either way. Set it small to
+    // force the paging to iterate against a conversation that would
+    // otherwise fit in a single fetch.
+    let replay_batch =
+        bridge::broker::replay_batch_size(std::env::var("BRIDGE_REPLAY_BATCH").ok().as_deref());
     let broker = NatsBroker {
         client: client.clone(),
+        replay_batch,
     };
     let delta = NatsDeltaSink(client.clone());
 
