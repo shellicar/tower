@@ -86,8 +86,10 @@ impl Auth {
     }
 
     /// Read the current credential and set the auth header. Fresh per request:
-    /// the secret exists only for the duration of this call.
-    async fn apply(
+    /// the secret exists only for the duration of this call. Public so a caller
+    /// can build the request bridge would send without sending it, credential
+    /// and all, which is what makes a failing request reproducible by hand.
+    pub async fn apply(
         &self,
         request: reqwest::RequestBuilder,
         http: &reqwest::Client,
@@ -320,6 +322,16 @@ fn request_body(
     body
 }
 
+/// The messages request short of its credential: the url, the version header
+/// and the body. Public so a caller reproducing a request by hand builds the
+/// one bridge actually sends, and stays right when the url or the version
+/// moves.
+pub fn message_request(http: &reqwest::Client, body: &Value) -> reqwest::RequestBuilder {
+    http.post("https://api.anthropic.com/v1/messages")
+        .header("anthropic-version", "2023-06-01")
+        .json(body)
+}
+
 /// The connect phase: the request up to and including the response status,
 /// retried under whatever policy the `retry` cell holds at the moment each
 /// failure lands. A response that has begun streaming is past this point and
@@ -347,14 +359,14 @@ async fn connect(
 ) -> anyhow::Result<reqwest::Response> {
     let mut attempt: u32 = 1;
     loop {
-        let request = http
-            .post("https://api.anthropic.com/v1/messages")
-            .header("anthropic-version", "2023-06-01")
-            .json(body);
         // An auth failure is local configuration rather than a connect
         // failure — it has no representation in ConnectFailure — so it
         // surfaces immediately, as it always did.
-        let sent = auth.apply(request, http).await?.send().await;
+        let sent = auth
+            .apply(message_request(http, body), http)
+            .await?
+            .send()
+            .await;
 
         let (failure, reported, error) = match sent {
             Ok(response) if response.status().is_success() => return Ok(response),
@@ -403,9 +415,15 @@ async fn connect(
     }
 }
 
-/// Stream one turn: publish `block`/`delta` as chunks arrive, accumulate the
-/// content blocks for the commit, and return the round's accounting.
-/// `tools` is the API `tools` array; empty = the no-tools call as before.
+/// The block the system array always leads with: subscription (OAuth) access
+/// requires the request to declare the Agent SDK identity. Public because a
+/// caller building its own body for `stream_body` has to lead with it too,
+/// and a retyped copy of a string the API checks is a copy that can drift.
+pub const AGENT_SDK_PREFIX: &str = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
+
+/// Stream one turn: build the body bridge shapes for a served conversation,
+/// then hand it to `stream_body`. `tools` is the API `tools` array; empty =
+/// the no-tools call as before.
 #[allow(clippy::too_many_arguments)]
 pub async fn stream_turn<D: DeltaSink>(
     sink: &D,
@@ -419,13 +437,9 @@ pub async fn stream_turn<D: DeltaSink>(
     attach: &Option<bridge::attach::AttachHandle>,
     retry: &RetryCell,
 ) -> anyhow::Result<TurnDone> {
-    // The system array always leads with the Agent SDK identity prefix;
-    // subscription (OAuth) access requires it. The spawn's own system prompt
-    // follows as a second block.
-    let mut system_blocks = vec![json!({
-        "type": "text",
-        "text": "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
-    })];
+    // The spawn's own system prompt follows the identity prefix as a second
+    // block.
+    let mut system_blocks = vec![json!({ "type": "text", "text": AGENT_SDK_PREFIX })];
     if let Some(system) = system {
         system_blocks.push(json!({ "type": "text", "text": system }));
     }
@@ -449,7 +463,29 @@ pub async fn stream_turn<D: DeltaSink>(
     mark_message_cache_breakpoint(&mut messages);
     let body = request_body(model, system_blocks, messages, tools);
 
-    let response = connect(http, auth, &body, conv, retry).await?;
+    stream_body(sink, http, conv, auth, &body, attach, retry).await
+}
+
+/// Stream one turn from a body the caller built: publish `block`/`delta` as
+/// chunks arrive, accumulate the content blocks for the commit, and return the
+/// round's accounting.
+///
+/// The seam exists for a caller whose request bridge does not shape (a
+/// one-shot call wanting its own `output_config` and no cache breakpoints,
+/// say), so it can still have the connect-with-retry phase, the SSE fold and
+/// the accounting rather than a second copy of them. The body is sent as given:
+/// `stream: true` and the `AGENT_SDK_PREFIX` system block are the caller's to
+/// include.
+pub async fn stream_body<D: DeltaSink>(
+    sink: &D,
+    http: &reqwest::Client,
+    conv: &ConversationId,
+    auth: &Auth,
+    body: &Value,
+    attach: &Option<bridge::attach::AttachHandle>,
+    retry: &RetryCell,
+) -> anyhow::Result<TurnDone> {
+    let response = connect(http, auth, body, conv, retry).await?;
 
     // v2's one deliberately flat subject: delta and block keep their body
     // `type`; the leaf does not spell it here. Deltas mirror onto the attach
