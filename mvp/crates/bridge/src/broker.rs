@@ -453,7 +453,9 @@ impl NatsBroker {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_REPLAY_BATCH, ReplayPlan, backlog_drained, replay_batch_size, replay_plan};
+    use super::{
+        DEFAULT_REPLAY_BATCH, ReplayPlan, backlog_drained, replay_batch_size, replay_plan,
+    };
 
     #[test]
     fn replay_plan_is_empty_when_nothing_is_pending() {
