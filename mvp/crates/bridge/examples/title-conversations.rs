@@ -32,10 +32,7 @@ mod model;
 mod retry;
 
 const MODEL: &str = "claude-haiku-4-5";
-/// Hardcoded, as the script this ports hardcodes it: the live tower db is in
-/// another worktree, and reading $TOWER_DB instead would silently aim a run at
-/// whichever db a shell happened to be pointed at.
-const DEFAULT_DB: &str = "/Users/stephen/repos/@shellicar/tower--frontend-show-cwd/mvp/tower-v2.db";
+const DEFAULT_DB: &str = "tower-v2.db";
 const MAX_TOKENS: i64 = 128;
 const RECENT: i64 = 100;
 
@@ -68,7 +65,8 @@ Titles each conversation from its own content. Prints the plan and exits;
 conversations and prints stored against generated, writing nothing. --sample
 sets the size, default 10. --convs takes a comma-separated list of
 conversation ids and compares exactly those. --model overrides the model,
-default claude-haiku-4-5. --db overrides the hardcoded database path.
+default claude-haiku-4-5. --db defaults to $TOWER_DB, then tower-v2.db in the
+working directory.
 --curl prints the request as a curl command, credential included, so a
 request that fails can be run and picked apart by hand.
 ";
@@ -233,7 +231,9 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let db_path = flag(&args, "--db").unwrap_or_else(|| DEFAULT_DB.to_string());
+    let db_path = flag(&args, "--db")
+        .or_else(|| std::env::var("TOWER_DB").ok())
+        .unwrap_or_else(|| DEFAULT_DB.to_string());
     let model = flag(&args, "--model").unwrap_or_else(|| MODEL.to_string());
     let limit = match flag(&args, "--limit") {
         Some(raw) => raw.parse::<usize>().context("--limit needs a number")?,
