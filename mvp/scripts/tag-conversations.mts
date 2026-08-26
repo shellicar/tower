@@ -37,7 +37,7 @@ if (!db) {
 }
 
 const query = (statement: string): string[][] =>
-  execFileSync("sqlite3", ["-separator", US, db, statement], { encoding: "utf8" })
+  execFileSync("sqlite3", ["-cmd", ".timeout 5000", "-separator", US, db, statement], { encoding: "utf8" })
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line) => line.split(US));

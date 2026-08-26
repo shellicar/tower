@@ -36,6 +36,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Storage first: the schema must exist before the views thread starts.
     let db = rusqlite::Connection::open(&db_path)?;
+    db.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;")?;
     apply_schema(&db)?;
 
     let client = async_nats::connect(&nats_url).await.with_context(|| {
