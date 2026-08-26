@@ -25,7 +25,19 @@
     Object.entries(view.view.filters).every(
       ([k, vs]) => vs.length === 0 || vs.includes(tagOf(r, k)),
     );
-  const visible = $derived(rail.ordered.filter(matches));
+  // The two state filters read the same facts the dots do, so the list can
+  // never disagree with what's rendered on it.
+  const stateMatches = (conv: string) =>
+    (!view.view.liveOnly || rail.verdict(conv) === 'alive') &&
+    (!view.view.unreadOnly || rail.staleConvs.has(conv));
+  const visible = $derived(rail.ordered.filter((r) => matches(r) && stateMatches(r.conv)));
+  // Potential conversations have no row, so they can never be stale: `unread`
+  // empties the section rather than filtering it.
+  const potential = $derived(
+    view.view.unreadOnly
+      ? []
+      : rail.attachedOnly.filter((a) => !view.view.liveOnly || a.verdict === 'alive'),
+  );
   // Computed once per render, then a plain Set.has() per row below — not a
   // fresh rail.pendingByConv per row, which would rebuild the whole Set
   // (walking every ask) once for EACH row instead of once for the list.
@@ -56,10 +68,12 @@
   /** Value counts for the expanded key, honouring the OTHER keys' filters. */
   const facetValues = $derived.by(() => {
     if (!expandedKey) return [];
-    const others = rail.ordered.filter((r) =>
-      Object.entries(view.view.filters).every(
-        ([k, vs]) => k === expandedKey || vs.length === 0 || vs.includes(tagOf(r, k)),
-      ),
+    const others = rail.ordered.filter(
+      (r) =>
+        stateMatches(r.conv) &&
+        Object.entries(view.view.filters).every(
+          ([k, vs]) => k === expandedKey || vs.length === 0 || vs.includes(tagOf(r, k)),
+        ),
     );
     const counts = new Map<string, number>();
     for (const r of others) {
@@ -124,6 +138,26 @@
   </div>
   <div class="mt-1.5 flex flex-wrap items-center gap-1">
     <span class="text-neutral-500">filter</span>
+    <button
+      class="cursor-pointer rounded border px-1.5 {view.view.liveOnly
+        ? 'border-green-600 text-green-300'
+        : 'border-neutral-700 text-neutral-400'}"
+      title="only conversations a live agent is serving"
+      onclick={() => {
+        view.view.liveOnly = !view.view.liveOnly;
+        view.saveView();
+      }}>live</button
+    >
+    <button
+      class="cursor-pointer rounded border px-1.5 {view.view.unreadOnly
+        ? 'border-sky-600 text-sky-300'
+        : 'border-neutral-700 text-neutral-400'}"
+      title="only conversations nobody's looked at since they last got new content"
+      onclick={() => {
+        view.view.unreadOnly = !view.view.unreadOnly;
+        view.saveView();
+      }}>unread</button
+    >
     {#each keys as k (k)}
       <button
         class="cursor-pointer rounded border px-1.5 {expandedKey === k || selectedCount(k)
@@ -158,7 +192,7 @@
   <!-- Potential conversations: attached, no messages yet — served, silent.
        Transient by design: they vanish with the attachment; the first
        committed message births an ordinary row below. -->
-  {#each rail.attachedOnly as a (a.conv)}
+  {#each potential as a (a.conv)}
     <li>
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
       <!-- A `role="button"` div, not a `<button>`: it wraps a real Dismiss
