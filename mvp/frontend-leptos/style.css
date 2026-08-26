@@ -78,6 +78,9 @@ html, body {
 .facet-toggle { border: 1px solid #404040; color: #737373; padding: 1px 6px; border-radius: 2px; background: none; font: inherit; }
 .facet-toggle:hover { background: #262626; }
 .facet-toggle.on { border-color: #0284c7; color: #7dd3fc; }
+/* The liveness chip wears the dot's own green, so the control and what it
+   selects read as the same thing. */
+.facet-toggle.on.live { border-color: #16a34a; color: #86efac; }
 .facet-values { padding-left: 0; }
 .facet-value { border: 1px solid #404040; color: #a3a3a3; padding: 1px 8px; border-radius: 999px; background: none; font: inherit; }
 .facet-value:hover { background: #262626; }
