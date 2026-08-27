@@ -1,0 +1,22 @@
+[package]
+name = "bridge-auth"
+version = "0.1.0"
+edition.workspace = true
+
+[lints]
+workspace = true
+
+# The Anthropic credential everything else runs on: where it is stored, when
+# it expires, and how it is renewed. Deliberately not interactive. Obtaining
+# a credential for the first time is bridge-login's job, so the long-lived
+# bridge process never links a browser launcher or a callback listener it
+# would have no way to use.
+[dependencies]
+bridge-secrets = { path = "../bridge-secrets" }
+anyhow.workspace = true
+base64.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+uuid.workspace = true

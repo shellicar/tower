@@ -6,9 +6,9 @@ edition.workspace = true
 [lints]
 workspace = true
 
-# Keychain reads for the credentials bridge hands to a child process. macOS
-# only: the whole crate compiles away elsewhere, and so does everything that
-# depends on it.
+# Keychain access for the credentials bridge holds and hands to a child
+# process. The crate compiles everywhere; only the binding is macOS-gated, so
+# a caller off macOS gets a runtime answer rather than a missing symbol.
 [dependencies]
 thiserror.workspace = true
 
