@@ -265,6 +265,7 @@ dependencies = [
  "anyhow",
  "async-nats",
  "base64",
+ "bridge-auth",
  "bridge-secrets",
  "bridge-testkit",
  "bridge-tools-github",
@@ -285,6 +286,30 @@ dependencies = [
  "uuid",
  "wire",
  "yaml_serde",
+]
+
+[[package]]
+name = "bridge-auth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bridge-secrets",
+ "reqwest",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "bridge-login"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bridge-auth",
+ "reqwest",
+ "tokio",
 ]
 
 [[package]]

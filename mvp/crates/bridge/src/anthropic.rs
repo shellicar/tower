@@ -48,47 +48,42 @@ pub fn build_http_client() -> reqwest::Client {
         .expect("reqwest client")
 }
 
-/// The OAuth token endpoint and client id claude-sdk-cli itself uses
-/// (packages/claude-sdk/src/private/Client/Auth/consts.ts) — refreshing a
-/// Claude Code credential means speaking the same grant to the same client.
-const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
-const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-
 /// Both ways of being allowed in: a platform API key, or the Claude Code
-/// subscription's OAuth token (bearer + the oauth beta header). The credential
-/// is held as its SOURCE, never the secret: it is read fresh on every request,
-/// so nothing sits at rest in memory and a token the file has since been
-/// refreshed with (by this bridge or the CLI) is picked up. An expired token
-/// is refreshed in place, matching claude-sdk-cli's own AnthropicAuth so the
-/// two can share one credentials file live.
+/// subscription credential (bearer plus the oauth beta header). The
+/// credential is held as its SOURCE, never the secret: `bridge-auth` reads
+/// it back from the store on every request, so nothing sits at rest here and
+/// a token some other process has rotated is picked up rather than served
+/// stale. A spent token is renewed in place, once however many conversations
+/// find it spent at the same moment.
 #[derive(Clone)]
 pub enum Auth {
     /// `ANTHROPIC_API_KEY`, read from the environment at each request.
     ApiKey,
-    /// The Claude Code credentials file, read (and refreshed) at each request.
-    OAuth { path: String },
+    /// The stored subscription credential, read and renewed at each request.
+    OAuth(Arc<bridge_auth::Credentials>),
 }
 
 impl Auth {
-    /// Decide the source (`ANTHROPIC_API_KEY` wins), failing fast if neither is
-    /// present or the file carries no token — a misconfiguration surfaces at
-    /// startup, not on the first turn. The secret read to validate is dropped,
-    /// never stored.
+    /// Decide the source (`ANTHROPIC_API_KEY` wins), failing fast if neither
+    /// is there — a misconfiguration surfaces at startup, not on the first
+    /// turn.
+    ///
+    /// Obtaining a credential never happens here. This process is spawned
+    /// with its stdin belonging to whoever spawned it and no terminal of its
+    /// own, so there is nowhere for a login to run; a missing credential is
+    /// an error naming the command that creates one.
     pub fn resolve() -> anyhow::Result<Auth> {
         if std::env::var_os("ANTHROPIC_API_KEY").is_some() {
             return Ok(Auth::ApiKey);
         }
-        let home = bridge::home::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("HOME (or USERPROFILE) not set"))?;
-        let path = format!("{home}/.claude/.credentials.json");
-        read_credentials(&path)?; // validate now, discard the secret
-        Ok(Auth::OAuth { path })
+        Ok(Auth::OAuth(Arc::new(bridge_auth::Credentials::resolve()?)))
     }
 
-    /// Read the current credential and set the auth header. Fresh per request:
-    /// the secret exists only for the duration of this call. Public so a caller
-    /// can build the request bridge would send without sending it, credential
-    /// and all, which is what makes a failing request reproducible by hand.
+    /// Read the current credential and set the auth header. Fresh per
+    /// request: the secret exists only for the duration of this call. Public
+    /// so a caller can build the request bridge would send without sending
+    /// it, credential and all, which is what makes a failing request
+    /// reproducible by hand.
     pub async fn apply(
         &self,
         request: reqwest::RequestBuilder,
@@ -100,97 +95,14 @@ impl Auth {
                     .map_err(|_| anyhow::anyhow!("ANTHROPIC_API_KEY is no longer set"))?;
                 request.header("x-api-key", key)
             }
-            Auth::OAuth { path } => request
+            Auth::OAuth(credentials) => request
                 .header(
                     "authorization",
-                    format!("Bearer {}", oauth_token(path, http).await?),
+                    format!("Bearer {}", credentials.access_token(http).await?),
                 )
-                .header("anthropic-beta", "oauth-2025-04-20"),
+                .header("anthropic-beta", bridge_auth::oauth::BETA_HEADER),
         })
     }
-}
-
-/// Read the credentials file whole. Startup validation and every OAuth
-/// request both start here.
-fn read_credentials(path: &str) -> anyhow::Result<Value> {
-    let bytes = std::fs::read(path)
-        .map_err(|e| anyhow::anyhow!("no ANTHROPIC_API_KEY and no credentials at {path}: {e}"))?;
-    Ok(serde_json::from_slice(&bytes)?)
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
-/// The current OAuth access token. Refreshes and rewrites the credentials
-/// file first if `expiresAt` has passed — the same check claude-sdk-cli's
-/// `isExpired` makes — so an expired token degrades to one extra round trip
-/// instead of failing the turn. Called fresh per request; nothing cached.
-async fn oauth_token(path: &str, http: &reqwest::Client) -> anyhow::Result<String> {
-    let mut creds = read_credentials(path)?;
-    let expires_at = creds["claudeAiOauth"]["expiresAt"].as_i64().unwrap_or(0);
-    if now_ms() >= expires_at {
-        let refresh_token = creds["claudeAiOauth"]["refreshToken"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("{path} has no claudeAiOauth.refreshToken"))?
-            .to_string();
-        creds = refresh_credentials(&refresh_token, http).await?;
-        // Write back so the next process — this bridge or a live claude-sdk-cli
-        // sharing the same file — picks up the refreshed token too.
-        std::fs::write(path, serde_json::to_vec_pretty(&creds)?)
-            .map_err(|e| anyhow::anyhow!("failed to write refreshed credentials to {path}: {e}"))?;
-    }
-    creds["claudeAiOauth"]["accessToken"]
-        .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| anyhow::anyhow!("{path} has no claudeAiOauth.accessToken"))
-}
-
-/// POST the refresh_token grant (claude-sdk-cli's own
-/// Auth/refreshCredentials.ts) and shape the reply to match the credentials
-/// file's own schema (Auth/schema.ts's `authCredentials`), so the file stays
-/// readable by the CLI too. `subscriptionType`/`rateLimitTier` reset to empty
-/// on refresh — the token endpoint doesn't return them, and the reference
-/// implementation does the same.
-async fn refresh_credentials(refresh_token: &str, http: &reqwest::Client) -> anyhow::Result<Value> {
-    let response = http
-        .post(TOKEN_URL)
-        .json(&json!({
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": CLIENT_ID,
-        }))
-        .send()
-        .await?;
-    if !response.status().is_success() {
-        let status = response.status();
-        anyhow::bail!("token refresh failed: {status}");
-    }
-    let data: Value = response.json().await?;
-    let access_token = data["access_token"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("token refresh response has no access_token"))?;
-    let new_refresh_token = data["refresh_token"].as_str().unwrap_or(refresh_token);
-    let expires_in = data["expires_in"].as_i64().unwrap_or(0);
-    let scopes: Vec<&str> = data["scope"]
-        .as_str()
-        .unwrap_or("")
-        .split(' ')
-        .filter(|s| !s.is_empty())
-        .collect();
-    Ok(json!({
-        "claudeAiOauth": {
-            "accessToken": access_token,
-            "refreshToken": new_refresh_token,
-            "expiresAt": now_ms() + expires_in * 1000,
-            "scopes": scopes,
-            "subscriptionType": "",
-            "rateLimitTier": "",
-        }
-    }))
 }
 
 /// Marks the last cacheable block of the last message with a 1h ephemeral
@@ -684,8 +596,8 @@ mod tests {
         }
 
         /// A credential the request can be signed with that costs no network:
-        /// an unexpired token in a scratch file, so nothing here reaches the
-        /// refresh endpoint or the ambient environment.
+        /// an unspent token in a scratch file, so nothing here reaches the
+        /// token endpoint or the ambient environment.
         fn auth(scratch: &TestScratch) -> Auth {
             let path = scratch.path("credentials.json");
             std::fs::write(
@@ -693,9 +605,9 @@ mod tests {
                 r#"{"claudeAiOauth":{"accessToken":"t","refreshToken":"r","expiresAt":99999999999999}}"#,
             )
             .unwrap();
-            Auth::OAuth {
-                path: path.to_string_lossy().to_string(),
-            }
+            Auth::OAuth(Arc::new(bridge_auth::Credentials::new(
+                bridge_auth::Store::File { path },
+            )))
         }
 
         /// Short enough to run at full speed, and still doubling: 10ms, 20ms,
