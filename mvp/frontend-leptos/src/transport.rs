@@ -1,4 +1,4 @@
-//! transport — the one thing that touches the wire (docs/mvp/
+//! transport — the one thing that touches the wire (mvp/docs/
 //! frontend-architecture.md). It owns the socket, decodes each frame into a
 //! typed `ServerMsg`, and holds NO domain state: it knows bytes and frames,
 //! never conversations, approvals, or rows.
@@ -80,7 +80,7 @@ mod wasm {
     use std::rc::Rc;
     use std::time::Duration;
 
-    /// Reconnect backoff (docs/mvp/frontend-parity.md, "Transport /
+    /// Reconnect backoff (mvp/docs/frontend-parity.md, "Transport /
     /// connection lifecycle"): matches the Svelte reference
     /// (core/transport.svelte.ts) — 500ms initial, doubling, capped at 10s,
     /// reset the moment a connection proves itself by delivering a frame.

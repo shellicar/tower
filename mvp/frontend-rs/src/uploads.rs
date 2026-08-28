@@ -1,5 +1,5 @@
 //! uploads — the attachment upload, the frontend's SECOND concurrency boundary
-//! (docs/mvp/tower-ws-spec.md, POST /attachment). Like the socket, it is handled
+//! (mvp/docs/tower-ws-spec.md, POST /attachment). Like the socket, it is handled
 //! by communicating: the async work (file pick + HTTP) is spawned, and its
 //! result returns to the app over a channel, folded like any wire frame. There
 //! is no shared mutable write across an await — the exact shape that froze the

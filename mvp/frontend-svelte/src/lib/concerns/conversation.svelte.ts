@@ -1,5 +1,5 @@
 // concerns/conversation.svelte.ts — the open conversations' owned store
-// (docs/mvp/frontend-architecture.md). It owns a map of open conversations and
+// (mvp/docs/frontend-architecture.md). It owns a map of open conversations and
 // their content, folds its OWN slices of the wire (its convs' messages,
 // streaming, query closures, and header facts), and drives say/cancel as
 // id-correlated requests through the transport. The view concern decides WHICH

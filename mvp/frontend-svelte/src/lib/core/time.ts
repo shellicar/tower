@@ -1,4 +1,4 @@
-// Time verdicts, pure and injectable — Decision 1 of docs/mvp/frontend-architecture.md.
+// Time verdicts, pure and injectable — Decision 1 of mvp/docs/frontend-architecture.md.
 // The two hardest folds (liveness, approval void) are verdicts against the
 // client's OWN clock. Kept pure here so they test with a fixed `now`, and
 // shared by every concern instead of re-derived per component (they are today

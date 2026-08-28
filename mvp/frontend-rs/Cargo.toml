@@ -1,4 +1,4 @@
-# The Rust-WASM frontend: the side-by-side control's twin (docs/mvp/
+# The Rust-WASM frontend: the side-by-side control's twin (mvp/docs/
 # frontend-architecture.md). Same architecture as mvp/frontend-svelte (Svelte), so the
 # comparison isolates what the LANGUAGE buys. A detached workspace of its own —
 # it is trunk/wasm-built, kept out of the mvp workspace so `just build` stays

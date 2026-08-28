@@ -26,7 +26,7 @@ pub struct AppState<B: Broker, C: Clock> {
     /// The bucket name `attach` was opened against. A tower concern, never
     /// the client's: towerd stamps it into each object source when it
     /// forwards a say (ws.rs), so the block on the wire names its own bucket
-    /// (docs/mvp/bridge-stdio-spec.md) without the browser carrying it.
+    /// (mvp/docs/bridge-stdio-spec.md) without the browser carrying it.
     pub attach_bucket: String,
 }
 

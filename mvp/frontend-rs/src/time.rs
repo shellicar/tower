@@ -1,4 +1,4 @@
-//! Time verdicts, pure and injectable — Decision 1 of docs/mvp/
+//! Time verdicts, pure and injectable — Decision 1 of mvp/docs/
 //! frontend-architecture.md, mirroring the control's core/time.ts. The two
 //! hardest folds (liveness, approval void) are verdicts against the client's
 //! OWN clock. They take `now` as an argument, so they test with a fixed value

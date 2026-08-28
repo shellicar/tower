@@ -1,4 +1,4 @@
-//! concerns/approvals — the approvals' owned store (docs/mvp/
+//! concerns/approvals — the approvals' owned store (mvp/docs/
 //! frontend-architecture.md), mirroring the control's approvals.svelte.ts. It
 //! folds its OWN slice of the approval stream: void is derived against the
 //! passed clock, answer is an id-correlated request (recorded and matched
