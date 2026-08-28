@@ -1,7 +1,7 @@
 #!/bin/sh
 # Split conv-approval's single retention policy into the three categories
 # decided in review: audit (unlimited), diagnostic (90d), ephemeral (3d).
-# See docs/mvp/tower-v1-design.md / the session's own retention-category
+# See mvp/docs/tower-v1-design.md / the session's own retention-category
 # discussion — audit is the committal record (conv changes, approval
 # lifecycle); diagnostic is telemetry with real debugging/cost value (turn/
 # tool/usage events, agent attach/detach); ephemeral is pure liveness noise

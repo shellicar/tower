@@ -1,4 +1,4 @@
-//! concerns/view — the view concern (docs/mvp/frontend-architecture.md),
+//! concerns/view — the view concern (mvp/docs/frontend-architecture.md),
 //! ported from mvp/frontend-svelte's view.svelte.ts. It owns the shell's tabs and
 //! each tab's open set.
 //!

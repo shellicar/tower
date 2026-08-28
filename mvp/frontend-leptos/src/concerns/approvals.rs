@@ -1,4 +1,4 @@
-//! concerns/approvals — the approvals' owned store (docs/mvp/
+//! concerns/approvals — the approvals' owned store (mvp/docs/
 //! frontend-architecture.md), ported verbatim from frontend-rs's
 //! approvals.rs: the fold logic is render-framework-agnostic. It folds its
 //! OWN slice of the approval stream: void is derived against the passed

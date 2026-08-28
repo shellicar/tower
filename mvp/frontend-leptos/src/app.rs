@@ -1,7 +1,7 @@
 //! The composition root: wires transport + concerns, same as frontend-rs's
 //! app.rs and frontend's root. Owns every concern (a `RwSignal` per concern);
 //! concerns are blind to each other — the hand knows the fingers, the fingers
-//! don't know each other (docs/mvp/frontend-architecture.md). It renders no
+//! don't know each other (mvp/docs/frontend-architecture.md). It renders no
 //! detail itself: `ui::rail::RailView`, `ui::tabs::TabBar`, and
 //! `ui::conversation::ConversationView` read the concerns and hold their own
 //! local UI state; this file only wires them to the actions that mutate a

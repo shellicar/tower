@@ -1,4 +1,4 @@
-// core/transport.ts — the one thing that touches the wire (docs/mvp/
+// core/transport.ts — the one thing that touches the wire (mvp/docs/
 // frontend-architecture.md). It owns the socket, decodes each frame into a
 // typed event and dispatches it, correlates id-carrying requests to their
 // response, and holds connection state. It holds NO domain state: it knows
