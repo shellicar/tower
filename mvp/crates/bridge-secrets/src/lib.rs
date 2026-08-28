@@ -232,7 +232,10 @@ mod tests {
 
         let actual = read(&account).unwrap_err().to_string();
 
-        assert!(actual.contains(SERVICE) && actual.contains(&account), "{actual}");
+        assert!(
+            actual.contains(SERVICE) && actual.contains(&account),
+            "{actual}"
+        );
     }
 
     /// A write is readable, and a second write to the same account replaces

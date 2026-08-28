@@ -108,7 +108,9 @@ async fn by_code(http: &reqwest::Client) -> anyhow::Result<Minted> {
     let state = oauth::nonce();
     let url = oauth::authorize_url(&pkce.challenge, &state, oauth::MANUAL_REDIRECT_URL)?;
 
-    println!("bridge-login: visit this URL, authorise, then paste the code back here.\n\n  {url}\n");
+    println!(
+        "bridge-login: visit this URL, authorise, then paste the code back here.\n\n  {url}\n"
+    );
     print!("code: ");
     std::io::stdout().flush()?;
 
@@ -125,7 +127,14 @@ async fn by_code(http: &reqwest::Client) -> anyhow::Result<Minted> {
         );
     }
 
-    oauth::exchange_code(http, &code, &state, &pkce.verifier, oauth::MANUAL_REDIRECT_URL).await
+    oauth::exchange_code(
+        http,
+        &code,
+        &state,
+        &pkce.verifier,
+        oauth::MANUAL_REDIRECT_URL,
+    )
+    .await
 }
 
 #[cfg(test)]

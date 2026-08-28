@@ -113,7 +113,9 @@ async fn request_target(stream: &mut TcpStream) -> Option<String> {
 /// whether the code arrived, so a failure to write the page is not a failure
 /// to log in.
 async fn answer(stream: &mut TcpStream, status: &str, message: &str) {
-    let body = format!("<!doctype html><meta charset=\"utf-8\"><title>bridge-login</title><p>{message}</p>");
+    let body = format!(
+        "<!doctype html><meta charset=\"utf-8\"><title>bridge-login</title><p>{message}</p>"
+    );
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()

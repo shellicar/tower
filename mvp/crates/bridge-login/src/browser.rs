@@ -14,7 +14,12 @@ fn opener(url: &str) -> Option<(&'static str, Vec<String>)> {
         "macos" => Some(("open", vec![url.to_string()])),
         "windows" => Some((
             "cmd",
-            vec!["/C".to_string(), "start".to_string(), String::new(), url.to_string()],
+            vec![
+                "/C".to_string(),
+                "start".to_string(),
+                String::new(),
+                url.to_string(),
+            ],
         )),
         "linux" => Some(("xdg-open", vec![url.to_string()])),
         _ => None,
@@ -47,8 +52,7 @@ mod tests {
     fn passes_the_url_as_the_final_argument() {
         let expected = Some("https://example.test/auth".to_string());
 
-        let actual =
-            opener("https://example.test/auth").and_then(|(_, args)| args.last().cloned());
+        let actual = opener("https://example.test/auth").and_then(|(_, args)| args.last().cloned());
 
         assert_eq!(actual, expected);
     }

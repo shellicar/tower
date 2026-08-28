@@ -42,7 +42,9 @@ pub fn home_dir() -> Option<String> {
 /// other can use.
 pub fn credentials_file() -> anyhow::Result<PathBuf> {
     let home = home_dir().context("HOME (or USERPROFILE) is not set")?;
-    Ok(PathBuf::from(home).join(".claude").join(".credentials.json"))
+    Ok(PathBuf::from(home)
+        .join(".claude")
+        .join(".credentials.json"))
 }
 
 /// The store this machine uses, decided by platform and nothing else.
@@ -82,7 +84,10 @@ impl Credentials {
     /// Store a freshly minted credential, keeping everything the document
     /// already holds. What `bridge-login` calls once it has a code.
     pub fn save(&self, minted: &Minted) -> anyhow::Result<()> {
-        let document = self.store.read()?.unwrap_or_else(|| Value::Object(Default::default()));
+        let document = self
+            .store
+            .read()?
+            .unwrap_or_else(|| Value::Object(Default::default()));
         self.store.write(&record::merge(document, minted))
     }
 
@@ -208,8 +213,11 @@ mod tests {
         let path = scratch("save");
         let credentials = Credentials::new(Store::File { path: path.clone() });
         let expected = json!({ "trusted": true });
-        std::fs::write(&path, json!({ "enterpriseGateway": { "trusted": true } }).to_string())
-            .unwrap();
+        std::fs::write(
+            &path,
+            json!({ "enterpriseGateway": { "trusted": true } }).to_string(),
+        )
+        .unwrap();
 
         credentials.save(&minted("a")).unwrap();
         let actual = credentials.store().read().unwrap().unwrap();
