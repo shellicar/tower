@@ -119,7 +119,7 @@ export interface ParsedModelName {
  *
  * Family is the first non-numeric token after the leading `claude`; version
  * is the trailing run of numeric tokens, joined by `.`. Model is
- * per-conversation (a spawn may name its own, docs/mvp/bridge-stdio-spec.md),
+ * per-conversation (a spawn may name its own, mvp/docs/bridge-stdio-spec.md),
  * so this always reads off that conversation's own usage snapshot, never a
  * shared default.
  */

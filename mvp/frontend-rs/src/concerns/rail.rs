@@ -1,4 +1,4 @@
-//! concerns/rail — the staleness rail's owned store (docs/mvp/
+//! concerns/rail — the staleness rail's owned store (mvp/docs/
 //! frontend-architecture.md), mirroring the control's rail.svelte.ts. It folds
 //! its OWN slices of three event families: rows (the staleness list), agent
 //! facts (liveness + potential conversations), and approval facts (the

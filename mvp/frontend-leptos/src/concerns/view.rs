@@ -1,4 +1,4 @@
-//! concerns/view — the view concern (docs/mvp/frontend-architecture.md),
+//! concerns/view — the view concern (mvp/docs/frontend-architecture.md),
 //! ported from mvp/frontend-svelte's view.svelte.ts. It owns the shell's tabs and
 //! each tab's open set.
 //!
@@ -35,6 +35,13 @@ pub struct ViewConfig {
     pub always_show: Vec<String>,
     /// When grouping, drop rows that lack the group key entirely.
     pub hide_untagged: bool,
+    /// Only conversations a live agent is serving — the green dot, `Alive`
+    /// alone. Stranded is excluded deliberately: an attachment outlives a
+    /// killed agent (nothing publishes `detached` on a kill), so "attached"
+    /// accumulates corpses and stops meaning "being worked on".
+    pub live_only: bool,
+    /// Only conversations flagged stale — the blue dot.
+    pub unread_only: bool,
 }
 
 /// A tab is a whole working view: its own config AND its own open set.
@@ -238,6 +245,16 @@ impl View {
     pub fn toggle_hide_untagged(&mut self) {
         let v = self.active_view_mut();
         v.hide_untagged = !v.hide_untagged;
+    }
+
+    pub fn toggle_live_only(&mut self) {
+        let v = self.active_view_mut();
+        v.live_only = !v.live_only;
+    }
+
+    pub fn toggle_unread_only(&mut self) {
+        let v = self.active_view_mut();
+        v.unread_only = !v.unread_only;
     }
 
     pub fn toggle_always_show(&mut self, key: &str) {

@@ -1,4 +1,4 @@
-// concerns/approvals.svelte.ts — the approvals' owned store (docs/mvp/
+// concerns/approvals.svelte.ts — the approvals' owned store (mvp/docs/
 // frontend-architecture.md). It folds its OWN slice of the approval stream:
 // void is derived against its clock, answer is an id-correlated request, and
 // the settlement arrives as an `approval` event like any other. This is the

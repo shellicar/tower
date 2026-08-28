@@ -1,5 +1,5 @@
 // concerns/usage.svelte.ts — the per-conversation usage snapshot store
-// (docs/mvp/frontend-architecture.md). It folds one wire slice — the `usage`
+// (mvp/docs/frontend-architecture.md). It folds one wire slice — the `usage`
 // frame — into an owned map, keyed by conversation. The frame is an ABSOLUTE
 // snapshot (towerd owns the accumulation, precisely because a turn's usage
 // streams cumulatively on the wire), so a fold is a replacement, never a sum.

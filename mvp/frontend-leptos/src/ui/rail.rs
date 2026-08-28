@@ -32,6 +32,8 @@ fn save_view(tab_name: &str, view: &View) {
         "groupKey": cfg.group_key,
         "alwaysShow": cfg.always_show,
         "hideUntagged": cfg.hide_untagged,
+        "liveOnly": cfg.live_only,
+        "unreadOnly": cfg.unread_only,
     });
     let _ = storage.set_item(&view_key(tab_name), &json.to_string());
 }
@@ -62,6 +64,14 @@ pub fn load_view(tab_name: &str) -> crate::concerns::view::ViewConfig {
             .unwrap_or_default(),
         hide_untagged: v
             .get("hideUntagged")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        live_only: v
+            .get("liveOnly")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        unread_only: v
+            .get("unreadOnly")
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false),
     }
@@ -98,6 +108,13 @@ fn matches(row: &WsRow, filters: &HashMap<String, Vec<String>>) -> bool {
     filters
         .iter()
         .all(|(k, vs)| vs.is_empty() || vs.contains(&tag_of(row, k)))
+}
+
+/// The two state filters, read from the same facts the dots are drawn from so
+/// the list can never disagree with what's rendered on it.
+fn state_matches(rail: &Rail, conv: &str, live_only: bool, unread_only: bool, now: Millis) -> bool {
+    (!live_only || rail.verdict(conv, now) == Some(Liveness::Alive))
+        && (!unread_only || rail.stale_convs().contains(conv))
 }
 
 #[component]
@@ -222,6 +239,24 @@ pub fn RailView(
                 </div>
                 <div class="controls-row">
                     <span class="dim">"filter"</span>
+                    <button
+                        class="facet-toggle live"
+                        class:on=move || view.with(|v| v.view_config().live_only)
+                        title="only conversations a live agent is serving"
+                        on:click=move |_| {
+                            view.update(|v| v.toggle_live_only());
+                            save_view(&tab_name(), &view.get_untracked());
+                        }
+                    >"live"</button>
+                    <button
+                        class="facet-toggle"
+                        class:on=move || view.with(|v| v.view_config().unread_only)
+                        title="only conversations nobody's looked at since they last got new content"
+                        on:click=move |_| {
+                            view.update(|v| v.toggle_unread_only());
+                            save_view(&tab_name(), &view.get_untracked());
+                        }
+                    >"unread"</button>
                     {move || {
                         keys()
                             .into_iter()
@@ -253,9 +288,13 @@ pub fn RailView(
                         let mut counts: HashMap<String, usize> = HashMap::new();
                         rail.with(|r| {
                             let filters = view.with(|v| v.view_config().filters.clone());
+                            let live_only = view.with(|v| v.view_config().live_only);
+                            let unread_only = view.with(|v| v.view_config().unread_only);
+                            let now_ms = now.get();
                             for row in r.ordered() {
                                 let others_match = filters.iter().all(|(k, vs)| k == &ek || vs.is_empty() || vs.contains(&tag_of(row, k)));
-                                if others_match && let Some(v) = row.tags.get(&ek) {
+                                let state_match = state_matches(r, &row.conv, live_only, unread_only, now_ms);
+                                if others_match && state_match && let Some(v) = row.tags.get(&ek) {
                                     *counts.entry(v.clone()).or_insert(0) += 1;
                                 }
                             }
@@ -288,9 +327,15 @@ pub fn RailView(
             </div>
             <ul class="potential">
                 {move || {
+                    let live_only = view.with(|v| v.view_config().live_only);
+                    let unread_only = view.with(|v| v.view_config().unread_only);
                     rail.with(|r| {
                         r.attached_only(now.get())
                             .into_iter()
+                            // A potential conversation has no row, so it can
+                            // never be stale: `unread` empties the section
+                            // rather than filtering it.
+                            .filter(|p| !unread_only && (!live_only || p.verdict == Some(Liveness::Alive)))
                             .map(|p| {
                                 let conv = p.conv.to_owned();
                                 let conv_click = conv.clone();
@@ -345,8 +390,17 @@ pub fn RailView(
                     let group_key = view.with(|v| v.view_config().group_key.clone());
                     let hide_untagged = view.with(|v| v.view_config().hide_untagged);
                     let always_show = view.with(|v| v.view_config().always_show.clone());
+                    let live_only = view.with(|v| v.view_config().live_only);
+                    let unread_only = view.with(|v| v.view_config().unread_only);
+                    let now_ms = now.get();
                     rail.with(|r| {
-                        let visible: Vec<WsRow> = r.ordered().into_iter().filter(|row| matches(row, &filters)).cloned().collect();
+                        let visible: Vec<WsRow> = r
+                            .ordered()
+                            .into_iter()
+                            .filter(|row| matches(row, &filters))
+                            .filter(|row| state_matches(r, &row.conv, live_only, unread_only, now_ms))
+                            .cloned()
+                            .collect();
                         let sections: Vec<Section> = if group_key.is_empty() {
                             vec![Section { label: None, rows: visible, max: 0 }]
                         } else {

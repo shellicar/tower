@@ -44,12 +44,21 @@ The wire contract. One concern per document, indexed by
 
 ## The design docs
 
-- [`docs/planning/project-state.md`](docs/planning/project-state.md): read first. Maps the
-  design documents and says where things stand.
+`docs/planning/` is the frozen design corpus. It is not maintained, and it is
+not discardable either: it holds the reasoning you would otherwise guess at.
+
+- [`docs/planning/project-state.md`](docs/planning/project-state.md): where
+  things stood, and a map of the rest of the corpus.
 - [`docs/planning/multi-transport-architecture.md`](docs/planning/multi-transport-architecture.md):
   the capabilities spec. Agent, bridge, protocol, the layers.
 - [`docs/planning/orchestration-layer.md`](docs/planning/orchestration-layer.md): the three
   concerns above the agent: routing, control plane, orchestration logic.
+
+`docs/design/` is live design work, and is maintained.
+
+- [`docs/design/landscape.md`](docs/design/landscape.md): what else exists,
+  what each project traded away, and what tower should take.
+
 - [`docs/roadmap.md`](docs/roadmap.md): CLI to tower v1, in stages that are
   each independently valuable.
 
