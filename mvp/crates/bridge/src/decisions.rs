@@ -84,6 +84,12 @@ impl Conversation {
         self.tree.last().map(|m| m.id.as_str())
     }
 
+    /// The query live against this tree, if any — the premise's other
+    /// half, exposed so a rejection can report which half failed.
+    pub fn live(&self) -> Option<&str> {
+        self.live.as_deref()
+    }
+
     /// The premise check: the sender's tip must be the tree's, and no query
     /// may be live against it. A live acceptance makes the same premise
     /// stale (scenario 5). `has_new_content` is the sender's own text
