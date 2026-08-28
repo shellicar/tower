@@ -112,13 +112,7 @@ fn matches(row: &WsRow, filters: &HashMap<String, Vec<String>>) -> bool {
 
 /// The two state filters, read from the same facts the dots are drawn from so
 /// the list can never disagree with what's rendered on it.
-fn state_matches(
-    rail: &Rail,
-    conv: &str,
-    live_only: bool,
-    unread_only: bool,
-    now: Millis,
-) -> bool {
+fn state_matches(rail: &Rail, conv: &str, live_only: bool, unread_only: bool, now: Millis) -> bool {
     (!live_only || rail.verdict(conv, now) == Some(Liveness::Alive))
         && (!unread_only || rail.stale_convs().contains(conv))
 }
