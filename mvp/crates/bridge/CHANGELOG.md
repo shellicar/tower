@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `settings` request can name the system prompt or the user context to get its full text.
 - The tools line's exec group takes max_timeout_s, refusing any Exec call that asks to run longer than the host allows.
 - Add retries to the Anthropic HTTP client, instead of ending a conversation on one failed request.
+- `just titles` titles tower's conversations from their own content, one small-model call each, against the database in $TOWER_DB. It prints what it would write and writes only with --apply; --compare prints stored titles against generated ones.
 
 ### Changed
 
