@@ -53,6 +53,12 @@ not discardable either: it holds the reasoning you would otherwise guess at.
   the capabilities spec. Agent, bridge, protocol, the layers.
 - [`docs/planning/orchestration-layer.md`](docs/planning/orchestration-layer.md): the three
   concerns above the agent: routing, control plane, orchestration logic.
+
+`docs/design/` is live design work, and is maintained.
+
+- [`docs/design/landscape.md`](docs/design/landscape.md): what else exists,
+  what each project traded away, and what tower should take.
+
 - [`docs/roadmap.md`](docs/roadmap.md): CLI to tower v1, in stages that are
   each independently valuable.
 

@@ -56,6 +56,10 @@ deviations land in the doc first, then the code.
   reference), `code-architecture.md`, `orchestration-layer.md`,
   `multi-transport-architecture.md`, `tui-architecture.md`, `project-state.md`.
   Don't maintain it; don't guess past it either.
+- `docs/design/` — live design work, maintained; the opposite of the corpus
+  above. `landscape.md` (what else exists: Synadia's NATS agent protocol, Open
+  Agent Spec, herdr, firstmate; what each traded away, and what tower should
+  take).
 - A change to the wire contract (`docs/spec/`) rides its own PR, never bundled
   with code. One owner per document per change; implementation PRs build to
   merged spec text. Every other document, this file included, changes in the
