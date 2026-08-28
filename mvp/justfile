@@ -69,6 +69,15 @@ frontend:
     cd frontend-svelte && pnpm install && pnpm build
     cd frontend-leptos && trunk build
 
+# Title conversations from their own content, through bridge's model client.
+# Dry run unless --apply. Compare a sample without writing:
+#
+#     just titles --compare --sample 5
+#     just titles --apply --limit 5
+#     just titles --help
+titles *args:
+    cargo run -p bridge --example title-conversations -- {{args}}
+
 # Validate every changes.jsonl against the schema derived from changes.config.json.
 changes-validate:
     node ../scripts/validate-changes.mts
