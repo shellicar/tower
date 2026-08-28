@@ -28,6 +28,13 @@ export interface ViewConfig {
   alwaysShow: string[];
   /** When grouping, drop rows that lack the group key entirely. */
   hideUntagged: boolean;
+  /** Only conversations a live agent is serving — the green dot, `alive`
+   *  alone. Stranded is excluded deliberately: an attachment outlives a
+   *  killed agent (nothing publishes `detached` on a kill), so "attached"
+   *  accumulates corpses and stops meaning "being worked on". */
+  liveOnly: boolean;
+  /** Only conversations flagged stale — the blue dot. */
+  unreadOnly: boolean;
 }
 
 /** A tab is a whole working view: its own config AND its own open set. */
@@ -42,6 +49,8 @@ const defaultView = (): ViewConfig => ({
   groupKey: '',
   alwaysShow: [],
   hideUntagged: false,
+  liveOnly: false,
+  unreadOnly: false,
 });
 
 const defaultTabs = (): Tab[] => [{ name: 'main', view: defaultView(), convs: [] }];
@@ -193,6 +202,8 @@ function readLegacyLocalTabs(): Tab[] | null {
           groupKey: t.view?.groupKey ?? '',
           alwaysShow: t.view?.alwaysShow ?? [],
           hideUntagged: t.view?.hideUntagged ?? false,
+          liveOnly: t.view?.liveOnly ?? false,
+          unreadOnly: t.view?.unreadOnly ?? false,
         },
         convs: Array.isArray(t.convs) ? t.convs.filter((c: unknown) => typeof c === 'string') : [],
       }));
@@ -227,6 +238,8 @@ function readViewConfig(name: string): ViewConfig {
         groupKey: v.groupKey ?? '',
         alwaysShow: v.alwaysShow ?? [],
         hideUntagged: v.hideUntagged ?? false,
+        liveOnly: v.liveOnly ?? false,
+        unreadOnly: v.unreadOnly ?? false,
       };
     }
   } catch {
