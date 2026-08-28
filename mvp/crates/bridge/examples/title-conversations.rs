@@ -32,6 +32,9 @@ mod model;
 mod retry;
 
 const MODEL: &str = "claude-haiku-4-5";
+/// Where a session that will not fit the small model's window goes instead.
+const LARGE_MODEL: &str = "claude-sonnet-5";
+const CONTEXT_LIMIT: i64 = 200_000;
 const DEFAULT_DB: &str = "tower-v2.db";
 const MAX_TOKENS: i64 = 128;
 const RECENT: i64 = 100;
@@ -65,7 +68,8 @@ Titles each conversation from its own content. Prints the plan and exits;
 conversations and prints stored against generated, writing nothing. --sample
 sets the size, default 10. --convs takes a comma-separated list of
 conversation ids and compares exactly those. --model overrides the model,
-default claude-haiku-4-5. --db defaults to $TOWER_DB, then tower-v2.db in the
+default claude-haiku-4-5; a session counted over 200000 tokens goes to
+claude-sonnet-5 instead. --db defaults to $TOWER_DB, then tower-v2.db in the
 working directory.
 --curl prints the request as a curl command, credential included, so a
 request that fails can be run and picked apart by hand.
@@ -116,8 +120,47 @@ impl Titler {
         })
     }
 
+    /// The prompt's size from the API rather than a guess, so the model is
+    /// chosen before a send that would be rejected for length. The sampling
+    /// fields are not part of this endpoint's schema and would be a 400.
+    async fn count_tokens(&self, body: &Value) -> anyhow::Result<i64> {
+        let mut counted = body.clone();
+        let fields = counted
+            .as_object_mut()
+            .expect("request_body builds an object");
+        for name in ["max_tokens", "stream", "output_config"] {
+            fields.remove(name);
+        }
+        let response = self
+            .auth
+            .apply(
+                self.http
+                    .post("https://api.anthropic.com/v1/messages/count_tokens")
+                    .header("anthropic-version", "2023-06-01")
+                    .json(&counted),
+                &self.http,
+            )
+            .await?
+            .send()
+            .await?;
+        let status = response.status();
+        let text = response.text().await?;
+        anyhow::ensure!(status.is_success(), "count_tokens {status}: {text}");
+        serde_json::from_str::<Value>(&text)?["input_tokens"]
+            .as_i64()
+            .ok_or_else(|| anyhow::anyhow!("count_tokens carried no input_tokens: {text}"))
+    }
+
     async fn title(&self, db: &Connection, conv: &str) -> anyhow::Result<String> {
-        let body = request_body(&session_text(db, conv)?, &self.model);
+        let session = session_text(db, conv)?;
+        // Sent empty, the model invents a title rather than failing.
+        anyhow::ensure!(!session.trim().is_empty(), "no content");
+        let mut body = request_body(&session, &self.model);
+        let tokens = self.count_tokens(&body).await?;
+        if tokens > CONTEXT_LIMIT {
+            eprintln!("{conv} {tokens} tokens: {LARGE_MODEL}");
+            body = request_body(&session, LARGE_MODEL);
+        }
         let done = anthropic::stream_body(
             &Discard,
             &self.http,
