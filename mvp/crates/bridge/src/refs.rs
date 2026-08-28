@@ -71,6 +71,10 @@ const MAX_LIMIT: usize = 100_000;
 /// model-context side rather than inventing a second number.
 const OVERSIZED_THRESHOLD: usize = 16 * 1024;
 
+/// This module's own tool name, shared by the schema and the exemption in
+/// `finalize` so the two cannot drift apart under a rename.
+const REF_TOOL: &str = "Ref";
+
 /// The "walk and replace what's too big" choke point every composable/Exec
 /// tool's string result passes through before it becomes a `tool_result`.
 /// Under the threshold, `content` rides verbatim; over it, the FULL content
@@ -79,28 +83,35 @@ const OVERSIZED_THRESHOLD: usize = 16 * 1024;
 /// tool. A stash failure falls back to the raw (still internally capped)
 /// content rather than losing the result outright.
 ///
-/// Always returns `Value::String`: the Messages API requires a
-/// `tool_result`'s `content` to be a string or a list of content blocks —
-/// never a bare object. An earlier version returned `json!({ref, size,
-/// hint})` directly, which the API rejects outright (400, on every replay
-/// of the history once committed) the first time a result crossed the
-/// threshold. Fixed 19 Jul 2026.
+/// Always returns `Value::String`, carrying the pointer as JSON *text*. The
+/// Messages API requires a `tool_result`'s `content` to be a string or a list
+/// of content blocks, so a bare object is rejected with a 400 on every replay
+/// of the history once committed. That constrains the type and says nothing
+/// about the shape: serialising the object satisfies it, which is what every
+/// other tool returning JSON already does. A fix on 19 Jul 2026 read that 400
+/// as "objects are rejected" and replaced the shape with a prose sentence,
+/// which left `ref_schema`'s description promising a shape nothing emitted.
 pub fn finalize(refs: &RefStore, content: String, hint: &str) -> Value {
-    if content.len() <= OVERSIZED_THRESHOLD {
+    // Ref itself is exempt at any size. Its result is a tool result like any
+    // other, so finalizing it swapped an oversized answer for a pointer to a
+    // NEW ref holding that answer, and the only way out was to ask for less:
+    // a 40,000-char request came back as "[ref …, 36155 bytes — use Ref to
+    // fetch it]". The threshold exists to stop a large result arriving
+    // unasked, and a Ref call is the model deliberately asking for one.
+    if hint == REF_TOOL || content.len() <= OVERSIZED_THRESHOLD {
         return Value::String(content);
     }
     match store(refs, &content, hint) {
-        Ok(stored) => Value::String(format!(
-            "[ref {}: {hint}, {} bytes — use Ref to fetch it]",
-            stored.id, stored.size
-        )),
+        Ok(stored) => Value::String(
+            json!({ "ref": stored.id, "size": stored.size, "hint": hint }).to_string(),
+        ),
         Err(_) => Value::String(content),
     }
 }
 
 pub fn ref_schema() -> Value {
     json!({
-        "name": "Ref",
+        "name": REF_TOOL,
         "description": "Fetch the content of a stored ref. When a tool result contains \
             { ref, size, hint } instead of the full value, use this tool to retrieve it. \
             Returns at most `limit` characters starting at `start` (both default to \
@@ -219,21 +230,30 @@ mod tests {
     }
 
     #[test]
+    fn a_ref_result_is_returned_whole_however_large() {
+        let refs = memory_store();
+        let expected = "x".repeat(super::OVERSIZED_THRESHOLD + 1);
+
+        let actual = finalize(&refs, expected.clone(), super::REF_TOOL);
+
+        assert_eq!(actual, json!(expected));
+    }
+
+    #[test]
     fn content_over_the_threshold_is_stashed_and_pointed_to() {
         let refs = memory_store();
         let big = "x".repeat(17 * 1024);
         let out = finalize(&refs, big.clone(), "Exec");
         // A string, never a bare object — tool_result content must be a
         // string or a list of content blocks (the 19 Jul bug this guards).
+        // The string is JSON text, so the model reads fields rather than
+        // pattern-matching prose.
         let out_str = out.as_str().expect("finalize always returns a string");
-        assert!(out_str.contains("Exec"));
-        assert!(out_str.contains(&big.len().to_string()));
-        let id = out_str
-            .split("[ref ")
-            .nth(1)
-            .and_then(|s| s.split(':').next())
-            .expect("ref id present")
-            .to_string();
+        let pointer: serde_json::Value =
+            serde_json::from_str(out_str).expect("the pointer is json text");
+        assert_eq!(pointer["hint"], json!("Exec"));
+        assert_eq!(pointer["size"], json!(big.len()));
+        let id = pointer["ref"].as_str().expect("ref id present").to_string();
         // Nothing was discarded: the full content is fetchable back out.
         let (fetched, is_error) = run_ref(&refs, &json!({ "id": id, "limit": 100_000 }));
         assert!(!is_error);
