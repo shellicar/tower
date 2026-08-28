@@ -332,7 +332,18 @@ pub async fn run<B: Broker, D: DeltaSink>(
                 let response = match parse_request(leaf, &msg.payload) {
                     ConvRequest::Say { text, tip, from, attachments } => {
                         let has_new_content = !text.trim().is_empty() || !attachments.is_empty();
-                        match conversation.on_say(tip.as_ref().map(|t| t.0.as_str()), has_new_content) {
+                        let sender_tip = tip.as_ref().map(|t| t.0.as_str());
+                        let decision = conversation.on_say(sender_tip, has_new_content);
+                        // The reply is a bare token, so the two halves of the
+                        // premise are indistinguishable from outside: say which.
+                        eprintln!(
+                            "bridge[{}]: say premise {decision:?} — sender tip {:?}, own tip {:?}, live query {:?}, content {has_new_content}",
+                            config.conv.0,
+                            sender_tip,
+                            conversation.tip(),
+                            conversation.live(),
+                        );
+                        match decision {
                             SayDecision::Stale => encode_rejected("stale"),
                             // The sender's tip was correct; there was just
                             // nothing to send and nothing to resume (the tip
