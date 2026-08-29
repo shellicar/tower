@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Writing and deleting a memory no longer raises an approval. All five memory tools now run without asking.
 - The environment an Exec child runs with is composed as a whole before the child is spawned: the call's own variables, then a configured provider's removals, then its forced values. What a child ends up with is unchanged.
 - An Exec call states how many seconds it may run, and is killed and returned as an error when it passes.
-- Bridge holds its own Anthropic credential rather than sharing Claude Code's, stored in the macOS Keychain and in ~/.claude/.credentials.json on platforms without one. Obtain a credential with bridge-login; bridge will not start until you have.
+- Log in to bridge with bridge-login.
 
 ### Removed
 
