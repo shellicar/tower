@@ -1,0 +1,18 @@
+[package]
+name = "bridge-login"
+version = "0.1.0"
+edition.workspace = true
+
+[lints]
+workspace = true
+
+# The only binary that knows what a browser is. It exists so bridge does
+# not: bridge is a long-lived process whose stdin belongs to whoever spawned
+# it, and an interactive flow has nowhere to run inside one. Kept out of the
+# bridge crate rather than added as a second target there, so it links a
+# credential store and an HTTP client and nothing else.
+[dependencies]
+bridge-auth = { path = "../bridge-auth" }
+anyhow.workspace = true
+reqwest.workspace = true
+tokio.workspace = true

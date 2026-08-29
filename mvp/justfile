@@ -78,6 +78,15 @@ frontend:
 titles *args:
     cargo run -p bridge --example title-conversations -- {{args}}
 
+# Obtain the Anthropic credential bridge runs on, and store it. Opens a
+# browser and catches the redirect on a local port; asks for a pasted code
+# instead when no browser can be opened. A flag narrows that to one way in:
+#
+#     just login --interactive
+#     just login --code
+login *args:
+    cargo run -p bridge-login -- {{args}}
+
 # Validate every changes.jsonl against the schema derived from changes.config.json.
 changes-validate:
     node ../scripts/validate-changes.mts

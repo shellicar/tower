@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/wire", "crates/ws-types", "crates/towerd", "crates/bridge", "crates/bridge-secrets", "crates/bridge-testkit", "crates/bridge-tools-github", "crates/helm", "frontend-leptos"]
+members = ["crates/wire", "crates/ws-types", "crates/towerd", "crates/bridge", "crates/bridge-auth", "crates/bridge-login", "crates/bridge-secrets", "crates/bridge-testkit", "crates/bridge-tools-github", "crates/helm", "frontend-leptos"]
 
 [workspace.package]
 version = "0.1.0"
@@ -42,11 +42,11 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # schema's declared field order (and whatever order the model actually
 # wrote) never survives to what gets published or reviewed.
 serde_json = { version = "1", features = ["preserve_order"] }
-# bridge-secrets' Keychain read (get_generic_password). Already in the tree
-# transitively (rustls-native-certs reads the system trust store through it);
-# named here because bridge-secrets depends on it directly. Apple platforms
-# only, which is why bridge-secrets is macOS-only and so is everything built
-# on it.
+# bridge-secrets' Keychain access. Already in the tree transitively
+# (rustls-native-certs reads the system trust store through it); named here
+# because bridge-secrets depends on it directly. Apple platforms only, which
+# is why the Keychain is the credential store on macOS and a file everywhere
+# else.
 security-framework = "3"
 sha2 = "0.10"
 # EditFile's diff generation — the same job the CLI's own EditFile.ts hands
