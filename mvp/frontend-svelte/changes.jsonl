@@ -1,2 +1,3 @@
 {"type":"change","category":"added","description":"The rail can be filtered to only conversations a live agent is serving, or only unread ones, saved per tab."}
 {"type":"change","category":"added","description":"A conversation's panel shows the directory the agent serving it is working in, and follows that agent when it changes directory. A second agent taking the conversation over, or an old one releasing the claim it no longer holds, leaves the directory reading correctly rather than blank."}
+{"type":"change","category":"fixed","description":"A conversation whose agent claimed it without naming its world now shows that agent as alive on the rail, instead of showing nothing attached or going stranded a minute later while the agent is plainly still working."}
