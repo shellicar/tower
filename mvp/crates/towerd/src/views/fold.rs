@@ -238,12 +238,29 @@ impl Views {
                      WHERE world = ?1 AND instance_id = ?2 AND conv = ?3",
                     rusqlite::params![world.0, d.instance_id.0, d.conversation_id.0],
                 )?;
-                Some(AgentFact::Detached {
-                    world: world.clone(),
-                    instance: d.instance_id.clone(),
-                    ts: ts_ms,
-                    conv: d.conversation_id.clone(),
-                })
+                // Gated like the `attached` arm above, and for the same
+                // reason: this table is pair-keyed, so the delete is always
+                // safe, but the FACT is keyed by conversation alone once it
+                // reaches a client. A displaced instance publishing its
+                // compliant `detached` (agent.md, Attachment) would tell
+                // every client to clear an attachment the conv leaf already
+                // superseded — the standing claim would vanish from the UI
+                // while towerd still held it, until a reconnect.
+                let conv_leaf_stands: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM conv_attachments WHERE conv = ?1)",
+                    [&d.conversation_id.0],
+                    |r| r.get(0),
+                )?;
+                if conv_leaf_stands {
+                    None
+                } else {
+                    Some(AgentFact::Detached {
+                        world: world.clone(),
+                        instance: d.instance_id.clone(),
+                        ts: ts_ms,
+                        conv: d.conversation_id.clone(),
+                    })
+                }
             }
             // Unknown agent traffic: represented at ingest, nothing to fold;
             // the cursor still advances.
