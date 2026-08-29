@@ -31,11 +31,10 @@ run() {
   pids+=($!)
 }
 
-trap 'kill 0' EXIT INT TERM
+trap 'kill 0' EXIT INT TERM HUP
 
 run towerd cargo run -q -p towerd
-( cd frontend-leptos && run leptos trunk serve ) &
-pids+=($!)
+run leptos sh -c 'cd frontend-leptos && exec trunk serve'
 run svelte pnpm --dir frontend-svelte dev
 
 echo "mvp up: leptos http://localhost:8082 · svelte http://localhost:$WEB_PORT · towerd http://$TOWER_BIND (db $TOWER_DB) · Ctrl-C stops everything"
