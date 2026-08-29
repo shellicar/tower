@@ -10,5 +10,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Open towerd's database in WAL mode.
-- An agent displaced from a conversation no longer clears the standing attachment when it releases its own superseded claim, so clients keep showing the agent that actually holds the conversation.
-- Attachments in the connect snapshot arrive oldest first, so a client reconnecting mid-handover settles on the claim that stands rather than whichever one the database happened to return first.
+- Ignore a displaced agent's release of a claim it no longer holds.
+- Order attachments in the connect snapshot oldest first.
