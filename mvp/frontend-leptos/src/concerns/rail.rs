@@ -163,12 +163,22 @@ impl Rail {
                 // liveness promise a `pulse` would otherwise be the only
                 // source of — the gap where an instance that dies before its
                 // first pulse read as alive forever (docs/spec/agent.md).
-                let held = self.instances.get(&ikey);
-                let instance = Instance {
-                    last_pulse: fact.ts.max(held.map(|h| h.last_pulse).unwrap_or(0)),
-                    interval_s: fact.interval_s.or_else(|| held.and_then(|h| h.interval_s)),
-                };
-                self.instances.insert(ikey, instance);
+                //
+                // Only when the claim names its world, because this map is
+                // keyed on the pair: an entry seated under an empty world
+                // answers the exact lookup ahead of the same instance's own
+                // pulses, which key under the real world, so the conversation
+                // would strand on this one stale ts while the agent pulses on.
+                // towerd guards the same write for the same reason
+                // (views/fold.rs, the conv-leaf `attached`).
+                if !fact.world.is_empty() {
+                    let held = self.instances.get(&ikey);
+                    let instance = Instance {
+                        last_pulse: fact.ts.max(held.map(|h| h.last_pulse).unwrap_or(0)),
+                        interval_s: fact.interval_s.or_else(|| held.and_then(|h| h.interval_s)),
+                    };
+                    self.instances.insert(ikey, instance);
+                }
                 // One attachment per conv: a new `attached` REPLACES
                 // whatever stood, unconditionally — never merges beside it.
                 if let Some(conv) = &fact.conv {
@@ -605,6 +615,49 @@ mod tests {
                 attached_ts: 100_000,
             }],
         }
+    }
+
+    /// A world-less `attached` folded live, then the instance's own pulse
+    /// under a real world. The claim's key would be "/inst-1", the pulse's is
+    /// "mac/inst-1": attaching must not seat an instance under the claim's
+    /// empty world, or that entry answers the exact lookup forever after and
+    /// the real instance's pulses never reach the conversation again. towerd
+    /// guards the same write for the same reason (views/fold.rs,
+    /// apply_conv_attachment).
+    fn fold_worldless_attach_then_pulse(rail: &mut Rail) {
+        attach(rail, "", 100_000, "/served/here");
+        rail.apply(&ServerMsg::Agent(WsAgent {
+            kind: "pulse".into(),
+            world: "mac".into(),
+            instance_id: "i1".into(),
+            ts: 200_000,
+            conv: None,
+            cwd: None,
+            interval_s: Some(15),
+            host: None,
+        }));
+    }
+
+    #[test]
+    fn a_worldless_attach_keeps_its_cwd_past_the_stranded_threshold_while_pulsing() {
+        // 110s after the attach, 10s after the pulse: the claim's own ts is
+        // long stale, the instance it names is plainly alive.
+        let mut rail = Rail::default();
+        fold_worldless_attach_then_pulse(&mut rail);
+
+        let actual = rail.live_cwd("a", 210_000);
+
+        assert_eq!(actual, Some("/served/here"));
+    }
+
+    #[test]
+    fn a_worldless_attach_keeps_its_dot_alive_past_the_stranded_threshold_while_pulsing() {
+        let mut rail = Rail::default();
+        fold_worldless_attach_then_pulse(&mut rail);
+
+        let actual = rail.verdict("a", 210_000);
+
+        assert_eq!(actual, Some(Liveness::Alive));
     }
 
     #[test]

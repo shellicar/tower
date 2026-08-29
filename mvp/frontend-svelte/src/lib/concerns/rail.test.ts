@@ -115,6 +115,47 @@ describe('detached gating', () => {
   });
 });
 
+describe('a world-less attached folded live', () => {
+  // The claim's own key would be "/inst-1", the instance's pulses key under
+  // "mac/inst-1". Attaching must not seat an instance under the claim's empty
+  // world: that entry answers the exact lookup forever after, so the real
+  // instance's pulses never reach the conversation again. towerd guards the
+  // same write for the same reason (views/fold.rs, apply_conv_attachment).
+  function foldWorldlessAttachThenPulse(emit: (event: ServerMsg) => void): void {
+    emit(attached('', 100_000, '/served/here'));
+    emit({
+      type: 'agent',
+      kind: 'pulse',
+      world: 'mac',
+      instanceId: 'inst-1',
+      ts: 200_000,
+      intervalS: 15,
+    } as ServerMsg);
+  }
+
+  it('keeps showing the cwd past the stranded threshold while the instance pulses', () => {
+    // 110s after the attach, 10s after the pulse: the claim's own ts is long
+    // stale, the instance it names is plainly alive.
+    const { rail, emit } = fakeTransport({ now: () => 210_000 });
+    foldWorldlessAttachThenPulse(emit);
+
+    const expected = '/served/here';
+    const actual = rail.liveCwd('a');
+
+    expect(actual).toBe(expected);
+  });
+
+  it('keeps the dot alive past the stranded threshold while the instance pulses', () => {
+    const { rail, emit } = fakeTransport({ now: () => 210_000 });
+    foldWorldlessAttachThenPulse(emit);
+
+    const expected = 'alive';
+    const actual = rail.verdict('a');
+
+    expect(actual).toBe(expected);
+  });
+});
+
 describe('verdict', () => {
   it('degrades to the bare instanceId when the claim omits world', () => {
     // The dot on every rail row reads this. A claim that omits its world must

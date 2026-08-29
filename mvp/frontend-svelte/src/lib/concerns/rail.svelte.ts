@@ -97,16 +97,25 @@ export class Rail {
           // promise a `pulse` would otherwise be the only source of — the gap
           // where an instance that dies before its first pulse read as alive
           // forever (docs/spec/agent.md).
-          const heldInstance = this.#instances.get(ikey);
-          const nextInstances = new Map(this.#instances);
-          nextInstances.set(ikey, {
-            world: event.world,
-            instanceId: event.instanceId,
-            host: heldInstance?.host,
-            lastPulse: Math.max(event.ts, heldInstance?.lastPulse ?? 0),
-            intervalS: event.intervalS ?? heldInstance?.intervalS,
-          });
-          this.#instances = nextInstances;
+          //
+          // Only when the claim names its world, because this map is keyed on
+          // the pair: an entry seated under an empty world answers the exact
+          // lookup ahead of the same instance's own pulses, which key under
+          // the real world, so the conversation would strand on this one
+          // stale ts while the agent pulses on. towerd guards the same write
+          // for the same reason (views/fold.rs, the conv-leaf `attached`).
+          if (event.world) {
+            const heldInstance = this.#instances.get(ikey);
+            const nextInstances = new Map(this.#instances);
+            nextInstances.set(ikey, {
+              world: event.world,
+              instanceId: event.instanceId,
+              host: heldInstance?.host,
+              lastPulse: Math.max(event.ts, heldInstance?.lastPulse ?? 0),
+              intervalS: event.intervalS ?? heldInstance?.intervalS,
+            });
+            this.#instances = nextInstances;
+          }
           // One attachment per conv: a new `attached` REPLACES whatever
           // stood, unconditionally — never merges beside it.
           const next = new Map(this.#attachments);
