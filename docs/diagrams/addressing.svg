@@ -1,0 +1,184 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 990" width="1760" height="990" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <style>
+      .bg { fill: #1B1826; }
+      .title { fill: #FBF6E3; font-size: 34px; font-weight: 700; }
+      .purpose { fill: #AEB6BF; font-size: 19px; }
+      .side { fill: #7F8C8D; font-size: 15px; font-weight: 700; letter-spacing: 2.5px; }
+      .sideclaim { font-size: 23px; font-weight: 700; }
+      .note { fill: #AEB6BF; font-size: 17px; }
+      .small { fill: #7F8C8D; font-size: 13px; }
+      .level { fill: #7F8C8D; font-size: 13px; font-weight: 700; letter-spacing: 1.5px; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .chip { fill: #241F38; stroke: #4A4363; }
+      .chiphot { fill: #2E1E0E; stroke: #E67E22; }
+      .conv { fill: #12101C; stroke: #2ECC71; }
+      .path { stroke: #E67E22; stroke-width: 1.5; fill: none; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1760" height="990"/>
+
+  <text class="title" x="60" y="72">Thirty agents are working. How do you address one of them?</text>
+  <text class="purpose" x="60" y="106">Counted on this laptop, 3 August 2026: 5 tmux servers, 9 sessions, 23 windows, 45 panes.</text>
+
+  <line x1="880" y1="150" x2="880" y2="930" stroke="#3A3550" stroke-width="1"/>
+
+  <!-- ================= LEFT: an address is a path ================= -->
+  <text class="side" x="60" y="188">TODAY</text>
+  <text class="sideclaim" x="60" y="222" fill="#E0A96D">The address is a path to a place in your terminal</text>
+
+  <!-- level 1: servers -->
+  <text class="level" x="60" y="286">SERVER</text>
+  <g class="mono" font-size="13">
+    <rect class="chiphot" x="170" y="266" width="120" height="30" rx="6"/>
+    <text x="182" y="286" fill="#FBF6E3">default</text>
+    <rect class="chip" x="298" y="266" width="120" height="30" rx="6"/>
+    <text x="310" y="286" fill="#7F8C8D">shellicar</text>
+    <rect class="chip" x="426" y="266" width="120" height="30" rx="6"/>
+    <text x="438" y="286" fill="#7F8C8D">tower</text>
+    <rect class="chip" x="554" y="266" width="120" height="30" rx="6"/>
+    <text x="566" y="286" fill="#7F8C8D">testing</text>
+    <rect class="chip" x="682" y="266" width="130" height="30" rx="6"/>
+    <text x="694" y="286" fill="#7F8C8D">test-display</text>
+  </g>
+  <path class="path" d="M 230 296 L 230 326"/>
+
+  <!-- level 2: sessions -->
+  <text class="level" x="60" y="346">SESSION</text>
+  <g class="mono" font-size="13">
+    <rect class="chiphot" x="170" y="326" width="120" height="30" rx="6"/>
+    <text x="182" y="346" fill="#FBF6E3">deal-hub</text>
+    <rect class="chip" x="298" y="326" width="120" height="30" rx="6"/>
+    <text x="310" y="346" fill="#7F8C8D">easyquote</text>
+    <rect class="chip" x="426" y="326" width="120" height="30" rx="6"/>
+    <text x="438" y="346" fill="#7F8C8D">products-api</text>
+    <rect class="chip" x="554" y="326" width="120" height="30" rx="6"/>
+    <text x="566" y="346" fill="#7F8C8D">eagers</text>
+    <rect class="chip" x="682" y="326" width="60" height="30" rx="6"/>
+    <text x="694" y="346" fill="#7F8C8D">+5</text>
+  </g>
+  <path class="path" d="M 230 356 L 230 386"/>
+
+  <!-- level 3: windows -->
+  <text class="level" x="60" y="406">WINDOW</text>
+  <g class="mono" font-size="13">
+    <rect class="chiphot" x="170" y="386" width="86" height="30" rx="6"/>
+    <text x="182" y="406" fill="#FBF6E3">node</text>
+    <rect class="chip" x="264" y="386" width="86" height="30" rx="6"/>
+    <text x="276" y="406" fill="#7F8C8D">node</text>
+    <rect class="chip" x="358" y="386" width="86" height="30" rx="6"/>
+    <text x="370" y="406" fill="#7F8C8D">node</text>
+    <rect class="chip" x="452" y="386" width="86" height="30" rx="6"/>
+    <text x="464" y="406" fill="#7F8C8D">node</text>
+    <rect class="chip" x="546" y="386" width="86" height="30" rx="6"/>
+    <text x="558" y="406" fill="#7F8C8D">node</text>
+    <rect class="chip" x="640" y="386" width="86" height="30" rx="6"/>
+    <text x="652" y="406" fill="#7F8C8D">node</text>
+    <rect class="chip" x="734" y="386" width="86" height="30" rx="6"/>
+    <text x="746" y="406" fill="#7F8C8D">node</text>
+  </g>
+  <text class="small" x="170" y="436">20 of 23 windows are named after the process. The name says nothing about the work.</text>
+  <path class="path" d="M 213 416 L 213 456"/>
+
+  <!-- level 4: panes -->
+  <text class="level" x="60" y="476">PANE</text>
+  <g class="mono" font-size="13">
+    <rect class="chiphot" x="170" y="456" width="120" height="30" rx="6"/>
+    <text x="182" y="476" fill="#FBF6E3">node</text>
+    <rect class="chip" x="298" y="456" width="120" height="30" rx="6"/>
+    <text x="310" y="476" fill="#7F8C8D">node</text>
+    <rect class="chip" x="426" y="456" width="120" height="30" rx="6"/>
+    <text x="438" y="476" fill="#7F8C8D">zsh</text>
+    <rect class="chip" x="554" y="456" width="120" height="30" rx="6"/>
+    <text x="566" y="476" fill="#7F8C8D">node</text>
+  </g>
+  <text class="small" x="170" y="506">Three agents on one feature. Which is which? Open it and read.</text>
+
+  <!-- the resulting address -->
+  <rect x="170" y="540" width="500" height="42" rx="6" fill="#2E1E0E" stroke="#E67E22"/>
+  <text class="mono" x="186" y="567" font-size="16" fill="#E0A96D">default : deal-hub : 4 : node : pane 1</text>
+  <text class="small" x="690" y="567">the whole address</text>
+
+  <text class="note" x="60" y="646">Every level multiplies, and one path is open at a time. Each thing sits in exactly one place,</text>
+  <text class="note" x="60" y="674">so the grouping is the address: change how you organise and you change where things live.</text>
+  <text class="note" x="60" y="712">The convention has to be carried by hand. Custom options exist for it and are empty:</text>
+  <text class="mono" x="60" y="740" font-size="16" fill="#7F8C8D">@role=   @title=</text>
+  <text class="note" x="60" y="796" fill="#E8867C">Restart, and the tree is gone. The conversation ids only ever existed inside the panes,</text>
+  <text class="note" x="60" y="824" fill="#E8867C">which is why finding them again meant scraping the terminal for them.</text>
+
+  <!-- ================= RIGHT: an address is an id ================= -->
+  <text class="side" x="940" y="188">WITH TOWER</text>
+  <text class="sideclaim" x="940" y="222" fill="#9FE0B8">The address is the conversation, and nothing contains it</text>
+
+  <!-- the fleet list, as it actually reads -->
+  <g>
+    <rect x="940" y="252" width="760" height="34" rx="6" fill="#241F38" stroke="#4A4363"/>
+    <text class="mono" x="954" y="274" font-size="14" fill="#FBF6E3">Tower</text>
+    <circle cx="1024" cy="269" r="5" fill="#5DADE2"/>
+    <text class="mono" x="1038" y="274" font-size="14" fill="#EAF2FB">42</text>
+    <text class="mono" x="1070" y="274" font-size="14" fill="#9FE0B8">live</text>
+    <text class="mono" x="1420" y="274" font-size="13" fill="#7F8C8D">group</text>
+    <rect x="1474" y="258" width="86" height="22" rx="4" fill="#12101C" stroke="#4A4363"/>
+    <text class="mono" x="1484" y="274" font-size="13" fill="#AEB6BF">none</text>
+    <text class="mono" x="1580" y="274" font-size="13" fill="#7F8C8D">filter</text>
+  </g>
+
+  <g class="mono" font-size="14">
+    <rect x="940" y="292" width="760" height="42" fill="#1F2B3A" stroke="#2E2942"/>
+    <circle cx="960" cy="313" r="5" fill="#2ECC71"/>
+    <text x="978" y="318" fill="#FBF6E3">test conversation 1</text>
+    <text x="1470" y="318" fill="#7F8C8D">turn_aborted</text>
+    <text x="1640" y="318" fill="#9FE0B8">12s</text>
+
+    <rect x="940" y="334" width="760" height="42" fill="#12101C" stroke="#2E2942"/>
+    <circle cx="960" cy="355" r="5" fill="#5DADE2"/>
+    <text x="978" y="360" fill="#AEB6BF">b707e240-5f11-47c3-92eb-ff7c07ab07d1</text>
+    <text x="1470" y="360" fill="#7F8C8D">query</text>
+    <text x="1640" y="360" fill="#E0A96D">1h</text>
+
+    <rect x="940" y="376" width="760" height="42" fill="#12101C" stroke="#2E2942"/>
+    <circle cx="960" cy="397" r="5" fill="#5DADE2"/><circle cx="976" cy="397" r="5" fill="#2ECC71"/>
+    <text x="994" y="402" fill="#AEB6BF">94cd63e7-6864-4f77-a888-3f9f218...</text>
+    <text x="1470" y="402" fill="#7F8C8D">query</text>
+    <text x="1640" y="402" fill="#E0A96D">1h</text>
+
+    <rect x="940" y="418" width="760" height="42" fill="#12101C" stroke="#2E2942"/>
+    <text x="978" y="444" fill="#FBF6E3">planner: cross-cutting</text>
+    <text x="1470" y="444" fill="#7F8C8D">query</text>
+    <text x="1640" y="444" fill="#E0A96D">4h</text>
+
+    <rect x="940" y="460" width="760" height="42" fill="#12101C" stroke="#2E2942"/>
+    <text x="978" y="486" fill="#AEB6BF">9961e6cf-a45b-47ed-ad91-9708075a4918</text>
+    <text x="1470" y="486" fill="#7F8C8D">query</text>
+    <text x="1640" y="486" fill="#E0A96D">5h</text>
+
+    <rect x="940" y="502" width="760" height="42" fill="#12101C" stroke="#2E2942"/>
+    <circle cx="960" cy="523" r="5" fill="#2ECC71"/>
+    <text x="978" y="528" fill="#FBF6E3">dealhub - isolated ASP</text>
+    <text x="1470" y="528" fill="#7F8C8D">query</text>
+    <text x="1640" y="528" fill="#7F8C8D">4d</text>
+
+    <rect x="940" y="544" width="760" height="42" fill="#12101C" stroke="#2E2942"/>
+    <circle cx="960" cy="565" r="5" fill="#2ECC71"/>
+    <text x="978" y="570" fill="#FBF6E3">dh - send dealpack fixes !7404</text>
+    <text x="1470" y="570" fill="#7F8C8D">query</text>
+    <text x="1640" y="570" fill="#7F8C8D">4d</text>
+
+    <rect x="940" y="586" width="760" height="42" fill="#12101C" stroke="#2E2942"/>
+    <circle cx="960" cy="607" r="5" fill="#2ECC71"/>
+    <text x="978" y="612" fill="#FBF6E3">ci - 10898 display !7398</text>
+    <text x="1470" y="612" fill="#7F8C8D">query</text>
+    <text x="1640" y="612" fill="#7F8C8D">4d</text>
+  </g>
+
+  <text class="small" x="940" y="656">A title where someone set one, an id where nobody did. Both address the same way.</text>
+
+  <text class="note" x="940" y="712">The id is the whole address, and it is flat: no server, no session, no window, no pane.</text>
+  <text class="note" x="940" y="740">A title is decoration on top of it, optional, set by whoever is doing the work,</text>
+  <text class="note" x="940" y="768">including the agent itself when it opens a conversation related to this one.</text>
+  <text class="note" x="940" y="812">Grouping is a control, not a structure: group by nothing, filter, or arrange tabs however</text>
+  <text class="note" x="940" y="840">you like. Nothing in the spec carries a title, a tag, or a notion of a project.</text>
+  <text class="note" x="940" y="884" fill="#9FE0B8">The id outlives the process that served it and every screen that showed it.</text>
+  <text class="note" x="940" y="912" fill="#9FE0B8">Nothing has to be scraped to find the work again.</text>
+</svg>

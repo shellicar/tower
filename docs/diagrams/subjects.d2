@@ -1,0 +1,124 @@
+vars: {
+  d2-config: {
+    theme-id: 200
+    layout-engine: elk
+  }
+}
+
+direction: down
+
+title: "Tower: how the subjects relate" {
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+classes: {
+  concern: {
+    style: { fill: "#101828"; stroke: "#5DADE2"; font-color: "#EAF2FB" }
+  }
+  events: {
+    style: { fill: "#14352A"; stroke: "#2ECC71"; font-color: "#E8F8F0" }
+  }
+  requests: {
+    style: { fill: "#3A2412"; stroke: "#E67E22"; font-color: "#FBEFE3" }
+  }
+  telemetry: {
+    style: { fill: "#0E2E33"; stroke: "#5DD0E0"; font-color: "#E0FAFD" }
+  }
+  pattern: {
+    style: { fill: "#241832"; stroke: "#A569BD"; font-color: "#F3EAFB" }
+  }
+  party: {
+    style: { fill: "#2A2A3A"; stroke: "#AEB6BF"; font-color: "#EAECEE" }
+  }
+  stream: {
+    style: { fill: "#3A3413"; stroke: "#F1C40F"; font-color: "#FBF6E3" }
+  }
+  group: {
+    style: { fill: transparent; stroke: "#566573"; stroke-dash: 3; font-color: "#7F8C8D" }
+  }
+  pub: {
+    style: { stroke: "#2ECC71"; font-color: "#9FE0B8" }
+  }
+  sub: {
+    style: { stroke: "#5DADE2"; font-color: "#9FC9E8" }
+  }
+  req: {
+    style: { stroke: "#E67E22"; font-color: "#E0A96D" }
+  }
+  never: {
+    style: { stroke: "#E74C3C"; stroke-dash: 3; font-color: "#E8867C" }
+  }
+  capture: {
+    style: { stroke: "#F1C40F"; stroke-dash: 2; font-color: "#D6C067" }
+  }
+}
+
+shape_rule: "Every subject has the same five tokens\n\n{concern} . {version} . {id} . {class} . {event}\n\nconcern names the data, never a mechanism or a consumer\nversion is per concern: a breaking change is a new tree, so old and new run side by side\nid is the entity the traffic is about\nclass is the nature of the traffic, which is where retention, trust and access divide\nevent is the message's type, so nothing has to open the body to route on it" {
+  class: pattern
+}
+
+# ---- the three concerns, one namespace each ----
+trees: "One namespace per concern. Trees are disjoint, so versions move independently: conv is v2, agent and approval are v1" {
+  class: group
+
+  conv: "conv.v2.{conversationId}\nthe conversation: what was said, and what changed it" {
+    class: concern
+    telemetry: "telemetry.>\nobservation, never authority\n\nturn.started · turn.ended\nturn.cancelled · turn.aborted\ntool.use · usage" { class: telemetry }
+    changes: "changes.>\nthe committal change stream: the record itself\n\nmessage · revision\ntip.moved · query" { class: events }
+    attachment: "attachment.>\nwho is serving this conversation, now\n\nattached · moved · detached" { class: events }
+    deltas: "deltas\nthe in-progress message, chunk by chunk\n\ndelta · block\n\nflat on purpose: the type rides in the body,\nbecause these shapes share every routing and retention rule" { class: telemetry }
+    requests: "requests.>\ninbound: address the conversation\n\nsay · cancel · chdir" { class: requests }
+  }
+
+  agent: "agent.v1.{world}\nwho is serving conversations, and where" {
+    class: concern
+    telemetry: "telemetry.>\nis a process up, and still promising to be\n\nready · pulse" { class: telemetry }
+    requests: "requests.>\noperations on the world's servicing\n\nservice · drain\n\ninstances in a world share a queue group,\nso exactly one answers" { class: requests }
+  }
+
+  approval: "approval.v1.{approvalId}\nasking permission, and answering" {
+    class: concern
+    lifecycle: "lifecycle\nthe exchange itself\n\nraised · settled" { class: events }
+    telemetry: "telemetry\nthe pending ask's own pulse, about every 15s\n\nheartbeat" { class: telemetry }
+    requests: "requests\nthe answer" { class: requests }
+  }
+}
+
+# ---- who is on which end ----
+parties: "Parties" {
+  class: group
+  bridge: "bridge\nthe agent host: publishes what the agent does, answers what is asked of its world" { class: party }
+  csc: "claude-sdk-cli\na separate agent, written before any of this,\ntaking part by publishing the same subjects" { class: party }
+  towerd: "towerd\nfolds the trees into state and serves the clients" { class: party }
+  clients: "clients\nbrowser and helm" { class: party }
+}
+
+streams: "JetStream" {
+  class: group
+  capture: "streams capture event subjects only" { class: stream }
+}
+
+# ---- who is on each end, at the tree level: every leaf below is the same story ----
+parties.bridge -> trees.conv: "publishes everything the agent does" { class: pub }
+parties.bridge -> trees.agent: "publishes its world's ready and pulse" { class: pub }
+parties.bridge -> trees.approval: "raises the ask" { class: pub }
+parties.csc -> trees.conv: "publishes its own conversations; towerd folds them beside the rest" { class: pub }
+
+trees -> parties.towerd: "folds every event class; subscribes to a whole class, never a set of leaves" { class: sub }
+parties.towerd -> parties.clients: "one WebSocket, all of it already folded" { class: sub }
+
+parties.towerd -> trees: "sends the requests a user causes: say, cancel, chdir, service, drain, the approval answer" { class: req }
+trees -> parties.bridge: "a request is answered by whoever holds the conversation, or by one instance in the world" { class: req }
+
+# ---- the one hard boundary ----
+streams.capture -> trees.conv.changes: "captured, and replayed to rebuild state" { class: capture }
+streams.capture -> trees.conv.requests: "never captured: a stream over a requests subject acknowledges the publish and becomes a second responder, racing the real reply" { class: never }
+
+note: "The subject carries the taxonomy, and that is structural rather than stylistic: NATS routes, filters, retains and authorises on subjects only, never on payloads. A type buried in the body can be received and discarded, nothing more. So the type is stated exactly once, and where it is a routing axis it is the subject's last token and the body does not repeat it.\nThe class token is where policy divides. Telemetry is publish-only and nothing acts on it, so the worst case of a bogus publish is a wrong pixel; the change stream is the system's truth, so reading it is reading state and writing it is acting. Keeping them in separate tokens is what lets a deployment grade the two differently.\nEvolution is add-only within a version: producers may only add new events, fields and values, and every consumer must tolerate what it does not recognise. That is why a fold subscribes to a whole class and never to a list of leaves: a wildcard subscriber tolerates a new event type, while a leaf-list subscriber is silently blind to it, and on the change stream blind means wrong state with no error.\nOne boundary is contract rather than configuration: streams capture events only, never a requests subject.\nNothing on the wire enforces any of this, and there is no negotiation and no capability handshake. The system works because participants conform, which is why an independent agent like claude-sdk-cli can join by publishing the right subjects and nothing has to be told about it.\nColours: green = the committal record, cyan = observation, orange = requests, purple = the naming rule, gold = capture, red = the boundary that must not be crossed." {
+  near: bottom-center
+  shape: text
+  style.font-color: "#7F8C8D"
+}
