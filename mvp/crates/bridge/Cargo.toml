@@ -13,6 +13,11 @@ workspace = true
 # compaction.
 [dependencies]
 wire = { path = "../wire" }
+# The Anthropic credential: where it is stored, and renewing it when it is
+# spent. Reading and renewing only — obtaining one is bridge-login, a
+# separate binary, so nothing interactive is linked into a process that has
+# no terminal to be interactive in.
+bridge-auth = { path = "../bridge-auth" }
 # The GitHub pull request tools and the Keychain read behind them. Depended
 # on unconditionally: whether a credential can be read is a runtime question,
 # so the tools, their flag mappings, and their tests exist on every platform.
