@@ -9,4 +9,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- towerd opens its database in WAL mode, so another process can read the database while towerd is writing to it instead of failing on a locked database.
+- Open towerd's database in WAL mode.

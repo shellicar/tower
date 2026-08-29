@@ -1,1 +1,1 @@
-{"type":"change","category":"fixed","description":"towerd opens its database in WAL mode, so another process can read the database while towerd is writing to it instead of failing on a locked database."}
+{"type":"change","category":"fixed","description":"Open towerd's database in WAL mode."}
