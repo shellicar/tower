@@ -85,6 +85,15 @@ html, body {
 .facet-value { border: 1px solid #404040; color: #a3a3a3; padding: 1px 8px; border-radius: 999px; background: none; font: inherit; }
 .facet-value:hover { background: #262626; }
 .facet-value.on { border-color: currentColor; }
+.id-search { width: 18ch; background: #171717; border: 1px solid #404040; color: #ddd; font: inherit; padding: 1px 4px; }
+.id-search::placeholder { color: #525252; }
+/* Suspended while an id search runs: the chips still show what they hold,
+   they just cannot narrow a search that is already global. */
+.view-controls select:disabled,
+.facet-toggle:disabled,
+.facet-value:disabled { opacity: 0.4; cursor: default; }
+.facet-toggle:disabled:hover,
+.facet-value:disabled:hover { background: none; }
 
 .section-header { display: flex; justify-content: space-between; gap: 8px; background: #171717; padding: 4px 12px; border-bottom: 1px solid #262626; font-size: 11px; cursor: default; }
 .tag-chips { display: flex; flex-wrap: wrap; gap: 4px; width: 100%; padding-top: 2px; }
@@ -308,7 +317,11 @@ html, body {
 
 .conversation-footer { flex-shrink: 0; padding: 8px 0 12px; border-top: 1px solid #262626; background: #111; }
 
-.status-line { display: flex; align-items: center; gap: 8px; color: #737373; margin: 0 0 6px; }
+/* Wraps: the id is long, and at a narrow panel width the row would otherwise
+   squeeze the age and the state chip into broken lines. */
+.status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: #737373; margin: 0 0 6px; }
+.status-line .conv-id { flex-shrink: 0; color: #737373; background: none; border: none; font: inherit; padding: 0; }
+.status-line .conv-id:hover { color: #d4d4d4; }
 /* Truncates from the LEFT: the tail of a path (the leaf directory) is the
    informative end, so the ellipsis belongs at the front, not the back.
    `direction: rtl` + `text-align: left` is the standard trick — the browser

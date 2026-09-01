@@ -82,6 +82,10 @@ pub struct View {
     /// Whether the fleet-wide unread/stale-conversations panel is showing —
     /// same footing as `approvals_open`.
     pub unread_open: bool,
+    /// The rail's conversation-id search box. Not persisted and not per tab:
+    /// looking an id up is a momentary act, not a slice of the fleet worth
+    /// keeping, so switching tab clears it.
+    pub conv_search: String,
 }
 
 impl Default for View {
@@ -95,6 +99,7 @@ impl Default for View {
             active: 0,
             approvals_open: false,
             unread_open: false,
+            conv_search: String::new(),
         }
     }
 }
@@ -190,6 +195,7 @@ impl View {
     pub fn switch_tab(&mut self, i: usize) {
         if i < self.tabs.len() {
             self.active = i;
+            self.conv_search.clear();
         }
     }
 
@@ -342,6 +348,29 @@ mod tests {
         assert_eq!(v.tabs[0].name, "work");
         assert!(v.rename_tab(0, "   ", "r2".into()).is_none());
         assert_eq!(v.tabs[0].name, "work"); // blank ignored
+    }
+
+    #[test]
+    fn the_id_search_starts_empty() {
+        let expected = "";
+
+        let actual = View::default().conv_search;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn the_id_search_does_not_survive_a_tab_switch() {
+        let mut v = View::default();
+        v.add_tab("r1".into());
+        v.conv_search = "aa-11".to_owned();
+
+        v.switch_tab(0);
+
+        let expected = "";
+        let actual = v.conv_search;
+
+        assert_eq!(actual, expected);
     }
 
     #[test]
