@@ -371,7 +371,9 @@
         </span>
       </div>
     {/each}
-    <p class="mb-1.5 flex items-center gap-2 text-neutral-500">
+    <!-- Wraps: the id is long, and at a narrow panel width the row would
+         otherwise squeeze the age and the state chip into broken lines. -->
+    <p class="mb-1.5 flex flex-wrap items-center gap-2 text-neutral-500">
       <button class="shrink-0 cursor-pointer hover:text-neutral-300" title="copy conversation id" onclick={copyConvId}
         >{oc.conv}</button
       >

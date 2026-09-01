@@ -317,7 +317,9 @@ html, body {
 
 .conversation-footer { flex-shrink: 0; padding: 8px 0 12px; border-top: 1px solid #262626; background: #111; }
 
-.status-line { display: flex; align-items: center; gap: 8px; color: #737373; margin: 0 0 6px; }
+/* Wraps: the id is long, and at a narrow panel width the row would otherwise
+   squeeze the age and the state chip into broken lines. */
+.status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: #737373; margin: 0 0 6px; }
 .status-line .conv-id { flex-shrink: 0; color: #737373; background: none; border: none; font: inherit; padding: 0; }
 .status-line .conv-id:hover { color: #d4d4d4; }
 /* Truncates from the LEFT: the tail of a path (the leaf directory) is the
