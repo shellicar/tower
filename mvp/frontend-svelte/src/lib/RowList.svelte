@@ -30,13 +30,21 @@
   const stateMatches = (conv: string) =>
     (!view.view.liveOnly || rail.verdict(conv) === 'alive') &&
     (!view.view.unreadOnly || rail.staleConvs.has(conv));
-  const visible = $derived(rail.ordered.filter((r) => matches(r) && stateMatches(r.conv)));
+  // An id search suspends every chip (the rail concern owns that rule): an id
+  // names one conversation across the fleet, so no category may hide it.
+  const searching = $derived(view.convSearch !== '');
+  const visible = $derived(
+    rail.listedRows(view.convSearch, rail.ordered.filter((r) => matches(r) && stateMatches(r.conv))),
+  );
   // Potential conversations have no row, so they can never be stale: `unread`
   // empties the section rather than filtering it.
   const potential = $derived(
-    view.view.unreadOnly
-      ? []
-      : rail.attachedOnly.filter((a) => !view.view.liveOnly || a.verdict === 'alive'),
+    rail.listedPotential(
+      view.convSearch,
+      view.view.unreadOnly
+        ? []
+        : rail.attachedOnly.filter((a) => !view.view.liveOnly || a.verdict === 'alive'),
+    ),
   );
   // Computed once per render, then a plain Set.has() per row below — not a
   // fresh rail.pendingByConv per row, which would rebuild the whole Set
@@ -47,7 +55,9 @@
    *  group. Untagged is hideable, and never outranks real groups. */
   const sections = $derived.by(() => {
     const k = view.view.groupKey;
-    if (!k) return [{ label: null as string | null, rows: visible, max: 0 }];
+    // Grouping suspends with the chips: `hide untagged` drops rows, and a
+    // search result must not be sectioned away from the reader who named it.
+    if (searching || !k) return [{ label: null as string | null, rows: visible, max: 0 }];
     const m = new Map<string, RowState[]>();
     for (const r of visible) {
       const v = r.tags?.[k];
@@ -107,8 +117,9 @@
   <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
     <span class="text-neutral-500">group</span>
     <select
-      class="border border-neutral-700 bg-neutral-900 px-1 text-neutral-300"
+      class="border border-neutral-700 bg-neutral-900 px-1 text-neutral-300 disabled:cursor-default disabled:opacity-40"
       bind:value={view.view.groupKey}
+      disabled={searching}
       onchange={() => view.saveView()}
     >
       <option value="">none</option>
@@ -116,9 +127,11 @@
     </select>
     {#if view.view.groupKey}
       <button
-        class="cursor-pointer rounded border px-1.5 {view.view.hideUntagged
+        class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {view.view
+          .hideUntagged
           ? 'border-sky-600 text-sky-300'
           : 'border-neutral-700 text-neutral-500'}"
+        disabled={searching}
         onclick={() => {
           view.view.hideUntagged = !view.view.hideUntagged;
           view.saveView();
@@ -138,21 +151,34 @@
   </div>
   <div class="mt-1.5 flex flex-wrap items-center gap-1">
     <span class="text-neutral-500">filter</span>
+    <!-- The id box: a conversation id is the address everything outside tower
+         uses, so the rail has to be searchable by it. Non-empty suspends the
+         chips beside it. -->
+    <input
+      class="w-36 min-w-0 border border-neutral-700 bg-neutral-900 px-1 text-neutral-300 placeholder:text-neutral-600"
+      placeholder="conversation id"
+      title="find a conversation by its id"
+      bind:value={view.convSearch}
+    />
     <button
-      class="cursor-pointer rounded border px-1.5 {view.view.liveOnly
+      class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {view.view
+        .liveOnly
         ? 'border-green-600 text-green-300'
         : 'border-neutral-700 text-neutral-400'}"
       title="only conversations a live agent is serving"
+      disabled={searching}
       onclick={() => {
         view.view.liveOnly = !view.view.liveOnly;
         view.saveView();
       }}>live</button
     >
     <button
-      class="cursor-pointer rounded border px-1.5 {view.view.unreadOnly
+      class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {view.view
+        .unreadOnly
         ? 'border-sky-600 text-sky-300'
         : 'border-neutral-700 text-neutral-400'}"
       title="only conversations nobody's looked at since they last got new content"
+      disabled={searching}
       onclick={() => {
         view.view.unreadOnly = !view.view.unreadOnly;
         view.saveView();
@@ -160,9 +186,11 @@
     >
     {#each keys as k (k)}
       <button
-        class="cursor-pointer rounded border px-1.5 {expandedKey === k || selectedCount(k)
+        class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {expandedKey ===
+          k || selectedCount(k)
           ? 'border-sky-600 text-sky-300'
           : 'border-neutral-700 text-neutral-400'}"
+        disabled={searching}
         onclick={() => (expandedKey = expandedKey === k ? '' : k)}
       >
         {k}{selectedCount(k) ? ` (${selectedCount(k)})` : ''}
@@ -173,11 +201,11 @@
     <div class="mt-1.5 flex flex-wrap gap-1">
       {#each facetValues as [value, count] (value)}
         <button
-          class="cursor-pointer rounded-full border px-2 {view.view.filters[
-            expandedKey
-          ]?.includes(value)
+          class="cursor-pointer rounded-full border px-2 disabled:cursor-default disabled:opacity-40 {view
+            .view.filters[expandedKey]?.includes(value)
             ? 'border-current'
             : 'border-neutral-700 text-neutral-400'}"
+          disabled={searching}
           style={view.view.filters[expandedKey]?.includes(value)
             ? `color: ${rail.tagKeys[expandedKey]}`
             : ''}
@@ -200,6 +228,7 @@
       <div
         role="button"
         tabindex="0"
+        title={a.conv}
         class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900 {view.tab.convs.includes(
           a.conv,
         )
@@ -253,7 +282,10 @@
     {#each section.rows as row (row.conv)}
       {@const verdict = rail.verdict(row.conv)}
       <li>
+        <!-- The title is the id: a row shows a name when it has one, and the
+             id is what addresses it everywhere outside tower. -->
         <button
+          title={row.conv}
           class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900 {view.tab.convs.includes(
             row.conv,
           )

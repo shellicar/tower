@@ -52,6 +52,16 @@ const ROW_ESTIMATE_PX: f64 = 96.0;
 /// doesn't pop rows in at the edge — same value as VirtualList.svelte.
 const OVERSCAN_PX: f64 = 600.0;
 
+/// Put text on the system clipboard. The promise is dropped: a rejection
+/// (clipboard denied, or an insecure context) leaves the copy simply not
+/// having happened, and there is nothing to fall back to.
+fn copy_to_clipboard(text: &str) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let _ = window.navigator().clipboard().write_text(text);
+}
+
 fn draft_key(conv: &str) -> String {
     format!("tower.draft.{conv}")
 }
@@ -644,6 +654,16 @@ pub fn ConversationView(
                 }}
 
                 <p class="status-line">
+                    // The id is what addresses this conversation everywhere
+                    // outside tower, so the status line carries it and one
+                    // click takes it.
+                    <button
+                        class="conv-id"
+                        title="copy conversation id"
+                        on:click=move |_| conv.with_value(|c| copy_to_clipboard(c))
+                    >
+                        {move || conv.with_value(Clone::clone)}
+                    </button>
                     {move || {
                         conv.with_value(|c| rail.with(|r| r.row(c).map(|row| {
                             format!("{} · {} ago", row.last_kind, age(now.get(), row.last_event))

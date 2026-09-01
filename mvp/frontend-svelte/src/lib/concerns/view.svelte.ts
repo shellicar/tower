@@ -62,6 +62,10 @@ export class View {
   approvalsOpen = $state(false);
   /** Whether the unread/stale-conversations view is showing — same footing. */
   unreadOpen = $state(false);
+  /** The rail's conversation-id search box. Not persisted and not per tab:
+   *  looking an id up is a momentary act, not a slice of the fleet worth
+   *  keeping, so switching tab clears it. */
+  convSearch = $state('');
 
   readonly #conversations: Conversations;
   readonly #transport: Transport;
@@ -167,6 +171,7 @@ export class View {
 
   switchTab(i: number): void {
     this.active = i;
+    this.convSearch = '';
     // Only the active tab's conversations stay open — background tabs are cold
     // (holding every conversation's content warm was CPU and RAM on invisible
     // panels). Switching back re-fetches: half a second against a gigabyte.
