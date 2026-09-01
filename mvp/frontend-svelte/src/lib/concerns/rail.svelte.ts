@@ -25,8 +25,8 @@ function sameInstance(
 /** Does this conversation id contain the search string? Case-insensitive
  *  substring, taken verbatim: the query is never trimmed, split or fuzzed, so
  *  "1 e" matches an id holding "1 e" and nothing looser. Only the id is
- *  consulted — a title says what a conversation is about, the id says which
- *  one it is, and this box answers the second question. */
+ *  consulted, because a title says what a conversation is about while the id
+ *  says which one it is, and this box answers the second question. */
 export function idMatches(conv: string, query: string): boolean {
   return conv.toLowerCase().includes(query.toLowerCase());
 }
@@ -202,10 +202,11 @@ export class Rail {
     return [...this.#rows.values()].sort((a, b) => b.lastEvent - a.lastEvent);
   }
 
-  /** The rows the rail lists: the chip-filtered list, or — while an id search
-   *  runs — every conversation whose id matches it. A search suspends the
-   *  chips rather than composing with them: an id names one conversation
-   *  across the whole fleet, so no category may hide the one you named. */
+  /** The rows the rail lists. While the id search box is empty this is the
+   *  chip-filtered list; while it holds anything it is every conversation
+   *  whose id matches. A search suspends the chips rather than composing with
+   *  them: an id names one conversation across the whole fleet, so no category
+   *  may hide the one you named. */
   listedRows(search: string, chipVisible: RowState[]): RowState[] {
     if (search === '') return chipVisible;
     return this.ordered.filter((r) => idMatches(r.conv, search));
