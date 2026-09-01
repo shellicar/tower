@@ -215,12 +215,19 @@ impl Views {
         // was raised against (attached_ts <= dismissed_ts): a fresh re-attach
         // after dismissal is new evidence and un-hides it, the same way a
         // stranded instance pulsing again resurrects it.
+        //
+        // Oldest first: this table is keyed (world, instance_id, conv), so one
+        // conversation can hold several claims here, and both clients build
+        // conv -> attachment by last-wins over this array. Unordered, the
+        // winner is whatever sqlite happened to return, and a reconnect can
+        // seat a claim the live fold had already superseded.
         let mut stmt = self.db.prepare_cached(
             "SELECT a.world, a.instance_id, a.conv, a.cwd, a.attached_ts
              FROM agent_attachments a
              LEFT JOIN dismissed_attachments d
                  ON d.world = a.world AND d.instance_id = a.instance_id AND d.conv = a.conv
-             WHERE d.dismissed_ts IS NULL OR a.attached_ts > d.dismissed_ts",
+             WHERE d.dismissed_ts IS NULL OR a.attached_ts > d.dismissed_ts
+             ORDER BY a.attached_ts ASC",
         )?;
         let mut attachments = stmt
             .query_map([], |r| {
