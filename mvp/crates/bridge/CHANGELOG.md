@@ -39,9 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Turns ask the messages API for adaptive thinking rather than a fixed token budget.
 - A Ref result is returned whole however large, instead of being stashed and swapped for a pointer to a new ref holding it. The pointer to an oversized result is JSON text again, as the Ref tool's description says it is.
 - An adopted conversation replays its whole record, instead of stopping at whatever one fetch returned.
+- The commit in bridge's build stamp can now be trusted: the hash carries a -dirty suffix unless a git status over the exact files bridge was compiled from reported nothing, so a binary built from an edited tree no longer names a commit it does not contain.
 
 ### Security
 
 - Configuring a GitHub credential stops Exec children authenticating with the host's own gh login. A host that configures none is unaffected.
-- The commit in bridge's build stamp can now be trusted: the hash carries a -dirty suffix unless a git status over bridge and the crates it compiles reported no modified, staged or untracked files, so a binary built from an edited tree no longer names a commit it does not contain.
-- The commit in bridge's build stamp can now be trusted: the hash carries a -dirty suffix unless a git status over the exact files bridge was compiled from reported nothing, so a binary built from an edited tree no longer names a commit it does not contain.
