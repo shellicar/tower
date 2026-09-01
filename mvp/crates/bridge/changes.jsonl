@@ -19,4 +19,4 @@
 {"type":"change","category":"added","description":"`just titles` titles tower's conversations from their own content, one small-model call each, against the database in $TOWER_DB. It prints what it would write and writes only with --apply; --compare prints stored titles against generated ones."}
 {"type":"change","category":"added","description":"`just titles` counts a conversation's tokens before titling it, so one over 200000 tokens goes to claude-sonnet-5 rather than being rejected for length. A conversation with no content is refused instead of being given a title the model invented for it."}
 {"type":"change","category":"changed","description":"Log in to bridge with bridge-login."}
-{"type":"change","category":"added","description":"The ready event bridge publishes at boot carries its own name, so a reader can tell which agent implementation the version beside it belongs to."}
+{"type":"change","category":"added","description":"Name bridge in the ready telemetry it publishes at boot."}
