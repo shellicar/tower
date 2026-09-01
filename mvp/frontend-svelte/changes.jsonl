@@ -1,1 +1,3 @@
 {"type":"change","category":"added","description":"The rail can be filtered to only conversations a live agent is serving, or only unread ones, saved per tab."}
+{"type":"change","category":"added","description":"A conversation's panel shows the directory its agent is working in."}
+{"type":"change","category":"fixed","description":"An agent whose claim omits its world reads as alive on the rail."}

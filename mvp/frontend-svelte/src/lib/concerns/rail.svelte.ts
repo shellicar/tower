@@ -10,6 +10,18 @@ import { type Clock, approvalVoid, livenessVerdict, systemClock } from '../core/
 import type { Transport } from '../core/transport.svelte';
 import type { AgentAttachment, AgentInstance, Millis, RowState, ServerMsg } from '../types';
 
+/** Instance identity is the (world, instanceId) pair (agent.md, The entity).
+ *  An empty `world` is the wire's stand-in for absent, so a comparison with
+ *  one missing either side falls back to bare `instanceId`: degraded, not
+ *  broken. */
+function sameInstance(
+  held: { world: string; instanceId: string },
+  fact: { world: string; instanceId: string },
+): boolean {
+  if (held.instanceId !== fact.instanceId) return false;
+  return !held.world || !fact.world || held.world === fact.world;
+}
+
 export class Rail {
   #rows = $state<Map<string, RowState>>(new Map());
   #tagKeys = $state<Record<string, string>>({});
@@ -85,16 +97,25 @@ export class Rail {
           // promise a `pulse` would otherwise be the only source of — the gap
           // where an instance that dies before its first pulse read as alive
           // forever (docs/spec/agent.md).
-          const heldInstance = this.#instances.get(ikey);
-          const nextInstances = new Map(this.#instances);
-          nextInstances.set(ikey, {
-            world: event.world,
-            instanceId: event.instanceId,
-            host: heldInstance?.host,
-            lastPulse: Math.max(event.ts, heldInstance?.lastPulse ?? 0),
-            intervalS: event.intervalS ?? heldInstance?.intervalS,
-          });
-          this.#instances = nextInstances;
+          //
+          // Only when the claim names its world, because this map is keyed on
+          // the pair: an entry seated under an empty world answers the exact
+          // lookup ahead of the same instance's own pulses, which key under
+          // the real world, so the conversation would strand on this one
+          // stale ts while the agent pulses on. towerd guards the same write
+          // for the same reason (views/fold.rs, the conv-leaf `attached`).
+          if (event.world) {
+            const heldInstance = this.#instances.get(ikey);
+            const nextInstances = new Map(this.#instances);
+            nextInstances.set(ikey, {
+              world: event.world,
+              instanceId: event.instanceId,
+              host: heldInstance?.host,
+              lastPulse: Math.max(event.ts, heldInstance?.lastPulse ?? 0),
+              intervalS: event.intervalS ?? heldInstance?.intervalS,
+            });
+            this.#instances = nextInstances;
+          }
           // One attachment per conv: a new `attached` REPLACES whatever
           // stood, unconditionally — never merges beside it.
           const next = new Map(this.#attachments);
@@ -107,9 +128,18 @@ export class Rail {
           });
           this.#attachments = next;
         } else if (event.kind === 'detached' && event.conv) {
-          const next = new Map(this.#attachments);
-          next.delete(event.conv);
-          this.#attachments = next;
+          // Only the STANDING instance's release clears the attachment
+          // (ws-spec, agent): a displaced instance publishes `detached` as
+          // its own act of compliance, and that is a fact about its past
+          // claim, not a retraction of the one that replaced it. Identity is
+          // the (world, instanceId) pair, degrading to bare instanceId when
+          // either side omits world.
+          const held = this.#attachments.get(event.conv);
+          if (held && sameInstance(held, event)) {
+            const next = new Map(this.#attachments);
+            next.delete(event.conv);
+            this.#attachments = next;
+          }
         }
         break;
       }
@@ -187,7 +217,38 @@ export class Rail {
 
   #liveness(conv: string): AgentInstance | null {
     const a = this.#attachments.get(conv);
-    return a ? (this.#instances.get(`${a.world}/${a.instanceId}`) ?? null) : null;
+    return a ? (this.#instance(a) ?? null) : null;
+  }
+
+  /** The conversation's live attachment's cwd — "where is this conversation
+   *  being served", for the open panel's status line. Gated on liveness
+   *  (folded against the rail's own clock, agent-spec: a fold, never
+   *  declared): a stranded agent is not serving anything, so its cwd must
+   *  not render as if it were. Not gated on rowlessness like
+   *  `attachedOnly`: an ordinary conversation with a row can still have a
+   *  live attachment. undefined when nothing is attached and alive, or the
+   *  attachment carries no cwd.
+   *
+   *  No tie to break: attachments are keyed by conv alone (agent-spec.md,
+   *  supersession), so a conversation has at most one. */
+  liveCwd(conv: string): string | undefined {
+    const a = this.#attachments.get(conv);
+    if (!a) return undefined;
+    const inst = this.#instance(a);
+    if (!inst || livenessVerdict(this.#now, inst.lastPulse, inst.intervalS) !== 'alive') return undefined;
+    return a.cwd;
+  }
+
+  /** The instance an attachment names. The key is the (world, instanceId)
+   *  pair, and it degrades the same way the gates do (ws-spec): a claim
+   *  published without a world keys as "/inst-1" while that same instance's
+   *  pulses key as "mac/inst-1", so an exact miss falls back to a bare
+   *  `instanceId` match rather than reading as no instance at all. */
+  #instance(held: { world: string; instanceId: string }): AgentInstance | undefined {
+    return (
+      this.#instances.get(`${held.world}/${held.instanceId}`) ??
+      [...this.#instances.values()].find((i) => sameInstance(held, i))
+    );
   }
 
   /** Potential conversations: attached, no row yet — served, silent. Transient

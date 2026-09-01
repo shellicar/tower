@@ -10,3 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - The rail can be filtered to only conversations a live agent is serving, or only unread ones, saved per tab.
+- A conversation's panel shows the directory its agent is working in.
+
+### Fixed
+
+- An agent whose claim omits its world reads as alive on the rail.
