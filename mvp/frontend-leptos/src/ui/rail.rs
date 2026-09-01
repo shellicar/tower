@@ -10,6 +10,7 @@ use leptos::prelude::*;
 use crate::concerns::approvals::Approvals;
 use crate::concerns::rail::Rail;
 use crate::concerns::view::View;
+use crate::facets::{facet_values, tag_of};
 use crate::time::{Liveness, Millis, age};
 use crate::transport::Status;
 use ws_types::WsRow;
@@ -97,17 +98,10 @@ struct Section {
     max: Millis,
 }
 
-fn tag_of(row: &WsRow, key: &str) -> String {
-    row.tags
-        .get(key)
-        .cloned()
-        .unwrap_or_else(|| "(untagged)".to_owned())
-}
-
-fn matches(row: &WsRow, filters: &HashMap<String, Vec<String>>) -> bool {
+fn matches(row: &WsRow, filters: &HashMap<String, Vec<Option<String>>>) -> bool {
     filters
         .iter()
-        .all(|(k, vs)| vs.is_empty() || vs.contains(&tag_of(row, k)))
+        .all(|(k, vs)| vs.is_empty() || vs.iter().any(|v| v.as_deref() == tag_of(row, k)))
 }
 
 /// The two state filters, read from the same facts the dots are drawn from so
@@ -284,28 +278,21 @@ pub fn RailView(
                     (!ek.is_empty()).then(|| {
                         let ek3 = ek.clone();
                         let colour = rail.with(|r| r.tag_keys().get(&ek).cloned().unwrap_or_default());
-                        // Value counts honour the OTHER keys' filters.
-                        let mut counts: HashMap<String, usize> = HashMap::new();
-                        rail.with(|r| {
-                            let filters = view.with(|v| v.view_config().filters.clone());
-                            let live_only = view.with(|v| v.view_config().live_only);
-                            let unread_only = view.with(|v| v.view_config().unread_only);
-                            let now_ms = now.get();
-                            for row in r.ordered() {
-                                let others_match = filters.iter().all(|(k, vs)| k == &ek || vs.is_empty() || vs.contains(&tag_of(row, k)));
-                                let state_match = state_matches(r, &row.conv, live_only, unread_only, now_ms);
-                                if others_match && state_match && let Some(v) = row.tags.get(&ek) {
-                                    *counts.entry(v.clone()).or_insert(0) += 1;
-                                }
-                            }
+                        let filters = view.with(|v| v.view_config().filters.clone());
+                        let live_only = view.with(|v| v.view_config().live_only);
+                        let unread_only = view.with(|v| v.view_config().unread_only);
+                        let now_ms = now.get();
+                        let values = rail.with(|r| {
+                            facet_values(&r.ordered(), &ek, &filters, |conv| {
+                                state_matches(r, conv, live_only, unread_only, now_ms)
+                            })
                         });
-                        let mut values: Vec<(String, usize)> = counts.into_iter().collect();
-                        values.sort_by(|a, b| b.1.cmp(&a.1));
                         view! {
                             <div class="controls-row facet-values">
-                                {values.into_iter().map(|(value, count)| {
-                                    let selected = view.with(|v| v.view_config().filters.get(&ek3).map(|vs| vs.contains(&value)).unwrap_or(false));
-                                    let value2 = value.clone();
+                                {values.into_iter().map(|fv| {
+                                    let selected = view.with(|v| v.view_config().filters.get(&ek3).map(|vs| vs.contains(&fv.value)).unwrap_or(false));
+                                    let label = format!("{} ({})", fv.value.as_deref().unwrap_or("(untagged)"), fv.count);
+                                    let value2 = fv.value.clone();
                                     let ek4 = ek3.clone();
                                     let colour = colour.clone();
                                     view! {
@@ -314,10 +301,10 @@ pub fn RailView(
                                             class:on=selected
                                             style=move || selected.then(|| format!("color: {colour}")).unwrap_or_default()
                                             on:click=move |_| {
-                                                view.update(|v| v.toggle_filter(&ek4, &value2));
+                                                view.update(|v| v.toggle_filter(&ek4, value2.as_deref()));
                                                 save_view(&tab_name(), &view.get_untracked());
                                             }
-                                        >{format!("{value} ({count})")}</button>
+                                        >{label}</button>
                                     }
                                 }).collect_view()}
                             </div>

@@ -20,8 +20,9 @@ import type { ServerMsg, WireTab } from '../types';
 
 /** The rail's view configuration — per tab, local only. */
 export interface ViewConfig {
-  /** key -> selected values; OR within a key, AND across keys. */
-  filters: Record<string, string[]>;
+  /** key -> selected values; OR within a key, AND across keys. `null` selects
+   *  rows carrying no value for that key, which is why it is not a string. */
+  filters: Record<string, (string | null)[]>;
   /** Section the rail by this key; '' = flat. */
   groupKey: string;
   /** Keys whose values decorate rows (value only; colour carries the key). */

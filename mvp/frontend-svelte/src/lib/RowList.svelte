@@ -1,5 +1,6 @@
 <script lang="ts">
   import { rail, view } from './app';
+  import { facetValues, tagOf } from './core/facets';
   import { age, heat } from './core/time';
   import type { RowState } from './types';
 
@@ -17,8 +18,6 @@
 
   /** Which key's values are expanded in the facet bar; '' = none. */
   let expandedKey = $state('');
-
-  const tagOf = (r: RowState, k: string) => r.tags?.[k] ?? '(untagged)';
 
   // OR within a key, AND across keys — tags are flat.
   const matches = (r: RowState) =>
@@ -65,25 +64,11 @@
       });
   });
 
-  /** Value counts for the expanded key, honouring the OTHER keys' filters. */
-  const facetValues = $derived.by(() => {
-    if (!expandedKey) return [];
-    const others = rail.ordered.filter(
-      (r) =>
-        stateMatches(r.conv) &&
-        Object.entries(view.view.filters).every(
-          ([k, vs]) => k === expandedKey || vs.length === 0 || vs.includes(tagOf(r, k)),
-        ),
-    );
-    const counts = new Map<string, number>();
-    for (const r of others) {
-      const v = r.tags?.[expandedKey];
-      if (v) counts.set(v, (counts.get(v) ?? 0) + 1);
-    }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  });
+  const values = $derived(
+    expandedKey ? facetValues(rail.ordered, expandedKey, view.view.filters, stateMatches) : [],
+  );
 
-  function toggleFilter(value: string) {
+  function toggleFilter(value: string | null) {
     const vs = view.view.filters[expandedKey] ?? [];
     view.view.filters[expandedKey] = vs.includes(value)
       ? vs.filter((v) => v !== value)
@@ -171,7 +156,7 @@
   </div>
   {#if expandedKey}
     <div class="mt-1.5 flex flex-wrap gap-1">
-      {#each facetValues as [value, count] (value)}
+      {#each values as { value, count } (value)}
         <button
           class="cursor-pointer rounded-full border px-2 {view.view.filters[
             expandedKey
@@ -181,7 +166,7 @@
           style={view.view.filters[expandedKey]?.includes(value)
             ? `color: ${rail.tagKeys[expandedKey]}`
             : ''}
-          onclick={() => toggleFilter(value)}>{value} ({count})</button
+          onclick={() => toggleFilter(value)}>{value ?? '(untagged)'} ({count})</button
         >
       {/each}
     </div>

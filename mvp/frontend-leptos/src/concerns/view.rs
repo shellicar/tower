@@ -27,8 +27,10 @@ use ws_types::{ClientMsg, ServerMsg, WsTab};
 /// mvp/frontend-svelte's `ViewConfig`.
 #[derive(Debug, Clone, Default)]
 pub struct ViewConfig {
-    /// key -> selected values; OR within a key, AND across keys.
-    pub filters: HashMap<String, Vec<String>>,
+    /// key -> selected values; OR within a key, AND across keys. `None`
+    /// selects rows carrying no value for that key, which is why it is not a
+    /// plain `String`.
+    pub filters: HashMap<String, Vec<Option<String>>>,
     /// Section the rail by this key; empty = flat.
     pub group_key: String,
     /// Keys whose values decorate rows (value only; colour carries the key).
@@ -267,13 +269,13 @@ impl View {
     }
 
     /// OR within a key: toggling a value adds/removes it from that key's set.
-    pub fn toggle_filter(&mut self, key: &str, value: &str) {
+    pub fn toggle_filter(&mut self, key: &str, value: Option<&str>) {
         let v = self.active_view_mut();
         let vs = v.filters.entry(key.to_owned()).or_default();
-        if let Some(i) = vs.iter().position(|x| x == value) {
+        if let Some(i) = vs.iter().position(|x| x.as_deref() == value) {
             vs.remove(i);
         } else {
-            vs.push(value.to_owned());
+            vs.push(value.map(str::to_owned));
         }
     }
 }
