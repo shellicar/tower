@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Clock } from '../core/time';
 import type { ClientMsg, ServerMsg } from '../types';
 import type { Transport } from '../core/transport.svelte';
-import { Rail } from './rail.svelte';
+import { Rail, idMatches } from './rail.svelte';
 
 // A fake transport: Rail only ever calls subscribe/send/id on it. Cast past
 // the nominal `Transport` type (its private fields make a plain object
@@ -221,5 +221,115 @@ describe('liveCwd', () => {
     const actual = rail.liveCwd('a');
 
     expect(actual).toBeUndefined();
+  });
+});
+
+describe('idMatches', () => {
+  it('matches a substring of the id whatever the case', () => {
+    const expected = true;
+
+    const actual = idMatches('1E7A-B2C3', 'e7a');
+
+    expect(actual).toBe(expected);
+  });
+
+  it('takes a query with a space verbatim', () => {
+    const expected = true;
+
+    const actual = idMatches('draft 1 e2', '1 e');
+
+    expect(actual).toBe(expected);
+  });
+
+  it('does not match a spaced query against an id without the space', () => {
+    const expected = false;
+
+    const actual = idMatches('767a8ef8-1e27', '1 e');
+
+    expect(actual).toBe(expected);
+  });
+
+  it('does not match characters merely scattered through the id', () => {
+    const expected = false;
+
+    const actual = idMatches('1e7a', '17');
+
+    expect(actual).toBe(expected);
+  });
+});
+
+describe('the conversation-id search', () => {
+  function listOf(rows: { conv: string; title?: string }[]): ServerMsg {
+    return {
+      type: 'list',
+      rows: rows.map((r, i) => ({
+        conv: r.conv,
+        lastEvent: i,
+        lastKind: 'message',
+        title: r.title,
+      })),
+      tagKeys: {},
+    } as ServerMsg;
+  }
+
+  it('lists a matching conversation the chips had hidden', () => {
+    // The chips are suspended, not composed with: an id names one
+    // conversation across the fleet, so an empty chip result cannot hide it.
+    const { rail, emit } = fakeTransport();
+    emit(listOf([{ conv: 'aa-11' }, { conv: 'bb-22' }]));
+
+    const expected = ['aa-11'];
+
+    const actual = rail.listedRows('AA', []).map((r) => r.conv);
+
+    expect(actual).toEqual(expected);
+  });
+
+  it('leaves the chips governing while the box is empty', () => {
+    const { rail, emit } = fakeTransport();
+    emit(listOf([{ conv: 'aa-11' }, { conv: 'bb-22' }]));
+    const chipVisible = rail.ordered.filter((r) => r.conv === 'bb-22');
+
+    const expected = ['bb-22'];
+
+    const actual = rail.listedRows('', chipVisible).map((r) => r.conv);
+
+    expect(actual).toEqual(expected);
+  });
+
+  it('searches the id and never the title', () => {
+    const { rail, emit } = fakeTransport();
+    emit(listOf([{ conv: 'aa-11', title: 'zebra' }]));
+
+    const actual = rail.listedRows('zebra', []);
+
+    expect(actual).toEqual([]);
+  });
+
+  it('lists nothing when no id matches', () => {
+    const { rail, emit } = fakeTransport();
+    emit(listOf([{ conv: 'aa-11' }, { conv: 'bb-22' }]));
+
+    const actual = rail.listedRows('zz', []);
+
+    expect(actual).toEqual([]);
+  });
+
+  it('lists a matching potential conversation the chips had hidden', () => {
+    const { rail, emit } = fakeTransport({ now: () => 120_000 });
+    emit({
+      type: 'agent',
+      kind: 'attached',
+      world: 'w1',
+      instanceId: 'inst-1',
+      ts: 100_000,
+      conv: 'ghost-77',
+    } as ServerMsg);
+
+    const expected = ['ghost-77'];
+
+    const actual = rail.listedPotential('GHOST', []).map((p) => p.conv);
+
+    expect(actual).toEqual(expected);
   });
 });

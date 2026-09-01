@@ -248,6 +248,16 @@
     }
   }
 
+  // The id is what addresses this conversation everywhere outside tower, so
+  // the status line carries it and one click takes it.
+  async function copyConvId(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(oc.conv);
+    } catch {
+      // Clipboard denied or an insecure context: nothing to fall back to.
+    }
+  }
+
   let now = $state(Date.now());
   $effect(() => {
     const t = setInterval(() => (now = Date.now()), 1_000);
@@ -362,6 +372,9 @@
       </div>
     {/each}
     <p class="mb-1.5 flex items-center gap-2 text-neutral-500">
+      <button class="shrink-0 cursor-pointer hover:text-neutral-300" title="copy conversation id" onclick={copyConvId}
+        >{oc.conv}</button
+      >
       {#if row}<span>{row.lastKind} · {age(now, row.lastEvent)} ago</span>{/if}
       {#if liveCwd}<span class="truncate-left min-w-0" title={liveCwd}><span>{liveCwd}</span></span>{/if}
       {#if oc.queryState === 'unknown'}

@@ -49,6 +49,15 @@ pub struct Rail {
     stale: HashSet<String>,
 }
 
+/// Does this conversation id contain the search string? Case-insensitive
+/// substring, taken verbatim: the query is never trimmed, split or fuzzed, so
+/// "1 e" matches an id holding "1 e" and nothing looser. Only the id is
+/// consulted — a title says what a conversation is about, the id says which
+/// one it is, and this box answers the second question.
+pub fn id_matches(conv: &str, query: &str) -> bool {
+    conv.to_lowercase().contains(&query.to_lowercase())
+}
+
 /// Instance identity is the (world, instanceId) pair (agent.md, The entity).
 /// An empty `world` is the wire's stand-in for absent, so a comparison with
 /// one missing either side falls back to bare `instanceId`: degraded, not
@@ -217,6 +226,38 @@ impl Rail {
         let mut rows: Vec<&WsRow> = self.rows.values().collect();
         rows.sort_by_key(|r| std::cmp::Reverse(r.last_event));
         rows
+    }
+
+    /// The rows the rail lists: the chip-filtered list, or — while an id
+    /// search runs — every conversation whose id matches it. A search
+    /// suspends the chips rather than composing with them: an id names one
+    /// conversation across the whole fleet, so no category may hide the one
+    /// you named.
+    pub fn listed_rows(&self, search: &str, chip_visible: Vec<WsRow>) -> Vec<WsRow> {
+        if search.is_empty() {
+            return chip_visible;
+        }
+        self.ordered()
+            .into_iter()
+            .filter(|r| id_matches(&r.conv, search))
+            .cloned()
+            .collect()
+    }
+
+    /// Potential conversations the rail lists, under `listed_rows`' rule.
+    pub fn listed_potential<'a>(
+        &'a self,
+        search: &str,
+        now: Millis,
+        chip_visible: Vec<PotentialConv<'a>>,
+    ) -> Vec<PotentialConv<'a>> {
+        if search.is_empty() {
+            return chip_visible;
+        }
+        self.attached_only(now)
+            .into_iter()
+            .filter(|p| id_matches(p.conv, search))
+            .collect()
     }
 
     /// The row for one conversation — its header facts and annotations.
@@ -421,6 +462,148 @@ mod tests {
         rail.apply(&row_event("c", 20));
         let order: Vec<&str> = rail.ordered().iter().map(|r| r.conv.as_str()).collect();
         assert_eq!(order, ["b", "c", "a"]);
+    }
+
+    mod id_matches {
+        use super::*;
+
+        #[test]
+        fn matches_a_substring_of_the_id_whatever_the_case() {
+            let expected = true;
+
+            let actual = id_matches("1E7A-B2C3", "e7a");
+
+            assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn takes_a_query_with_a_space_verbatim() {
+            let expected = true;
+
+            let actual = id_matches("draft 1 e2", "1 e");
+
+            assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn does_not_match_a_spaced_query_against_an_id_without_the_space() {
+            let expected = false;
+
+            let actual = id_matches("767a8ef8-1e27", "1 e");
+
+            assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn does_not_match_characters_merely_scattered_through_the_id() {
+            let expected = false;
+
+            let actual = id_matches("1e7a", "17");
+
+            assert_eq!(actual, expected);
+        }
+    }
+
+    mod the_conversation_id_search {
+        use super::*;
+
+        fn listed(rows: &[(&str, Option<&str>)]) -> ServerMsg {
+            ServerMsg::List {
+                rows: rows
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (conv, title))| WsRow {
+                        conv: (*conv).to_owned(),
+                        last_event: i as Millis,
+                        last_kind: "message".to_owned(),
+                        title: title.map(str::to_owned),
+                        tags: HashMap::new(),
+                    })
+                    .collect(),
+                tag_keys: HashMap::new(),
+            }
+        }
+
+        fn convs(rows: &[WsRow]) -> Vec<&str> {
+            rows.iter().map(|r| r.conv.as_str()).collect()
+        }
+
+        #[test]
+        fn lists_a_matching_conversation_the_chips_had_hidden() {
+            // The chips are suspended, not composed with: an id names one
+            // conversation across the fleet, so an empty chip result cannot
+            // hide it.
+            let mut rail = Rail::default();
+            rail.apply(&listed(&[("aa-11", None), ("bb-22", None)]));
+
+            let expected = ["aa-11"];
+
+            let listed = rail.listed_rows("AA", Vec::new());
+            let actual = convs(&listed);
+
+            assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn leaves_the_chips_governing_while_the_box_is_empty() {
+            let mut rail = Rail::default();
+            rail.apply(&listed(&[("aa-11", None), ("bb-22", None)]));
+            let chip_visible: Vec<WsRow> = rail
+                .ordered()
+                .into_iter()
+                .filter(|r| r.conv == "bb-22")
+                .cloned()
+                .collect();
+
+            let expected = ["bb-22"];
+
+            let listed = rail.listed_rows("", chip_visible);
+            let actual = convs(&listed);
+
+            assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn searches_the_id_and_never_the_title() {
+            let mut rail = Rail::default();
+            rail.apply(&listed(&[("aa-11", Some("zebra"))]));
+
+            let actual = rail.listed_rows("zebra", Vec::new());
+
+            assert!(actual.is_empty());
+        }
+
+        #[test]
+        fn lists_nothing_when_no_id_matches() {
+            let mut rail = Rail::default();
+            rail.apply(&listed(&[("aa-11", None), ("bb-22", None)]));
+
+            let actual = rail.listed_rows("zz", Vec::new());
+
+            assert!(actual.is_empty());
+        }
+
+        #[test]
+        fn lists_a_matching_potential_conversation_the_chips_had_hidden() {
+            let mut rail = Rail::default();
+            rail.apply(&ServerMsg::Agent(WsAgent {
+                kind: "attached".into(),
+                world: "w1".into(),
+                instance_id: "i1".into(),
+                ts: 100_000,
+                conv: Some("ghost-77".into()),
+                cwd: None,
+                interval_s: None,
+                host: None,
+            }));
+
+            let expected = ["ghost-77"];
+
+            let listed = rail.listed_potential("GHOST", 120_000, Vec::new());
+            let actual: Vec<&str> = listed.iter().map(|p| p.conv).collect();
+
+            assert_eq!(actual, expected);
+        }
     }
 
     #[test]
