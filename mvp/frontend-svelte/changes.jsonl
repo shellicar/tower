@@ -4,3 +4,4 @@
 {"type":"change","category":"fixed","description":"Facet filter values hold a stable order between renders; values on an equal count sort by name."}
 {"type":"change","category":"fixed","description":"A selected facet value that matches no conversations stays in the list at a count of 0, so it can still be deselected."}
 {"type":"change","category":"added","description":"The facet filter can select conversations carrying no value for a tag key, listed as (untagged)."}
+{"type":"change","category":"added","description":"A conversation's id can be searched for in the rail and copied from its panel."}

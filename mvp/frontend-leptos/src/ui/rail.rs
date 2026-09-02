@@ -132,6 +132,10 @@ pub fn RailView(
     let expanded_key = RwSignal::new(String::new());
 
     let tab_name = move || view.with(|v| v.tab().name.clone());
+    // An id search suspends every control that decides which conversations
+    // are listed (the rail concern owns the rule itself): an id names one
+    // conversation across the fleet, so no category may hide it.
+    let searching = move || view.with(|v| !v.conv_search.is_empty());
 
     let keys = move || {
         rail.with(|r| {
@@ -181,6 +185,7 @@ pub fn RailView(
                     <span class="dim">"group"</span>
                     <select
                         prop:value=move || view.with(|v| v.view_config().group_key.clone())
+                        disabled=searching
                         on:change=move |ev| {
                             let key = event_target_value(&ev);
                             view.update(|v| v.set_group_key(key));
@@ -197,6 +202,7 @@ pub fn RailView(
                                 <button
                                     class="facet-toggle"
                                     class:on=hidden
+                                    disabled=searching
                                     on:click=move |_| {
                                         view.update(|v| v.toggle_hide_untagged());
                                         save_view(&tab_name(), &view.get_untracked());
@@ -233,10 +239,24 @@ pub fn RailView(
                 </div>
                 <div class="controls-row">
                     <span class="dim">"filter"</span>
+                    // The id box: a conversation id is the address everything
+                    // outside tower uses, so the rail has to be searchable by
+                    // it. Non-empty suspends the chips beside it.
+                    <input
+                        class="id-search"
+                        placeholder="conversation id"
+                        title="find a conversation by its id"
+                        prop:value=move || view.with(|v| v.conv_search.clone())
+                        on:input=move |ev| {
+                            let query = event_target_value(&ev);
+                            view.update(|v| v.conv_search = query);
+                        }
+                    />
                     <button
                         class="facet-toggle live"
                         class:on=move || view.with(|v| v.view_config().live_only)
                         title="only conversations a live agent is serving"
+                        disabled=searching
                         on:click=move |_| {
                             view.update(|v| v.toggle_live_only());
                             save_view(&tab_name(), &view.get_untracked());
@@ -246,6 +266,7 @@ pub fn RailView(
                         class="facet-toggle"
                         class:on=move || view.with(|v| v.view_config().unread_only)
                         title="only conversations nobody's looked at since they last got new content"
+                        disabled=searching
                         on:click=move |_| {
                             view.update(|v| v.toggle_unread_only());
                             save_view(&tab_name(), &view.get_untracked());
@@ -262,6 +283,7 @@ pub fn RailView(
                                     <button
                                         class="facet-toggle"
                                         class:on=(expanded || count > 0)
+                                        disabled=searching
                                         on:click=move |_| {
                                             expanded_key.update(|e| *e = if *e == k2 { String::new() } else { k2.clone() });
                                         }
@@ -299,6 +321,7 @@ pub fn RailView(
                                         <button
                                             class="facet-value"
                                             class:on=selected
+                                            disabled=searching
                                             style=move || selected.then(|| format!("color: {colour}")).unwrap_or_default()
                                             on:click=move |_| {
                                                 view.update(|v| v.toggle_filter(&ek4, value2.as_deref()));
@@ -316,13 +339,19 @@ pub fn RailView(
                 {move || {
                     let live_only = view.with(|v| v.view_config().live_only);
                     let unread_only = view.with(|v| v.view_config().unread_only);
+                    let search = view.with(|v| v.conv_search.clone());
+                    let now_ms = now.get();
                     rail.with(|r| {
-                        r.attached_only(now.get())
+                        let chip_visible = r
+                            .attached_only(now_ms)
                             .into_iter()
                             // A potential conversation has no row, so it can
                             // never be stale: `unread` empties the section
                             // rather than filtering it.
                             .filter(|p| !unread_only && (!live_only || p.verdict == Some(Liveness::Alive)))
+                            .collect();
+                        r.listed_potential(&search, now_ms, chip_visible)
+                            .into_iter()
                             .map(|p| {
                                 let conv = p.conv.to_owned();
                                 let conv_click = conv.clone();
@@ -334,6 +363,7 @@ pub fn RailView(
                                 view! {
                                     <li
                                         class:selected=selected
+                                        title=conv.clone()
                                         on:click=move |_| on_toggle.run(conv_click.clone())
                                     >
                                         <span class="row-main">
@@ -379,16 +409,21 @@ pub fn RailView(
                     let always_show = view.with(|v| v.view_config().always_show.clone());
                     let live_only = view.with(|v| v.view_config().live_only);
                     let unread_only = view.with(|v| v.view_config().unread_only);
+                    let search = view.with(|v| v.conv_search.clone());
                     let now_ms = now.get();
                     rail.with(|r| {
-                        let visible: Vec<WsRow> = r
+                        let chip_visible: Vec<WsRow> = r
                             .ordered()
                             .into_iter()
                             .filter(|row| matches(row, &filters))
                             .filter(|row| state_matches(r, &row.conv, live_only, unread_only, now_ms))
                             .cloned()
                             .collect();
-                        let sections: Vec<Section> = if group_key.is_empty() {
+                        let visible = r.listed_rows(&search, chip_visible);
+                        // Grouping suspends with the chips: `hide untagged`
+                        // drops rows, and a search result must not be
+                        // sectioned away from the reader who named it.
+                        let sections: Vec<Section> = if !search.is_empty() || group_key.is_empty() {
                             vec![Section { label: None, rows: visible, max: 0 }]
                         } else {
                             let mut grouped: Vec<(String, Vec<WsRow>)> = Vec::new();
@@ -449,9 +484,13 @@ pub fn RailView(
                                             })
                                         })
                                         .collect();
+                                    // The hover title is the id: a row shows a
+                                    // name when it has one, and the id is what
+                                    // addresses it everywhere outside tower.
                                     view! {
                                         <li
                                             class:selected=selected
+                                            title=conv.clone()
                                             on:click=move |_| on_toggle.run(conv_click.clone())
                                         >
                                             <span class="row-main">

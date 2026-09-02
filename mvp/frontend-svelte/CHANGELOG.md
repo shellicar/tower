@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The rail can be filtered to only conversations a live agent is serving, or only unread ones, saved per tab.
 - A conversation's panel shows the directory its agent is working in.
 - The facet filter can select conversations carrying no value for a tag key, listed as (untagged).
+- A conversation's id can be searched for in the rail and copied from its panel.
 
 ### Fixed
 

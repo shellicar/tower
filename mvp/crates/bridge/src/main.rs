@@ -1764,10 +1764,13 @@ async fn main() -> anyhow::Result<()> {
         // version/gitHash/buildTime ride the wire alongside instanceId — the
         // same build banner main() prints locally, but durable and queryable
         // now: "which build served this world" no longer dies with whoever's
-        // terminal happened to be open at boot.
+        // terminal happened to be open at boot. name because more than one
+        // implementation publishes here, and a version with nothing naming
+        // what it versions cannot be read.
         serde_json::json!({
             "ts": now_iso(),
             "instanceId": instance,
+            "name": env!("CARGO_PKG_NAME"),
             "version": env!("CARGO_PKG_VERSION"),
             "gitHash": env!("BRIDGE_GIT_HASH"),
             "buildTime": env!("BRIDGE_BUILD_TIME"),
