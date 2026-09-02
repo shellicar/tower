@@ -14,6 +14,14 @@ pub fn tag_of<'a>(row: &'a WsRow, key: &str) -> Option<&'a str> {
     row.tags.get(key).map(String::as_str)
 }
 
+/// OR within a key, AND across keys — tags are flat. A selected `None`
+/// matches a row carrying no value for that key, and nothing else.
+pub fn matches(row: &WsRow, filters: &HashMap<String, Vec<Option<String>>>) -> bool {
+    filters
+        .iter()
+        .all(|(k, vs)| vs.is_empty() || vs.iter().any(|v| v.as_deref() == tag_of(row, k)))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FacetValue {
     pub value: Option<String>,
@@ -113,6 +121,81 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn admits_a_row_whose_value_is_selected() {
+        let expected = true;
+
+        let actual = matches(
+            &row("1", &[("repo", "a")]),
+            &filters(&[("repo", &[Some("a"), Some("b")])]),
+        );
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn rejects_a_row_whose_value_is_not_selected() {
+        let expected = false;
+
+        let actual = matches(
+            &row("1", &[("repo", "c")]),
+            &filters(&[("repo", &[Some("a"), Some("b")])]),
+        );
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn ignores_a_key_whose_filter_selects_nothing() {
+        let expected = true;
+
+        let actual = matches(&row("1", &[("repo", "a")]), &filters(&[("repo", &[])]));
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn admits_a_row_with_no_value_for_the_key_when_none_is_selected() {
+        let expected = true;
+
+        let actual = matches(&row("1", &[]), &filters(&[("repo", &[None])]));
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn rejects_a_row_tagged_untagged_when_none_is_selected() {
+        let expected = false;
+
+        let actual = matches(
+            &row("1", &[("repo", "(untagged)")]),
+            &filters(&[("repo", &[None])]),
+        );
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn rejects_a_row_with_no_value_for_the_key_when_untagged_is_selected() {
+        let expected = false;
+
+        let actual = matches(&row("1", &[]), &filters(&[("repo", &[Some("(untagged)")])]));
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn requires_every_key_to_match() {
+        let expected = false;
+
+        let actual = matches(
+            &row("1", &[("repo", "a"), ("world", "y")]),
+            &filters(&[("repo", &[Some("a")]), ("world", &[Some("x")])]),
+        );
+
+        assert_eq!(actual, expected);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { rail, view } from './app';
-  import { facetValues, tagOf } from './core/facets';
+  import { facetValues, matches, tagOf } from './core/facets';
   import { age, heat } from './core/time';
   import type { RowState } from './types';
 
@@ -19,11 +19,6 @@
   /** Which key's values are expanded in the facet bar; '' = none. */
   let expandedKey = $state('');
 
-  // OR within a key, AND across keys — tags are flat.
-  const matches = (r: RowState) =>
-    Object.entries(view.view.filters).every(
-      ([k, vs]) => vs.length === 0 || vs.includes(tagOf(r, k)),
-    );
   // The two state filters read the same facts the dots do, so the list can
   // never disagree with what's rendered on it.
   const stateMatches = (conv: string) =>
@@ -33,7 +28,10 @@
   // names one conversation across the fleet, so no category may hide it.
   const searching = $derived(view.convSearch !== '');
   const visible = $derived(
-    rail.listedRows(view.convSearch, rail.ordered.filter((r) => matches(r) && stateMatches(r.conv))),
+    rail.listedRows(
+      view.convSearch,
+      rail.ordered.filter((r) => matches(r, view.view.filters) && stateMatches(r.conv)),
+    ),
   );
   // Potential conversations have no row, so they can never be stale: `unread`
   // empties the section rather than filtering it.
@@ -56,20 +54,28 @@
     const k = view.view.groupKey;
     // Grouping suspends with the chips: `hide untagged` drops rows, and a
     // search result must not be sectioned away from the reader who named it.
-    if (searching || !k) return [{ label: null as string | null, rows: visible, max: 0 }];
-    const m = new Map<string, RowState[]>();
+    if (searching || !k)
+      return [{ key: '', value: null as string | null, label: null as string | null, rows: visible, max: 0 }];
+    const m = new Map<string | null, RowState[]>();
     for (const r of visible) {
-      const v = r.tags?.[k];
-      if (v === undefined && view.view.hideUntagged) continue;
-      const label = v ?? '(untagged)';
-      if (!m.has(label)) m.set(label, []);
-      m.get(label)!.push(r);
+      const v = tagOf(r, k);
+      if (v === null && view.view.hideUntagged) continue;
+      if (!m.has(v)) m.set(v, []);
+      m.get(v)!.push(r);
     }
     return [...m.entries()]
-      .map(([label, rows]) => ({ label, rows, max: Math.max(...rows.map((r) => r.lastEvent)) }))
+      .map(([value, rows]) => ({
+        // A literal '(untagged)' tag and the no-value group render the same
+        // label, so the label cannot identify a section.
+        key: JSON.stringify(value),
+        value,
+        label: value ?? '(untagged)',
+        rows,
+        max: Math.max(...rows.map((r) => r.lastEvent)),
+      }))
       .sort((a, b) => {
-        const ua = a.label === '(untagged)' ? 1 : 0;
-        const ub = b.label === '(untagged)' ? 1 : 0;
+        const ua = a.value === null ? 1 : 0;
+        const ub = b.value === null ? 1 : 0;
         return ua - ub || b.max - a.max;
       });
   });
@@ -250,7 +256,7 @@
       </div>
     </li>
   {/each}
-  {#each sections as section (section.label ?? '')}
+  {#each sections as section (section.key)}
     {#if section.label !== null}
       <li
         class="flex justify-between gap-2 border-b border-neutral-800 bg-neutral-900 px-3 py-1 text-xs"

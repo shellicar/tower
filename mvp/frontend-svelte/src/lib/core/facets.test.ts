@@ -1,12 +1,70 @@
 import { describe, expect, it } from 'vitest';
 import type { RowState } from '../types';
-import { facetValues } from './facets';
+import { facetValues, matches } from './facets';
 
 function row(conv: string, tags?: Record<string, string>): RowState {
   return { conv, lastEvent: 0, lastKind: 'message', tags };
 }
 
 const anyState = () => true;
+
+describe('matches', () => {
+  it('admits a row whose value is selected', () => {
+    const expected = true;
+
+    const actual = matches(row('1', { repo: 'a' }), { repo: ['a', 'b'] });
+
+    expect(actual).toBe(expected);
+  });
+
+  it('rejects a row whose value is not selected', () => {
+    const expected = false;
+
+    const actual = matches(row('1', { repo: 'c' }), { repo: ['a', 'b'] });
+
+    expect(actual).toBe(expected);
+  });
+
+  it('ignores a key whose filter selects nothing', () => {
+    const expected = true;
+
+    const actual = matches(row('1', { repo: 'a' }), { repo: [] });
+
+    expect(actual).toBe(expected);
+  });
+
+  it('admits a row with no value for the key when null is selected', () => {
+    const expected = true;
+
+    const actual = matches(row('1'), { repo: [null] });
+
+    expect(actual).toBe(expected);
+  });
+
+  it('rejects a row tagged "(untagged)" when null is selected', () => {
+    const expected = false;
+
+    const actual = matches(row('1', { repo: '(untagged)' }), { repo: [null] });
+
+    expect(actual).toBe(expected);
+  });
+
+  it('rejects a row with no value for the key when "(untagged)" is selected', () => {
+    const expected = false;
+
+    const actual = matches(row('1'), { repo: ['(untagged)'] });
+
+    expect(actual).toBe(expected);
+  });
+
+  it('requires every key to match', () => {
+    const expected = false;
+
+    const actual = matches(row('1', { repo: 'a', world: 'y' }), { repo: ['a'], world: ['x'] });
+
+    expect(actual).toBe(expected);
+  });
+});
 
 describe('facetValues', () => {
   it('breaks a tie on the value, lexicographically', () => {

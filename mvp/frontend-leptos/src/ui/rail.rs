@@ -2,15 +2,12 @@
 //! pending-marker and the void-list are each concern's own slice, not a
 //! shared store — Decision 2's default). Owns no state of its own; the open
 //! conversation and every action are the composition root's.
-
-use std::collections::HashMap;
-
 use leptos::prelude::*;
 
 use crate::concerns::approvals::Approvals;
 use crate::concerns::rail::Rail;
 use crate::concerns::view::View;
-use crate::facets::{facet_values, tag_of};
+use crate::facets::{facet_values, matches, tag_of};
 use crate::time::{Liveness, Millis, age};
 use crate::transport::Status;
 use ws_types::WsRow;
@@ -93,15 +90,12 @@ fn heat_class(now: Millis, ts: Millis) -> &'static str {
 
 /// One section of grouped rows, or the single flat group when ungrouped.
 struct Section {
-    label: Option<String>,
+    /// `None` is the flat group, which draws no header. `Some(value)` is a
+    /// real group, whose value is `None` when its rows carry no value for the
+    /// group key.
+    group: Option<Option<String>>,
     rows: Vec<WsRow>,
     max: Millis,
-}
-
-fn matches(row: &WsRow, filters: &HashMap<String, Vec<Option<String>>>) -> bool {
-    filters
-        .iter()
-        .all(|(k, vs)| vs.is_empty() || vs.iter().any(|v| v.as_deref() == tag_of(row, k)))
 }
 
 /// The two state filters, read from the same facts the dots are drawn from so
@@ -424,30 +418,29 @@ pub fn RailView(
                         // drops rows, and a search result must not be
                         // sectioned away from the reader who named it.
                         let sections: Vec<Section> = if !search.is_empty() || group_key.is_empty() {
-                            vec![Section { label: None, rows: visible, max: 0 }]
+                            vec![Section { group: None, rows: visible, max: 0 }]
                         } else {
-                            let mut grouped: Vec<(String, Vec<WsRow>)> = Vec::new();
+                            let mut grouped: Vec<(Option<String>, Vec<WsRow>)> = Vec::new();
                             for row in visible {
-                                let value = row.tags.get(&group_key).cloned();
+                                let value = tag_of(&row, &group_key).map(str::to_owned);
                                 if value.is_none() && hide_untagged {
                                     continue;
                                 }
-                                let label = value.unwrap_or_else(|| "(untagged)".to_owned());
-                                match grouped.iter_mut().find(|(l, _)| l == &label) {
+                                match grouped.iter_mut().find(|(v, _)| v == &value) {
                                     Some((_, rows)) => rows.push(row),
-                                    None => grouped.push((label, vec![row])),
+                                    None => grouped.push((value, vec![row])),
                                 }
                             }
                             let mut sections: Vec<Section> = grouped
                                 .into_iter()
-                                .map(|(label, rows)| {
+                                .map(|(value, rows)| {
                                     let max = rows.iter().map(|r| r.last_event).max().unwrap_or(0);
-                                    Section { label: Some(label), rows, max }
+                                    Section { group: Some(value), rows, max }
                                 })
                                 .collect();
                             sections.sort_by(|a, b| {
-                                let ua = (a.label.as_deref() == Some("(untagged)")) as u8;
-                                let ub = (b.label.as_deref() == Some("(untagged)")) as u8;
+                                let ua = u8::from(matches!(&a.group, Some(None)));
+                                let ub = u8::from(matches!(&b.group, Some(None)));
                                 ua.cmp(&ub).then(b.max.cmp(&a.max))
                             });
                             sections
@@ -455,7 +448,8 @@ pub fn RailView(
                         sections
                             .into_iter()
                             .map(|section| {
-                                let header = section.label.clone().map(|label| {
+                                let header = section.group.clone().map(|value| {
+                                    let label = value.unwrap_or_else(|| "(untagged)".to_owned());
                                     let count = section.rows.len();
                                     let max = section.max;
                                     let heat = heat_class(now.get(), max);

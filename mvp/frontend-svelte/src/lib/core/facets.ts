@@ -10,6 +10,17 @@ export function tagOf(row: RowState, key: string): string | null {
   return row.tags?.[key] ?? null;
 }
 
+/** OR within a key, AND across keys — tags are flat. A selected `null`
+ *  matches a row carrying no value for that key, and nothing else. */
+export function matches(
+  row: RowState,
+  filters: Record<string, readonly (string | null)[]>,
+): boolean {
+  return Object.entries(filters).every(
+    ([k, vs]) => vs.length === 0 || vs.includes(tagOf(row, k)),
+  );
+}
+
 export interface FacetValue {
   value: string | null;
   count: number;
