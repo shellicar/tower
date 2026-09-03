@@ -1,0 +1,68 @@
+name: Test matrix
+
+# The workspace test suite on all three platforms this repo ships binaries for.
+# The runners cover two independent axes, so none of them is redundant: ubuntu
+# is case-sensitive and unix, macos is case-insensitive and unix, windows is
+# case-insensitive and not unix. Until this existed, cargo test only ever ran
+# on ubuntu, so two of the three platforms we publish were never tested.
+#
+# ci.yml's `checks` job deliberately stays ubuntu-only and keeps clippy,
+# fmt --check, the changes validation, the changelog drift check and the svelte
+# checks. Those are platform-irrelevant, and the drift check in particular is a
+# `git diff --exit-code` that would trip on line endings under Windows.
+#
+# The binary job is left alone: its matrix is package times platform, so the
+# suite inside it would run the same tests nine times.
+on:
+  workflow_call:
+
+jobs:
+  # Decided once, on ubuntu, and handed to all three runners. The point of a
+  # platform matrix is that the same tests run everywhere; scoping per runner
+  # would let a platform quietly test a different set, and the dep-info the
+  # scoping reads is per-runner cache state.
+  scope:
+    runs-on: ubuntu-24.04
+    outputs:
+      packages: ${{ steps.scope.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mvp
+      - name: Determine test scope
+        id: scope
+        shell: bash
+        working-directory: mvp
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            PACKAGES=$(node scripts/affected-crates.mts "origin/${{ github.base_ref }}" --format=cargo-args --tier=affected)
+            echo "packages=${PACKAGES:---workspace}" >> "$GITHUB_OUTPUT"
+          else
+            echo "packages=--workspace" >> "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    needs: scope
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Keep line endings as committed
+        # Windows runners default core.autocrlf to true, which rewrites every
+        # checked-out text file. Path and byte handling is what this matrix
+        # exists to test, so the tree has to be identical on all three.
+        shell: bash
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mvp
+      - run: cargo test ${{ needs.scope.outputs.packages }}
+        shell: bash
+        working-directory: mvp
