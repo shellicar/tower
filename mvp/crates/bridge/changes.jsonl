@@ -20,5 +20,4 @@
 {"type":"change","category":"added","description":"`just titles` counts a conversation's tokens before titling it, so one over 200000 tokens goes to claude-sonnet-5 rather than being rejected for length. A conversation with no content is refused instead of being given a title the model invented for it."}
 {"type":"change","category":"changed","description":"Log in to bridge with bridge-login."}
 {"type":"change","category":"added","description":"Name bridge in the ready telemetry it publishes at boot."}
-{"type":"change","category":"fixed","description":"The commit in bridge's build stamp can now be trusted: the hash carries a -dirty suffix unless a git status over bridge and the crates it compiles reported no modified, staged or untracked files, so a binary built from an edited tree no longer names a commit it does not contain."}
 {"type":"change","category":"fixed","description":"The commit in bridge's build stamp can now be trusted: the hash carries a -dirty suffix unless a git status over the exact files bridge was compiled from reported nothing, so a binary built from an edited tree no longer names a commit it does not contain."}

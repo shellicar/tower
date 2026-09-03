@@ -7,11 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- towerd names its own build on startup: version, the commit it was built from (suffixed -dirty when any file it was compiled from was uncommitted, staged or untracked), and the build time.
+
 ### Fixed
 
 - Open towerd's database in WAL mode.
 - Ignore a displaced agent's release of a claim it no longer holds.
 - Order attachments in the connect snapshot oldest first.
-### Added
-
-- towerd names its own build on startup: version, the commit it was built from (suffixed -dirty when any file it was compiled from was uncommitted, staged or untracked), and the build time.
