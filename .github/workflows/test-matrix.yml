@@ -39,6 +39,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: mvp
-      - run: cargo test --workspace
+      # --no-fail-fast so one red crate does not hide the rest: cargo stops at
+      # the first failing test binary otherwise, and on a platform run what the
+      # other crates do is exactly what you came for. It still exits non-zero.
+      - run: cargo test --workspace --no-fail-fast
         shell: bash
         working-directory: mvp
