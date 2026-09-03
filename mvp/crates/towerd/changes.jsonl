@@ -1,3 +1,4 @@
 {"type":"change","category":"fixed","description":"Open towerd's database in WAL mode."}
 {"type":"change","category":"fixed","description":"Ignore a displaced agent's release of a claim it no longer holds."}
 {"type":"change","category":"fixed","description":"Order attachments in the connect snapshot oldest first."}
+{"type":"change","category":"added","description":"towerd names its own build on startup: version, the commit it was built from (suffixed -dirty when any file it was compiled from was uncommitted, staged or untracked), and the build time."}

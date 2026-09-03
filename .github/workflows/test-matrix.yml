@@ -1,0 +1,47 @@
+name: Test matrix
+
+# The workspace test suite on all three platforms this repo ships binaries for.
+# The runners cover two independent axes, so none of them is redundant: ubuntu
+# is case-sensitive and unix, macos is case-insensitive and unix, windows is
+# case-insensitive and not unix. Until this existed, cargo test only ever ran
+# on ubuntu, so two of the three platforms we publish were never tested.
+#
+# ci.yml's `checks` job deliberately stays ubuntu-only and keeps clippy,
+# fmt --check, the changes validation, the changelog drift check and the svelte
+# checks. Those are platform-irrelevant, and the drift check in particular is a
+# `git diff --exit-code` that would trip on line endings under Windows.
+#
+# The binary job is left alone: its matrix is package times platform, so the
+# suite inside it would run the same tests nine times.
+on:
+  workflow_call:
+
+jobs:
+  # The whole workspace, every time, on every platform. This matrix exists
+  # because a crate can pass on one platform and fail on another, and a
+  # narrowed run answers that for whichever crates a diff happened to touch
+  # rather than for the suite. Whole-workspace is also what makes the run
+  # comparable between the three: same tests, same everywhere.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Keep line endings as committed
+        # Windows runners default core.autocrlf to true, which rewrites every
+        # checked-out text file. Path and byte handling is what this matrix
+        # exists to test, so the tree has to be identical on all three.
+        shell: bash
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mvp
+      # --no-fail-fast so one red crate does not hide the rest: cargo stops at
+      # the first failing test binary otherwise, and on a platform run what the
+      # other crates do is exactly what you came for. It still exits non-zero.
+      - run: cargo test --workspace --no-fail-fast
+        shell: bash
+        working-directory: mvp

@@ -39,8 +39,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: mvp
-      - run: cargo build --release -p ${{ inputs.package }}
+      # Two builds: the first records what this binary compiles, the second
+      # bakes in the stamp computed from that record. A single bare build
+      # would fall back to the previous build's record, which on a fresh
+      # runner does not exist, and would ship every artifact marked dirty.
+      - name: Build
+        shell: bash
         working-directory: mvp
+        run: |
+          set -eu
+          cargo build --release -p ${{ inputs.package }}
+          PREFIX=$(echo '${{ inputs.package }}' | tr '[:lower:]-' '[:upper:]_')
+          STAMP=$(cargo run -q -p buildstamp -- "target/release/${{ inputs.package }}.d")
+          echo "stamping ${{ inputs.package }} as $STAMP"
+          export "BUILDSTAMP_$PREFIX=$STAMP"
+          cargo build --release -p ${{ inputs.package }}
       - name: Package
         shell: bash
         env:

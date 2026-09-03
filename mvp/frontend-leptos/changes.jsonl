@@ -2,3 +2,4 @@
 {"type":"change","category":"added","description":"A conversation's panel shows the directory its agent is working in."}
 {"type":"change","category":"fixed","description":"An agent whose claim omits its world reads as alive on the rail."}
 {"type":"change","category":"added","description":"A conversation's id can be searched for in the rail and copied from its panel."}
+{"type":"change","category":"added","description":"The app logs its own build to the browser console on load: version, the commit it was built from (suffixed -dirty when any file it was compiled from was uncommitted, staged or untracked), and the build time, so a stale cached bundle is visible."}
