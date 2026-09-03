@@ -17,36 +17,12 @@ on:
   workflow_call:
 
 jobs:
-  # Decided once, on ubuntu, and handed to all three runners. The point of a
-  # platform matrix is that the same tests run everywhere; scoping per runner
-  # would let a platform quietly test a different set, and the dep-info the
-  # scoping reads is per-runner cache state.
-  scope:
-    runs-on: ubuntu-24.04
-    outputs:
-      packages: ${{ steps.scope.outputs.packages }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: mvp
-      - name: Determine test scope
-        id: scope
-        shell: bash
-        working-directory: mvp
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --no-tags origin "${{ github.base_ref }}"
-            PACKAGES=$(node scripts/affected-crates.mts "origin/${{ github.base_ref }}" --format=cargo-args --tier=affected)
-            echo "packages=${PACKAGES:---workspace}" >> "$GITHUB_OUTPUT"
-          else
-            echo "packages=--workspace" >> "$GITHUB_OUTPUT"
-          fi
-
+  # The whole workspace, every time, on every platform. This matrix exists
+  # because a crate can pass on one platform and fail on another, and a
+  # narrowed run answers that for whichever crates a diff happened to touch
+  # rather than for the suite. Whole-workspace is also what makes the run
+  # comparable between the three: same tests, same everywhere.
   test:
-    needs: scope
     strategy:
       fail-fast: false
       matrix:
@@ -63,6 +39,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: mvp
-      - run: cargo test ${{ needs.scope.outputs.packages }}
+      - run: cargo test --workspace
         shell: bash
         working-directory: mvp
