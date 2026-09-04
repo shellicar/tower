@@ -36,7 +36,7 @@ send_wrapper = "0.6"
 # gloo-net's WebSocket: an async Stream/Sink split, not ewebsock's try_recv
 # channel — the natural fit for Leptos's push-based reactive graph rather than
 # egui's per-frame pull.
-gloo-net = { version = "0.6", features = ["websocket", "http"] }
+gloo-net = { version = "0.7", features = ["websocket", "http"] }
 futures = "0.3"
 web-sys = { version = "0.3", features = [
   "Clipboard",
