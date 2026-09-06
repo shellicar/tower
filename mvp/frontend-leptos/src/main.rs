@@ -20,6 +20,16 @@ mod uploads;
 #[cfg(target_arch = "wasm32")]
 fn main() {
     console_error_panic_hook::set_once();
+    // The wasm is cached, so a stale tab is otherwise indistinguishable.
+    web_sys::console::log_1(
+        &format!(
+            "tower-frontend-leptos {} ({}) built {}",
+            env!("CARGO_PKG_VERSION"),
+            env!("FRONTEND_LEPTOS_GIT_HASH"),
+            env!("FRONTEND_LEPTOS_BUILD_TIME"),
+        )
+        .into(),
+    );
 
     let window = web_sys::window().expect("no window");
     let location = window.location();
