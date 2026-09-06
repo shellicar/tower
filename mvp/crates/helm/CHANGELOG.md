@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- helm names its version, commit and build time before it takes the screen.
+- Print helm's version, commit and build time before it takes the screen.
 
 ### Changed
 

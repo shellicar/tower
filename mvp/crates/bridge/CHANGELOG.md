@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Turns ask the messages API for adaptive thinking rather than a fixed token budget.
 - A Ref result is returned whole however large, instead of being stashed and swapped for a pointer to a new ref holding it. The pointer to an oversized result is JSON text again, as the Ref tool's description says it is.
 - An adopted conversation replays its whole record, instead of stopping at whatever one fetch returned.
-- The build stamp marks its hash dirty when a file bridge was compiled from is uncommitted or untracked.
+- Stop bridge's build stamp naming a commit it was not built from.
 
 ### Security
 
