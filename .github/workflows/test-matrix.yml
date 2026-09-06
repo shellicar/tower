@@ -1,0 +1,26 @@
+name: Test matrix
+
+# Two axes: ubuntu is case-sensitive and unix, macos is case-insensitive and
+# unix, windows is case-insensitive and not unix.
+on:
+  workflow_call:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Keep line endings as committed
+        shell: bash
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mvp
+      - run: cargo test --workspace --no-fail-fast
+        shell: bash
+        working-directory: mvp
