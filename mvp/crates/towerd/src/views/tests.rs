@@ -1415,22 +1415,3 @@ fn a_user_message_is_not_a_qualifying_event() {
             .is_none()
     );
 }
-
-// TEMPORARY probes, not tests of behaviour. Every views test hangs on Windows
-// and no other towerd test does, so these split what they all share into its
-// parts and let a Windows run say which part it is. Delete once it has.
-#[test]
-fn probe_fresh_only() {
-    let _views = fresh();
-}
-
-#[test]
-fn probe_sqlite_only() {
-    let db = rusqlite::Connection::open_in_memory().unwrap();
-    apply_schema(&db).unwrap();
-}
-
-#[test]
-fn probe_runtime_only() {
-    let _handle = RT.with(|rt| rt.handle().clone());
-}
