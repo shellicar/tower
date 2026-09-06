@@ -1,18 +1,9 @@
 //! The stamp a binary answers "which commit am I?" with.
 //!
-//! Cargo already knows what a binary was compiled from: after a build,
-//! `target/<profile>/<binary>.d` lists every local source file that went into
-//! it, path dependencies and patched crates included. So the build computes
-//! the stamp and hands it to a second build through the environment, and a
-//! build script's whole job is to receive it.
-//!
-//! A stamp reads clean only when a `git status` ran and reported nothing over
-//! that file list. An untracked file that is part of the build shows up as
-//! `??` and counts; one that is not part of the build cannot change the
-//! binary, so it does not.
-//!
-//! Cargo does not list `Cargo.lock` or the workspace manifest, which are
-//! equally part of what compiles, so they are added to the checked set here.
+//! `target/<profile>/<binary>.d` is what cargo recorded the binary as compiled
+//! from, path dependencies and patched crates included. A stamp reads clean
+//! only when a `git status` over that list, plus `Cargo.lock` and the
+//! workspace manifest, ran and reported nothing.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -36,9 +27,7 @@ pub fn emit(prefix: &str) {
 /// The stamp for the binary that `dep_info` describes: cargo's
 /// `target/<profile>/<binary>.d`, or the wasm target's own copy of it.
 pub fn stamp(dep_info: &Path) -> String {
-    // Absolute first: the walk up to the workspace root has to leave the
-    // caller's working directory, and a relative path runs out of ancestors
-    // before it gets there.
+    // Absolute, or the walk to the workspace root runs out of ancestors.
     let Ok(dep_info) = std::path::absolute(dep_info) else {
         return "unknown-dirty".to_string();
     };
@@ -46,18 +35,12 @@ pub fn stamp(dep_info: &Path) -> String {
     let Some(workspace) = workspace_root(dep_info) else {
         return "unknown-dirty".to_string();
     };
-    // Resolved, because git reports its own toplevel resolved: an unresolved
-    // path through a symlinked parent reads as outside the repository, and
-    // git rejects the whole status call rather than that one pathspec.
     let workspace = workspace.canonicalize().unwrap_or(workspace);
     let Some(hash) = git(&workspace, &["rev-parse", "--short", "HEAD"]) else {
         return "unknown-dirty".to_string();
     };
-    // Resolved the same way the compiled paths are, or the prefix comparison
-    // below is between two spellings of the same directory: on Windows
-    // `canonicalize` returns an extended-length path (`\\?\C:\...`) while git
-    // reports `C:/...`, and every compiled file then reads as outside the
-    // repository, leaving nothing but the lockfile and manifest to answer for.
+    // Resolved the same way the compiled paths are: an unresolved spelling of
+    // the same directory makes every one of them read as outside the repo.
     let Some(repo) = git(&workspace, &["rev-parse", "--show-toplevel"])
         .map(PathBuf::from)
         .map(|repo| repo.canonicalize().unwrap_or(repo))
@@ -75,10 +58,9 @@ pub fn stamp(dep_info: &Path) -> String {
 /// `None` when the dep-info is unreadable, which certifies nothing.
 fn checked_paths(dep_info: &Path, workspace: &Path, repo: &Path) -> Option<Vec<PathBuf>> {
     let recorded = std::fs::read_to_string(dep_info).ok()?;
-    // The list carries whatever build scripts declared, which can include
-    // directories and paths outside the repository (a linked worktree's git
-    // internals, for one). Git rejects the whole call over an outside path,
-    // and a directory would drag in files that are not compiled.
+    // The list also carries whatever build scripts declared, which can be a
+    // directory or a path outside the repo; git rejects the whole call over
+    // an outside path, and a directory drags in files that are not compiled.
     let mut paths: Vec<PathBuf> = compiled_files(&recorded)
         .into_iter()
         .map(|path| path.canonicalize().unwrap_or(path))
@@ -98,9 +80,8 @@ fn compiled_files(dep_info: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-/// The right-hand side of a dep-info line: `<output>: <file> <file>`. The
-/// colon that ends the output is the one followed by whitespace, which the
-/// colon in a Windows drive letter never is.
+/// The right-hand side of `<output>: <file> <file>`. The colon that ends the
+/// output is the one followed by whitespace; a drive letter's never is.
 fn dependency_list(line: &str) -> Option<&str> {
     let bytes = line.as_bytes();
     let end = (0..bytes.len())
@@ -108,8 +89,8 @@ fn dependency_list(line: &str) -> Option<&str> {
     Some(&line[end + 1..])
 }
 
-/// Whitespace separates paths, and a backslash before a space escapes it.
-/// A backslash anywhere else is a Windows path separator, not an escape.
+/// Whitespace separates paths; a backslash escapes only a space, since
+/// anywhere else it is a Windows path separator.
 fn split_escaped(list: &str) -> Vec<String> {
     let mut paths = Vec::new();
     let mut current = String::new();
@@ -156,15 +137,9 @@ fn certified_clean(repo: &Path, paths: &[PathBuf]) -> bool {
     }
 }
 
-/// Git, with the settings this check refuses to inherit.
-///
-/// `status.showUntrackedFiles=no` in a user's config would hide exactly the
-/// files the design rests on noticing, and the stamp would then certify clean
-/// over a file nobody committed. A claim about a commit must not depend on
-/// settings on the machine that made it.
-///
-/// `--no-optional-locks` because a build script has no business writing the
-/// index, which `git status` otherwise does to refresh it.
+/// Git with the settings this check refuses to inherit: a user's
+/// `status.showUntrackedFiles=no` would hide files the stamp has to notice,
+/// and `status` refreshes the index unless told not to.
 fn git_command(dir: &Path) -> Command {
     let mut command = Command::new("git");
     command
@@ -183,9 +158,8 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
-/// No stamp was handed in, so this is a bare `cargo build`. The previous
-/// build's dep-info still names what this binary compiles, which is at worst
-/// one build out of date and beats stamping nothing at all.
+/// A bare `cargo build`: the previous build's dep-info still names what this
+/// binary compiles, at worst one build out of date.
 fn from_previous_build() -> String {
     match dep_info_beside_out_dir() {
         Some(dep_info) => stamp(&dep_info),
@@ -202,8 +176,6 @@ fn dep_info_beside_out_dir() -> Option<PathBuf> {
     Some(profile_dir.join(format!("{package}.d")))
 }
 
-/// From Rust, not a `date` subprocess: `date -u` is not a program on Windows
-/// outside a bash shell, and CI builds Windows binaries.
 fn build_time_utc() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -216,7 +188,7 @@ fn build_time_utc() -> String {
 }
 
 /// Howard Hinnant's civil_from_days: days since the unix epoch to a proleptic
-/// Gregorian year/month/day, no leap-second table and no dependency.
+/// Gregorian year/month/day.
 fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let shifted = days + 719_468;
     let era = shifted.div_euclid(146_097);

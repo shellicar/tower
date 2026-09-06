@@ -962,10 +962,8 @@ mod tests {
         ExecCredentials::default()
     }
 
-    // Gated off Windows, not fixed: these drive real unix tooling (echo, exit,
-    // sleep) through run_bash, and what they assert about spawning, output and
-    // kill grace does not hold there. The behaviour underneath is unproven on
-    // Windows rather than known-good.
+    // Gated off Windows, not fixed: these drive unix tooling (echo, exit,
+    // sleep) through run_bash. Exec there is unproven, not known-good.
     #[cfg(not(windows))]
     #[tokio::test]
     async fn echo_succeeds_and_carries_stdout() {

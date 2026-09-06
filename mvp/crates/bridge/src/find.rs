@@ -211,8 +211,8 @@ mod tests {
         }
     }
 
-    // Gated off Windows, not fixed: the assertion below spells the expected
-    // path with a forward slash, which is not what a Windows walk returns.
+    // Gated off Windows, not fixed: the assertion spells the path with a
+    // forward slash, which is not what a Windows walk returns.
     #[cfg(not(windows))]
     #[tokio::test]
     async fn finds_files_recursively_and_excludes_node_modules_by_default() {

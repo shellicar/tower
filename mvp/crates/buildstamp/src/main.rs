@@ -1,9 +1,6 @@
 //! Prints the stamp for one binary, given the dep-info cargo wrote for it:
 //!
 //!     buildstamp target/debug/bridge.d
-//!
-//! Run between two builds: the first tells cargo to write the dep-info, the
-//! second receives what this printed.
 
 fn main() {
     let mut args = std::env::args().skip(1);

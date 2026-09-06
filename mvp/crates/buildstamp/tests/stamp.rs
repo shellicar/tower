@@ -1,7 +1,5 @@
-//! The proof, driven end to end: build a scratch repository, compute the
-//! stamp from what cargo recorded, build again with it, and ask the binary
-//! what it says. Cargo's rerun behaviour is what these pin, and it cannot be
-//! reasoned about from the outside.
+//! Driven end to end against a scratch repository: build, compute the stamp
+//! from what cargo recorded, build again with it, and ask the binary.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -81,8 +79,7 @@ impl Scratch {
             None => APP_MAIN.to_string(),
         };
         scratch.write("app/src/main.rs", &main);
-        // Compiled, so an edit to it has to show. `mod orphan;` in main.rs
-        // is what makes it so.
+        // Compiled: `mod orphan;` in main.rs is what makes it so.
         scratch.write(
             "app/src/orphan.rs",
             "pub const NOTE: &str = \"compiled\";\n",
@@ -102,8 +99,7 @@ impl Scratch {
         );
 
         scratch.git(&["init", "-q"]);
-        // The lockfile is part of the checked set, so the baseline has to
-        // hold it committed the way a real repository does.
+        // The lockfile is in the checked set, so the baseline must commit it.
         scratch.cargo(&["generate-lockfile"], None);
         scratch.commit(
             &[
@@ -179,8 +175,7 @@ impl Scratch {
                 "user.email=scratch@example.invalid",
                 "-c",
                 "user.name=scratch",
-                // A scratch repository has no signing key, and the machine's
-                // own config may well demand one.
+                // No signing key here, and the machine's config may demand one.
                 "-c",
                 "commit.gpgsign=false",
             ])
@@ -235,8 +230,7 @@ impl Scratch {
         );
     }
 
-    /// What the built binary says its stamp is, after the two builds the
-    /// approach is made of.
+    /// What the built binary says its stamp is, after both builds.
     fn binary_says(&self) -> String {
         self.build(None);
         let stamp = buildstamp::stamp(&self.dep_info());
@@ -298,8 +292,8 @@ mod stamp {
     #[test]
     fn marks_dirty_when_an_untracked_file_is_part_of_the_build() {
         let scratch = Scratch::new("untracked");
-        // The module declaration is committed and the file it names is not,
-        // so the only thing git has to notice is the untracked file itself.
+        // The declaration is committed and the file it names is not, so the
+        // untracked file is the only thing git has to notice.
         scratch.append("app/src/main.rs", "mod extra;\n");
         scratch.write("app/src/extra.rs", "pub const NOTE: &str = \"new\";\n");
         scratch.commit(&["app/src/main.rs"], "declare the new module");
@@ -335,9 +329,8 @@ mod stamp {
         assert_eq!(actual, expected);
     }
 
-    /// Asserted on the computed stamp rather than the binary: cargo rewrites
-    /// a hand-edited lockfile back to canonical form on the next build, and
-    /// there is no offline `cargo update` to stand in for it.
+    /// Asserted on the computed stamp, not the binary: cargo rewrites a
+    /// hand-edited lockfile on the next build.
     #[test]
     fn counts_the_lockfile_that_cargo_never_records_as_compiled() {
         let scratch = Scratch::new("lockfile");
@@ -359,8 +352,7 @@ mod stamp {
         let expected = scratch.head();
         scratch.binary_says();
 
-        // No stamp handed in: the build script falls back to the dep-info the
-        // build before it left behind.
+        // No stamp handed in: the build script falls back to the last record.
         scratch.build(None);
         let actual = scratch.run_binary();
 
@@ -368,9 +360,8 @@ mod stamp {
     }
 }
 
-/// The edges of what the check can see, pinned so they stay known rather than
-/// guessed. Several of these answer clean where dirty would be better; that
-/// gap is recorded in trigger-matrix.md, not closed here.
+/// The edges of what the check can see. Several answer clean where dirty
+/// would be better; trigger-matrix.md records which.
 mod boundary {
     use super::{Scratch, dirty};
 

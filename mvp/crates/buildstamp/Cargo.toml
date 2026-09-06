@@ -1,8 +1,5 @@
-# Every binary's build script, so a running binary can name the commit it was
-# built from and say whether the working tree it compiled matched that commit.
-# std only, deliberately: a build-dependency is compiled before anything else
-# in the workspace, and vergen/git-version approximate the dirty question
-# rather than scoping it to what the binary actually compiles.
+# The build stamp every binary carries: which commit it was built from, and
+# whether the files it compiled matched that commit. std only.
 [package]
 name = "buildstamp"
 version.workspace = true

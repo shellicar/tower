@@ -11,9 +11,6 @@ use towerd::{ingest, views, web};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Which build this is, before anything it might fail at: towerd runs for
-    // days, so the answer to "which commit is that process?" has to survive
-    // in the log rather than in whoever started it.
     eprintln!(
         "towerd {} ({}) built {}",
         env!("CARGO_PKG_VERSION"),

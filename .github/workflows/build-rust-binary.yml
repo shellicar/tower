@@ -34,15 +34,12 @@ jobs:
           - runner: windows-2022
             platform: win32-x64
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: mvp
-      # Two builds: the first records what this binary compiles, the second
-      # bakes in the stamp computed from that record. A single bare build
-      # would fall back to the previous build's record, which on a fresh
-      # runner does not exist, and would ship every artifact marked dirty.
       - name: Build
         shell: bash
         working-directory: mvp

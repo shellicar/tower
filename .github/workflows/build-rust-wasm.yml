@@ -28,6 +28,7 @@ jobs:
   wasm:
     if: inputs.should_run
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
@@ -35,9 +36,8 @@ jobs:
           workspaces: mvp
       - run: rustup target add wasm32-unknown-unknown
       - uses: jetli/trunk-action@v0.5.0
-      # Two builds, as for the native binaries. The stamp comes from the wasm
-      # target's own dep-info: the native build of this crate compiles none of
-      # its wasm-only modules, so its record is the wrong one.
+      # The stamp comes from the wasm target's dep-info; the native build of
+      # this crate compiles none of its wasm-only modules.
       - name: Build
         shell: bash
         working-directory: mvp/${{ inputs.package }}

@@ -42,6 +42,7 @@ jobs:
   checks:
     if: github.ref_type != 'tag'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,9 +64,7 @@ jobs:
             echo "fmt_packages=" >> "$GITHUB_OUTPUT"
           fi
         working-directory: mvp
-      # cargo test runs in test-matrix.yml instead, on all three platforms.
-      # Everything left in this job is platform-irrelevant, and the changelog
-      # drift check below would trip on line endings under Windows.
+      # cargo test runs in test-matrix.yml, on all three platforms.
       - run: cargo clippy ${{ steps.scope.outputs.packages }}
         working-directory: mvp
       - run: cargo fmt --check ${{ steps.scope.outputs.fmt_packages }}
@@ -88,10 +87,6 @@ jobs:
           node scripts/generate-all-changelogs.mts
           git diff --exit-code -- '*/CHANGELOG.md'
 
-  # The workspace suite on all three platforms this repo ships binaries for.
-  # Separate from checks because only cargo test needs repeating per platform,
-  # and separate from the binary job because that matrix is package times
-  # platform, which would run the same tests nine times.
   test-matrix:
     if: github.ref_type != 'tag'
     uses: ./.github/workflows/test-matrix.yml
@@ -101,6 +96,7 @@ jobs:
   # triggers.
   detect:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     outputs:
       app: ${{ steps.tag.outputs.app }}
       version: ${{ steps.tag.outputs.version }}
@@ -192,6 +188,7 @@ jobs:
       ]
     if: always()
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Require every needed job to have succeeded or skipped
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}

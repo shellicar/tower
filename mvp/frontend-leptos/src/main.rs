@@ -20,8 +20,7 @@ mod uploads;
 #[cfg(target_arch = "wasm32")]
 fn main() {
     console_error_panic_hook::set_once();
-    // Which build the browser is actually running: the served wasm is a
-    // cacheable artifact, so a stale tab is otherwise indistinguishable.
+    // The wasm is cached, so a stale tab is otherwise indistinguishable.
     web_sys::console::log_1(
         &format!(
             "tower-frontend-leptos {} ({}) built {}",

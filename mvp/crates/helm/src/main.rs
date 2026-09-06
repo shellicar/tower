@@ -80,8 +80,7 @@ fn resolve_bridge_path() -> String {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Which build this is, printed before ratatui claims the screen: the
-    // last moment this process can write to the real terminal.
+    // Before ratatui claims the screen, the last moment stderr reaches it.
     eprintln!(
         "helm {} ({}) built {}",
         env!("CARGO_PKG_VERSION"),
