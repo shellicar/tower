@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- towerd names its own build on startup: version, the commit it was built from (suffixed -dirty when any file it was compiled from was uncommitted, staged or untracked), and the build time.
+- towerd names its version, commit and build time on startup.
 
 ### Fixed
 

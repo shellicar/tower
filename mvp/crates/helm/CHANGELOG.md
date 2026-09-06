@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- helm names its own build before it takes the screen: version, the commit it was built from (suffixed -dirty when any file it was compiled from was uncommitted, staged or untracked), and the build time.
+- helm names its version, commit and build time before it takes the screen.
 
 ### Changed
 
