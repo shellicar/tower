@@ -68,11 +68,11 @@ jobs:
       matrix:
         include:
           - probe: everything except the views tests
-            filter: -- --skip views:: --test-threads=1
+            filter: '-- --skip views:: --test-threads=1'
           - probe: the test that hung, alone
-            filter: views::tests::a_displaced_agent_v1_detached_emits_no_fact_while_the_conv_leaf_stands -- --exact --test-threads=1 --nocapture
+            filter: 'views::tests::a_displaced_agent_v1_detached_emits_no_fact_while_the_conv_leaf_stands -- --exact --test-threads=1 --nocapture'
           - probe: a different views test, alone
-            filter: views::tests::message_lands_in_views_and_row -- --exact --test-threads=1 --nocapture
+            filter: 'views::tests::message_lands_in_views_and_row -- --exact --test-threads=1 --nocapture'
     runs-on: windows-2022
     timeout-minutes: 12
     steps:
