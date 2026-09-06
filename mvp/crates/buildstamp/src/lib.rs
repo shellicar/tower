@@ -53,7 +53,15 @@ pub fn stamp(dep_info: &Path) -> String {
     let Some(hash) = git(&workspace, &["rev-parse", "--short", "HEAD"]) else {
         return "unknown-dirty".to_string();
     };
-    let Some(repo) = git(&workspace, &["rev-parse", "--show-toplevel"]).map(PathBuf::from) else {
+    // Resolved the same way the compiled paths are, or the prefix comparison
+    // below is between two spellings of the same directory: on Windows
+    // `canonicalize` returns an extended-length path (`\\?\C:\...`) while git
+    // reports `C:/...`, and every compiled file then reads as outside the
+    // repository, leaving nothing but the lockfile and manifest to answer for.
+    let Some(repo) = git(&workspace, &["rev-parse", "--show-toplevel"])
+        .map(PathBuf::from)
+        .map(|repo| repo.canonicalize().unwrap_or(repo))
+    else {
         return format!("{hash}-dirty");
     };
     match checked_paths(dep_info, &workspace, &repo) {

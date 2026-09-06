@@ -962,6 +962,11 @@ mod tests {
         ExecCredentials::default()
     }
 
+    // Gated off Windows, not fixed: these drive real unix tooling (echo, exit,
+    // sleep) through run_bash, and what they assert about spawning, output and
+    // kill grace does not hold there. The behaviour underneath is unproven on
+    // Windows rather than known-good.
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn echo_succeeds_and_carries_stdout() {
         let mut cancel = no_cancel();
@@ -970,6 +975,7 @@ mod tests {
         assert!(content.contains("hello"), "stdout absent: {content:?}");
     }
 
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn a_nonzero_exit_is_an_error() {
         let mut cancel = no_cancel();
@@ -979,6 +985,7 @@ mod tests {
         assert!(content.contains('3'), "status absent: {content:?}");
     }
 
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn stderr_is_captured_and_labelled() {
         let mut cancel = no_cancel();
@@ -992,6 +999,7 @@ mod tests {
         assert!(content.contains("oops"));
     }
 
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn output_over_the_cap_is_truncated() {
         let mut cancel = no_cancel();
@@ -1051,6 +1059,7 @@ mod tests {
         assert!(content.contains("hello"), "stdout absent: {content:?}");
     }
 
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn exec_honours_cwd_and_env() {
         let mut cancel = no_cancel();
@@ -1532,6 +1541,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn a_command_that_finished_before_the_deadline_reports_its_own_status() {
         let mut cancel = no_cancel();
@@ -1569,6 +1579,7 @@ mod tests {
 
     /// One grace for the whole call, not one per command: five commands used to
     /// cost five 500ms waits, so the call outran its own deadline by 2.5s.
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn the_kill_grace_does_not_grow_with_the_number_of_commands() {
         let mut cancel = no_cancel();
