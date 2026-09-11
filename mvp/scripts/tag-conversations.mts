@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 
 const PALETTE = ["#8ec07c", "#83a598", "#d3869b", "#fabd2f", "#fe8019", "#b8bb26", "#7fc7ff", "#d65d0e", "#b16286", "#689d6a"];
 const US = "\u001f";
@@ -8,6 +9,7 @@ const REPOS = "/repos/";
 const DEFAULT_DB = "tower-v2.db";
 const BUCKET = process.env.NATS_REPORTING_BUCKET ?? "reporting-lines";
 const DIR_KEYS = ["org", "platform", "project", "repo", "worktree"] as const;
+const ADO_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798";
 const FLEET = "fleet";
 // Every fleet repo has the same GitHub owner, so only its directory says whose work it manages.
 const FLEET_ORGS: Record<string, string> = {
@@ -19,7 +21,7 @@ const FLEET_ORGS: Record<string, string> = {
 };
 
 type Tag = { conv: string; key: string; value: string };
-type Dir = { convs: string[]; org: string; platform: string; project: string; repo: string; worktree: string; fleet: boolean };
+type Dir = { convs: string[]; org: string; platform: string; owner: string; project: string; repo: string; worktree: string; branch: string; fleet: boolean };
 
 const args = process.argv.slice(2);
 
@@ -53,8 +55,7 @@ if (!existsSync(db)) {
 }
 
 const query = (statement: string): string[][] =>
-  // The message scan returns whole message bodies, already 0.8 MB against execFileSync's 1 MB default.
-  execFileSync("sqlite3", ["-readonly", "-cmd", ".timeout 5000", "-separator", US, db, statement], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 })
+  execFileSync("sqlite3", ["-readonly", "-cmd", ".timeout 5000", "-separator", US, db, statement], { encoding: "utf8" })
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line) => line.split(US));
@@ -68,12 +69,12 @@ const git = (cwd: string, gitArgs: string[]): string => {
 };
 
 // Azure DevOps nests a project between the org and the repo and marks it with _git; GitHub does not.
-const fromRemote = (url: string): { platform: string; project: string; repo: string } => {
+const fromRemote = (url: string): { platform: string; owner: string; project: string; repo: string } => {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    return { platform: "", project: "", repo: "" };
+    return { platform: "", owner: "", project: "", repo: "" };
   }
   const platform = parsed.host === "github.com" ? "github" : parsed.host === "dev.azure.com" || parsed.host.endsWith(".visualstudio.com") ? "devops" : "";
   const segments = parsed.pathname
@@ -81,8 +82,9 @@ const fromRemote = (url: string): { platform: string; project: string; repo: str
     .filter((segment) => segment.length > 0)
     .map(decodeURIComponent);
   const at = segments.indexOf("_git");
-  if (at > 0) return { platform, project: segments[at - 1] ?? "", repo: segments[at + 1] ?? "" };
-  return { platform, project: "", repo: (segments[segments.length - 1] ?? "").replace(/\.git$/, "") };
+  const owner = segments[0] ?? "";
+  if (at > 0) return { platform, owner, project: segments[at - 1] ?? "", repo: segments[at + 1] ?? "" };
+  return { platform, owner, project: "", repo: (segments[segments.length - 1] ?? "").replace(/\.git$/, "") };
 };
 
 const derive = (cwd: string): Omit<Dir, "convs"> => {
@@ -93,15 +95,16 @@ const derive = (cwd: string): Omit<Dir, "convs"> => {
   const fleet = segments[0] === FLEET;
   const client = fleet ? FLEET_ORGS[(segments[1] ?? "").split("--")[0] ?? ""] : undefined;
   const org = at < 0 ? "personal" : (client ?? segments[0] ?? "");
-  const empty = { org, platform: "", project: "", repo: "", worktree: "", fleet };
+  const empty = { org, platform: "", owner: "", project: "", repo: "", worktree: "", branch: "", fleet };
   const root = git(cwd, ["rev-parse", "--show-toplevel"]);
   if (!root) return empty;
   const name = root.slice(root.lastIndexOf("/") + 1);
   const sep = name.indexOf("--");
   const worktree = sep < 0 ? "" : name.slice(sep + 2);
+  const branch = git(cwd, ["symbolic-ref", "--short", "HEAD"]);
   const url = git(cwd, ["remote", "get-url", "origin"]);
-  if (!url) return { ...empty, worktree };
-  return { ...fromRemote(url), org, worktree, fleet };
+  if (!url) return { ...empty, worktree, branch };
+  return { ...fromRemote(url), org, worktree, branch, fleet };
 };
 
 const reportingLines = (): { workers: string[]; owners: string[] } => {
@@ -128,67 +131,72 @@ const reportingLines = (): { workers: string[]; owners: string[] } => {
   return { workers: keys, owners };
 };
 
-const GITHUB_PR = /github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/g;
-const DEVOPS_PR = /dev\.azure\.com\/([\w.%-]+)\/([\w.%-]+)\/_git\/([\w.%-]+)\/pullrequests?\/(\d+)/gi;
+// The pull request a conversation belongs to is the open one for the branch its
+// working directory is on. What the conversation says is not evidence: a message
+// naming a pull request is as likely to be discussing someone else's.
+type Repo = { platform: string; owner: string; project: string; repo: string };
+type Branches = { numbers: Map<string, string>; answered: Set<string> };
 
-// Every pull request each conversation names, however many times, before any of them
-// are known to be open.
-const mentioned = (): Map<string, Map<string, number>> => {
-  const counts = new Map<string, Map<string, number>>();
-  for (const [conv, content] of query(
-    "SELECT conv, content FROM messages WHERE content LIKE '%/pull/%' OR content LIKE '%pullrequest/%' OR content LIKE '%pullrequests/%';",
-  )) {
-    if (!conv || !content) continue;
-    const perConv = counts.get(conv) ?? new Map<string, number>();
-    const bump = (reference: string) => perConv.set(reference, (perConv.get(reference) ?? 0) + 1);
-    for (const match of content.matchAll(GITHUB_PR)) bump(`${match[1]}/${match[2]}#${match[3]}`);
-    for (const match of content.matchAll(DEVOPS_PR)) bump(`${match[1]}/${match[2]}/${match[3]}#${match[4]}`);
-    if (perConv.size > 0) counts.set(conv, perConv);
-  }
-  return counts;
+const repoKey = (r: Repo): string => [r.platform, r.owner, r.project, r.repo].join(US);
+
+const onGithub = (r: Repo): string[] => {
+  const raw = execFileSync("gh", ["pr", "list", "--repo", `${r.owner}/${r.repo}`, "--state", "open", "--json", "number,headRefName"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  return (JSON.parse(raw) as { number: number; headRefName: string }[]).map((pr) => `${pr.headRefName}${US}${pr.number}`);
 };
 
-// A lookup that failed is not a lookup that found nothing: `whole` says every source
-// answered, and only then may a tag be removed for being absent from the result.
-type Open = { references: string[]; whole: boolean };
-
-const openOnGithub = (): Open => {
-  try {
-    const raw = execFileSync("gh", ["search", "prs", "--owner", "shellicar", "--state", "open", "--limit", "200", "--json", "number,repository"], { encoding: "utf8" });
-    const found = JSON.parse(raw) as { number: number; repository: { nameWithOwner: string } }[];
-    return { references: found.map((item) => `${item.repository.nameWithOwner}#${item.number}`), whole: true };
-  } catch {
-    process.stderr.write("warning: could not list open GitHub pull requests, so no pr tag is planned or removed from one\n");
-    return { references: [], whole: false };
-  }
+// az rest authenticates as the default account whatever flags it is given, which
+// 403s against an org in another tenant, so the token is minted per subscription
+// and attached by hand. The subscription is git-refresh's, read from the same
+// repository, so the two can never disagree. (~/lib/git-common.sh)
+const onDevops = (r: Repo, cwd: string): string[] => {
+  const subscription = git(cwd, ["config", "--get", "cleanup.subscription"]);
+  if (!subscription) throw new Error(`no cleanup.subscription in ${cwd}`);
+  const profile = git(cwd, ["config", "--get", "cleanup.azconfig"]);
+  const env = profile ? { ...process.env, AZURE_CONFIG_DIR: profile.replace(/^~\//, `${homedir()}/`) } : process.env;
+  const run = (args: string[]) => execFileSync("az", args, { encoding: "utf8", env, stdio: ["ignore", "pipe", "ignore"] }).trim();
+  const token = run(["account", "get-access-token", "--subscription", subscription, "--resource", ADO_RESOURCE, "--query", "accessToken", "-o", "tsv"]);
+  const raw = run([
+    "rest",
+    "--method",
+    "get",
+    "--skip-authorization-header",
+    "--headers",
+    `Authorization=Bearer ${token}`,
+    "--url",
+    `https://dev.azure.com/${r.owner}/${r.project}/_apis/git/repositories/${r.repo}/pullrequests`,
+    "--uri-parameters",
+    "searchCriteria.status=active",
+    "$top=1000",
+    "api-version=7.1",
+    "--query",
+    "value[].[sourceRefName, pullRequestId]",
+    "-o",
+    "tsv",
+  ]);
+  // An expired session answers with the HTML sign-in page and a 200, so rows are
+  // validated rather than trusted: a branch, a tab, and digits.
+  return raw
+    .split("\n")
+    .map((line) => line.split("\t"))
+    .filter((fields): fields is [string, string] => fields.length === 2 && /^\d+$/.test(fields[1] ?? ""))
+    .map(([ref, number]) => `${ref.replace(/^refs\/heads\//, "")}${US}${number}`);
 };
 
-const openOnDevops = (projects: [string, string][]): Open => {
-  const references: string[] = [];
-  let whole = true;
-  for (const [org, project] of projects) {
+const openPullRequests = (repos: Map<string, { repo: Repo; cwd: string }>): Branches => {
+  const numbers = new Map<string, string>();
+  const answered = new Set<string>();
+  for (const [key, { repo, cwd }] of repos) {
     try {
-      const raw = execFileSync(
-        "az",
-        ["repos", "pr", "list", "--org", `https://dev.azure.com/${org}`, "--project", decodeURIComponent(project), "--status", "active", "--query", "[].{id:pullRequestId,repo:repository.name}", "-o", "json"],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-      );
-      for (const item of JSON.parse(raw) as { id: number; repo: string }[]) references.push(`${org}/${project}/${item.repo}#${item.id}`);
+      for (const found of repo.platform === "github" ? onGithub(repo) : onDevops(repo, cwd)) {
+        const at = found.lastIndexOf(US);
+        numbers.set(`${key}${US}${found.slice(0, at)}`, found.slice(at + 1));
+      }
+      answered.add(key);
     } catch {
-      process.stderr.write(`warning: could not list open pull requests in ${org}/${decodeURIComponent(project)}, so no pr tag is planned or removed from one\n`);
-      whole = false;
+      process.stderr.write(`warning: could not list open pull requests for ${repo.owner}/${repo.repo}, so its pr tags are neither planned nor removed\n`);
     }
   }
-  return { references, whole };
-};
-
-const pullRequests = (counts: Map<string, Map<string, number>>, open: Set<string>): Map<string, string> => {
-  const winners = new Map<string, string>();
-  for (const [conv, perConv] of counts) {
-    const best = [...perConv.entries()].filter(([reference]) => open.has(reference)).sort((a, b) => b[1] - a[1])[0];
-    if (best) winners.set(conv, best[0].split("#")[1] ?? "");
-  }
-  return winners;
+  return { numbers, answered };
 };
 
 const known = new Set(query("SELECT conv FROM rows;").map((row) => row[0]));
@@ -227,26 +235,29 @@ for (const conv of owners) if (known.has(conv)) roleOf.set(conv, "handler");
 for (const conv of workers) if (known.has(conv)) roleOf.set(conv, "operator");
 for (const [conv, role] of roleOf) planned.push({ conv, key: "role", value: role });
 
-const mentions = mentioned();
-const devopsProjects = new Map<string, [string, string]>();
-for (const perConv of mentions.values()) {
-  for (const reference of perConv.keys()) {
-    const [org = "", project = "", repo] = reference.split("/");
-    if (repo !== undefined) devopsProjects.set(`${org}/${project}`, [org, project]);
+const repos = new Map<string, { repo: Repo; cwd: string }>();
+for (const [cwd, entry] of byDir) if (entry.platform && entry.repo && entry.branch) repos.set(repoKey(entry), { repo: entry, cwd });
+
+const { numbers, answered } = openPullRequests(repos);
+
+// Only a conversation whose repository answered can lose its pr tag. One whose
+// working directory is gone, or whose host could not be reached, is unknown, and
+// unknown is not closed.
+const prAnswered = new Set<string>();
+for (const entry of byDir.values()) {
+  const key = repoKey(entry);
+  if (!entry.branch || !answered.has(key)) continue;
+  const number = numbers.get(`${key}${US}${entry.branch}`);
+  for (const conv of entry.convs) {
+    prAnswered.add(conv);
+    if (number) planned.push({ conv, key: "pr", value: number });
   }
 }
-
-const github = openOnGithub();
-const devops = openOnDevops([...devopsProjects.values()]);
-const open = new Set([...github.references, ...devops.references]);
-const wholePr = github.whole && devops.whole;
-
-for (const [conv, number] of pullRequests(mentions, open)) if (known.has(conv) && number) planned.push({ conv, key: "pr", value: number });
 
 const existing = new Map(query("SELECT conv, key, value FROM tags;").map((row) => [`${row[0]}${US}${row[1]}`, row[2]]));
 const changes = planned.filter((tag) => existing.get(`${tag.conv}${US}${tag.key}`) !== tag.value);
 const plannedKeys = new Set(planned.map((tag) => `${tag.conv}${US}${tag.key}`));
-const removals = wholePr ? [...existing.keys()].filter((key) => key.endsWith(`${US}pr`) && !plannedKeys.has(key)) : [];
+const removals = [...existing.keys()].filter((key) => key.endsWith(`${US}pr`) && !plannedKeys.has(key) && prAnswered.has(key.split(US)[0] ?? ""));
 
 const tally = (key: string): [string, number][] => {
   const counts = new Map<string, number>();
@@ -277,7 +288,8 @@ for (const [dir, entry] of [...byDir.entries()].sort((a, b) => a[0].localeCompar
   const writes = entry.convs.some((conv) => DIR_KEYS.some((key) => pending.has(`${conv}${US}${key}`)));
   process.stdout.write(`  ${writes ? "*" : " "} ${String(entry.convs.length).padStart(2)}  ${dir}  ${derived}\n`);
 }
-const prRemovals = wholePr ? `${removals.length} stale pr rows to remove` : "pr removals skipped, a lookup failed";
+const silent = repos.size - answered.size;
+const prRemovals = silent === 0 ? `${removals.length} stale pr rows to remove` : `${removals.length} stale pr rows to remove, ${silent} repositories did not answer and were left alone`;
 process.stdout.write(`\n${changes.length} rows to write, ${planned.length - changes.length} already correct, ${prRemovals}\n`);
 
 if (!apply) {
