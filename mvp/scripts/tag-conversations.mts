@@ -60,6 +60,11 @@ const query = (statement: string): string[][] =>
     .filter((line) => line.length > 0)
     .map((line) => line.split(US));
 
+// Progress goes to stderr so the plan on stdout stays pipeable.
+const step = (label: string): void => void process.stderr.write(`  ${label} ... `);
+const stepDone = (result: string): void => void process.stderr.write(`${result}\n`);
+const substep = (label: string, result: string): void => void process.stderr.write(`    ${label.padEnd(46)} ${result}\n`);
+
 const git = (cwd: string, gitArgs: string[]): string => {
   try {
     return execFileSync("git", gitArgs, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
@@ -185,15 +190,18 @@ const onDevops = (r: Repo, cwd: string): string[] => {
 const openPullRequests = (repos: Map<string, { repo: Repo; cwd: string }>): Branches => {
   const numbers = new Map<string, string>();
   const answered = new Set<string>();
+  process.stderr.write(`  open pull requests in ${repos.size} repositories ...\n`);
   for (const [key, { repo, cwd }] of repos) {
+    const before = numbers.size;
     try {
       for (const found of repo.platform === "github" ? onGithub(repo) : onDevops(repo, cwd)) {
         const at = found.lastIndexOf(US);
         numbers.set(`${key}${US}${found.slice(0, at)}`, found.slice(at + 1));
       }
       answered.add(key);
+      substep(`${repo.platform} ${repo.owner}/${repo.repo}`, `${numbers.size - before} open`);
     } catch {
-      process.stderr.write(`warning: could not list open pull requests for ${repo.owner}/${repo.repo}, so its pr tags are neither planned nor removed\n`);
+      substep(`${repo.platform} ${repo.owner}/${repo.repo}`, "did not answer, its pr tags left alone");
     }
   }
   return { numbers, answered };
@@ -216,6 +224,7 @@ const withCwd = new Set<string>();
 const inFleet = new Set<string>();
 const byDir = new Map<string, Dir>();
 
+step("reading working directories");
 for (const [conv, cwd] of attachments) {
   if (!conv || !cwd || !known.has(conv)) continue;
   const entry = byDir.get(cwd) ?? { convs: [], ...derive(cwd) };
@@ -226,7 +235,11 @@ for (const [conv, cwd] of attachments) {
   for (const key of DIR_KEYS) if (entry[key]) planned.push({ conv, key, value: entry[key] });
 }
 
+stepDone(`${byDir.size} directories, ${withCwd.size} conversations`);
+
+step("reporting lines");
 const { workers, owners } = reportingLines();
+stepDone(`${workers.length} lines, ${new Set(owners).size} owners`);
 const roleOf = new Map<string, string>();
 
 // The directory, never the org tag it produced: that tag now names the client.
@@ -254,7 +267,9 @@ for (const entry of byDir.values()) {
   }
 }
 
+step("existing tags");
 const existing = new Map(query("SELECT conv, key, value FROM tags;").map((row) => [`${row[0]}${US}${row[1]}`, row[2]]));
+stepDone(`${existing.size} rows`);
 const changes = planned.filter((tag) => existing.get(`${tag.conv}${US}${tag.key}`) !== tag.value);
 const plannedKeys = new Set(planned.map((tag) => `${tag.conv}${US}${tag.key}`));
 const removals = [...existing.keys()].filter((key) => key.endsWith(`${US}pr`) && !plannedKeys.has(key) && prAnswered.has(key.split(US)[0] ?? ""));
@@ -323,6 +338,8 @@ for (const key of removals) {
 
 statements.push("COMMIT;");
 
+step(`writing ${changes.length} rows`);
 execFileSync("sqlite3", [db], { input: statements.join("\n"), encoding: "utf8" });
+stepDone("done");
 
 process.stdout.write(`\nWrote ${changes.length} rows, removed ${removals.length}. Refresh the UI to see them.\n`);
