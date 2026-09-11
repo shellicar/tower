@@ -315,15 +315,17 @@ if (!apply) {
 if (changes.length === 0 && removals.length === 0) process.exit(0);
 
 const escape = (value: string): string => `'${value.replace(/'/g, "''")}'`;
-const seeded = Number(query("SELECT COUNT(*) FROM tag_keys;")[0]?.[0] ?? "0");
-const keysUsed = [...new Set(changes.map((tag) => tag.key))];
+const coloured = new Map(query("SELECT key, colour FROM tag_keys;").map((row) => [row[0] ?? "", row[1] ?? ""]));
+const taken = new Set(coloured.values());
 
 const statements = ["PRAGMA busy_timeout = 5000;", "BEGIN;"];
 
-keysUsed.forEach((key, index) => {
-  const colour = PALETTE[(seeded + index) % PALETTE.length] ?? PALETTE[0];
+for (const key of new Set(changes.map((tag) => tag.key))) {
+  if (coloured.has(key)) continue;
+  const colour = PALETTE.find((entry) => !taken.has(entry)) ?? PALETTE[0];
+  taken.add(colour);
   statements.push(`INSERT OR IGNORE INTO tag_keys (key, colour) VALUES (${escape(key)}, ${escape(String(colour))});`);
-});
+}
 
 for (const tag of changes) {
   statements.push(
