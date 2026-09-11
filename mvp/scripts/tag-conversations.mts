@@ -6,7 +6,6 @@ const US = "\u001f";
 const REPOS = "/repos/";
 const DEFAULT_DB = "tower-v2.db";
 const BUCKET = process.env.NATS_REPORTING_BUCKET ?? "reporting-lines";
-const PERSONAL_REPOS: Record<string, string> = { "/Volumes/ato": "ato", "/Users/stephen/dotfiles": "dotfiles" };
 const DIR_KEYS = ["org", "project", "repo", "worktree"] as const;
 
 type Tag = { conv: string; key: string; value: string };
@@ -18,9 +17,9 @@ if (args.includes("--help") || args.includes("-h")) {
   process.stdout.write(
     "usage: node tag-conversations.mts [--db <path>] [--apply]\n\n" +
       "Tags each conversation with org, project, repo, worktree and role. The org is\n" +
-      "the first directory under /repos/, the project and repo come from the git remote\n" +
-      "of the working directory tower recorded, and the role comes from the\n" +
-      "reporting-lines bucket.\n" +
+      "the first directory under /repos/, or personal for a path outside it; the\n" +
+      "project, repo and worktree come from the git repository at the working\n" +
+      "directory tower recorded; and the role comes from the reporting-lines bucket.\n" +
       "Prints the plan and exits. --apply prints the same plan, then writes it.\n" +
       "--db defaults to $TOWER_DB, then tower-v2.db in the working directory.\n",
   );
@@ -62,9 +61,10 @@ const fromRemote = (url: string): { project: string; repo: string } => {
 };
 
 const derive = (cwd: string): { org: string; project: string; repo: string; worktree: string } => {
+  // Only org needs the path convention. A repository answers for the rest of it
+  // wherever it sits, so the git half runs whether or not the path is under /repos/.
   const at = cwd.indexOf(REPOS);
-  if (at < 0) return { org: "personal", project: "", repo: PERSONAL_REPOS[cwd] ?? "", worktree: "" };
-  const [org = ""] = cwd.slice(at + REPOS.length).split("/");
+  const org = at < 0 ? "personal" : (cwd.slice(at + REPOS.length).split("/")[0] ?? "");
   const root = git(cwd, ["rev-parse", "--show-toplevel"]);
   if (!root) return { org, project: "", repo: "", worktree: "" };
   const name = root.slice(root.lastIndexOf("/") + 1);
