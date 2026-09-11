@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 
 const PALETTE = ["#8ec07c", "#83a598", "#d3869b", "#fabd2f", "#fe8019", "#b8bb26", "#7fc7ff", "#d65d0e", "#b16286", "#689d6a"];
 const US = "\u001f";
@@ -7,9 +8,18 @@ const REPOS = "/repos/";
 const DEFAULT_DB = "tower-v2.db";
 const BUCKET = process.env.NATS_REPORTING_BUCKET ?? "reporting-lines";
 const DIR_KEYS = ["org", "project", "repo", "worktree"] as const;
+const FLEET = "fleet";
+// Every fleet repo has the same GitHub owner, so only its directory says whose work it manages.
+const FLEET_ORGS: Record<string, string> = {
+  "claude-fleet-eagers": "Eagers",
+  "claude-fleet-flightrac": "Flightrac",
+  "claude-fleet-hellicar-solutions": "Hellicar-Solutions",
+  "claude-fleet-hopeventures": "HopeVentures",
+  "claude-fleet-shellicar": "@shellicar",
+};
 
 type Tag = { conv: string; key: string; value: string };
-type Dir = { convs: string[]; org: string; project: string; repo: string; worktree: string };
+type Dir = { convs: string[]; org: string; project: string; repo: string; worktree: string; fleet: boolean };
 
 const args = process.argv.slice(2);
 
@@ -17,9 +27,10 @@ if (args.includes("--help") || args.includes("-h")) {
   process.stdout.write(
     "usage: node tag-conversations.mts [--db <path>] [--apply]\n\n" +
       "Tags each conversation with org, project, repo, worktree and role. The org is\n" +
-      "the first directory under /repos/, or personal for a path outside it; the\n" +
-      "project, repo and worktree come from the git repository at the working\n" +
-      "directory tower recorded; and the role comes from the reporting-lines bucket.\n" +
+      "the first directory under /repos/, or the client a fleet repo manages, or\n" +
+      "personal for a path outside it; the project, repo and worktree come from the\n" +
+      "git repository at the working directory tower recorded; and the role comes\n" +
+      "from the reporting-lines bucket and the fleet directory.\n" +
       "Prints the plan and exits. --apply prints the same plan, then writes it.\n" +
       "--db defaults to $TOWER_DB, then tower-v2.db in the working directory.\n",
   );
@@ -35,8 +46,13 @@ if (!db) {
   process.exit(64);
 }
 
+if (!existsSync(db)) {
+  process.stderr.write(`no database at ${db}\n`);
+  process.exit(66);
+}
+
 const query = (statement: string): string[][] =>
-  execFileSync("sqlite3", ["-cmd", ".timeout 5000", "-separator", US, db, statement], { encoding: "utf8" })
+  execFileSync("sqlite3", ["-readonly", "-cmd", ".timeout 5000", "-separator", US, db, statement], { encoding: "utf8" })
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line) => line.split(US));
@@ -51,7 +67,13 @@ const git = (cwd: string, gitArgs: string[]): string => {
 
 // Azure DevOps nests a project between the org and the repo and marks it with _git; GitHub does not.
 const fromRemote = (url: string): { project: string; repo: string } => {
-  const segments = new URL(url).pathname
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { project: "", repo: "" };
+  }
+  const segments = parsed.pathname
     .split("/")
     .filter((segment) => segment.length > 0)
     .map(decodeURIComponent);
@@ -60,20 +82,23 @@ const fromRemote = (url: string): { project: string; repo: string } => {
   return { project: "", repo: (segments[segments.length - 1] ?? "").replace(/\.git$/, "") };
 };
 
-const derive = (cwd: string): { org: string; project: string; repo: string; worktree: string } => {
+const derive = (cwd: string): { org: string; project: string; repo: string; worktree: string; fleet: boolean } => {
   // Only org needs the path convention. A repository answers for the rest of it
   // wherever it sits, so the git half runs whether or not the path is under /repos/.
   const at = cwd.indexOf(REPOS);
-  const org = at < 0 ? "personal" : (cwd.slice(at + REPOS.length).split("/")[0] ?? "");
+  const segments = at < 0 ? [] : cwd.slice(at + REPOS.length).split("/");
+  const fleet = segments[0] === FLEET;
+  const client = fleet ? FLEET_ORGS[(segments[1] ?? "").split("--")[0] ?? ""] : undefined;
+  const org = at < 0 ? "personal" : (client ?? segments[0] ?? "");
   const root = git(cwd, ["rev-parse", "--show-toplevel"]);
-  if (!root) return { org, project: "", repo: "", worktree: "" };
+  if (!root) return { org, project: "", repo: "", worktree: "", fleet };
   const name = root.slice(root.lastIndexOf("/") + 1);
   const sep = name.indexOf("--");
   const worktree = sep < 0 ? "" : name.slice(sep + 2);
   const url = git(cwd, ["remote", "get-url", "origin"]);
-  if (!url) return { org, project: "", repo: "", worktree };
+  if (!url) return { org, project: "", repo: "", worktree, fleet };
   const { project, repo } = fromRemote(url);
-  return { org, project, repo, worktree };
+  return { org, project, repo, worktree, fleet };
 };
 
 const reportingLines = (): { workers: string[]; owners: string[] } => {
@@ -143,7 +168,8 @@ const attachments = query(
 );
 
 const planned: Tag[] = [];
-const orgOf = new Map<string, string>();
+const withCwd = new Set<string>();
+const inFleet = new Set<string>();
 const byDir = new Map<string, Dir>();
 
 for (const [conv, cwd] of attachments) {
@@ -151,14 +177,16 @@ for (const [conv, cwd] of attachments) {
   const entry = byDir.get(cwd) ?? { convs: [], ...derive(cwd) };
   byDir.set(cwd, entry);
   entry.convs.push(conv);
-  orgOf.set(conv, entry.org);
+  withCwd.add(conv);
+  if (entry.fleet) inFleet.add(conv);
   for (const key of DIR_KEYS) if (entry[key]) planned.push({ conv, key, value: entry[key] });
 }
 
 const { workers, owners } = reportingLines();
 const roleOf = new Map<string, string>();
 
-for (const [conv, org] of orgOf) if (org === "fleet") roleOf.set(conv, "handler");
+// The directory, never the org tag it produced: that tag now names the client.
+for (const conv of inFleet) roleOf.set(conv, "handler");
 for (const conv of owners) if (known.has(conv)) roleOf.set(conv, "handler");
 for (const conv of workers) if (known.has(conv)) roleOf.set(conv, "operator");
 for (const [conv, role] of roleOf) planned.push({ conv, key: "role", value: role });
@@ -180,7 +208,7 @@ const tally = (key: string): [string, number][] => {
 };
 
 process.stdout.write(`database ${db}\n`);
-process.stdout.write(`${orgOf.size} conversations have a recorded working directory\n`);
+process.stdout.write(`${withCwd.size} conversations have a recorded working directory\n`);
 
 for (const key of ["org", "project", "repo", "role", "pr"]) {
   process.stdout.write(`\n${key}\n`);
