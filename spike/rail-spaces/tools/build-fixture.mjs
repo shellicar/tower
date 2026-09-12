@@ -77,6 +77,41 @@ for (const { name } of tabs) {
 }
 const placements = [];
 
+// Liveness is a fold, never a stored verdict: the facts are the standing
+// attachment and its instance's last pulse, and the reader decides against a
+// clock. Frozen here, so the clock is the instant the snapshot was taken.
+const dismissed = new Set(
+  db
+    .prepare('select world, instance_id, conv from dismissed_attachments')
+    .all()
+    .map((r) => `${r.world}\u0000${r.instance_id}\u0000${r.conv}`),
+);
+
+const pulses = new Map(
+  db
+    .prepare('select world, instance_id, last_pulse, interval_s from agent_instances')
+    .all()
+    .map((r) => [`${r.world}\u0000${r.instance_id}`, { lastPulse: r.last_pulse, intervalS: r.interval_s }]),
+);
+
+const attachments = db
+  .prepare('select conv, world, instance_id, cwd, attached_ts from conv_attachments')
+  .all()
+  .filter((r) => !dismissed.has(`${r.world}\u0000${r.instance_id}\u0000${r.conv}`))
+  .map((r) => {
+    const pulse = pulses.get(`${r.world}\u0000${r.instance_id}`);
+    const held = {
+      conv: r.conv,
+      world: r.world,
+      instanceId: r.instance_id,
+      attachedTs: r.attached_ts,
+      lastPulse: pulse?.lastPulse ?? r.attached_ts,
+    };
+    if (r.cwd !== null) held.cwd = r.cwd;
+    if (pulse?.intervalS != null) held.intervalS = pulse.intervalS;
+    return held;
+  });
+
 db.close();
 
 process.stdout.write(
@@ -84,8 +119,10 @@ process.stdout.write(
     {
       takenFrom: dbPath,
       takenAt: new Date().toISOString(),
+      takenAtMs: Date.now(),
       tagKeys,
       conversations,
+      attachments,
       layout: { spaces, placements },
       notes: {
         conversations: conversations.length,
@@ -93,6 +130,7 @@ process.stdout.write(
         tagged: conversations.filter((r) => r.tags !== undefined).length,
         placed: placements.length,
         spaces: spaces.length,
+        attached: attachments.length,
       },
     },
     null,

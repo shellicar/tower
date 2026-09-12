@@ -9,12 +9,14 @@
     rows,
     tagKeys,
     now,
+    verdicts,
     onArrive,
   }: {
     live: Live;
     rows: Row[];
     tagKeys: Record<string, string>;
     now: number;
+    verdicts: Map<string, 'alive' | 'stranded'>;
     onArrive: (conv: string) => void;
   } = $props();
 
@@ -36,6 +38,7 @@
   let groupKey = $state('');
   let hideUntagged = $state(false);
   let unreadOnly = $state(false);
+  let liveOnly = $state(false);
   let alwaysShow = $state<string[]>(['repo', 'role']);
 
   const tagOf = (r: Row, k: string) => r.tags?.[k] ?? '(untagged)';
@@ -43,7 +46,8 @@
   // OR within a key, AND across keys.
   const matches = (r: Row) =>
     Object.entries(filters).every(([k, vs]) => vs.length === 0 || vs.includes(tagOf(r, k)));
-  const stateMatches = (r: Row) => !unreadOnly || r.stale === true;
+  const stateMatches = (r: Row) =>
+    (!unreadOnly || r.stale === true) && (!liveOnly || verdicts.get(r.conv) === 'alive');
 
   const searching = $derived(live.model.searchText !== '');
   const listed = $derived(
@@ -185,6 +189,14 @@
       oninput={(e) => live.act((m) => m.setSearch(e.currentTarget.value))}
     />
     <button
+      class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {liveOnly
+        ? 'border-green-600 text-green-300'
+        : 'border-neutral-700 text-neutral-400'}"
+      title="only conversations a live agent is serving, as at the snapshot"
+      disabled={searching}
+      onclick={() => (liveOnly = !liveOnly)}>live</button
+    >
+    <button
       class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {unreadOnly
         ? 'border-sky-600 text-sky-300'
         : 'border-neutral-700 text-neutral-400'}"
@@ -257,6 +269,14 @@
                 class="shrink-0 text-sky-400"
                 title="nobody's looked at this since it last got new content">●</span
               >{/if}
+            {#if verdicts.get(conv) === 'alive'}
+              <span class="h-2 w-2 shrink-0 rounded-full bg-green-400" title="a live agent is serving this"></span>
+            {:else if verdicts.get(conv) === 'stranded'}
+              <span
+                class="h-2 w-2 shrink-0 rounded-full bg-red-400"
+                title="an agent holds this but has stopped pulsing"
+              ></span>
+            {/if}
             <span class="truncate" class:text-neutral-200={row?.title}>{row?.title ?? conv}</span>
           </span>
           <span class="flex shrink-0 items-baseline gap-2 text-neutral-400">

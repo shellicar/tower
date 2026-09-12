@@ -3,13 +3,17 @@
   import Panel from './lib/Panel.svelte';
   import Rail from './lib/Rail.svelte';
   import SpaceStrip from './lib/SpaceStrip.svelte';
+  import { livenessVerdict } from './lib/core/time';
   import { live } from './lib/reactive.svelte';
   import { Layout } from './model/layout';
 
   const rows = new Map(fixture.conversations.map((r) => [r.conv, r]));
-  // The fixture is a snapshot, so "now" is its newest event rather than the
-  // wall clock: otherwise every row reads as weeks old.
-  const now = fixture.conversations.reduce((latest, r) => Math.max(latest, r.lastEvent), 0);
+  // The fixture is a snapshot, so "now" is the instant it was taken rather than
+  // the wall clock: ages and the liveness verdict then read as they did then.
+  const now = fixture.takenAtMs;
+  const verdicts = new Map(
+    fixture.attachments.map((a) => [a.conv, livenessVerdict(now, a.lastPulse, a.intervalS)] as const),
+  );
   const rowOf = (conv: string) => rows.get(conv);
   const stale = new Set(fixture.conversations.filter((r) => r.stale).map((r) => r.conv));
   const staleCount = (convs: string[]) => convs.filter((c) => stale.has(c)).length;
@@ -41,6 +45,7 @@
         rows={fixture.conversations}
         tagKeys={fixture.tagKeys}
         {now}
+        {verdicts}
         onArrive={arriveAt}
       />
     </div>
