@@ -21,7 +21,7 @@
   const scopes: { value: RailScope; label: string; title: string }[] = [
     { value: 'all', label: 'all', title: 'every conversation' },
     { value: 'space', label: 'this space', title: 'only what lives in the space in front' },
-    { value: 'unplaced', label: 'nowhere', title: 'only conversations that live nowhere' },
+    { value: 'unplaced', label: 'unplaced', title: 'only conversations that are in no space' },
   ];
 
   const keys = $derived(Object.keys(tagKeys).sort());
@@ -248,10 +248,7 @@
       <li class="group relative">
         <button
           title={conv}
-          class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900 {where !==
-            null && where === live.model.shownSpace
-            ? 'bg-slate-800'
-            : ''}"
+          class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900"
           onclick={() => goTo(conv)}
           oncontextmenu={(e) => fileByGesture(conv, e)}
         >
@@ -264,10 +261,15 @@
           </span>
           <span class="flex shrink-0 items-baseline gap-2 text-neutral-400">
             {#if where !== null}
-              <span class="text-sky-200/70">{live.model.nameOf(where)}</span>
-              {#if placement?.drawn === false}<span class="text-neutral-600" title="in this space, off the screen"
-                  >away</span
-                >{/if}
+              <span
+                class="rounded px-1.5 {where === live.model.shownSpace
+                  ? 'bg-sky-900 text-sky-100'
+                  : 'border border-neutral-700 text-neutral-400'}"
+                title={where === live.model.shownSpace
+                  ? 'in the space you are standing in'
+                  : `lives in ${live.model.nameOf(where)}`}
+                >{live.model.nameOf(where)}{placement?.drawn === false ? ' · away' : ''}</span
+              >
             {/if}
             <span>{row?.lastKind}</span>
             <span class="min-w-[3ch] text-right {heat(now, row?.lastEvent ?? 0)}">{age(now, row?.lastEvent ?? 0)}</span>

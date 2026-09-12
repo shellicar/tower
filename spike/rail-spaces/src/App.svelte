@@ -65,7 +65,7 @@
           {:else if model.model.placedIn(shown).length === 0}
             Nothing lives here yet. Right click a conversation in the rail to put it in.
           {:else}
-            Everything that lives here is away. Scope the rail to this space to find it.
+            Everything that lives here is away. Scope the rail to this space to bring one back.
           {/if}
         </p>
       {/each}
