@@ -334,10 +334,10 @@
       <li>
         <button
           title={conv}
-          class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left transition-colors duration-500 hover:bg-neutral-900 {refused ===
+          class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left transition-colors duration-500 {refused ===
           conv
-            ? 'bg-amber-950'
-            : ''}"
+            ? 'bg-amber-950 hover:bg-amber-900'
+            : 'hover:bg-neutral-900'}"
           onclick={() => goTo(conv)}
           oncontextmenu={(e) => fileByGesture(conv, e)}
         >
