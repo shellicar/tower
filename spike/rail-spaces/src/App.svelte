@@ -23,6 +23,28 @@
   const drawn = $derived(model.layout.drawn);
   const shown = $derived(model.layout.shownSpace);
 
+  // The rail's width is this browser's own business, so it is kept here rather
+  // than in the layout, and survives a reload because this gets reloaded a lot.
+  const MIN = 240;
+  const MAX = 720;
+  let railWidth = $state(Number(localStorage.getItem('railWidth') ?? 320));
+
+  function startResize(event: PointerEvent) {
+    event.preventDefault();
+    const handle = event.currentTarget as HTMLElement;
+    handle.setPointerCapture(event.pointerId);
+    const move = (moved: PointerEvent) => {
+      railWidth = Math.min(MAX, Math.max(MIN, moved.clientX));
+    };
+    const done = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', done);
+      localStorage.setItem('railWidth', String(railWidth));
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', done);
+  }
+
   // Which panel was asked for, when several are drawn.
   let arrived = $state('');
   let clearArrival: ReturnType<typeof setTimeout> | undefined;
@@ -33,8 +55,15 @@
   }
 </script>
 
-<div class="grid h-screen grid-cols-[320px_1fr]">
-  <aside class="flex min-h-0 flex-col overflow-hidden border-r border-neutral-700">
+<div class="grid h-screen" style="grid-template-columns: {railWidth}px 1fr">
+  <aside class="relative flex min-h-0 flex-col overflow-hidden border-r border-neutral-700">
+    <div
+      class="absolute top-0 right-0 z-10 h-full w-1 cursor-col-resize hover:bg-sky-700"
+      title="drag to resize the rail"
+      role="separator"
+      aria-orientation="vertical"
+      onpointerdown={startResize}
+    ></div>
     <header class="flex items-baseline justify-between border-b border-neutral-700 px-3 py-2">
       <h1 class="text-sm font-bold">Tower <span class="font-normal text-neutral-600">rail spaces spike</span></h1>
       <span class="text-sky-300">● {stale.size}</span>
