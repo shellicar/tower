@@ -155,15 +155,44 @@ whose decision it was.
 ### `set_layout`
 
 ```json
-{ "type": "set_layout", "id": "r8", "tabs": [ { "name": "main", "convs": ["c65b902d-…"] }, { "name": "ops", "convs": [] } ] }
+{ "type": "set_layout", "id": "r8",
+  "spaces": [
+    { "id": "sp-3f2a", "name": "tower", "parent": null },
+    { "id": "sp-91c4", "name": "exec-az", "parent": "sp-3f2a" }
+  ],
+  "placements": [
+    { "conv": "c65b902d-…", "space": "sp-3f2a", "drawn": true },
+    { "conv": "a41f7e60-…", "space": "sp-3f2a", "drawn": false }
+  ] }
 ```
 
-Replace the fleet's whole layout (the shared tabs and which conversations sit
-in each), every connected session's workspace, tmux-attach style: whoever
-changes it, everyone sees it live. No `conv`: layout is fleet-wide, never
-per-conversation. Response: `layout_set`. The new layout also arrives as an
-ordinary `layout` broadcast to every connected session, this one included, so
-the ack itself carries nothing further to apply.
+Replace the fleet's whole layout: every space, and every conversation's
+placement among them. Every connected session's workspace, tmux-attach style,
+so whoever changes it, everyone sees it live. No `conv`: a layout is fleet-wide,
+never per-conversation. Response: `layout_set`. The new layout also arrives as
+an ordinary `layout` broadcast to every connected session, this one included,
+so the ack itself carries nothing further to apply.
+
+A client sends the whole thing every time and last write wins. Individual
+operations would only earn their keep to stop a stale client clobbering a fresh
+one, which is not a concern at this scale.
+
+**The client mints space ids.** A snapshot has to be able to name a space that
+the same snapshot creates, so an id the server allocated afterwards would arrive
+too late to place anything in it. Any opaque unique string; the client's own
+uuid is the obvious one.
+
+**Both orders are the array order, and there is no position field.** Spaces are
+in sibling order and placements are in placement order, so a space's
+conversations are the placements naming it, in the order they appear. An
+explicit position can disagree with the sequence that holds it (two placements
+at 3); an array cannot.
+
+**Placements are flat and keyed by conversation, never nested inside spaces.**
+Nesting them would make "the same conversation under two spaces" expressible,
+which is the one thing the model forbids: a conversation has at most one
+placement. Flat, the key enforces it. A conversation named twice in one frame is
+tolerated rather than rejected, and the last placement wins.
 
 ### `dismiss_approval`
 
@@ -388,17 +417,45 @@ millis; for `pulse` it is the new `lastPulse`.
 ### `layout`: once, on connect; live, unconditional
 
 ```json
-{ "type": "layout", "tabs": [ { "name": "main", "convs": ["c65b902d-…"] }, { "name": "ops", "convs": [] } ] }
+{ "type": "layout",
+  "spaces": [
+    { "id": "sp-3f2a", "name": "tower", "parent": null },
+    { "id": "sp-91c4", "name": "exec-az", "parent": "sp-3f2a" }
+  ],
+  "placements": [
+    { "conv": "c65b902d-…", "space": "sp-3f2a", "drawn": true },
+    { "conv": "a41f7e60-…", "space": "sp-3f2a", "drawn": false }
+  ] }
 ```
 
-The fleet's shared layout: sent once at connect, right after `agents`, and
-again whenever any client changes it via `set_layout`: every connected
-session sees the same shared workspace live, the tmux-attach model. Replace
-wholesale, never a delta, same discipline as `list`. Absent tabs (an empty
-array) until any client has ever set one; a client with nothing yet falls
-back to its own local default. `tabs` is `{ name, convs }` pairs; a tab's
-own view (filters, grouping) is not on the wire yet, kept client-side and
-re-matched to its tab by name across the fold.
+The fleet's shared layout: sent once at connect, right after `agents`, and again
+whenever any client changes it via `set_layout`. Every connected session sees
+the same arrangement live, the tmux-attach model. Replace wholesale, never a
+delta, same discipline as `list`. Identical in shape to `set_layout` without the
+request id, so a client folds what it sends and what it receives through one
+path.
+
+A **space** carries `id`, `name`, and `parent`, which is `null` at the top level.
+Depth is data rather than schema, so a space holds other spaces to whatever
+depth the client creates.
+
+A **placement** carries `conv`, the `space` it sits in, and `drawn`, which is
+false while the conversation is minimised. Minimised is a fact about the layout
+rather than about one client, so putting a conversation away puts it away in
+every browser.
+
+Both arrays may be empty, and empty is a legal steady state rather than a
+missing value: no spaces at all is legal, a space holding nothing is legal, and
+nothing creates a default space.
+
+Tolerance, because a client folds this rather than validating it: a placement
+naming a space that is not in the same frame is dropped, and a space naming a
+parent that is not in the same frame reads as top level rather than vanishing.
+
+What is **not** here, and deliberately: which space a client is showing, how it
+has sliced its rail, and its filters and grouping. Those are facts about one
+client rather than about the arrangement, so two browsers agree about where
+conversations live while each shows a different space.
 
 ### `layout_set`: response to `set_layout`
 
@@ -767,9 +824,16 @@ const approvalState = z.looseObject({
   }).optional(),
 });
 
-const wsTab = z.looseObject({
+const wsSpace = z.looseObject({
+  id: z.string(),
   name: z.string(),
-  convs: z.array(z.string()),
+  parent: z.string().nullable(),
+});
+
+const wsPlacement = z.looseObject({
+  conv: z.string(),
+  space: z.string(),
+  drawn: z.boolean(),
 });
 
 const unreadState = z.looseObject({
@@ -790,7 +854,7 @@ export const clientMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('set_title'), id: z.string(), conv: z.string(), title: z.string() }),
   z.looseObject({ type: z.literal('set_tag'), id: z.string(), conv: z.string(), key: z.string(), value: z.string() }),
   z.looseObject({ type: z.literal('answer'), id: z.string(), approval: z.string(), approved: z.boolean() }),
-  z.looseObject({ type: z.literal('set_layout'), id: z.string(), tabs: z.array(wsTab) }),
+  z.looseObject({ type: z.literal('set_layout'), id: z.string(), spaces: z.array(wsSpace), placements: z.array(wsPlacement) }),
   z.looseObject({ type: z.literal('dismiss_approval'), id: z.string(), approval: z.string() }),
   z.looseObject({ type: z.literal('dismiss_attachment'), id: z.string(), world: z.string(), instanceId: z.string(), conv: z.string() }),
 ]);
@@ -807,7 +871,7 @@ export const serverMsg = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('agent'),        kind: z.string(), world: z.string(), instanceId: z.string(), ts: millis,
                   conv: z.string().optional(), cwd: z.string().optional(), intervalS: z.number().int().optional(), host: z.string().optional() }),
   z.looseObject({ type: z.literal('approval') }).and(approvalState),
-  z.looseObject({ type: z.literal('layout'),       tabs: z.array(wsTab) }),
+  z.looseObject({ type: z.literal('layout'),       spaces: z.array(wsSpace), placements: z.array(wsPlacement) }),
   z.looseObject({ type: z.literal('layout_set'),   id: z.string() }),
   z.looseObject({ type: z.literal('attachment_dismissed'), world: z.string(), instanceId: z.string(), conv: z.string() }),
   z.looseObject({ type: z.literal('stale_conversations'), conversations: z.array(unreadState) }),
