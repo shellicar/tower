@@ -134,7 +134,9 @@
 
   // A click on an unplaced conversation has nothing to do, and says so on the
   // row itself: a line of text here would push the whole rail down, which is a
-  // lot of movement to report that nothing happened.
+  // lot of movement to report that nothing happened. It marks the row's edge
+  // rather than its background, because the background belongs to hover, and a
+  // property carrying both a passing event and a continuous state says neither.
   let refused = $state('');
   let clearRefusal: ReturnType<typeof setTimeout> | undefined;
 
@@ -334,10 +336,10 @@
       <li>
         <button
           title={conv}
-          class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left transition-colors duration-500 {refused ===
+          class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-l-2 border-neutral-800 px-3 py-2 text-left transition-colors duration-500 hover:bg-neutral-900 {refused ===
           conv
-            ? 'bg-amber-950 hover:bg-amber-900'
-            : 'hover:bg-neutral-900'}"
+            ? 'border-l-amber-500'
+            : 'border-l-transparent'}"
           onclick={() => goTo(conv)}
           oncontextmenu={(e) => fileByGesture(conv, e)}
         >
