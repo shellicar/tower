@@ -209,14 +209,16 @@ export class Layout {
     return this.drawn;
   }
 
-  /** The rail's own slice of the register it is handed. An id search answers
-   *  "which one is it", so it suspends the scope rather than composing with
-   *  it. */
-  railRows(convs: readonly ConvId[]): ConvId[] {
-    if (this.#search !== '') return convs.filter((c) => idMatches(c, this.#search));
-    if (this.#scope === 'unplaced') return convs.filter((c) => !this.#placements.has(c));
+  /** The rail's own slice. `register` is every conversation there is;
+   *  `visible` is what the rail's other filters have left of it. An id search
+   *  answers "which one is it", so it reaches past the scope AND past those
+   *  filters rather than composing with either: that is why the whole register
+   *  has to come in alongside the filtered list. */
+  railRows(register: readonly ConvId[], visible: readonly ConvId[] = register): ConvId[] {
+    if (this.#search !== '') return register.filter((c) => idMatches(c, this.#search));
+    if (this.#scope === 'unplaced') return visible.filter((c) => !this.#placements.has(c));
     if (this.#scope === 'space')
-      return this.#shown === null ? [] : convs.filter((c) => this.spaceOf(c) === this.#shown);
-    return [...convs];
+      return this.#shown === null ? [] : visible.filter((c) => this.spaceOf(c) === this.#shown);
+    return [...visible];
   }
 }

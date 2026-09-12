@@ -7,7 +7,6 @@
   import { Layout } from './model/layout';
 
   const rows = new Map(fixture.conversations.map((r) => [r.conv, r]));
-  const register = fixture.conversations.map((r) => r.conv);
   // The fixture is a snapshot, so "now" is its newest event rather than the
   // wall clock: otherwise every row reads as weeks old.
   const now = fixture.conversations.reduce((latest, r) => Math.max(latest, r.lastEvent), 0);
@@ -29,7 +28,7 @@
       <span class="text-sky-300">● {stale.size}</span>
     </header>
     <div class="min-h-0 flex-1 overflow-y-auto">
-      <Rail live={model} {register} {rowOf} tagKeys={fixture.tagKeys} {now} />
+      <Rail live={model} rows={fixture.conversations} tagKeys={fixture.tagKeys} {now} />
     </div>
   </aside>
   <main class="flex min-h-0 min-w-0 flex-col">

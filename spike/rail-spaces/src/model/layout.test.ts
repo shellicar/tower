@@ -400,6 +400,29 @@ describe('the rail', () => {
 
     expect(actual).toEqual(expected);
   });
+
+  test("a search by id finds a conversation the rail's own filters had hidden", () => {
+    const layout = twoSpaces();
+    layout.setSearch('gamma');
+
+    const expected = ['c-gamma'];
+    const actual = layout.railRows(register, ['c-alpha']);
+
+    expect(actual).toEqual(expected);
+  });
+
+  test('the scope narrows what the rail was already showing', () => {
+    const layout = twoSpaces();
+    layout.place('c-alpha', tower);
+    layout.place('c-beta', tower);
+    layout.showSpace(tower);
+    layout.setScope('space');
+
+    const expected = ['c-beta'];
+    const actual = layout.railRows(register, ['c-beta', 'c-gamma']);
+
+    expect(actual).toEqual(expected);
+  });
 });
 
 describe('the spaces themselves', () => {
