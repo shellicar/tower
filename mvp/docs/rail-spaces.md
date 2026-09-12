@@ -224,6 +224,22 @@ filed ones are what the eye should catch. Arrivals are not lost by this: the rai
 ordered by last event with the age coloured, so something that has just moved and has no
 space sits at the top, fresh, with an empty slot. The scope below is the deliberate look.
 
+**A click with nothing to do marks the row's left edge, which fades.** Clicking an unplaced
+conversation cannot go anywhere, and the answer belongs on the row that was clicked rather
+than in a line of text at the top of the rail, which pushes everything down to report that
+nothing happened. The edge is always present and transparent when idle, so nothing shifts
+when it lights.
+
+It marks the edge rather than the background because the background belongs to hover.
+Hover is continuous state, meaning the pointer is here; a refused click is a passing
+event, meaning that did nothing. One property carrying both says neither, and the two
+animating together makes the fade appear to speed up and slow down as the pointer moves,
+which is feedback responding to input that is not a reply to it.
+
+The row keeps its hover. The gesture that files a conversation is durable and fleet-wide,
+and hover is what says which row is about to take it, in a list where the rows are close
+together and there are hundreds of them.
+
 ### The rail's controls, and what each belongs to
 
 The header is two blocks, because two different things own these controls and a reader
@@ -263,6 +279,16 @@ that they have finished with it buys nothing.
 to reach past the rail's own filters as well as past the scope, so a model given only what
 the filters left cannot honour the rule that an id always finds its conversation.
 
+**Only the rows scroll.** The control blocks are pinned and the list takes the height that
+is left, so the controls cannot roll away from the list they are acting on. The cost is
+that they hold the top of the rail permanently, and they grow when a tag key is expanded.
+If that starts to eat too much, folding a block behind a line naming what it has set is
+the answer, and it applies to whichever block is in the way rather than to both.
+
+**The rail's width is dragged from its edge, and is this client's own business.** It sits
+with the space being shown and the rail's slicing, not in the layout, so one browser being
+wider than another is not something the fleet has an opinion about.
+
 ### The space strip
 
 Two rows rather than indentation. The first holds the top-level spaces. Once one of them
@@ -281,6 +307,14 @@ what will be released.
 `–` minimises and `×` unplaces, as above. The panel a reader arrived at by clicking a rail
 row is ringed briefly, because arriving among eight panels otherwise means re-reading
 titles to find the one you asked for.
+
+### The surface
+
+The page declares `color-scheme: dark`, which is what makes the browser draw its own
+furniture to match: scrollbars, select menus, focus rings, form controls. Hand-painting
+scrollbars instead throws away the platform's behaviour, has to be redone for each engine,
+and leaves the native controls still wrong. Neither existing frontend sets it today, so
+both draw light scrollbars and light select menus over a near-black page.
 
 ### What has no design yet
 
