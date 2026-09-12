@@ -1,8 +1,9 @@
 <script lang="ts">
   // Read-only. Ways to present which controls belong to the space and which
-  // travel with the reader, drawn at the rail's real width so the wrapping is
-  // honest. Every control row keeps its own label: a bare row of tag chips
-  // does not say what it does. Nothing here is wired to the model.
+  // travel with the reader. Nothing is renamed and nothing moves between rows:
+  // the words are the ones the rail uses today, so the only difference between
+  // these is how ownership is shown. `filter` appears in both blocks, because
+  // there are filters in both. Drawn at the rail's real width.
 
   const keys = ['org', 'platform', 'pr', 'project', 'repo', 'role', 'worktree'];
   const colours: Record<string, string> = {
@@ -22,17 +23,18 @@
   const box = 'w-36 min-w-0 border border-neutral-700 bg-neutral-900 px-1 text-neutral-600';
   const select = 'border border-neutral-700 bg-neutral-900 px-1 text-neutral-300';
   const row = 'flex flex-wrap items-center gap-1';
+  const owned = 'border-l-2 border-l-sky-700 pl-1';
 </script>
 
 {#snippet scopeChips()}
   <span class={on}>all</span><span class={off}>this space</span><span class={off}>unplaced</span>
 {/snippet}
 
-{#snippet findChips()}
+{#snippet globalFilterChips()}
   <span class={box}>conversation id</span><span class={live}>live</span><span class={off}>unread</span>
 {/snippet}
 
-{#snippet facetChips()}
+{#snippet spaceFilterChips()}
   {#each keys as k (k)}<span class={k === 'org' ? on : off}>{k}{k === 'org' ? ' (2)' : ''}</span>{/each}
 {/snippet}
 
@@ -82,35 +84,62 @@
       <div class="mt-1.5 {row}">
         <span class={label}>group</span>{@render groupChips()}<span class="ml-2 {label}">show</span>{@render showChips()}
       </div>
-      <div class="mt-1.5 {row}"><span class={label}>filter</span>{@render findChips()}{@render facetChips()}</div>
+      <div class="mt-1.5 {row}">
+        <span class={label}>filter</span>{@render globalFilterChips()}{@render spaceFilterChips()}
+      </div>
       <p class="mt-1.5 text-neutral-500">these belong to tower <span class={off}>clear</span></p>
     </div>
   {/snippet}
-  {@render variant('1 · today', 'The split is real but invisible. Group sits beside show; the tag chips beside unread.', today)}
+  {@render variant(
+    '1 · today',
+    'The split is real but invisible. Group is the space’s and sits beside show, which is yours; the tag chips are the space’s and sit beside unread, which is yours.',
+    today,
+  )}
 
-  {#snippet labelColumn()}
+  {#snippet marked()}
+    <div class="border-b border-neutral-800 px-3 py-2">
+      <div class={row}><span class={label}>scope</span>{@render scopeChips()}<span class={label}>638/638</span></div>
+      <div class="mt-1.5 {row}">
+        <span class={label}>group</span><span class="{row} {owned}">{@render groupChips()}</span>
+        <span class="ml-2 {label}">show</span>{@render showChips()}
+      </div>
+      <div class="mt-1.5 {row}">
+        <span class={label}>filter</span>{@render globalFilterChips()}<span class="{row} {owned}"
+          >{@render spaceFilterChips()}</span
+        >
+      </div>
+      <p class="mt-1.5 text-neutral-600">▌ belongs to tower <span class={off}>clear</span></p>
+    </div>
+  {/snippet}
+  {@render variant(
+    '2 · marked where they are',
+    'Nothing moves. A blue edge runs beside the controls the space owns, explained once at the bottom.',
+    marked,
+  )}
+
+  {#snippet column()}
     <div class="border-b border-neutral-800 px-3 py-2">
       <div class="grid grid-cols-[auto_1fr] items-baseline gap-x-2 gap-y-1.5">
         <span class={label}>scope</span><span class={row}>{@render scopeChips()}</span>
-        <span class={label}>find</span><span class={row}>{@render findChips()}</span>
+        <span class={label}>filter</span><span class={row}>{@render globalFilterChips()}</span>
         <span class={label}>show</span><span class={row}>{@render showChips()}</span>
-        <span class="text-sky-200/70">tower</span><span class="text-neutral-600">↓ these two are its own</span>
+        <span class="text-sky-200/70">tower</span><span></span>
         <span class={label}>group</span><span class={row}>{@render groupChips()}</span>
-        <span class={label}>filter</span><span class={row}>{@render facetChips()}</span>
+        <span class={label}>filter</span><span class={row}>{@render spaceFilterChips()}</span>
       </div>
     </div>
   {/snippet}
   {@render variant(
-    '2 · labels in a column',
-    'Every row keeps its word, aligned down the left. The space name is a row like the others and everything under it is the space’s.',
-    labelColumn,
+    '3 · one column, split by a name',
+    'Words line up down the left so they stay readable when chips wrap. The space’s name is a row of its own, and everything below it is the space’s. Filter appears twice, which is the point.',
+    column,
   )}
 
-  {#snippet twoBlocks()}
+  {#snippet blocks()}
     <div class="border-b border-neutral-800 px-3 py-2">
       <div class="grid grid-cols-[auto_1fr] items-baseline gap-x-2 gap-y-1.5">
         <span class={label}>scope</span><span class={row}>{@render scopeChips()}</span>
-        <span class={label}>find</span><span class={row}>{@render findChips()}</span>
+        <span class={label}>filter</span><span class={row}>{@render globalFilterChips()}</span>
         <span class={label}>show</span><span class={row}>{@render showChips()}</span>
       </div>
     </div>
@@ -120,51 +149,32 @@
       </div>
       <div class="grid grid-cols-[auto_1fr] items-baseline gap-x-2 gap-y-1.5">
         <span class={label}>group</span><span class={row}>{@render groupChips()}</span>
-        <span class={label}>filter</span><span class={row}>{@render facetChips()}</span>
+        <span class={label}>filter</span><span class={row}>{@render spaceFilterChips()}</span>
       </div>
     </div>
   {/snippet}
   {@render variant(
-    '3 · the space has its own block',
-    'Same label column, but the space’s controls sit in a block headed by its name, on its own ground.',
-    twoBlocks,
+    '4 · two blocks',
+    'Same as 3, but the space’s controls get their own ground and their own clear, so the boundary is a surface rather than a name.',
+    blocks,
   )}
 
   {#snippet folded()}
     <div class="border-b border-neutral-800 px-3 py-2">
       <div class="grid grid-cols-[auto_1fr] items-baseline gap-x-2 gap-y-1.5">
         <span class={label}>scope</span><span class={row}>{@render scopeChips()}</span>
-        <span class={label}>find</span><span class={row}>{@render findChips()}</span>
+        <span class={label}>filter</span><span class={row}>{@render globalFilterChips()}</span>
         <span class={label}>show</span><span class={row}>{@render showChips()}</span>
       </div>
     </div>
     <div class="flex items-baseline justify-between border-b border-neutral-800 bg-neutral-950 px-3 py-1.5">
-      <span class="text-neutral-400">▸ tower: grouped by repo, 1 filter</span>
+      <span class="text-neutral-400">▸ tower: grouped by repo, filtered by org</span>
       <span class={off}>clear</span>
     </div>
   {/snippet}
   {@render variant(
-    '4 · the space’s folded away',
-    'One line says what the space has set and opens it. Shortest header by far; costs a click to change anything.',
+    '5 · the space’s folded away',
+    'One line says what the space has set, and opens. Much the shortest header, at the cost of a click before you can change either.',
     folded,
-  )}
-
-  {#snippet onTheSpace()}
-    <div class="border-b border-neutral-800 px-3 py-2">
-      <div class="grid grid-cols-[auto_1fr] items-baseline gap-x-2 gap-y-1.5">
-        <span class={label}>scope</span><span class={row}>{@render scopeChips()}</span>
-        <span class={label}>find</span><span class={row}>{@render findChips()}</span>
-        <span class={label}>show</span><span class={row}>{@render showChips()}</span>
-      </div>
-    </div>
-    <p class="border-b border-neutral-800 px-3 py-2 text-neutral-600">
-      group and filter are not here at all. They live under the space strip at the top of the stage, attached to the
-      space chip that owns them, because that is the thing they belong to.
-    </p>
-  {/snippet}
-  {@render variant(
-    '5 · put them on the space instead',
-    'The rail keeps only what is yours. The space’s own controls sit with the space, away from the list they change.',
-    onTheSpace,
   )}
 </div>
