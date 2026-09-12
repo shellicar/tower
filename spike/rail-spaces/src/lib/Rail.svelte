@@ -132,13 +132,22 @@
   const selectedCount = (k: string) => view.filters[k]?.length ?? 0;
   const filtered = $derived(Object.values(view.filters).some((vs) => vs.length > 0));
 
+  // A click on an unplaced conversation has nothing to do, and says so on the
+  // row itself: a line of text here would push the whole rail down, which is a
+  // lot of movement to report that nothing happened.
   let refused = $state('');
+  let clearRefusal: ReturnType<typeof setTimeout> | undefined;
 
   function goTo(conv: string) {
-    refused = '';
     model.act((m) => {
-      if (m.goTo(conv)) onArrive(conv);
-      else refused = conv;
+      if (m.goTo(conv)) {
+        refused = '';
+        onArrive(conv);
+        return;
+      }
+      refused = conv;
+      clearTimeout(clearRefusal);
+      clearRefusal = setTimeout(() => (refused = ''), 900);
     });
   }
 
@@ -156,7 +165,7 @@
 </script>
 
 <!-- Yours: the way you are looking, whatever space is in front. -->
-<div class="border-b border-neutral-800 px-3 py-2 text-xs">
+<div class="shrink-0 border-b border-neutral-800 px-3 py-2 text-xs">
   <div class="grid grid-cols-[auto_1fr] items-baseline gap-x-2 gap-y-1.5">
     <span class="text-neutral-500">scope</span>
     <span class="flex flex-wrap items-center gap-1">
@@ -219,7 +228,7 @@
 </div>
 
 <!-- The space's own: they stay with it when you walk away. -->
-<div class="border-b border-neutral-800 bg-neutral-950 px-3 py-2 text-xs">
+<div class="shrink-0 border-b border-neutral-800 bg-neutral-950 px-3 py-2 text-xs">
   <div class="mb-1.5 flex items-baseline justify-between gap-2">
     <span class="truncate text-neutral-300"
       >{model.layout.shownSpace === null
@@ -298,19 +307,17 @@
   {/if}
 </div>
 
-<div class="border-b border-neutral-800 px-3 py-1.5 text-xs">
+<div class="shrink-0 border-b border-neutral-800 px-3 py-1.5 text-xs">
   <p class="text-neutral-600">
     click shows the space a conversation is placed in · right click places it in {model.layout.shownSpace ===
     null
       ? 'nothing: no space shown'
       : (model.layout.nameOf(model.layout.shownSpace) ?? '')}
   </p>
-  {#if refused !== ''}
-    <p class="mt-1 text-amber-500">{refused} is unplaced, so there is no space to show</p>
-  {/if}
 </div>
 
-<ul>
+<!-- Only the rows scroll: the controls above stay where they were put. -->
+<ul class="min-h-0 flex-1 overflow-y-auto">
   {#each sections as section (section.label ?? '')}
     {#if section.label !== null}
       <li class="flex justify-between gap-2 border-b border-neutral-800 bg-neutral-900 px-3 py-1 text-xs">
@@ -327,7 +334,10 @@
       <li>
         <button
           title={conv}
-          class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900"
+          class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left transition-colors duration-500 hover:bg-neutral-900 {refused ===
+          conv
+            ? 'bg-amber-950'
+            : ''}"
           onclick={() => goTo(conv)}
           oncontextmenu={(e) => fileByGesture(conv, e)}
         >

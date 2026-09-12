@@ -60,7 +60,7 @@
       <h1 class="text-sm font-bold">Tower <span class="font-normal text-neutral-600">rail spaces spike</span></h1>
       <span class="text-sky-300">● {stale.size}</span>
     </header>
-    <div class="min-h-0 flex-1 overflow-y-auto">
+    <div class="flex min-h-0 flex-1 flex-col">
       <Rail
         {model}
         rows={fixture.conversations}
