@@ -1,6 +1,6 @@
 {
  "takenFrom": "/Users/stephen/repos/@shellicar/tower--rail-spaces-spike/spike/rail-spaces/.snapshot/tower-v2-snapshot.db",
- "takenAt": "2026-09-12T08:14:19.040Z",
+ "takenAt": "2026-09-12T08:15:57.688Z",
  "tagKeys": {
   "org": "#8ec07c",
   "repo": "#83a598",
@@ -5589,11 +5589,6 @@
     "parent": null
    },
    {
-    "id": "s-exec-az",
-    "name": "exec-az",
-    "parent": "s-tower"
-   },
-   {
     "id": "s-dotfiles",
     "name": "dotfiles",
     "parent": null
@@ -5619,160 +5614,13 @@
     "parent": null
    }
   ],
-  "placements": [
-   {
-    "conv": "7875ef21-b79d-424f-8996-1b4e34521d90",
-    "space": "s-tower",
-    "drawn": true
-   },
-   {
-    "conv": "74ab7b2a-a87a-4e5b-b64d-44c0fa23646c",
-    "space": "s-tower",
-    "drawn": true
-   },
-   {
-    "conv": "fa60fc32-aa3c-4a1a-8ec1-72c965aa3f89",
-    "space": "s-dotfiles",
-    "drawn": true
-   },
-   {
-    "conv": "37eef5b4-b124-4f15-8737-ef79dfeaf017",
-    "space": "s-dotfiles",
-    "drawn": true
-   },
-   {
-    "conv": "6f32c76c-6079-4fe8-a54b-994a395ff849",
-    "space": "s-skills",
-    "drawn": true
-   },
-   {
-    "conv": "e5f9f0a3-7fd6-43cb-ac9e-7d73247d612d",
-    "space": "s-skills",
-    "drawn": true
-   },
-   {
-    "conv": "0b1148e0-66d9-4e6c-a2d4-5d53ed1414a2",
-    "space": "s-skills",
-    "drawn": true
-   },
-   {
-    "conv": "2dfda638-6759-4ec8-81de-2a313e0d7f33",
-    "space": "s-flightrac",
-    "drawn": true
-   },
-   {
-    "conv": "6edc210c-cf7f-4c56-b5b2-463cb8d12abd",
-    "space": "s-flightrac",
-    "drawn": true
-   },
-   {
-    "conv": "db7184f5-b1df-488e-9337-899258aafbf4",
-    "space": "s-swe",
-    "drawn": true
-   },
-   {
-    "conv": "8fe63efb-d647-4816-a7f5-0f1527835aaf",
-    "space": "s-swe",
-    "drawn": true
-   },
-   {
-    "conv": "dbcf93f6-ee75-463f-82c2-f815505419fc",
-    "space": "s-swe",
-    "drawn": true
-   },
-   {
-    "conv": "1d78c5ae-0150-4c4b-a2e0-2df6b4f0d523",
-    "space": "s-hopeventures",
-    "drawn": true
-   },
-   {
-    "conv": "2b0974f1-cf56-4962-8b28-6ff8ca5fc764",
-    "space": "s-hopeventures",
-    "drawn": true
-   },
-   {
-    "conv": "8d0d6b88-3d85-4dac-99a3-2ded366a13e7",
-    "space": "s-hopeventures",
-    "drawn": true
-   },
-   {
-    "conv": "de5538ec-d3e3-4d05-9c42-843e7a666aca",
-    "space": "s-tower",
-    "drawn": true
-   },
-   {
-    "conv": "bad5683a-4786-450c-8982-47f4649759b0",
-    "space": "s-tower",
-    "drawn": true
-   },
-   {
-    "conv": "b2e8479f-1083-43a5-afca-58a2bf23a662",
-    "space": "s-tower",
-    "drawn": false
-   },
-   {
-    "conv": "e2352d77-e161-4c09-b59a-f4ea3d6f61c7",
-    "space": "s-exec-az",
-    "drawn": true
-   },
-   {
-    "conv": "3ac8a420-ea1c-4d93-9db5-4ac04736aacb",
-    "space": "s-exec-az",
-    "drawn": true
-   },
-   {
-    "conv": "80d285d7-e773-4a5a-9293-ba1fe4089113",
-    "space": "s-exec-az",
-    "drawn": true
-   },
-   {
-    "conv": "6a4b08b5-5bdf-40ee-bd1e-82f40cf00cac",
-    "space": "s-dotfiles",
-    "drawn": true
-   },
-   {
-    "conv": "c086cfd6-8397-4fee-a69d-3deb4aea8682",
-    "space": "s-dotfiles",
-    "drawn": true
-   },
-   {
-    "conv": "12da3104-e39d-4d35-9874-58877eec1854",
-    "space": "s-skills",
-    "drawn": true
-   },
-   {
-    "conv": "13b872ca-8577-43b9-bfff-5cd945ce9db1",
-    "space": "s-skills",
-    "drawn": false
-   },
-   {
-    "conv": "6dc7822a-e6c2-4905-920c-4f54790b2ea0",
-    "space": "s-flightrac",
-    "drawn": true
-   },
-   {
-    "conv": "a759b5aa-d42d-4bce-ad35-d431dccbbd3a",
-    "space": "s-flightrac",
-    "drawn": true
-   },
-   {
-    "conv": "1c14c53f-cf92-46fd-890f-f627893c8e65",
-    "space": "s-swe",
-    "drawn": true
-   },
-   {
-    "conv": "616bc9c4-8e71-47ff-8012-18a3c71e13bb",
-    "space": "s-hopeventures",
-    "drawn": true
-   }
-  ]
+  "placements": []
  },
  "notes": {
   "conversations": 638,
   "titled": 632,
   "tagged": 236,
-  "placed": 29,
-  "droppedDuplicatePlacements": [],
-  "placedButNotInTheRegister": []
+  "placed": 0,
+  "spaces": 6
  }
 }
