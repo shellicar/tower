@@ -3,6 +3,14 @@
 /* Lifted from mvp/frontend-svelte/src/app.css so the spike reads like tower
    rather than like a new design. */
 
+/* Tell the browser the page is dark and it draws its own furniture to match:
+   scrollbars, the select's menu, focus rings, form controls. Painting
+   scrollbars by hand instead throws away the platform's behaviour and has to be
+   redone per engine. */
+:root {
+  color-scheme: dark;
+}
+
 body {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 13px;
