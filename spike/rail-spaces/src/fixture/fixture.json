@@ -1,0 +1,5703 @@
+{
+ "takenFrom": "/Users/stephen/repos/@shellicar/tower--rail-spaces-spike/spike/rail-spaces/.snapshot/tower-v2-snapshot.db",
+ "takenAt": "2026-09-12T06:32:54.201Z",
+ "tagKeys": {
+  "org": "#8ec07c",
+  "repo": "#83a598",
+  "worktree": "#d3869b",
+  "project": "#fabd2f",
+  "role": "#fe8019",
+  "pr": "#b8bb26",
+  "platform": "#7fc7ff"
+ },
+ "conversations": [
+  {
+   "conv": "efb529c9-05ad-4cb5-bf29-1650bcee4330",
+   "lastEvent": 1789194726189,
+   "lastKind": "tool_use",
+   "stale": true
+  },
+  {
+   "conv": "cb2fb2c1-1566-47c5-a04f-705238429e27",
+   "lastEvent": 1789194724780,
+   "lastKind": "message",
+   "stale": true
+  },
+  {
+   "conv": "d52a76be-7928-4ee5-beba-f08b246c28a5",
+   "lastEvent": 1789194714244,
+   "lastKind": "query",
+   "stale": true
+  },
+  {
+   "conv": "bf401b0e-4ac3-4d49-84a5-a7629b532e34",
+   "lastEvent": 1789194713045,
+   "lastKind": "usage",
+   "stale": true
+  },
+  {
+   "conv": "6a4b08b5-5bdf-40ee-bd1e-82f40cf00cac",
+   "lastEvent": 1789194524527,
+   "lastKind": "query",
+   "title": "Add reasoning output to git-refresh command",
+   "tags": {
+    "org": "personal",
+    "platform": "github",
+    "repo": "dotfiles",
+    "worktree": "git-refresh-reason"
+   },
+   "stale": true
+  },
+  {
+   "conv": "de5538ec-d3e3-4d05-9c42-843e7a666aca",
+   "lastEvent": 1789194501018,
+   "lastKind": "query",
+   "title": "Rethink tower UI for conversation tenancy",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "ui-revamp",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "261c7f34-a24f-42f8-9a01-38d05f73581c",
+   "lastEvent": 1789193932238,
+   "lastKind": "query",
+   "title": "Country configuration and immutability for organisation creation",
+   "tags": {
+    "org": "HopeVentures",
+    "project": "CircuitBreaker",
+    "repo": "CircuitBreaker",
+    "worktree": "frontend-tax-registration-field",
+    "role": "operator",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "1d78c5ae-0150-4c4b-a2e0-2df6b4f0d523",
+   "lastEvent": 1789143183998,
+   "lastKind": "query",
+   "title": "Coordinate attendance and bonus content updates",
+   "tags": {
+    "org": "HopeVentures",
+    "repo": "claude-fleet-hopeventures",
+    "role": "handler",
+    "platform": "github"
+   }
+  },
+  {
+   "conv": "8d0d6b88-3d85-4dac-99a3-2ded366a13e7",
+   "lastEvent": 1789135150979,
+   "lastKind": "query"
+  },
+  {
+   "conv": "2b0974f1-cf56-4962-8b28-6ff8ca5fc764",
+   "lastEvent": 1789135145453,
+   "lastKind": "query",
+   "title": "Prove Cosmos access and fix attendance data",
+   "tags": {
+    "org": "HopeVentures",
+    "project": "CircuitBreaker",
+    "repo": "CircuitBreaker",
+    "worktree": "attendance-data-correction",
+    "role": "operator",
+    "platform": "devops",
+    "pr": "599"
+   }
+  },
+  {
+   "conv": "d19e7d48-fed6-4aa8-b793-fa72b26c55b2",
+   "lastEvent": 1789121536403,
+   "lastKind": "turn_started"
+  },
+  {
+   "conv": "bad5683a-4786-450c-8982-47f4649759b0",
+   "lastEvent": 1789121026150,
+   "lastKind": "query",
+   "title": "Review reported bugs and pending work",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "platform": "github"
+   }
+  },
+  {
+   "conv": "fc38e601-c7a0-4560-a065-16cad31111ad",
+   "lastEvent": 1789120810052,
+   "lastKind": "tool_use",
+   "title": "Add twelve month bonus content to survey",
+   "tags": {
+    "org": "HopeVentures",
+    "platform": "devops",
+    "project": "CircuitBreaker",
+    "repo": "CircuitBreaker",
+    "worktree": "survey-twelve-month-bonus-content",
+    "role": "operator"
+   }
+  },
+  {
+   "conv": "b2e8479f-1083-43a5-afca-58a2bf23a662",
+   "lastEvent": 1789119653854,
+   "lastKind": "query",
+   "title": "Fix fleet repo organization tagging in script",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "fix-tag-org",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "a7bc9bc7-bb8d-4b5c-b85e-b515758dfa79",
+   "lastEvent": 1789118226096,
+   "lastKind": "query",
+   "title": "Add twelve-month bonus content to survey",
+   "tags": {
+    "org": "HopeVentures",
+    "project": "CircuitBreaker",
+    "repo": "CircuitBreaker",
+    "worktree": "twelve-month-bonus-content",
+    "role": "operator",
+    "platform": "devops"
+   }
+  },
+  {
+   "conv": "29e311c3-6f67-49c5-b152-607f322e98b3",
+   "lastEvent": 1789098336455,
+   "lastKind": "query",
+   "title": "Configure holder SPs and review Azure credential access",
+   "tags": {
+    "org": "personal",
+    "repo": "claude-config"
+   }
+  },
+  {
+   "conv": "a9d840ef-85d8-4de6-802a-b52c21d2ae7b",
+   "lastEvent": 1788943054034,
+   "lastKind": "query",
+   "title": "Restructure Eagers contract to advisory role",
+   "tags": {
+    "org": "personal"
+   },
+   "stale": true
+  },
+  {
+   "conv": "81a57ba2-dc20-4647-9da6-a6d4d23e76de",
+   "lastEvent": 1788873715172,
+   "lastKind": "query",
+   "title": "Investigate Stripe webhook delivery delays",
+   "stale": true
+  },
+  {
+   "conv": "7c2c6dc0-de4a-44d4-8550-0ab3416c01f4",
+   "lastEvent": 1788857238724,
+   "lastKind": "query",
+   "title": "Investigate AzCli credential caching behavior",
+   "stale": true
+  },
+  {
+   "conv": "db7184f5-b1df-488e-9337-899258aafbf4",
+   "lastEvent": 1788718607557,
+   "lastKind": "query",
+   "title": "Container cleanup and script lifetime refactor",
+   "tags": {
+    "org": "shellicar",
+    "repo": "claude-swe",
+    "worktree": "rust-bash-tool",
+    "role": "handler",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "2dfda638-6759-4ec8-81de-2a313e0d7f33",
+   "lastEvent": 1788717846098,
+   "lastKind": "query",
+   "title": "Decide timestamp handling for analysis port",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "role": "handler",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "c086cfd6-8397-4fee-a69d-3deb4aea8682",
+   "lastEvent": 1788717077065,
+   "lastKind": "query",
+   "title": "Disable YubiKey touch policy for git signatures",
+   "tags": {
+    "org": "personal",
+    "repo": "dotfiles",
+    "worktree": "disable-touch-policy"
+   },
+   "stale": true
+  },
+  {
+   "conv": "fa60fc32-aa3c-4a1a-8ec1-72c965aa3f89",
+   "lastEvent": 1788716952673,
+   "lastKind": "query",
+   "title": "Build git suite tool with interactive UI and tests",
+   "tags": {
+    "org": "personal",
+    "role": "handler",
+    "repo": "dotfiles",
+    "worktree": "git-cleanup-ado"
+   }
+  },
+  {
+   "conv": "dbfafdeb-7363-4d8e-92d6-c38fc8ba1325",
+   "lastEvent": 1788716905184,
+   "lastKind": "query",
+   "title": "Review PR #17 for YubiKey touch policy changes",
+   "stale": true
+  },
+  {
+   "conv": "1c14c53f-cf92-46fd-890f-f627893c8e65",
+   "lastEvent": 1788716568098,
+   "lastKind": "query",
+   "title": "Compare Node and Rust orchestrator implementations",
+   "tags": {
+    "org": "shellicar",
+    "repo": "claude-swe",
+    "worktree": "orchestrator-review",
+    "role": "operator",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "37eef5b4-b124-4f15-8737-ef79dfeaf017",
+   "lastEvent": 1788715873447,
+   "lastKind": "query",
+   "title": "Review PR with dangerous deletion logic",
+   "tags": {
+    "org": "personal",
+    "repo": "dotfiles",
+    "worktree": "git-cleanup-ado"
+   }
+  },
+  {
+   "conv": "aac77e8a-6f2d-4be1-8205-f08436c7a55a",
+   "lastEvent": 1788715039541,
+   "lastKind": "query",
+   "title": "Review PR #17 for YubiKey touch policy changes",
+   "tags": {
+    "org": "personal",
+    "repo": "dotfiles",
+    "worktree": "disable-touch-policy"
+   },
+   "stale": true
+  },
+  {
+   "conv": "7875ef21-b79d-424f-8996-1b4e34521d90",
+   "lastEvent": 1788714673193,
+   "lastKind": "query",
+   "title": "Bridge improvements and parked work triage",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "role": "handler",
+    "pr": "40"
+   }
+  },
+  {
+   "conv": "e2748440-b38e-4dea-9426-434acc8d5209",
+   "lastEvent": 1788714270008,
+   "lastKind": "query",
+   "title": "Review pull request and identify which one",
+   "stale": true
+  },
+  {
+   "conv": "74ab7b2a-a87a-4e5b-b64d-44c0fa23646c",
+   "lastEvent": 1788714232214,
+   "lastKind": "query",
+   "title": "Implement buildstamp versioning system for binary verification",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "buildstamp"
+   }
+  },
+  {
+   "conv": "dbcf93f6-ee75-463f-82c2-f815505419fc",
+   "lastEvent": 1788711247030,
+   "lastKind": "query",
+   "title": "Build signal-handling job orchestrator in Rust",
+   "tags": {
+    "org": "shellicar",
+    "repo": "claude-swe",
+    "worktree": "orchestrator-rust",
+    "role": "operator",
+    "platform": "github"
+   }
+  },
+  {
+   "conv": "6dc7822a-e6c2-4905-920c-4f54790b2ea0",
+   "lastEvent": 1788709302820,
+   "lastKind": "query",
+   "title": "Audit functionality inventory against webapp",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "worktree": "inventory-audit",
+    "role": "operator",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "8fe63efb-d647-4816-a7f5-0f1527835aaf",
+   "lastEvent": 1788708916618,
+   "lastKind": "query",
+   "title": "Build orchestrator for job lifecycle management",
+   "tags": {
+    "org": "shellicar",
+    "repo": "claude-swe",
+    "worktree": "orchestrator-node",
+    "role": "operator",
+    "platform": "github"
+   }
+  },
+  {
+   "conv": "a759b5aa-d42d-4bce-ad35-d431dccbbd3a",
+   "lastEvent": 1788708451592,
+   "lastKind": "query",
+   "title": "Port analysis spine to Rust with parity verification",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "worktree": "webapp-poc-analysis",
+    "role": "operator",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "12da3104-e39d-4d35-9874-58877eec1854",
+   "lastEvent": 1788700984800,
+   "lastKind": "message",
+   "title": "Split and land skills-v2 changes via worktrees",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "role": "handler",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "6f32c76c-6079-4fe8-a54b-994a395ff849",
+   "lastEvent": 1788699486562,
+   "lastKind": "query",
+   "title": "Commit approval edge status changes",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "approval-edge",
+    "role": "operator",
+    "pr": "11",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "12dd2da7-398a-4c21-8b2f-d40a166b70ae",
+   "lastEvent": 1788698020380,
+   "lastKind": "query",
+   "title": "Design orchestration DSL for AI agent workflows",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "lite-llm"
+   },
+   "stale": true
+  },
+  {
+   "conv": "e5f9f0a3-7fd6-43cb-ac9e-7d73247d612d",
+   "lastEvent": 1788695513744,
+   "lastKind": "query",
+   "title": "Commit PR body skill documentation",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "pr-body-verbs",
+    "role": "operator",
+    "platform": "github"
+   }
+  },
+  {
+   "conv": "0b1148e0-66d9-4e6c-a2d4-5d53ed1414a2",
+   "lastEvent": 1788695469595,
+   "lastKind": "query",
+   "title": "Commit TypeScript hazard guard documentation",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "typescript-hazard-guard",
+    "role": "operator",
+    "platform": "github"
+   }
+  },
+  {
+   "conv": "616bc9c4-8e71-47ff-8012-18a3c71e13bb",
+   "lastEvent": 1788695020738,
+   "lastKind": "query",
+   "title": "Investigate subscription limits counting bug",
+   "tags": {
+    "org": "HopeVentures",
+    "repo": "claude-fleet-hopeventures",
+    "role": "handler",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "d829a395-5e85-48fd-986c-8f8a8c917a10",
+   "lastEvent": 1788437914433,
+   "lastKind": "query",
+   "title": "Summarize friend's Palworld game review",
+   "stale": true
+  },
+  {
+   "conv": "79c482b3-12b5-4ffc-96bc-4754160ad1f8",
+   "lastEvent": 1788437488448,
+   "lastKind": "query",
+   "title": "Design GPG key generation and YubiKey backup workflow",
+   "tags": {
+    "org": "personal",
+    "repo": "dotfiles"
+   }
+  },
+  {
+   "conv": "0a6aadeb-3b85-4e2c-aaa7-c2ed2d59b62e",
+   "lastEvent": 1788425542450,
+   "lastKind": "query",
+   "title": "Review staged commit changes and test probes",
+   "tags": {
+    "org": "shellicar",
+    "repo": "yubikey-airgap"
+   }
+  },
+  {
+   "conv": "6a9ee530-4945-4353-bbda-35b9668bdac3",
+   "lastEvent": 1788421860208,
+   "lastKind": "query",
+   "title": "Measure Rust-JavaScript interop overhead in Flightrac",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "role": "handler",
+    "platform": "devops"
+   }
+  },
+  {
+   "conv": "55ce1e0c-0200-48cc-926b-5b350e46c682",
+   "lastEvent": 1788359672582,
+   "lastKind": "query",
+   "title": "YubiKey three-key setup with GPG and OpenPGP",
+   "stale": true
+  },
+  {
+   "conv": "bbd8a8b7-8f75-4a90-854b-d72974e14e58",
+   "lastEvent": 1788324518556,
+   "lastKind": "message",
+   "title": "YubiKey offline setup with shared GPG key",
+   "stale": true
+  },
+  {
+   "conv": "d7c19971-04ae-497f-b1b7-816727eb5de8",
+   "lastEvent": 1788323100676,
+   "lastKind": "message",
+   "title": "Generate GPG key offline with two YubiKeys",
+   "stale": true
+  },
+  {
+   "conv": "50a786a2-1c61-401a-91bd-9f51eeda527f",
+   "lastEvent": 1788314740474,
+   "lastKind": "message",
+   "title": "YubiKey security setup and GPG signing",
+   "tags": {
+    "org": "personal",
+    "repo": "dotfiles",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "767a8ef8-02fb-4f27-b9b8-27c8d92969f7",
+   "lastEvent": 1788275800400,
+   "lastKind": "query",
+   "title": "Add conversation id search and display in tower",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "conversation-id",
+    "role": "operator"
+   }
+  },
+  {
+   "conv": "eb7dd9fa-a395-4949-a4ef-73656375f1b3",
+   "lastEvent": 1788272341808,
+   "lastKind": "query",
+   "title": "Add bridge name to telemetry ready event",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "agent-name",
+    "role": "operator"
+   }
+  },
+  {
+   "conv": "f569be9d-7504-4c14-ae2f-d9605bf9ba92",
+   "lastEvent": 1788272048500,
+   "lastKind": "query",
+   "title": "Review git-refresh refactor pull request",
+   "tags": {
+    "org": "personal",
+    "role": "operator",
+    "repo": "dotfiles",
+    "worktree": "git-refresh-gk"
+   }
+  },
+  {
+   "conv": "8b960e9a-80e6-4114-ab89-60d5d807242e",
+   "lastEvent": 1788270134098,
+   "lastKind": "query",
+   "title": "Review dotfiles git commands refactor PR",
+   "tags": {
+    "org": "personal",
+    "role": "operator",
+    "repo": "dotfiles",
+    "worktree": "git-cleanup-ado"
+   }
+  },
+  {
+   "conv": "6edc210c-cf7f-4c56-b5b2-463cb8d12abd",
+   "lastEvent": 1788268408833,
+   "lastKind": "query",
+   "title": "Benchmark wasm/JavaScript boundary overhead in Flightrac",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "worktree": "interop-overhead",
+    "role": "operator",
+    "platform": "devops"
+   }
+  },
+  {
+   "conv": "13b872ca-8577-43b9-bfff-5cd945ce9db1",
+   "lastEvent": 1788265434189,
+   "lastKind": "query",
+   "title": "Explain the decisions ledger rule",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "decisions-reason"
+   },
+   "stale": true
+  },
+  {
+   "conv": "8f745d33-c721-4a2b-a0cb-f23bee9ac74c",
+   "lastEvent": 1788265187717,
+   "lastKind": "query",
+   "title": "Add GitHub workflows to dotfiles",
+   "tags": {
+    "org": "personal"
+   },
+   "stale": true
+  },
+  {
+   "conv": "776db824-b606-45e8-b06c-0d44aadd97fa",
+   "lastEvent": 1788263590451,
+   "lastKind": "query",
+   "title": "Fix YubiKey PC/SC sharing conflict with Authenticator",
+   "stale": true
+  },
+  {
+   "conv": "65f5d3bb-0924-4b14-a43f-b14fd8057aba",
+   "lastEvent": 1788260812560,
+   "lastKind": "query",
+   "title": "Rewrite safe-operations skill to explain safety concept",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "safe-operations-brain-dead-claude",
+    "pr": "10",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "85320bff-e739-4596-9601-dd004a134acf",
+   "lastEvent": 1788258721351,
+   "lastKind": "query",
+   "title": "Evaluate multi-provider LLM adapters for bridge",
+   "stale": true
+  },
+  {
+   "conv": "a64a9289-7eac-464e-a6ba-d4fe607c2f41",
+   "lastEvent": 1788160190055,
+   "lastKind": "message",
+   "title": "Review PR #12, resolve gpg-setup.sh certificate reading findings",
+   "stale": true
+  },
+  {
+   "conv": "66fcd46b-8b03-4e2d-9faa-21f270878a46",
+   "lastEvent": 1788024274784,
+   "lastKind": "query",
+   "title": "Fix GPG wrapper bell spam during rebases",
+   "tags": {
+    "org": "personal"
+   },
+   "stale": true
+  },
+  {
+   "conv": "e196ac2f-700b-4c0e-ad53-abe8effa7490f",
+   "lastEvent": 1788023271762,
+   "lastKind": "query",
+   "title": "Show conversation's live attachment cwd on status line",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "frontend-show-cwd"
+   }
+  },
+  {
+   "conv": "e9be27b7-3037-4b7c-8120-d32e4969a44f",
+   "lastEvent": 1788021149235,
+   "lastKind": "query",
+   "title": "Fix VSCode workspace prune and test coverage gaps",
+   "tags": {
+    "org": "personal"
+   },
+   "stale": true
+  },
+  {
+   "conv": "08c5ce78-d8a5-4d3f-909a-fd67384e665f",
+   "lastEvent": 1788013020457,
+   "lastKind": "query",
+   "title": "Define the ghost role and refactor workflow vocabulary",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "adhoc-role"
+   }
+  },
+  {
+   "conv": "569be976-a0b9-40a4-b709-e0fa1b4ce799",
+   "lastEvent": 1788006461264,
+   "lastKind": "message",
+   "title": "Implement GPG signing retry and beep wrapper",
+   "tags": {
+    "org": "personal",
+    "repo": "skills-v2",
+    "worktree": "git-gpg-timeout"
+   },
+   "stale": true
+  },
+  {
+   "conv": "e2b60966-80a5-47e0-a51b-88ab6dce9b44",
+   "lastEvent": 1787996147904,
+   "lastKind": "query",
+   "title": "Land GitHub workflow files to main",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "github-workflows",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "86aab257-6bd1-4102-b225-4c65e725fbcc",
+   "lastEvent": 1787994763125,
+   "lastKind": "query",
+   "title": "Refactor changes skill as changes.jsonl reference",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "changes-description",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "5bff002e-044e-49cd-9f69-4f32e4e94478",
+   "lastEvent": 1787994040503,
+   "lastKind": "query",
+   "title": "Restore foundational skills v1 had lost",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "import-v1-skills"
+   },
+   "stale": true
+  },
+  {
+   "conv": "bd1b0520-3337-4f57-b7be-9669f295ed81",
+   "lastEvent": 1787993317606,
+   "lastKind": "query",
+   "title": "Review PR draft with findings verification",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "import-v1-skills"
+   },
+   "stale": true
+  },
+  {
+   "conv": "edd2d426-b870-42b9-99da-58d7e2486090",
+   "lastEvent": 1787991435762,
+   "lastKind": "query",
+   "title": "Trim long skill descriptions and set WHY standard",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "long-skill-descriptions"
+   },
+   "stale": true
+  },
+  {
+   "conv": "c539e352-0234-46b1-93c7-d86df33911a8",
+   "lastEvent": 1787989625105,
+   "lastKind": "query",
+   "title": "Update local config model and permissions",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "config",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "4df669c5-50e9-44e3-b85f-f46c388f8ae4",
+   "lastEvent": 1787988437424,
+   "lastKind": "query",
+   "title": "Land tag-conversations PR with squash auto-merge",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "tag-script",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "ff064a28-dcc0-403e-98c4-1d88b9f60999",
+   "lastEvent": 1787987458867,
+   "lastKind": "query",
+   "title": "Land dev.sh signal handling fix to main",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "dev-signals",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "dd6bdf0e-2095-4036-8276-53750170e673",
+   "lastEvent": 1787987112834,
+   "lastKind": "query",
+   "title": "Land D2 diagrams and assets to main",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "diagrams",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "70baa295-2f91-400e-84fb-8662d55065c1",
+   "lastEvent": 1787985595178,
+   "lastKind": "query",
+   "title": "Land config passthrough fix and enable auto-merge",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "config-passthrough",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "ea77c32b-ae26-4ae6-89ae-24f19648fb59",
+   "lastEvent": 1787983255123,
+   "lastKind": "query",
+   "title": "Build words skill for communication patterns",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "words-skill",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "bc2ff723-1f57-4384-83b4-1db4d276782d",
+   "lastEvent": 1787983250738,
+   "lastKind": "query",
+   "title": "Design individual skill to establish Claude identity",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "claude-identity",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "9b826440-3ab1-4025-9626-f270656f07bc",
+   "lastEvent": 1787983208251,
+   "lastKind": "query",
+   "title": "Write changelog skill for feature-focused entries",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "changelog-skill",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "39b79c05-4b8c-4d9d-8a87-747eefc34e21",
+   "lastEvent": 1787983197809,
+   "lastKind": "query",
+   "title": "Refine permission scope rules in baseline",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "permissions-do-not-extend",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "d310b4eb-04b2-4aba-8b26-63512419d775",
+   "lastEvent": 1787975568550,
+   "lastKind": "query",
+   "title": "Land bridge-credential PR with auto-merge",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "credential",
+    "role": "operator"
+   }
+  },
+  {
+   "conv": "41b6c106-3c42-46f2-9acc-630e2cc03dbe",
+   "lastEvent": 1787973851458,
+   "lastKind": "query",
+   "title": "Land feature/temp-config onto main as separate PRs",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "role": "handler"
+   },
+   "stale": true
+  },
+  {
+   "conv": "cfdc2085-6203-4d86-bfde-9828545286ec",
+   "lastEvent": 1787973836952,
+   "lastKind": "query",
+   "title": "Land lookout design record pull request",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "lookout-doc",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "e2d267c4-c441-40f9-a1b4-f4b19a2aa9b9",
+   "lastEvent": 1787973169411,
+   "lastKind": "query",
+   "title": "Enable auto-merge on WAL database pull request",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "wal",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "53b70e8a-ac57-4fb6-aa97-2d1f36907583",
+   "lastEvent": 1787931663112,
+   "lastKind": "query",
+   "title": "Land conversation titler pull request",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "titles",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "d58b9d15-d2f8-4498-b77e-6eed91fb61fb",
+   "lastEvent": 1787929130913,
+   "lastKind": "query",
+   "title": "Land replay paging PR with conflict resolution",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "replay-paging",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "70c212c0-cd61-4fb6-8419-7e23942dc00d",
+   "lastEvent": 1787927892207,
+   "lastKind": "query",
+   "title": "Calculate super contribution strategy and tax impact",
+   "tags": {
+    "org": "personal"
+   },
+   "stale": true
+  },
+  {
+   "conv": "84dcb7a6-aa72-498e-a989-ff5033bd5e41",
+   "lastEvent": 1787926139083,
+   "lastKind": "query",
+   "title": "Land rail filter toggles pull request",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "rail-filters",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "99c39174-3ce2-45ba-a687-3e0fed7ca64b",
+   "lastEvent": 1787919242532,
+   "lastKind": "query",
+   "title": "Review superannuation contribution cap and unused amounts",
+   "tags": {
+    "org": "personal"
+   },
+   "stale": true
+  },
+  {
+   "conv": "162cd7ad-62b5-426d-8014-46408fc0181b",
+   "lastEvent": 1787919054293,
+   "lastKind": "query",
+   "title": "File appearance in ATO debt recovery proceeding",
+   "tags": {
+    "org": "personal"
+   },
+   "stale": true
+  },
+  {
+   "conv": "165fb281-7412-4324-b5a2-3c38a223c483",
+   "lastEvent": 1787917893126,
+   "lastKind": "query",
+   "title": "Fix session titler token counting and model routing",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower"
+   },
+   "stale": true
+  },
+  {
+   "conv": "1e55c658-d9aa-4fe6-9190-f7a7a1a7f7e1",
+   "lastEvent": 1787914817128,
+   "lastKind": "query",
+   "title": "Land agent landscape survey pull request",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "landscape",
+    "role": "operator"
+   }
+  },
+  {
+   "conv": "510ca785-9937-4375-aa91-348be4bea1f6",
+   "lastEvent": 1787913991092,
+   "lastKind": "query",
+   "title": "Land pull request for ref pointer fixes",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "ref-result",
+    "role": "operator"
+   }
+  },
+  {
+   "conv": "505a4161-bcfc-4010-b0b8-797769a3531a",
+   "lastEvent": 1787913273914,
+   "lastKind": "query",
+   "title": "Add agent landscape survey to docs/design",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "landscape",
+    "role": "operator"
+   }
+  },
+  {
+   "conv": "a639254b-c4d6-4d44-b407-c2f42a5109cc",
+   "lastEvent": 1787911862938,
+   "lastKind": "query",
+   "title": "Move implementation docs beside their implementation",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "docs-move",
+    "role": "operator"
+   }
+  },
+  {
+   "conv": "eaf5b813-c942-4f21-9594-78f53643919e",
+   "lastEvent": 1787907286628,
+   "lastKind": "usage",
+   "title": "Search for .d2 files and images in repo"
+  },
+  {
+   "conv": "785c8fdb-d55b-4109-9c34-834d6589bcc4",
+   "lastEvent": 1787830599485,
+   "lastKind": "usage",
+   "title": "Find YubiKey documentation source conversation",
+   "stale": true
+  },
+  {
+   "conv": "895ababf-fca2-49d3-baf6-3356bf01b519",
+   "lastEvent": 1787739384263,
+   "lastKind": "query",
+   "title": "Investigate and fix subscription limit window bug",
+   "tags": {
+    "org": "HopeVentures",
+    "project": "CircuitBreaker",
+    "repo": "CircuitBreaker",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "baf7963f-0dfa-42cf-88b5-7b95f7440975",
+   "lastEvent": 1787712656337,
+   "lastKind": "query",
+   "title": "DOS extended memory configuration and himem.sys",
+   "stale": true
+  },
+  {
+   "conv": "b7534b4c-85e1-4a67-a74e-921f6b5a3fd0",
+   "lastEvent": 1787624287259,
+   "lastKind": "query",
+   "title": "Create title-conversations script using bridge's code",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "77271513-3617-412c-b3d8-a79d2355a4d3",
+   "lastEvent": 1787589536097,
+   "lastKind": "query",
+   "title": "Bridge critical items merged, infrastructure housekeeping",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "role": "handler",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "406bbf7a-faaa-4824-a119-02efd7b039b1",
+   "lastEvent": 1787589217815,
+   "lastKind": "query",
+   "title": "Spike verb-contract lifetime design prototype",
+   "tags": {
+    "org": "shellicar",
+    "repo": "claude-swe",
+    "worktree": "verb-contract",
+    "role": "operator",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "66a9ec46-921a-4447-a68d-904e101cd228",
+   "lastEvent": 1787575906290,
+   "lastKind": "query",
+   "title": "Recover git rebase with read-only hooks directory",
+   "stale": true
+  },
+  {
+   "conv": "7660c9e5-751a-4a8f-9ef2-198f80642545",
+   "lastEvent": 1787575735494,
+   "lastKind": "query",
+   "title": "Review PR #2 against gatekeeper skill",
+   "stale": true
+  },
+  {
+   "conv": "87352933-f7f8-43ce-9dd8-3f765b9e1b99",
+   "lastEvent": 1787574418451,
+   "lastKind": "query",
+   "title": "Implement connect-phase retry in bridge",
+   "tags": {
+    "org": "@shellicar",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "a567efa6-ead8-435d-8f6c-584dbcca1954",
+   "lastEvent": 1787571585813,
+   "lastKind": "query",
+   "title": "Bound Exec calls by a timeout the caller states",
+   "tags": {
+    "org": "@shellicar",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "b267d655-9c8f-4799-bcf3-cd0f5cd886bc",
+   "lastEvent": 1787571572940,
+   "lastKind": "query",
+   "title": "Review PR for decisions ledger skill",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "worktree": "decisions-reason"
+   },
+   "stale": true
+  },
+  {
+   "conv": "5ec8f531-5ac4-45fa-83b2-bde6b1894a59",
+   "lastEvent": 1787570742542,
+   "lastKind": "query",
+   "title": "Debug Claude task extension and instruction fidelity",
+   "stale": true
+  },
+  {
+   "conv": "bddec067-945b-440d-910d-4bd483082f7e",
+   "lastEvent": 1787561164134,
+   "lastKind": "query",
+   "title": "Sort workspace directories and fix git hooks installation",
+   "stale": true
+  },
+  {
+   "conv": "2faa452d-5dc9-4141-b26d-2a69ee7787af",
+   "lastEvent": 1787560273629,
+   "lastKind": "query",
+   "title": "Consolidate continuity skill and write decision entry",
+   "stale": true
+  },
+  {
+   "conv": "73fdb7b4-a642-4784-aa8a-bcab3e7b13d0",
+   "lastEvent": 1787560034065,
+   "lastKind": "query",
+   "title": "Fix decision entry describing skill merge",
+   "stale": true
+  },
+  {
+   "conv": "cd318a7d-86c5-4d51-b810-6b55835cb700",
+   "lastEvent": 1787559683686,
+   "lastKind": "message",
+   "title": "Configure bridge for daily use and merge critical fixes",
+   "tags": {
+    "role": "handler"
+   },
+   "stale": true
+  },
+  {
+   "conv": "00e2bd63-6404-4ef9-ac7c-396d91410692",
+   "lastEvent": 1787559556167,
+   "lastKind": "query",
+   "title": "Fix --config flag in start-v2.mjs script",
+   "stale": true
+  },
+  {
+   "conv": "88ef6143-f359-43de-8b38-5518a0a3d958",
+   "lastEvent": 1787557640586,
+   "lastKind": "query",
+   "title": "Continue bridge agent development from previous session",
+   "stale": true
+  },
+  {
+   "conv": "f9d5e2e2-0a38-4e2c-a4b8-2df1073341da",
+   "lastEvent": 1787555909087,
+   "lastKind": "usage",
+   "title": "Explore a challenging problem",
+   "stale": true
+  },
+  {
+   "conv": "5e6fb195-780a-4292-b252-af2ebe1fcd96",
+   "lastEvent": 1787554762115,
+   "lastKind": "query",
+   "title": "Fix tag conversations script attachment query",
+   "stale": true
+  },
+  {
+   "conv": "eb100fd4-edee-4f1d-8a92-8e896e953cdb",
+   "lastEvent": 1787541858147,
+   "lastKind": "query",
+   "title": "Remove memory tool approval gates",
+   "tags": {
+    "org": "@shellicar",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "f11cee63-a417-4e24-ba3e-c5f49c6e0702",
+   "lastEvent": 1787541854661,
+   "lastKind": "query",
+   "title": "Make bridge exec environment a value",
+   "tags": {
+    "org": "@shellicar",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "efa6d1c0-1800-4e2a-8f3a-7e78e1e73f92",
+   "lastEvent": 1787541152991,
+   "lastKind": "query",
+   "title": "Bridge settings reply refactor and broker isolation",
+   "tags": {
+    "org": "@shellicar",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "5b4c7c05-7d59-4448-b25f-db9e1b29f541",
+   "lastEvent": 1787540883924,
+   "lastKind": "query",
+   "title": "Review PR with skill consolidation findings",
+   "stale": true
+  },
+  {
+   "conv": "0b3e858e-2f98-4f49-a96c-a33eb89ee1d6",
+   "lastEvent": 1787496583612,
+   "lastKind": "query",
+   "title": "Complete release 1.0.0-beta.26 and publish",
+   "stale": true
+  },
+  {
+   "conv": "b1fc3314-c3d1-481f-9555-2a45ca8bb108",
+   "lastEvent": 1787495147256,
+   "lastKind": "query",
+   "title": "Refactor bridge model configuration to adaptive thinking",
+   "tags": {
+    "org": "@shellicar",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "011a68ac-fb21-415d-95f8-f2fcc0f59a08",
+   "lastEvent": 1787494838320,
+   "lastKind": "query",
+   "title": "Initial session connection and capabilities check",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "ad71ae49-9a5a-49e2-b864-24b7267d6c0f",
+   "lastEvent": 1787494373086,
+   "lastKind": "query",
+   "title": "Review conversations and set up tagging system",
+   "stale": true
+  },
+  {
+   "conv": "93798253-773d-4832-b8f6-2f5415be0d0b",
+   "lastEvent": 1787488145784,
+   "lastKind": "query",
+   "title": "Initial greeting from attach_probe",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "a081199b-1e35-4ccf-ab67-cbc30f685025",
+   "lastEvent": 1787483473934,
+   "lastKind": "query",
+   "title": "Resolve rebase conflicts and continue",
+   "stale": true
+  },
+  {
+   "conv": "09475dde-2e44-4a96-b691-999762ba511c",
+   "lastEvent": 1787482637954,
+   "lastKind": "query",
+   "title": "Build GitHub PR tools as only authentication route",
+   "tags": {
+    "org": "@shellicar",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "95a77ca8-b48c-4a38-b9cc-786ae8ccfed8",
+   "lastEvent": 1787470871969,
+   "lastKind": "query",
+   "title": "Repair bridge and establish handler workflow",
+   "tags": {
+    "role": "handler"
+   },
+   "stale": true
+  },
+  {
+   "conv": "9acb01e9-fa02-44d1-b502-b7977f44e295",
+   "lastEvent": 1787469644912,
+   "lastKind": "query",
+   "title": "July and August payroll, invoicing and reconciliation",
+   "tags": {
+    "org": "Hellicar-Solutions",
+    "repo": "xero-admin",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "9537b9db-1a0f-4987-aa06-12029c33c42e",
+   "lastEvent": 1787465703175,
+   "lastKind": "query",
+   "title": "Update CLAUDE.md format and remove stale files",
+   "stale": true
+  },
+  {
+   "conv": "c641413a-dda1-493c-8b74-ec48aa93ba8d",
+   "lastEvent": 1787463753809,
+   "lastKind": "query",
+   "title": "Deduplicate storage share and set up bidirectional sync",
+   "stale": true
+  },
+  {
+   "conv": "a5789e9f-c61a-4b33-8402-b2ee3cfb9751",
+   "lastEvent": 1787457436574,
+   "lastKind": "query",
+   "title": "Update inventory and order fiber optic cables",
+   "stale": true
+  },
+  {
+   "conv": "34be02bb-85b8-4056-b588-499b02f181a5",
+   "lastEvent": 1787448604209,
+   "lastKind": "query",
+   "title": "Update .gitignore for multiple project types",
+   "stale": true
+  },
+  {
+   "conv": "c7af0366-b343-495a-bc05-f1bd9e4d4fa5",
+   "lastEvent": 1787443185936,
+   "lastKind": "query",
+   "title": "Xero admin reconciliation and correction cycle",
+   "tags": {
+    "org": "Hellicar-Solutions",
+    "repo": "xero-admin",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "3597a3bd-de3a-47d2-9324-5ee1b70e79ae",
+   "lastEvent": 1787440156162,
+   "lastKind": "query",
+   "title": "Review feature/continuity-skill branch",
+   "stale": true
+  },
+  {
+   "conv": "df401b02-f79a-4936-a16f-c0e2dac1d8d3",
+   "lastEvent": 1786883227273,
+   "lastKind": "query",
+   "title": "Rebuild the PR skill from first principles",
+   "stale": true
+  },
+  {
+   "conv": "60ea6308-bd81-4577-926b-2bba26256128",
+   "lastEvent": 1786882615386,
+   "lastKind": "query",
+   "title": "Fix HTTP/2 request failures and image conditioning",
+   "stale": true
+  },
+  {
+   "conv": "d933e70e-85fa-4289-a6b6-5ea19e112da6",
+   "lastEvent": 1786878043891,
+   "lastKind": "query",
+   "title": "Preserve source image format when downscaling",
+   "stale": true
+  },
+  {
+   "conv": "bffec7b4-7baa-4942-a33c-a1152c2b8e54",
+   "lastEvent": 1786877752631,
+   "lastKind": "query",
+   "title": "Write PR body for image format preservation change",
+   "stale": true
+  },
+  {
+   "conv": "f653e07a-edcb-4b7e-af03-28d7836c32c9",
+   "lastEvent": 1786877546799,
+   "lastKind": "turn_aborted",
+   "title": "Write PR description for image format changes",
+   "stale": true
+  },
+  {
+   "conv": "57c12f67-d7b3-4a2b-9fa6-26093b132642",
+   "lastEvent": 1786876618478,
+   "lastKind": "query",
+   "title": "Urgent ATO writ response and lawyer instructions",
+   "stale": true
+  },
+  {
+   "conv": "28b3b539-4370-44c3-8d2e-b1b870351256",
+   "lastEvent": 1786859950822,
+   "lastKind": "query",
+   "title": "Remove unnecessary window raise from tmux-vscode script",
+   "stale": true
+  },
+  {
+   "conv": "8930b0ac-9ff4-4673-8649-af1cc1f64ef9",
+   "lastEvent": 1786859017744,
+   "lastKind": "query",
+   "title": "Debug HTTP 413 error logging in API requests",
+   "stale": true
+  },
+  {
+   "conv": "cc54dcd4-5fb5-4e31-9553-bde32d8a48de",
+   "lastEvent": 1786853830854,
+   "lastKind": "query",
+   "title": "Fix ff script to support directory search",
+   "stale": true
+  },
+  {
+   "conv": "b4893be0-7fba-4ee6-a87b-579a1d592a2f",
+   "lastEvent": 1786850156786,
+   "lastKind": "query",
+   "title": "Search Claude sessions for specific directory",
+   "stale": true
+  },
+  {
+   "conv": "33f297ff-1226-49fb-87ec-80527d6e7bc6",
+   "lastEvent": 1786702316353,
+   "lastKind": "query",
+   "title": "Investigate claude-code date injection bug in system prompt",
+   "stale": true
+  },
+  {
+   "conv": "46bbf90f-b504-47f5-b4f8-2e4a104decd1",
+   "lastEvent": 1786700930521,
+   "lastKind": "query",
+   "title": "Review file on failure modes and limitations",
+   "stale": true
+  },
+  {
+   "conv": "61f6b832-a381-405d-98da-39acf67b1d67",
+   "lastEvent": 1786611748050,
+   "lastKind": "query",
+   "title": "Debug and fix BananaBot9000's identity drift",
+   "stale": true
+  },
+  {
+   "conv": "5efeaac8-9eec-4a91-9b47-740104da22c5",
+   "lastEvent": 1786454374531,
+   "lastKind": "query",
+   "title": "Add click-to-copy to code blocks and response headers",
+   "tags": {
+    "pr": "504"
+   },
+   "stale": true
+  },
+  {
+   "conv": "1d73afe5-21a6-4f1b-bc2c-a2f8931d35fa",
+   "lastEvent": 1786451035289,
+   "lastKind": "query",
+   "title": "Build wire contract and skeleton crates",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "worktree": "crates-and-wire",
+    "role": "operator",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "fe17f556-d8b1-4d28-96fd-afee1eb469fc",
+   "lastEvent": 1786449178742,
+   "lastKind": "query",
+   "title": "Port Flightrac dashboard to Rust with WebSocket and telemetry",
+   "tags": {
+    "role": "handler"
+   },
+   "stale": true
+  },
+  {
+   "conv": "cb3f3e1e-8ce6-4ccc-9f63-935e97cc3e4f",
+   "lastEvent": 1786448806216,
+   "lastKind": "message",
+   "title": "Remove message identity from conversation file",
+   "tags": {
+    "pr": "506"
+   },
+   "stale": true
+  },
+  {
+   "conv": "d5f28c8e-abe6-4144-9db2-e9f512f18dc7",
+   "lastEvent": 1786448405511,
+   "lastKind": "query",
+   "title": "Review PR #504 click-to-copy feature",
+   "stale": true
+  },
+  {
+   "conv": "42304d7d-30d7-41d6-8111-6cde6e2afcc5",
+   "lastEvent": 1786389241008,
+   "lastKind": "query",
+   "title": "Spike frontend telemetry with WebSocket to defeat ad blockers",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "worktree": "frontend-telemetry",
+    "role": "operator",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "67ca6aed-6102-4bd0-aaec-6e40bb99f748",
+   "lastEvent": 1786388118059,
+   "lastKind": "query",
+   "title": "Restructure bash-parser AST for gate visibility",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "bash-tool",
+    "worktree": "parser",
+    "pr": "1",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "52b38717-9a1d-4d53-9b6c-633d92f3f638",
+   "lastEvent": 1786385428229,
+   "lastKind": "query",
+   "title": "Review PR for removing identity field",
+   "stale": true
+  },
+  {
+   "conv": "1259a756-3e2b-4fdc-872e-15a961b89536",
+   "lastEvent": 1786383169551,
+   "lastKind": "query",
+   "title": "Audit alert formula specification against runtime code",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "worktree": "formula-audit",
+    "role": "operator",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "a56de009-d4f4-47a9-be87-6ff2693b3d66",
+   "lastEvent": 1786382726374,
+   "lastKind": "message",
+   "title": "Initialize testing setup",
+   "stale": true
+  },
+  {
+   "conv": "9420b041-df6a-43af-9934-97992ccb3792",
+   "lastEvent": 1786380525064,
+   "lastKind": "query",
+   "title": "Integrate socket architecture and measure Web PubSub latency",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "worktree": "socket-integration",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "98350cbc-d692-4ae6-9af0-6ae2f5a033a7",
+   "lastEvent": 1786379681303,
+   "lastKind": "query",
+   "title": "Test greeting interaction",
+   "stale": true
+  },
+  {
+   "conv": "gh-tools-smoke",
+   "lastEvent": 1786376745688,
+   "lastKind": "query",
+   "title": "Simple acknowledgment response",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "414dfb6c-45aa-40aa-b8e8-56286ed76e98",
+   "lastEvent": 1786375107905,
+   "lastKind": "query",
+   "title": "Document git switch and safe branch moving",
+   "stale": true
+  },
+  {
+   "conv": "806ac29b-92d8-4b59-b833-cca450b3825f",
+   "lastEvent": 1786371018724,
+   "lastKind": "query",
+   "title": "Refactor git_main into a single git-main command",
+   "stale": true
+  },
+  {
+   "conv": "baf2a173-1543-45c8-b193-ba05ec7d5ee6",
+   "lastEvent": 1786339332529,
+   "lastKind": "query",
+   "title": "Rebuild skills-v2 from crew revert",
+   "stale": true
+  },
+  {
+   "conv": "8897d7d8-8378-4c2d-897e-e1b181f3aee8",
+   "lastEvent": 1786276405547,
+   "lastKind": "query",
+   "title": "Evaluate skills repo structure and decision ledger",
+   "stale": true
+  },
+  {
+   "conv": "1617bc56-aa0c-49ee-bd3c-ea8810a1ff9e",
+   "lastEvent": 1786258427437,
+   "lastKind": "query",
+   "title": "Review DECISIONS.md provenance and explanation quality",
+   "stale": true
+  },
+  {
+   "conv": "50e925ef-6802-49c6-a108-65ce081ca625",
+   "lastEvent": 1786258417342,
+   "lastKind": "query",
+   "title": "Review DECISIONS.md entries for decision documentation quality",
+   "stale": true
+  },
+  {
+   "conv": "5d2d50eb-acbd-4fe6-b7e9-bae2e5521bc2",
+   "lastEvent": 1786257821672,
+   "lastKind": "query",
+   "title": "Review staged diff for decision entries",
+   "stale": true
+  },
+  {
+   "conv": "f6b06eac-cd42-46c1-876b-bfc85bb05c94",
+   "lastEvent": 1786257692055,
+   "lastKind": "query",
+   "title": "Review staged diffs for decision consistency",
+   "stale": true
+  },
+  {
+   "conv": "5de53ba6-5d7f-4b5f-9f08-a06647a86adb",
+   "lastEvent": 1786247044035,
+   "lastKind": "message",
+   "title": "Add system role support to SDK",
+   "stale": true
+  },
+  {
+   "conv": "bcfa4f31-b654-4216-8dcc-909cf8ac58ab",
+   "lastEvent": 1786247029503,
+   "lastKind": "turn_aborted",
+   "title": "Add system role support to the SDK",
+   "stale": true
+  },
+  {
+   "conv": "28ed7dba-6834-44f7-a4df-c0fdc85e7c45",
+   "lastEvent": 1786215732530,
+   "lastKind": "query",
+   "title": "Remove MessageIdentity type from codebase",
+   "stale": true
+  },
+  {
+   "conv": "ac5a7b6f-2655-4647-84c4-4b38ee9c19f4",
+   "lastEvent": 1786215212510,
+   "lastKind": "query",
+   "title": "Integrate three bash-tool feature branches",
+   "tags": {
+    "pr": "1"
+   },
+   "stale": true
+  },
+  {
+   "conv": "3dbd7883-a108-4472-be58-8faf8dc7a69e",
+   "lastEvent": 1786214381957,
+   "lastKind": "query",
+   "title": "Add real OS pipes to ExecV3, fix redirect and pipeline defects",
+   "tags": {
+    "pr": "499"
+   },
+   "stale": true
+  },
+  {
+   "conv": "5cdf6eeb-a442-46fa-8ce1-1694127bd81e",
+   "lastEvent": 1786214232941,
+   "lastKind": "query",
+   "title": "Reshape bash-inspect to tree-walking inspection",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "bash-tool",
+    "worktree": "inspect",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "ff313a2c-f9db-4efc-9546-1a9ff7066c33",
+   "lastEvent": 1786207085279,
+   "lastKind": "query",
+   "title": "Review PR #501: cache invalidation bugs",
+   "stale": true
+  },
+  {
+   "conv": "45fb4f20-a222-42ff-9b35-ea434224772c",
+   "lastEvent": 1786207079227,
+   "lastKind": "query",
+   "title": "Build the lookout daemon for worker status monitoring",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "lookout",
+    "role": "operator",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "96fe171d-0856-45d8-bba0-5647314e76e0",
+   "lastEvent": 1786206107175,
+   "lastKind": "turn_aborted",
+   "title": "Shellcheck findings: fix bugs and mechanical issues",
+   "stale": true
+  },
+  {
+   "conv": "0ca77df1-653c-4928-a321-1fae38ff6de1",
+   "lastEvent": 1786205803239,
+   "lastKind": "message",
+   "title": "Clean up plan structure and skills gaps",
+   "stale": true
+  },
+  {
+   "conv": "502bab08-0550-45e3-a116-fcf295d2f831",
+   "lastEvent": 1786201465812,
+   "lastKind": "query",
+   "title": "Investigate click-to-copy feasibility in CLI",
+   "stale": true
+  },
+  {
+   "conv": "cadd3b32-983b-4301-8f83-fccd408f0fa2",
+   "lastEvent": 1786197823975,
+   "lastKind": "message",
+   "title": "Correct the inspect session and integrate bash-tool branches",
+   "stale": true
+  },
+  {
+   "conv": "892b4dc6-2570-4b8d-8432-7fff8f4b3782",
+   "lastEvent": 1786194164501,
+   "lastKind": "query",
+   "title": "Design the plan tool, build plan.md",
+   "stale": true
+  },
+  {
+   "conv": "4d34e87b-0deb-4c56-9823-da7df028852e",
+   "lastEvent": 1786187644970,
+   "lastKind": "query",
+   "title": "Port Read and Paths tools with CRLF handling",
+   "stale": true
+  },
+  {
+   "conv": "f9836cda-0212-4ea4-a5f6-d79a670ad587",
+   "lastEvent": 1786187031726,
+   "lastKind": "query",
+   "title": "Webapp rearchitecture: transport, frontend isolation, and hosting proof",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "b8db9d22-1d18-4cdb-84d0-29f4ccf90b48",
+   "lastEvent": 1786186241813,
+   "lastKind": "query",
+   "title": "Review GitHub CLI integration PR changes",
+   "stale": true
+  },
+  {
+   "conv": "a1e68999-c9f8-4d9b-9a9c-753bf1840bb0",
+   "lastEvent": 1786185962969,
+   "lastKind": "query",
+   "title": "Build the lookout daemon for tower",
+   "tags": {
+    "role": "handler"
+   },
+   "stale": true
+  },
+  {
+   "conv": "91e7b433-733a-4449-9f81-22c96605b718",
+   "lastEvent": 1786185672975,
+   "lastKind": "query",
+   "title": "Fix GitHub tool silent output for auto-merge",
+   "stale": true
+  },
+  {
+   "conv": "3b51d462-bcbc-4fb1-a49b-583fc2cae961",
+   "lastEvent": 1786185661704,
+   "lastKind": "query",
+   "title": "Fix cache warning token count bugs",
+   "tags": {
+    "pr": "501"
+   },
+   "stale": true
+  },
+  {
+   "conv": "44dcd32f-ec8f-4895-a5f4-2faea41f9ed2",
+   "lastEvent": 1786185638200,
+   "lastKind": "query",
+   "title": "Review PR for persisting aborted query replies",
+   "stale": true
+  },
+  {
+   "conv": "8e1d7efe-6efa-4fe9-8ad0-09e696ce2cdb",
+   "lastEvent": 1786184740743,
+   "lastKind": "query",
+   "title": "bash-walker tool validation and refactoring",
+   "tags": {
+    "role": "handler"
+   },
+   "stale": true
+  },
+  {
+   "conv": "cd14c94a-4845-4f08-b10c-68cfe614af4a",
+   "lastEvent": 1786017647128,
+   "lastKind": "query",
+   "title": "Implement policy approval engine for bridge",
+   "stale": true
+  },
+  {
+   "conv": "68bf9be9-d180-4d64-8f31-a4d0ae225ddb",
+   "lastEvent": 1786017632226,
+   "lastKind": "query",
+   "title": "Implement trap and readonly assignment fixes",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "bash-tool",
+    "worktree": "builtins",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "34f4a89c-3925-4f06-ac6f-633e7e9c2b70",
+   "lastEvent": 1786017480784,
+   "lastKind": "query",
+   "title": "Fix bash-walker conformance gaps in expand.rs",
+   "stale": true
+  },
+  {
+   "conv": "1cf8de81-1cfd-48d2-87d5-425564f43836",
+   "lastEvent": 1786017453182,
+   "lastKind": "query",
+   "title": "Review lookout daemon for production readiness",
+   "tags": {
+    "org": "@shellicar",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "65f19c4b-7338-4c26-a598-10683b8dff3c",
+   "lastEvent": 1786016870788,
+   "lastKind": "query",
+   "title": "Generate silly names for public figures",
+   "stale": true
+  },
+  {
+   "conv": "b30b9fa8-ad9f-46fd-9c70-374152fa1302",
+   "lastEvent": 1786015457999,
+   "lastKind": "query",
+   "title": "Fix orphaned replay containers on timeout signal",
+   "tags": {
+    "org": "shellicar",
+    "repo": "claude-swe",
+    "worktree": "rust-bash-tool",
+    "role": "operator",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "4d4a6884-184d-4097-82dd-c81380af133d",
+   "lastEvent": 1786008214488,
+   "lastKind": "query",
+   "title": "Design system diagrams for agent repo",
+   "stale": true
+  },
+  {
+   "conv": "152a4c2c-71ce-478a-8940-319bb42d4110",
+   "lastEvent": 1786007840751,
+   "lastKind": "query",
+   "title": "Analyze script lifetime and signal handling",
+   "stale": true
+  },
+  {
+   "conv": "1eb90e41-1eb1-4f99-b0d8-8ab88ce92583",
+   "lastEvent": 1786007829793,
+   "lastKind": "query",
+   "title": "Bash-walker fixes and swe benchmarking",
+   "tags": {
+    "org": "shellicar",
+    "repo": "claude-swe",
+    "platform": "github"
+   }
+  },
+  {
+   "conv": "066747fe-551b-45cf-a025-4c7f586ded52",
+   "lastEvent": 1786005402890,
+   "lastKind": "query",
+   "title": "Create d2 diagrams explaining repository architecture",
+   "stale": true
+  },
+  {
+   "conv": "697e3c36-947d-488b-918a-6a69f0852361",
+   "lastEvent": 1786005266946,
+   "lastKind": "query",
+   "title": "Determine renewal workflow trigger timing",
+   "stale": true
+  },
+  {
+   "conv": "1377e0f6-fff4-445d-b497-43eb6ea9e88f",
+   "lastEvent": 1786004468944,
+   "lastKind": "query",
+   "title": "Create find command wrapper script ff",
+   "stale": true
+  },
+  {
+   "conv": "00000000-0000-4000-8000-00000000c005",
+   "lastEvent": 1785944674198,
+   "lastKind": "query",
+   "title": "New coding session"
+  },
+  {
+   "conv": "00000000-0000-4000-8000-00000000c004",
+   "lastEvent": 1785944674116,
+   "lastKind": "query",
+   "title": "New coding session"
+  },
+  {
+   "conv": "00000000-0000-4000-8000-00000000c007",
+   "lastEvent": 1785944673798,
+   "lastKind": "message",
+   "title": "New coding session"
+  },
+  {
+   "conv": "d9eb609e-adb9-40e4-a475-1848f6e57b03",
+   "lastEvent": 1785941440000,
+   "lastKind": "query",
+   "title": "Move branch without losing changes safely",
+   "stale": true
+  },
+  {
+   "conv": "ab836d3b-05c7-4b16-b55a-6f137f251957",
+   "lastEvent": 1785940179754,
+   "lastKind": "query",
+   "title": "Review lookout daemon against design requirements",
+   "tags": {
+    "org": "@shellicar",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "4b4f0064-b83c-4fcf-815c-4341b11ed026",
+   "lastEvent": 1785940109062,
+   "lastKind": "query",
+   "title": "Resolve merge conflicts in query closure documentation",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "query-closure-owed",
+    "platform": "github",
+    "pr": "40"
+   },
+   "stale": true
+  },
+  {
+   "conv": "9ca08b08-4ae7-481a-bb15-e0f3c6179cf6",
+   "lastEvent": 1785939843031,
+   "lastKind": "query",
+   "title": "Add worker commission flow to nats skills",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "role": "operator",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "00000000-0000-4000-8000-00000000a007",
+   "lastEvent": 1785937761489,
+   "lastKind": "message",
+   "title": "New coding session"
+  },
+  {
+   "conv": "00000000-0000-4000-8000-00000000a006",
+   "lastEvent": 1785937759478,
+   "lastKind": "message",
+   "title": "New coding session"
+  },
+  {
+   "conv": "00000000-0000-4000-8000-00000000a004",
+   "lastEvent": 1785937759471,
+   "lastKind": "query",
+   "title": "New coding session"
+  },
+  {
+   "conv": "00000000-0000-4000-8000-00000000a005",
+   "lastEvent": 1785937759395,
+   "lastKind": "message",
+   "title": "New coding session"
+  },
+  {
+   "conv": "00000000-0000-4000-8000-00000000a003",
+   "lastEvent": 1785937759316,
+   "lastKind": "query",
+   "title": "New coding session"
+  },
+  {
+   "conv": "00000000-0000-4000-8000-00000000a002",
+   "lastEvent": 1785937759240,
+   "lastKind": "message",
+   "title": "New coding session"
+  },
+  {
+   "conv": "00000000-0000-4000-8000-00000000a001",
+   "lastEvent": 1785937759239,
+   "lastKind": "query",
+   "title": "New coding session"
+  },
+  {
+   "conv": "aa299992-0e1d-44cf-bb84-2079d4292517",
+   "lastEvent": 1785935289342,
+   "lastKind": "query",
+   "title": "Fix stop reason passthrough and empty message handling",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "stop-reason",
+    "role": "operator",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "e6ba4107-42df-48bd-998d-b0f9b5f3a3e3",
+   "lastEvent": 1785935275583,
+   "lastKind": "query",
+   "title": "Audit spec branch docs/stop-reason-optional",
+   "tags": {
+    "org": "@shellicar",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "4aaa2546-e701-4dc9-8cee-1e0e6d4fc1b7",
+   "lastEvent": 1785934691125,
+   "lastKind": "query",
+   "title": "Correct stop reason spec contradiction",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "stop-reason-spec",
+    "role": "operator",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "a83bb12d-90fd-485e-94f9-1b7a0e0723b5",
+   "lastEvent": 1785934687532,
+   "lastKind": "query",
+   "title": "Review stop reason passthrough branch defects",
+   "tags": {
+    "org": "@shellicar",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "6797b158-839d-42b4-90bd-b71100bef697",
+   "lastEvent": 1785934355604,
+   "lastKind": "query",
+   "title": "Fix bridge cwd reading per turn not mid query",
+   "stale": true
+  },
+  {
+   "conv": "86a6d886-1a17-44d2-b0df-fc6bfc99d240",
+   "lastEvent": 1785933135567,
+   "lastKind": "query",
+   "title": "Review bridge design doc for spec violations",
+   "tags": {
+    "org": "@shellicar",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "10e4f783-7eaf-486c-b532-261930b4db9f",
+   "lastEvent": 1785932095878,
+   "lastKind": "query",
+   "title": "Review PR #40 gatekeeper findings",
+   "tags": {
+    "org": "@shellicar",
+    "role": "operator"
+   },
+   "stale": true
+  },
+  {
+   "conv": "6a53ae81-a96c-43a8-aa38-5c74e378a34b",
+   "lastEvent": 1785931445160,
+   "lastKind": "query",
+   "title": "Build spawn tool and fix nats skill documentation",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "07316a28-761b-4bed-8143-ec801eb751e8",
+   "lastEvent": 1785930998204,
+   "lastKind": "query",
+   "title": "Document bridge seams design and review state",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "bridge-seams",
+    "pr": "41",
+    "platform": "github"
+   }
+  },
+  {
+   "conv": "0b27fb50-34f7-4b81-842d-7259926fd7e2",
+   "lastEvent": 1785930866869,
+   "lastKind": "query",
+   "title": "Fix canceling queries you didn't start",
+   "stale": true
+  },
+  {
+   "conv": "53066fa6-861c-4fd5-8397-eda30fd88aac",
+   "lastEvent": 1785929983720,
+   "lastKind": "query",
+   "title": "Merge and fix PR #37 documentation review findings",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "52a0a1f8-9641-4724-8b4e-40710a0dfa2d",
+   "lastEvent": 1785929812211,
+   "lastKind": "query",
+   "title": "Review PR #37 gatekeeper for moved frame spec",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "a8fb1103-8390-4f75-816e-e8c894e896cd",
+   "lastEvent": 1785928439854,
+   "lastKind": "query",
+   "title": "Merge main and restore em dashes in docs/spec",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "c7247ef3-e23f-4933-98ea-3cd2b0509d70",
+   "lastEvent": 1785927465130,
+   "lastKind": "query",
+   "title": "Review PR #36 corpus cleanup branch",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "36f4a6d5-d134-4e75-a7ab-52c115d6a7a0",
+   "lastEvent": 1785894626490,
+   "lastKind": "query",
+   "title": "Fix green tick and refactor git scripts",
+   "stale": true
+  },
+  {
+   "conv": "67c39c57-fade-482e-ba69-166a179f3b5e",
+   "lastEvent": 1785894248100,
+   "lastKind": "query",
+   "title": "Reorganize git skill by knowledge, rules, convention, banned",
+   "stale": true
+  },
+  {
+   "conv": "0fef691d-1095-46d9-9325-d24c08f9d225",
+   "lastEvent": 1785890073606,
+   "lastKind": "query",
+   "title": "Review PR #499 and report pipe bugs",
+   "stale": true
+  },
+  {
+   "conv": "ccd843e2-0242-43e1-a351-8ddca064ed02",
+   "lastEvent": 1785886717419,
+   "lastKind": "query",
+   "title": "Implement abort persistence and fix query identity bugs",
+   "tags": {
+    "pr": "502"
+   },
+   "stale": true
+  },
+  {
+   "conv": "be8289a3-3e46-4ba9-87bc-f8ecb428373d",
+   "lastEvent": 1785886196795,
+   "lastKind": "query",
+   "title": "Implement markdown table rendering",
+   "stale": true
+  },
+  {
+   "conv": "32144bdf-0f96-4655-853b-75bd6b59af09",
+   "lastEvent": 1785854602588,
+   "lastKind": "query",
+   "title": "Review PR for working directory announcements",
+   "stale": true
+  },
+  {
+   "conv": "478bba17-8939-4121-aaeb-11763d7bcdc6",
+   "lastEvent": 1785854246890,
+   "lastKind": "query",
+   "title": "Fix bash-walker conformance test divergences",
+   "stale": true
+  },
+  {
+   "conv": "ec90d1c7-dac7-41ea-93b7-40e780947273",
+   "lastEvent": 1785850966124,
+   "lastKind": "query",
+   "title": "Review tower show-cwd feature branch PR",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "4c1800b8-2b3b-4201-a5b3-57a3768c2616",
+   "lastEvent": 1785848744443,
+   "lastKind": "query",
+   "title": "Review bash parser crate findings",
+   "stale": true
+  },
+  {
+   "conv": "5eed95a0-bdbd-4c59-a12b-fec46a27868c",
+   "lastEvent": 1785848744376,
+   "lastKind": "query",
+   "title": "Review bash-walker crate for bash parity",
+   "stale": true
+  },
+  {
+   "conv": "b602614f-a837-4af6-b504-4e151d50409a",
+   "lastEvent": 1785848332663,
+   "lastKind": "query",
+   "title": "Review PR #500 markdown table rendering",
+   "stale": true
+  },
+  {
+   "conv": "e3664ad6-703c-42a2-9c26-f42b6c2fde68",
+   "lastEvent": 1785847226040,
+   "lastKind": "query",
+   "title": "Bridge seams design and crewmate workflow",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "92b05c02-e5f0-4b3f-8cb0-dae001d70d44",
+   "lastEvent": 1785843497460,
+   "lastKind": "message",
+   "title": "Persist partial assistant content on query abort",
+   "stale": true
+  },
+  {
+   "conv": "3eb2e5e1-75ff-44c1-8bd0-dcee150cfac7",
+   "lastEvent": 1785842812875,
+   "lastKind": "query",
+   "title": "Fix cache invalidation in CLI",
+   "stale": true
+  },
+  {
+   "conv": "77942042-2d73-4ebf-b1fa-c41aa554ce6d",
+   "lastEvent": 1785831741085,
+   "lastKind": "turn_aborted",
+   "title": "Rethink review-operator workflow and skills",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "2930d619-c4a3-40cc-8752-9861068710c3",
+   "lastEvent": 1785763596351,
+   "lastKind": "message",
+   "title": "Build temp workspace scratchpad with permission guards",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "temp-workspace",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "89527fa7-5e40-4ccc-b600-53f03ba8977a",
+   "lastEvent": 1785763241418,
+   "lastKind": "query",
+   "title": "Review buildstamp crate PR for dirty flag detection",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "a154bebc-b463-470c-96eb-4457f1f387c3",
+   "lastEvent": 1785762792484,
+   "lastKind": "query",
+   "title": "Test scratchpad containment and path normalization",
+   "stale": true
+  },
+  {
+   "conv": "92fb7a1f-dcd0-4e9b-bdff-246ff55405e3",
+   "lastEvent": 1785762517496,
+   "lastKind": "query",
+   "title": "Test scratchpad symlink permission resolution",
+   "stale": true
+  },
+  {
+   "conv": "7be47bcf-eecb-444b-83f1-35c12cfead34",
+   "lastEvent": 1785762284279,
+   "lastKind": "query",
+   "title": "Review corpus cleanup branch for semantic errors",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "51f170b0-53c6-491e-bd70-17d56b356bd2",
+   "lastEvent": 1785757515097,
+   "lastKind": "query",
+   "title": "Update SDK version and fix context window calculations",
+   "stale": true
+  },
+  {
+   "conv": "275051df-db61-45df-a31c-f5d7261636bf",
+   "lastEvent": 1785757142405,
+   "lastKind": "query",
+   "title": "Review PR #498 scratchpad feature and findings",
+   "stale": true
+  },
+  {
+   "conv": "d97cafa5-a2fa-4ffb-bcc7-e6257a5b63e2",
+   "lastEvent": 1785756364716,
+   "lastKind": "query",
+   "title": "Review executor hang fix and pipeline SIGPIPE behavior",
+   "stale": true
+  },
+  {
+   "conv": "e2352d77-e161-4c09-b59a-f4ea3d6f61c7",
+   "lastEvent": 1785755900624,
+   "lastKind": "query",
+   "title": "Rebuild Orchestrate engine and port tools to new contract",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "exec-az",
+    "platform": "github",
+    "pr": "487"
+   },
+   "stale": true
+  },
+  {
+   "conv": "84440c82-da14-40d3-a097-6a8ce06d5ad8",
+   "lastEvent": 1785755776730,
+   "lastKind": "query",
+   "title": "Verify PR fixes for context window metrics",
+   "stale": true
+  },
+  {
+   "conv": "22c9a4a7-ddca-404f-8255-dbd8736dd1aa",
+   "lastEvent": 1785755155497,
+   "lastKind": "query",
+   "title": "Review PR for system prompt refactoring",
+   "stale": true
+  },
+  {
+   "conv": "6370ae67-0d54-4dc0-8df3-1595e8bdf568",
+   "lastEvent": 1785754672689,
+   "lastKind": "turn_aborted",
+   "title": "Review pull request changes",
+   "stale": true
+  },
+  {
+   "conv": "d65812b7-31e3-4daf-bd41-7d23445920d4",
+   "lastEvent": 1785752365124,
+   "lastKind": "query",
+   "title": "Debug and implement Azure DevOps PR detection in git cleanup",
+   "stale": true
+  },
+  {
+   "conv": "27afef37-0871-468e-b7ce-8d6dc4a356d1",
+   "lastEvent": 1785750827306,
+   "lastKind": "query",
+   "title": "Review PR #108 system prompt reset changes",
+   "stale": true
+  },
+  {
+   "conv": "6feda348-81e2-401e-ac6b-14cf96a65690",
+   "lastEvent": 1785745437474,
+   "lastKind": "query",
+   "title": "Fix turbo cache correctness in agent-ready-repo",
+   "stale": true
+  },
+  {
+   "conv": "68cfd8ee-c0d7-4350-b878-25fef07a8934",
+   "lastEvent": 1785745050233,
+   "lastKind": "query",
+   "title": "Commit staged changes to SDK configuration",
+   "stale": true
+  },
+  {
+   "conv": "8c4208a8-29e5-4d29-8e7e-9a8259414044",
+   "lastEvent": 1785730219846,
+   "lastKind": "query",
+   "title": "Add tool-use trimming axis to conversation script",
+   "stale": true
+  },
+  {
+   "conv": "3962ab3e-bf89-463a-a9ee-c37ec82dc1bf",
+   "lastEvent": 1785688686202,
+   "lastKind": "query",
+   "title": "Set up Rust WebSocket backend infrastructure on Azure",
+   "stale": true
+  },
+  {
+   "conv": "28dce128-a092-49ff-915f-c5e222af663f",
+   "lastEvent": 1785683892133,
+   "lastKind": "query",
+   "title": "Review and fix frontend parity documentation",
+   "stale": true
+  },
+  {
+   "conv": "88a3541a-40a0-4f59-a896-f6904e723ac2",
+   "lastEvent": 1785683517574,
+   "lastKind": "query",
+   "title": "Prove Rust WebSocket backend protocol and clients",
+   "stale": true
+  },
+  {
+   "conv": "b98d0983-afd9-4d49-90a3-9b15faa073cd",
+   "lastEvent": 1785679159201,
+   "lastKind": "query",
+   "title": "Convert tmux status to event-driven format",
+   "stale": true
+  },
+  {
+   "conv": "bc896459-7c09-40ec-bece-f339bacae869",
+   "lastEvent": 1785678053768,
+   "lastKind": "query",
+   "title": "Debug macOS crash from shell spawn storm",
+   "stale": true
+  },
+  {
+   "conv": "f766bc40-8594-488f-a025-1abe8bdb669a",
+   "lastEvent": 1785677516882,
+   "lastKind": "turn_cancelled",
+   "title": "Diagnose unexpected laptop restart and shell spawn storm",
+   "stale": true
+  },
+  {
+   "conv": "3ac8a420-ea1c-4d93-9db5-4ac04736aacb",
+   "lastEvent": 1785666759201,
+   "lastKind": "query",
+   "title": "Security review of Orchestrate streaming and policy system",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "exec-az",
+    "platform": "github",
+    "pr": "487"
+   },
+   "stale": true
+  },
+  {
+   "conv": "32e66faa-696d-41f0-8760-5f8d2014fc6f",
+   "lastEvent": 1785665440580,
+   "lastKind": "query",
+   "title": "Review PR for scratchpad workspace feature",
+   "stale": true
+  },
+  {
+   "conv": "060e3fde-964e-4792-a2c2-e9526db54a98",
+   "lastEvent": 1785665279043,
+   "lastKind": "query",
+   "title": "Fix dynamic imports and deploy dependency updates",
+   "tags": {
+    "org": "Hellicar-Solutions",
+    "repo": "banananet",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "34bd1235-d542-464f-bd6e-43942d68ae30",
+   "lastEvent": 1785664839174,
+   "lastKind": "query",
+   "title": "Review codebase bugs and implement fixes",
+   "tags": {
+    "org": "shellicar",
+    "repo": "claude-swe",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "8d29e37b-2199-4873-a563-1659ff366183",
+   "lastEvent": 1785664565178,
+   "lastKind": "query",
+   "title": "Understand wheel group ownership in tmp",
+   "stale": true
+  },
+  {
+   "conv": "1da3caa9-40f2-48d7-a044-8b932b5d0298",
+   "lastEvent": 1785663606408,
+   "lastKind": "query",
+   "title": "Rebase and merge bridge-service feature",
+   "stale": true
+  },
+  {
+   "conv": "3bed103b-9311-428a-9f98-435afdc3019c",
+   "lastEvent": 1785663290954,
+   "lastKind": "query",
+   "title": "Review Az session cache login bugs",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "azcli-login",
+    "platform": "github",
+    "pr": "488"
+   },
+   "stale": true
+  },
+  {
+   "conv": "80d285d7-e773-4a5a-9293-ba1fe4089113",
+   "lastEvent": 1785663210225,
+   "lastKind": "query",
+   "title": "Review PR #487 architecture defects and streaming unification",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "exec-az",
+    "platform": "github",
+    "pr": "487"
+   },
+   "stale": true
+  },
+  {
+   "conv": "6cf202b3-4e04-4c5f-8379-1a8f8e4115ee",
+   "lastEvent": 1785661029187,
+   "lastKind": "query",
+   "title": "Configure CRS317 firewall and optimize routing performance",
+   "tags": {
+    "org": "shellicar",
+    "repo": "home-network",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "09773778-7c5f-4479-90e4-606dd794fcb6",
+   "lastEvent": 1785658724364,
+   "lastKind": "query",
+   "title": "Review bridge service request implementation",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "50bc7484-57d8-4b26-b313-50bae816d23f",
+   "lastEvent": 1785656753689,
+   "lastKind": "query",
+   "title": "Update query closure spec for displaced servicers",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "query-closure-owed",
+    "pr": "40",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "8a22218d-bf8d-4da2-8fbd-21e9ea781b43",
+   "lastEvent": 1785656203763,
+   "lastKind": "query",
+   "title": "Review core-di packages for 5.0.0 alpha bugs",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "caa74af8-1231-49e6-a064-4f932864d240",
+   "lastEvent": 1785650302032,
+   "lastKind": "query",
+   "title": "Simple acknowledgment response",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "b980773d-c231-4d5b-ad2b-60f409182108",
+   "lastEvent": 1785649498834,
+   "lastKind": "query",
+   "title": "Add operation 6 to gRPC transport spike",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "worktree": "transport-grpc",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "32a69b35-8b51-49ee-a363-3b4fb453b1d1",
+   "lastEvent": 1785648990415,
+   "lastKind": "query",
+   "title": "Add GraphQL operation for settings screen and temporal types",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "worktree": "transport-graphql",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "20664878-7333-4829-9bf0-f60bcfb0c0a4",
+   "lastEvent": 1785648848601,
+   "lastKind": "query",
+   "title": "Implement WebSocket transport spike with serde enums",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "worktree": "transport-ws-serde",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "a7cf466a-3d21-4031-8717-ec4e1cf442f8",
+   "lastEvent": 1785648820077,
+   "lastKind": "query",
+   "title": "Add settings operation and temporal type testing",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "worktree": "transport-rest-openapi",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "60214ead-dc6c-4521-a885-acebfdf19280",
+   "lastEvent": 1785648772433,
+   "lastKind": "query",
+   "title": "Build REST transport spike for Flightrac with operation 6",
+   "tags": {
+    "org": "Flightrac",
+    "project": "Flightrac",
+    "repo": "Flightrac",
+    "worktree": "transport-rest-mirror",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "a42ca706-22c5-4941-8d4f-ac6b56705c33",
+   "lastEvent": 1785646047362,
+   "lastKind": "query",
+   "title": "Review PR with agent attachment findings",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "frontend-show-cwd"
+   },
+   "stale": true
+  },
+  {
+   "conv": "381e9354-93aa-46c7-9d7a-989a924f9fe4",
+   "lastEvent": 1785575357848,
+   "lastKind": "query",
+   "title": "Set up native macOS desktop switching shortcuts",
+   "tags": {
+    "org": "personal",
+    "repo": "dotfiles",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "deee1331-f1f4-4fb5-be1c-d004df5d2665",
+   "lastEvent": 1785572529235,
+   "lastKind": "query",
+   "title": "Documentation prose cleanup: self-descriptions, citations, em dashes",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "81bc95c5-514c-4eec-bb26-23186704a018",
+   "lastEvent": 1785572178952,
+   "lastKind": "query",
+   "title": "Fix validation and runtime bugs in core-di singleton resolution",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "0ff62749-5ce6-44f2-b54b-61a846da2e5b",
+   "lastEvent": 1785550695534,
+   "lastKind": "query",
+   "title": "Find all d2 diagram files in home directory",
+   "stale": true
+  },
+  {
+   "conv": "96ad1460-4382-4b4f-bf92-97570dc8285a",
+   "lastEvent": 1785514637874,
+   "lastKind": "query",
+   "title": "Implement read-only and no-tools modes",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "read-only-mode",
+    "pr": "490",
+    "platform": "github"
+   }
+  },
+  {
+   "conv": "4490d0b2-c0a7-48d3-ab3c-7105752ce156",
+   "lastEvent": 1785512224187,
+   "lastKind": "turn_aborted",
+   "title": "Tower spec rulings and PR pipeline",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "22392ae9-b2e7-4d33-9141-7170bad7eb9e",
+   "lastEvent": 1785511782226,
+   "lastKind": "query",
+   "title": "Conformance review and gap fixes for claude-sdk-cli",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "tower-conformance",
+    "pr": "489",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "fbde8ec3-6271-4b68-997b-9adedd55aede",
+   "lastEvent": 1785511684661,
+   "lastKind": "query",
+   "title": "Fix git-catchup and clean up Azure scripts",
+   "stale": true
+  },
+  {
+   "conv": "70f3793c-5839-4909-aba3-3d937e9f42de",
+   "lastEvent": 1785511384965,
+   "lastKind": "query",
+   "title": "Rebase dashboard migration branch onto origin/main with LFS",
+   "stale": true
+  },
+  {
+   "conv": "c1e8b695-212c-40b7-8cf5-34315d498b97",
+   "lastEvent": 1785510731331,
+   "lastKind": "query",
+   "title": "Fix tower-ws-spec documentation on moved frame",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "46a42d29-6da8-4a2d-9960-4285c3513bb7",
+   "lastEvent": 1785508941118,
+   "lastKind": "query",
+   "title": "Gate detached attachments in towerd and frontends",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "frontend-show-cwd"
+   },
+   "stale": true
+  },
+  {
+   "conv": "be161a2e-0824-46b7-8c53-cb7380244119",
+   "lastEvent": 1785508585894,
+   "lastKind": "query",
+   "title": "Review documentation prose cleanup PR",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "cec126ce-80e1-4230-b24f-5a2cfc733bc1",
+   "lastEvent": 1785508081089,
+   "lastKind": "query",
+   "title": "Refactor operator, gatekeeper, and safety skills",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "2e802c45-dfd3-448f-85a9-0a76e1e713d9",
+   "lastEvent": 1785507545202,
+   "lastKind": "query",
+   "title": "Set up Azure identities and refactor editor state",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "c8531aa8-f594-4de6-ac7e-ddbe686c02a3",
+   "lastEvent": 1785507185782,
+   "lastKind": "query",
+   "title": "Review orchestrate tools PR and verify fixes",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "exec-az",
+    "platform": "github",
+    "pr": "487"
+   },
+   "stale": true
+  },
+  {
+   "conv": "9f1448a6-20bc-4d11-83bb-8d030cea77ce",
+   "lastEvent": 1785504793478,
+   "lastKind": "query",
+   "title": "Review PR #495 editor state refactor",
+   "stale": true
+  },
+  {
+   "conv": "c85827ad-8257-487a-a342-5ae6d5df4b35",
+   "lastEvent": 1785502522220,
+   "lastKind": "query",
+   "title": "Fix ESC cancel during account limit retry",
+   "stale": true
+  },
+  {
+   "conv": "ad835dc9-56f4-4f4e-abcc-228fbebff5b3",
+   "lastEvent": 1785502269985,
+   "lastKind": "query",
+   "title": "Review and refactor OAuth auth module",
+   "stale": true
+  },
+  {
+   "conv": "e34c4f9f-d3a8-4b53-ab30-5417a9fc8478",
+   "lastEvent": 1785500726279,
+   "lastKind": "message",
+   "title": "Close rail-parity gaps in frontend-leptos",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "e82725d6-ed63-4b1a-8c52-1f46f1bd1458",
+   "lastEvent": 1785498801321,
+   "lastKind": "query",
+   "title": "Review PR and refactor EditorState",
+   "stale": true
+  },
+  {
+   "conv": "574b97a4-034c-43fe-9d8b-113e8f2cac83",
+   "lastEvent": 1785496428682,
+   "lastKind": "query",
+   "title": "Review agent service verb bridge implementation",
+   "stale": true
+  },
+  {
+   "conv": "f0ce1691-570e-4bf2-ad3c-90df97c90a74",
+   "lastEvent": 1785494688537,
+   "lastKind": "query",
+   "title": "Fix git config identity and platform consistency",
+   "tags": {
+    "org": "personal",
+    "repo": "dotfiles",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "e1f51cde-070c-4a36-a1bc-c8e55b0244d8",
+   "lastEvent": 1785486186010,
+   "lastKind": "query",
+   "title": "Resolve rebase conflicts after LFS migration",
+   "stale": true
+  },
+  {
+   "conv": "52cceb04-dc98-45e3-aaa7-8eda0e025ede",
+   "lastEvent": 1785484223907,
+   "lastKind": "query",
+   "title": "Review and LFS-migrate Flightrac PR 58",
+   "stale": true
+  },
+  {
+   "conv": "bd48ea11-296a-4839-adb3-906d7aaeff20",
+   "lastEvent": 1785484069733,
+   "lastKind": "query",
+   "title": "Reorganize docs/spec for navigation clarity",
+   "stale": true
+  },
+  {
+   "conv": "328b2a54-35dd-48eb-b0eb-82707e2f5132",
+   "lastEvent": 1785483074046,
+   "lastKind": "query",
+   "title": "Review PR documentation reorganization and fixes",
+   "stale": true
+  },
+  {
+   "conv": "4c0cf22b-c623-46c8-b8b0-48f4c820c1f7",
+   "lastEvent": 1785477395842,
+   "lastKind": "query",
+   "title": "Review spec reorganization PR and verify fixes",
+   "stale": true
+  },
+  {
+   "conv": "ac01e2e0-3c3b-4c8b-8a64-bb4b32ad0855",
+   "lastEvent": 1785477351734,
+   "lastKind": "query",
+   "title": "Verify spec reorganization PR fixes",
+   "stale": true
+  },
+  {
+   "conv": "0a9d6c43-c26e-45f3-9bd3-dca5ea9f53c3",
+   "lastEvent": 1785471401575,
+   "lastKind": "query",
+   "title": "Convert HTML tables to markdown",
+   "stale": true
+  },
+  {
+   "conv": "85e918e6-98d6-4e10-909c-9740e1640263",
+   "lastEvent": 1785343242802,
+   "lastKind": "query",
+   "title": "Release version 1.0.0-beta.25",
+   "stale": true
+  },
+  {
+   "conv": "11986d99-3cfd-4335-9f4d-13a290746948",
+   "lastEvent": 1785342819042,
+   "lastKind": "query",
+   "title": "Reconcile stale spec text and fixtures",
+   "stale": true
+  },
+  {
+   "conv": "39ac1efc-0193-448d-8038-e436345d2981",
+   "lastEvent": 1785342519227,
+   "lastKind": "query",
+   "title": "Release core-di packages to version 5.0.0-alpha.6",
+   "stale": true
+  },
+  {
+   "conv": "94e6e785-5972-4bd1-a31d-322114534737",
+   "lastEvent": 1785340922701,
+   "lastKind": "query",
+   "title": "Simplify conduct rules in nats-spec documentation",
+   "stale": true
+  },
+  {
+   "conv": "a239cf9c-eca4-4350-959e-c1a14000a04c",
+   "lastEvent": 1785340122903,
+   "lastKind": "query",
+   "title": "Review PR for logic bugs in DI engine",
+   "stale": true
+  },
+  {
+   "conv": "23f2c918-6e89-4078-bd66-04d7506b280a",
+   "lastEvent": 1785339926568,
+   "lastKind": "query",
+   "title": "Add heartbeat interval maximum to specs",
+   "stale": true
+  },
+  {
+   "conv": "24bd7d1a-4c31-4f38-860a-37dc95d67efb",
+   "lastEvent": 1785338127732,
+   "lastKind": "query",
+   "title": "Add valid-or-not principle to nats spec",
+   "stale": true
+  },
+  {
+   "conv": "65a41a13-2424-4d39-8a12-b5d5e7c70b03",
+   "lastEvent": 1785338044444,
+   "lastKind": "query",
+   "title": "Orchestrate V2 port complete—policy engine design",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "exec-az",
+    "pr": "487",
+    "platform": "github"
+   }
+  },
+  {
+   "conv": "44840ad6-16b2-482a-bf8b-8ce475848071",
+   "lastEvent": 1785337687856,
+   "lastKind": "query",
+   "title": "Move chdir to conversation request tree",
+   "stale": true
+  },
+  {
+   "conv": "43eb0c55-3601-40e4-8e11-16cf518758f6",
+   "lastEvent": 1785335939298,
+   "lastKind": "query",
+   "title": "Build F3 conversation view with in-place switching",
+   "tags": {
+    "org": "@shellicar",
+    "pr": "487"
+   },
+   "stale": true
+  },
+  {
+   "conv": "0e40d6cf-037b-4810-b2ab-0b14ee11fba7",
+   "lastEvent": 1785335485377,
+   "lastKind": "query",
+   "title": "Review PR for conversation switch feature",
+   "stale": true
+  },
+  {
+   "conv": "daf992c0-0548-48c2-ba72-da3718d2654b",
+   "lastEvent": 1785333132135,
+   "lastKind": "query",
+   "title": "New coding session"
+  },
+  {
+   "conv": "3fa7d0c3-5f28-4f92-85f8-01ac1383469f",
+   "lastEvent": 1785333131217,
+   "lastKind": "usage",
+   "title": "Initial greeting and setup"
+  },
+  {
+   "conv": "c4eff2dc-f762-43c9-8438-0014fa050f5d",
+   "lastEvent": 1785326761825,
+   "lastKind": "query",
+   "title": "Review tool cancellation and concurrency in PR",
+   "stale": true
+  },
+  {
+   "conv": "ba7cc61f-6533-4794-a748-46256dfe310a",
+   "lastEvent": 1785326681403,
+   "lastKind": "query",
+   "title": "Review PR for spec corpus reconciliation",
+   "stale": true
+  },
+  {
+   "conv": "1980c021-21f5-4ba0-b213-f074dccab5f9",
+   "lastEvent": 1785326400656,
+   "lastKind": "query",
+   "title": "Review chdir conversation tree migration PR",
+   "stale": true
+  },
+  {
+   "conv": "5508bc87-d97e-4bb6-bcbf-8cc4b3c739ee",
+   "lastEvent": 1785326390816,
+   "lastKind": "query",
+   "title": "Review PR for conduct rules specification",
+   "stale": true
+  },
+  {
+   "conv": "17dd649f-3b56-4de9-bd70-e18babd9726f",
+   "lastEvent": 1785326366115,
+   "lastKind": "query",
+   "title": "Review PR adding valid-or-not principle to spec",
+   "stale": true
+  },
+  {
+   "conv": "ecb2614c-2ed6-4560-a9d0-d829ebba54c0",
+   "lastEvent": 1785326364504,
+   "lastKind": "query",
+   "title": "Review heartbeat interval maximum bound PR",
+   "stale": true
+  },
+  {
+   "conv": "fbd6ed95-654d-4b8a-ba7f-ac4201b0d043",
+   "lastEvent": 1785325596865,
+   "lastKind": "query",
+   "title": "Add observe-before-acting principle to spec",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "4dc54727-6272-4614-94a6-bf9243313333",
+   "lastEvent": 1785323807348,
+   "lastKind": "query",
+   "title": "Review PR for observe-before-acting principle",
+   "stale": true
+  },
+  {
+   "conv": "34aba367-e4e4-4b29-8ee5-707e98f9358e",
+   "lastEvent": 1785317757765,
+   "lastKind": "query",
+   "title": "Review PR for rule consistency across spec files",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "04a00597-40fb-409f-9e5f-e485904ca147",
+   "lastEvent": 1785317647940,
+   "lastKind": "query",
+   "title": "Review PR with findings verification",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "5552884b-9ff2-4596-a0c4-fd95476e2cf1",
+   "lastEvent": 1785286544995,
+   "lastKind": "query",
+   "title": "Fix pnpm PATH config and update sync scripts",
+   "tags": {
+    "org": "personal",
+    "repo": "dotfiles",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "e8a124a3-0575-43e2-8c3a-dadf811f99e1",
+   "lastEvent": 1785286303302,
+   "lastKind": "query",
+   "title": "Design gatekeeper review findings and compliance gates",
+   "tags": {
+    "org": "shellicar",
+    "repo": "skills-v2",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "71b19621-f21f-4ef1-9eee-115c04741379",
+   "lastEvent": 1785251175448,
+   "lastKind": "query",
+   "title": "Audit tower spec corpus for internal contradictions",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "4b6f342b-2495-466a-a141-bd7f68854bb8",
+   "lastEvent": 1785251138192,
+   "lastKind": "query",
+   "title": "Set up automated app versioning and releases for tower suite",
+   "stale": true
+  },
+  {
+   "conv": "ee4c1d89-6409-4379-a0cf-ba174541afd9",
+   "lastEvent": 1785251029061,
+   "lastKind": "query",
+   "title": "Review PR for versioning and release manifest"
+  },
+  {
+   "conv": "fadf0578-66ac-42f0-b390-7cf9a326784e",
+   "lastEvent": 1785249978718,
+   "lastKind": "query",
+   "title": "Review orchestrate branch for performance and concurrency issues",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "exec-az",
+    "platform": "github",
+    "pr": "487"
+   },
+   "stale": true
+  },
+  {
+   "conv": "96972ea2-cf6d-4140-a65c-a3c36d84aa7a",
+   "lastEvent": 1785249886797,
+   "lastKind": "query",
+   "title": "Review PR #487 Tools V2 Orchestrate",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "exec-az",
+    "platform": "github",
+    "pr": "487"
+   },
+   "stale": true
+  },
+  {
+   "conv": "f24bd6fa-eb04-46b7-afef-7c1a7eb5ba89",
+   "lastEvent": 1785249875402,
+   "lastKind": "query",
+   "title": "Implement bridge service verb with liveness seeding",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "669ffdda-72dd-4540-8ec2-e86568b61657",
+   "lastEvent": 1785249259242,
+   "lastKind": "query",
+   "title": "Adversarial review of PR #28 bridge service implementation",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "2be87e12-f949-4968-81f8-c31ffef83a76",
+   "lastEvent": 1785249078637,
+   "lastKind": "query",
+   "title": "Fix interactive Azure CLI login reuse on restart",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "azcli-login",
+    "pr": "488",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "93a37afb-b305-4284-ac64-58e0f6221d14",
+   "lastEvent": 1785248489917,
+   "lastKind": "query",
+   "title": "Review PR #15 for frontend cwd display",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "frontend-show-cwd"
+   },
+   "stale": true
+  },
+  {
+   "conv": "e9e507a0-c25b-470c-aaee-eb1167fa52eb",
+   "lastEvent": 1785248467621,
+   "lastKind": "query",
+   "title": "Add cwd display to conversation status line",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "worktree": "frontend-show-cwd"
+   },
+   "stale": true
+  },
+  {
+   "conv": "f53bc290-0ff9-497e-b97f-6a1ad71d79b3",
+   "lastEvent": 1785247179649,
+   "lastKind": "query",
+   "title": "Review PR for input bugs and inconsistencies",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "read-only-mode",
+    "platform": "github",
+    "pr": "490"
+   },
+   "stale": true
+  },
+  {
+   "conv": "377edfb1-5385-4459-95e1-a65f938696b9",
+   "lastEvent": 1785247116173,
+   "lastKind": "query",
+   "title": "Review PR for read-only mode implementation",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "read-only-mode",
+    "platform": "github",
+    "pr": "490"
+   },
+   "stale": true
+  },
+  {
+   "conv": "29d1aea5-95a3-4d46-80bb-92176bab634d",
+   "lastEvent": 1785247053027,
+   "lastKind": "query",
+   "title": "Review az session caching PR and defer reactive invalidation",
+   "stale": true
+  },
+  {
+   "conv": "516e9d5b-a524-46cc-93b5-d85effc143f6",
+   "lastEvent": 1785246950114,
+   "lastKind": "query",
+   "title": "Review PR changes to nats-spec and agent-spec",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "7c08b48a-6dd7-46c8-bba9-35a9b9a701a6",
+   "lastEvent": 1785246937031,
+   "lastKind": "query",
+   "title": "Review PR for nats-spec and agent-spec issues",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "7ca78a7f-4094-492f-8474-6990efd10b13",
+   "lastEvent": 1785246864266,
+   "lastKind": "usage",
+   "title": "Review PR and NATS specification for issues"
+  },
+  {
+   "conv": "7439b1ce-85b9-49ad-a239-aeda85774120",
+   "lastEvent": 1785245821102,
+   "lastKind": "query",
+   "title": "Review PR for spec adherence and bugs",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "tower-conformance",
+    "platform": "github",
+    "pr": "489"
+   },
+   "stale": true
+  },
+  {
+   "conv": "9a278101-62ea-4856-8eee-3d927b034f95",
+   "lastEvent": 1785245729003,
+   "lastKind": "query",
+   "title": "Review PR for spec adherence and bugs",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "tower-conformance",
+    "platform": "github",
+    "pr": "489"
+   },
+   "stale": true
+  },
+  {
+   "conv": "dd003c4e-4cce-4cec-93da-b61a284eab6a",
+   "lastEvent": 1785244263440,
+   "lastKind": "query",
+   "title": "Port markdown rendering and collapse affordance to Leptos frontend",
+   "stale": true
+  },
+  {
+   "conv": "401ef2d2-cd27-4a0f-b794-3185505685bd",
+   "lastEvent": 1785242681996,
+   "lastKind": "query",
+   "title": "Review PR branch for frontend rail parity",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "ce3a7acc-4f78-45f2-ac0e-c63d9ad61e89",
+   "lastEvent": 1785242135786,
+   "lastKind": "query",
+   "title": "Review markdown and tool-block rendering port",
+   "stale": true
+  },
+  {
+   "conv": "ca3003e0-153b-4ee5-a9a0-ffc69d878a20",
+   "lastEvent": 1785238800724,
+   "lastKind": "query",
+   "title": "Gap analysis between claude-sdk-cli and tower apps",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "platform": "github"
+   }
+  },
+  {
+   "conv": "c75c97cf-f875-4d5b-b3fe-932aae6aae54",
+   "lastEvent": 1785237838461,
+   "lastKind": "query",
+   "title": "Fix Leptos tab persistence across page refresh",
+   "stale": true
+  },
+  {
+   "conv": "5a3d4561-1f0e-4c0b-8d08-25decd57e47d",
+   "lastEvent": 1785236316129,
+   "lastKind": "query",
+   "title": "Review PR workflow release changes",
+   "stale": true
+  },
+  {
+   "conv": "7d7cbdd2-e5f7-43b3-aa05-16838f46bc5b",
+   "lastEvent": 1785233882911,
+   "lastKind": "query",
+   "title": "Release 1.0.0-beta.21 and refine bundled dependency rules",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "platform": "github"
+   }
+  },
+  {
+   "conv": "8f2d4afb-784f-47fb-b0b8-08aa3b7a8d01",
+   "lastEvent": 1785233807506,
+   "lastKind": "query",
+   "title": "Add severity levels to validation reports",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "eaaf8485-c771-480c-807f-0ea918f27d35",
+   "lastEvent": 1785232543062,
+   "lastKind": "query",
+   "title": "Rebuild bridge service requests implementation",
+   "stale": true
+  },
+  {
+   "conv": "b1f59cf4-95fc-496a-85d1-e6a4efbf823f",
+   "lastEvent": 1785207648509,
+   "lastKind": "query",
+   "title": "Release 1.0.0-beta.24 to npm",
+   "stale": true
+  },
+  {
+   "conv": "5743051b-8a7a-43b8-bd22-804d637baff1",
+   "lastEvent": 1785171552002,
+   "lastKind": "query",
+   "title": "Implement attachment leaf migration and review feedback fixes",
+   "stale": true
+  },
+  {
+   "conv": "6826d599-e10a-41b0-85f0-6b8852f2c322",
+   "lastEvent": 1785170061153,
+   "lastKind": "query",
+   "title": "Build and test Subagent tool for Claude CLI",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "subagent",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "17a6f119-f6eb-4e67-b607-bd29cc8013e7",
+   "lastEvent": 1785169908417,
+   "lastKind": "query",
+   "title": "Fix CI workflow not triggering on tags",
+   "stale": true
+  },
+  {
+   "conv": "c4ef056b-5998-4e80-9578-181821295af0",
+   "lastEvent": 1785169782882,
+   "lastKind": "query",
+   "title": "Review and fix attachment compliance spec PR",
+   "stale": true
+  },
+  {
+   "conv": "c9379cff-c6c0-45fc-8e01-ee16b4dd4e54",
+   "lastEvent": 1785169525674,
+   "lastKind": "query",
+   "title": "Draft conformance rule for nats-spec",
+   "stale": true
+  },
+  {
+   "conv": "7083562e-51ea-45ae-822b-9a2d7610f780",
+   "lastEvent": 1785168465017,
+   "lastKind": "query",
+   "title": "Attachment leaf migration review and fixup",
+   "stale": true
+  },
+  {
+   "conv": "8d1d1848-d492-4733-85b0-e3dbc529522c",
+   "lastEvent": 1785168163506,
+   "lastKind": "query",
+   "title": "Review PR #20 against new compliance spec",
+   "stale": true
+  },
+  {
+   "conv": "9abb6959-1070-4453-8ef7-873b48c1a927",
+   "lastEvent": 1785167875591,
+   "lastKind": "query",
+   "title": "Port TS tools to V2 and fix batch-level scope",
+   "stale": true
+  },
+  {
+   "conv": "dff5f12b-60bd-45cd-a4f6-027513574fd6",
+   "lastEvent": 1785167824845,
+   "lastKind": "usage",
+   "title": "New coding session"
+  },
+  {
+   "conv": "ca29561a-16df-4580-9468-eaa2f22bab90",
+   "lastEvent": 1785166485611,
+   "lastKind": "turn_aborted",
+   "title": "New coding session"
+  },
+  {
+   "conv": "b078eafe-c0cc-4b79-88a6-100f2df6af8e",
+   "lastEvent": 1785165015992,
+   "lastKind": "turn_aborted",
+   "title": "New coding session"
+  },
+  {
+   "conv": "d9419310-473a-4145-b426-20f6c00888ec",
+   "lastEvent": 1785165008255,
+   "lastKind": "usage",
+   "title": "New coding session"
+  },
+  {
+   "conv": "1b8e5a99-0fd5-4bf6-8dda-bcdff4d270d3",
+   "lastEvent": 1785159413738,
+   "lastKind": "query",
+   "title": "Port Memory and History tools to V2",
+   "stale": true
+  },
+  {
+   "conv": "7931b491-4349-4702-ad10-8d328b01a3d0",
+   "lastEvent": 1785159062189,
+   "lastKind": "usage",
+   "title": "New coding session"
+  },
+  {
+   "conv": "f5b27659-5be6-451f-b0df-fdfd39a73dae",
+   "lastEvent": 1785158432903,
+   "lastKind": "usage",
+   "title": "New coding session"
+  },
+  {
+   "conv": "9cf2f840-fc3c-4805-a407-aa41b4726146",
+   "lastEvent": 1785158200580,
+   "lastKind": "usage",
+   "title": "New coding session"
+  },
+  {
+   "conv": "c287017c-5df4-4cd0-bae3-6752c76f5867",
+   "lastEvent": 1785158074733,
+   "lastKind": "usage",
+   "title": "New coding session"
+  },
+  {
+   "conv": "e52cf736-0a98-40e8-8c20-93dac902fb9d",
+   "lastEvent": 1785158013478,
+   "lastKind": "usage",
+   "title": "New coding session"
+  },
+  {
+   "conv": "a6183320-fb56-442b-8a6f-ccd382472fc8",
+   "lastEvent": 1785157072868,
+   "lastKind": "query",
+   "title": "Review PR #20 attachment mechanism fixes",
+   "stale": true
+  },
+  {
+   "conv": "2f0d5e7b-af00-4021-9ece-3b9d9344e936",
+   "lastEvent": 1785156841830,
+   "lastKind": "query",
+   "title": "Classify gatekeeper findings from 25 review conversations",
+   "stale": true
+  },
+  {
+   "conv": "b3544173-067a-487f-9098-2c5b963dfcc5",
+   "lastEvent": 1785156783541,
+   "lastKind": "query",
+   "title": "Catalog gatekeeper review findings from 25 conversations",
+   "stale": true
+  },
+  {
+   "conv": "311b7812-b0c2-4f78-9b12-33167553f299",
+   "lastEvent": 1785156291457,
+   "lastKind": "usage",
+   "title": "New coding session"
+  },
+  {
+   "conv": "a0627288-bbf8-4294-9bc4-70f3fe2811fe",
+   "lastEvent": 1785156242707,
+   "lastKind": "usage",
+   "title": "Start new coding session"
+  },
+  {
+   "conv": "d3e02a83-e6f8-428c-a221-6271d38fb776",
+   "lastEvent": 1785156116965,
+   "lastKind": "usage",
+   "title": "New coding session"
+  },
+  {
+   "conv": "8e40d1df-503e-48a9-ac0a-4e08e67ac25a",
+   "lastEvent": 1785155941649,
+   "lastKind": "usage",
+   "title": "New coding session"
+  },
+  {
+   "conv": "fea3b9e2-43bc-4f89-a315-92cece0ac8e9",
+   "lastEvent": 1785155190689,
+   "lastKind": "query",
+   "title": "Categorize gatekeeper review findings",
+   "stale": true
+  },
+  {
+   "conv": "dbf6933a-b03f-4fa3-a2f4-282fbe9cd9c7",
+   "lastEvent": 1785153383554,
+   "lastKind": "usage",
+   "title": "New coding session"
+  },
+  {
+   "conv": "f5848bcb-687b-4f0d-bc54-401f5e7af782",
+   "lastEvent": 1785152081251,
+   "lastKind": "query",
+   "title": "Release core-di packages to 5.0.0-alpha.5",
+   "stale": true
+  },
+  {
+   "conv": "c3807ddc-b99e-4be7-b9c1-fa54e5af3865",
+   "lastEvent": 1785151423204,
+   "lastKind": "query",
+   "title": "Fix eager singleton service provider injection",
+   "stale": true
+  },
+  {
+   "conv": "b5f9b1e7-7fb7-4554-82db-1c3d49d0724d",
+   "lastEvent": 1785151389677,
+   "lastKind": "query",
+   "title": "Review PR and verify fixes",
+   "stale": true
+  },
+  {
+   "conv": "5bfb8858-12ff-4cdd-a896-b6248d4b06db",
+   "lastEvent": 1785151375854,
+   "lastKind": "query",
+   "title": "Implement Azure auth hardening for ExecV3",
+   "stale": true
+  },
+  {
+   "conv": "a6143de6-66b3-416c-8598-e40967782fa4",
+   "lastEvent": 1785151290825,
+   "lastKind": "query",
+   "title": "Review Azure auth hardening PR and subscription discovery",
+   "stale": true
+  },
+  {
+   "conv": "18ccdb34-5e39-42d4-a051-5176253892b1",
+   "lastEvent": 1785150489335,
+   "lastKind": "query",
+   "title": "Review PR #62 and verify fixes",
+   "stale": true
+  },
+  {
+   "conv": "56d71d52-457c-418b-93e5-3d25d3ef76b2",
+   "lastEvent": 1785150387799,
+   "lastKind": "query",
+   "title": "Fix dangling tool use self-healing in live sessions",
+   "stale": true
+  },
+  {
+   "conv": "762fc61a-e8a4-4e53-9b3b-8c3da9a563e8",
+   "lastEvent": 1785150258124,
+   "lastKind": "query",
+   "title": "Review PR for tool result healing logic",
+   "stale": true
+  },
+  {
+   "conv": "9f707c42-6414-431f-8357-4b60358d5d96",
+   "lastEvent": 1785150164761,
+   "lastKind": "query",
+   "title": "Fix az CLI process detachment and revert mirror change",
+   "stale": true
+  },
+  {
+   "conv": "7387abcb-8b85-4053-be7d-82a8049b2616",
+   "lastEvent": 1785149667180,
+   "lastKind": "query",
+   "title": "Review PR: separate self-heal from abandoned-tool mechanisms",
+   "stale": true
+  },
+  {
+   "conv": "bbd494c4-f287-4012-b7c4-919913b4dd0b",
+   "lastEvent": 1785149191118,
+   "lastKind": "query",
+   "title": "Review PR #62 dependency injection fixes",
+   "stale": true
+  },
+  {
+   "conv": "afe88be5-a281-4507-9349-8bee61d92b53",
+   "lastEvent": 1785149168318,
+   "lastKind": "query",
+   "title": "Review migration compatibility and rollout procedure",
+   "stale": true
+  },
+  {
+   "conv": "6845fad0-5cfa-4172-b1ad-cd7497fb4735",
+   "lastEvent": 1785147274671,
+   "lastKind": "query",
+   "title": "Review PR with failing tests for seven findings"
+  },
+  {
+   "conv": "84c230be-aa35-4906-a394-931361cb3b92",
+   "lastEvent": 1785145081195,
+   "lastKind": "query",
+   "title": "Integrate pending fleet missions via squash-merge",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-fleet-shellicar",
+    "role": "handler",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "8af7772b-8902-4995-bcb5-002209e4b4a0",
+   "lastEvent": 1785144883383,
+   "lastKind": "query",
+   "title": "Add runtime export verification tests",
+   "stale": true
+  },
+  {
+   "conv": "b5a7dbf7-b07f-43c9-8568-9a176b6e3824",
+   "lastEvent": 1785143470067,
+   "lastKind": "query",
+   "title": "Fix export resolution circular detection bug",
+   "stale": true
+  },
+  {
+   "conv": "99c70e37-640e-4780-89c4-6e5288c7a980",
+   "lastEvent": 1785141608936,
+   "lastKind": "query",
+   "title": "Review PR fixes for core-di export bug",
+   "stale": true
+  },
+  {
+   "conv": "63e05d8f-1a87-4837-801d-03c8aec1286b",
+   "lastEvent": 1785139520492,
+   "lastKind": "query",
+   "title": "Tower project status and queue management",
+   "stale": true
+  },
+  {
+   "conv": "9a2f7f0e-30e3-4476-a191-0ee7621b7a04",
+   "lastEvent": 1785089332435,
+   "lastKind": "query",
+   "title": "Build Orchestrate policy system and port file tools to V2",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "exec-az",
+    "platform": "github",
+    "pr": "487"
+   },
+   "stale": true
+  },
+  {
+   "conv": "072704dc-d95d-439a-abfe-37d18d3d36d8",
+   "lastEvent": 1785088786201,
+   "lastKind": "query",
+   "title": "Add Rust to dependabot configuration",
+   "stale": true
+  },
+  {
+   "conv": "7d7a356c-e798-41c2-85ba-a110ee9f54ed",
+   "lastEvent": 1785088563611,
+   "lastKind": "query",
+   "title": "Refactor buffer flush and seal mechanics",
+   "stale": true
+  },
+  {
+   "conv": "b0041faa-ac7b-42aa-b318-4d1029112714",
+   "lastEvent": 1785086618737,
+   "lastKind": "query",
+   "title": "Release core-di to version 5.0.0-alpha.4",
+   "stale": true
+  },
+  {
+   "conv": "4fed9c92-d23e-4a70-a8e6-3c67d830f6d0",
+   "lastEvent": 1785086069732,
+   "lastKind": "query",
+   "title": "Implement scope shadowing for core-di registration",
+   "stale": true
+  },
+  {
+   "conv": "ef17af1c-26e5-4c43-b5dc-fd96ca8aa12b",
+   "lastEvent": 1785085865521,
+   "lastKind": "query",
+   "title": "Write attachment-supersession specs into governing documents",
+   "stale": true
+  },
+  {
+   "conv": "6cae2745-925b-4ef9-b695-c9c5564bc0de",
+   "lastEvent": 1785085790541,
+   "lastKind": "query",
+   "title": "Review and fix shadow registration PR #58",
+   "stale": true
+  },
+  {
+   "conv": "8e0b1c61-28b1-42ca-846c-5b5006763f74",
+   "lastEvent": 1785085326023,
+   "lastKind": "query",
+   "title": "Verify PR review findings resolution",
+   "stale": true
+  },
+  {
+   "conv": "d13f5fc9-81eb-462e-8b84-40df60ca6108",
+   "lastEvent": 1785081419683,
+   "lastKind": "query",
+   "title": "Review spec changes for attachment rules",
+   "stale": true
+  },
+  {
+   "conv": "ad2a9496-989b-4b4f-ba9f-03fd38ce71ee",
+   "lastEvent": 1785080969823,
+   "lastKind": "query",
+   "title": "Implement skill gate tool restriction",
+   "stale": true
+  },
+  {
+   "conv": "63302a31-d6ac-4627-a056-60fe2aad1f02",
+   "lastEvent": 1785080930994,
+   "lastKind": "query",
+   "title": "Fix parallel tool cancellation and heal logic",
+   "stale": true
+  },
+  {
+   "conv": "4b3ac4ee-4458-4410-936a-8a587a3e4c20",
+   "lastEvent": 1785080147561,
+   "lastKind": "query",
+   "title": "Review PR fixes for approval coordinator hang",
+   "stale": true
+  },
+  {
+   "conv": "81efd3f9-7912-40e5-afb0-73f0e00fe246",
+   "lastEvent": 1785080129656,
+   "lastKind": "query",
+   "title": "Review PR #481 skill gate provider fix",
+   "stale": true
+  },
+  {
+   "conv": "fff26834-fda0-4dca-a767-8994233e12c8",
+   "lastEvent": 1785079791334,
+   "lastKind": "query",
+   "title": "Fix escape key intercepting Y/N in approval prompts",
+   "stale": true
+  },
+  {
+   "conv": "9f0a05bf-52b6-4858-b7fa-9ede58936450",
+   "lastEvent": 1785079482669,
+   "lastKind": "query",
+   "title": "Review and fix PR #480 approval state bug",
+   "stale": true
+  },
+  {
+   "conv": "8e0d7449-70a6-4c46-bc71-23fc33d79674",
+   "lastEvent": 1785073540235,
+   "lastKind": "query",
+   "title": "Implement service request handling in bridge",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "438ba5b0-5c5b-4077-a522-6167539bfa5a",
+   "lastEvent": 1785073281726,
+   "lastKind": "query",
+   "title": "Refactor bridge for testable request handling",
+   "stale": true
+  },
+  {
+   "conv": "9e2b5963-819a-41ea-8493-91d19144d91f",
+   "lastEvent": 1785073112177,
+   "lastKind": "query",
+   "title": "Review PR #14 and verify issue resolution",
+   "stale": true
+  },
+  {
+   "conv": "806d3e16-83cc-453a-9b49-8f6100d51f67",
+   "lastEvent": 1785072668632,
+   "lastKind": "query",
+   "title": "Review dependabot workflow changes",
+   "stale": true
+  },
+  {
+   "conv": "0669749f-73fe-4ef8-b9f1-cf69d39d5c25",
+   "lastEvent": 1785072326277,
+   "lastKind": "query",
+   "title": "Review PR #14 refactoring broker replay",
+   "stale": true
+  },
+  {
+   "conv": "e4eb3773-f9b3-448b-bd93-60792ebd771c",
+   "lastEvent": 1785071178353,
+   "lastKind": "query",
+   "title": "Review PR fixes for broker replay refactor",
+   "stale": true
+  },
+  {
+   "conv": "44f6b954-b8a1-4912-964e-7c3fe7aed151",
+   "lastEvent": 1785068838520,
+   "lastKind": "query",
+   "title": "Migrate CLI to core-di v5 with build-time validation",
+   "stale": true
+  },
+  {
+   "conv": "3977a5f8-35ec-45cc-8d1a-1cd682c15b6d",
+   "lastEvent": 1785068340202,
+   "lastKind": "query",
+   "title": "Verify CLAUDE.md claims and ship PR",
+   "stale": true
+  },
+  {
+   "conv": "7008620e-9dba-4457-89fd-8294b1094227",
+   "lastEvent": 1785067559431,
+   "lastKind": "query",
+   "title": "Review PR #479 dependency refactoring",
+   "stale": true
+  },
+  {
+   "conv": "5765df2d-88ae-40be-ac39-17bd528928b6",
+   "lastEvent": 1785067448983,
+   "lastKind": "query",
+   "title": "Review PR for factual accuracy",
+   "stale": true
+  },
+  {
+   "conv": "1d8d7ec3-0eca-4e94-be44-e0d638d7c09e",
+   "lastEvent": 1785067224525,
+   "lastKind": "query",
+   "title": "Fix unbounded memory leak in ConvChangePublisher",
+   "stale": true
+  },
+  {
+   "conv": "eb99da87-edc4-4d47-b8df-fce304eb7599",
+   "lastEvent": 1785065695454,
+   "lastKind": "usage",
+   "title": "Review current branch PR",
+   "stale": true
+  },
+  {
+   "conv": "dcdacd38-6a5a-41ce-8f7a-d259a1d628a6",
+   "lastEvent": 1785065640828,
+   "lastKind": "query",
+   "title": "Review PR 479 and verify fixes",
+   "stale": true
+  },
+  {
+   "conv": "4e634733-8ad9-4442-ba71-54d10e03c28a",
+   "lastEvent": 1785065600872,
+   "lastKind": "query",
+   "title": "Review PR 14 on broker seam refactor",
+   "stale": true
+  },
+  {
+   "conv": "d09bcf00-30bb-4513-8566-2ca66d5bd6d2",
+   "lastEvent": 1785064006955,
+   "lastKind": "query",
+   "title": "Review PR #14 bridge-broker-seam refactor",
+   "stale": true
+  },
+  {
+   "conv": "9602d074-f8f0-472b-804e-044e37eceb87",
+   "lastEvent": 1785063983561,
+   "lastKind": "query",
+   "title": "Review PR #479 and verify fixes",
+   "stale": true
+  },
+  {
+   "conv": "fbc07c3c-1619-4691-a3f5-17b1d5d76977",
+   "lastEvent": 1785062832440,
+   "lastKind": "query",
+   "title": "Review and fix PR extraction refactoring",
+   "stale": true
+  },
+  {
+   "conv": "0f34edce-5498-4a38-9107-85c6e0a11dad",
+   "lastEvent": 1785062643038,
+   "lastKind": "query",
+   "title": "Review PR and verify error handling fixes",
+   "stale": true
+  },
+  {
+   "conv": "e18458f1-3346-4a8f-a3fd-6a06141b2c29",
+   "lastEvent": 1785061872548,
+   "lastKind": "message",
+   "title": "Build bash AST executor and persistence experiment",
+   "stale": true
+  },
+  {
+   "conv": "83249aed-2bd2-4678-b18f-6a01e895ce5e",
+   "lastEvent": 1785061813227,
+   "lastKind": "query",
+   "title": "Review PR #479 DI refactor and fix watch disposal",
+   "stale": true
+  },
+  {
+   "conv": "86d41a55-a1f0-4459-91b6-0e62c1348db8",
+   "lastEvent": 1785060262557,
+   "lastKind": "usage",
+   "title": "Review pull request and debug CI failures",
+   "stale": true
+  },
+  {
+   "conv": "35a93e51-3c52-4d7a-86b3-dce60889d7e7",
+   "lastEvent": 1785060201233,
+   "lastKind": "query",
+   "title": "Review PR #14 seam refactor",
+   "stale": true
+  },
+  {
+   "conv": "899f446c-3d04-4a9a-af2a-00b5ff7ce050",
+   "lastEvent": 1785060118684,
+   "lastKind": "query",
+   "title": "Review PR #14 broker refactoring",
+   "stale": true
+  },
+  {
+   "conv": "9736b66e-53da-4a81-a365-d0d9ca5d75c0",
+   "lastEvent": 1785060087296,
+   "lastKind": "query",
+   "title": "Review and test PR dependency injection refactor",
+   "stale": true
+  },
+  {
+   "conv": "6767accc-78ee-4efd-b3f6-421cf3cabe7a",
+   "lastEvent": 1785059218928,
+   "lastKind": "query",
+   "title": "Fix DI refactor bugs with failing tests",
+   "stale": true
+  },
+  {
+   "conv": "f063a9a0-038f-4c53-a4bf-4286f77f031c",
+   "lastEvent": 1785058514895,
+   "lastKind": "query",
+   "title": "Review PR #14 and post findings",
+   "stale": true
+  },
+  {
+   "conv": "1e9fa8ac-1747-4ef7-a893-5ac0947f6071",
+   "lastEvent": 1785057180339,
+   "lastKind": "query",
+   "title": "Review attachment supersession spec PR",
+   "stale": true
+  },
+  {
+   "conv": "7f4547d3-9611-4030-9297-1ae7a1643097",
+   "lastEvent": 1785056741138,
+   "lastKind": "query",
+   "title": "Review PR #13 tab persistence fix",
+   "stale": true
+  },
+  {
+   "conv": "9acd4f91-e7ab-4448-b8ce-9d0b21ede47d",
+   "lastEvent": 1785056677771,
+   "lastKind": "message",
+   "title": "Review pull request"
+  },
+  {
+   "conv": "7c742321-1fcb-4705-9aac-4f3b5abdac90",
+   "lastEvent": 1785056336962,
+   "lastKind": "query",
+   "title": "Review PR with correctness and code quality concerns",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "fe0d0d99-d4a6-4af5-be0f-2f51f347d8ef",
+   "lastEvent": 1785056241824,
+   "lastKind": "query",
+   "title": "Review PR and fix terminal teardown bugs",
+   "stale": true
+  },
+  {
+   "conv": "ea1fce06-b023-4cbc-8ce9-0a787200b4b3",
+   "lastEvent": 1785055354126,
+   "lastKind": "query",
+   "title": "Review branch with attachment telemetry changes",
+   "stale": true
+  },
+  {
+   "conv": "de5136b9-6803-4843-8b08-ae8f62f91139",
+   "lastEvent": 1785053899904,
+   "lastKind": "query",
+   "title": "Review attachment supersession spec branch",
+   "stale": true
+  },
+  {
+   "conv": "14bce949-be65-40f7-992a-910663d457ce",
+   "lastEvent": 1785053395194,
+   "lastKind": "query",
+   "title": "Review PR #479 DI graph validation and fix drain window",
+   "stale": true
+  },
+  {
+   "conv": "6516aaab-26ff-4e4a-b25d-a73d18e81eb4",
+   "lastEvent": 1785051274235,
+   "lastKind": "query",
+   "title": "Review PR #479 dependency graph changes",
+   "stale": true
+  },
+  {
+   "conv": "e7263bf2-8c6a-4655-9827-274499ad98a7",
+   "lastEvent": 1785050529777,
+   "lastKind": "query",
+   "title": "Design broker seam for testable request handling",
+   "stale": true
+  },
+  {
+   "conv": "da62756b-bcd3-464a-9c84-c26c37505db8",
+   "lastEvent": 1785049643938,
+   "lastKind": "message",
+   "title": "Review pull request"
+  },
+  {
+   "conv": "face37c7-d919-4486-83c0-aa87c01042f1",
+   "lastEvent": 1785049525114,
+   "lastKind": "query",
+   "title": "Debug minimumReleaseAgeExclude policy violation",
+   "stale": true
+  },
+  {
+   "conv": "ce376d3e-d3fa-443a-9759-dadbb64d19fb",
+   "lastEvent": 1785048201625,
+   "lastKind": "query",
+   "title": "Review bridge service requests feature branch",
+   "stale": true
+  },
+  {
+   "conv": "41381d47-2658-4ba8-9816-34e92faabf67",
+   "lastEvent": 1785047027692,
+   "lastKind": "query",
+   "title": "Review pull request",
+   "stale": true
+  },
+  {
+   "conv": "42973f3b-dfd3-475f-aef2-a3e2aa1e1b58",
+   "lastEvent": 1784991238093,
+   "lastKind": "query",
+   "title": "Fix attachment model with conversation-scoped publishing",
+   "stale": true
+  },
+  {
+   "conv": "564baced-7a34-450b-a820-ed2438c9ccf1",
+   "lastEvent": 1784988247841,
+   "lastKind": "query",
+   "title": "Rebuild compliance and gatekeeper from first principles",
+   "stale": true
+  },
+  {
+   "conv": "3839054d-faa5-44e6-b012-bbe007bf2fa6",
+   "lastEvent": 1784987994208,
+   "lastKind": "query",
+   "title": "Add eagerSingletons option and remove meaningless verb",
+   "stale": true
+  },
+  {
+   "conv": "a7438a7c-ea30-431c-a2f4-b1488ec281a7",
+   "lastEvent": 1784987450868,
+   "lastKind": "query",
+   "title": "Review PR and write failing tests",
+   "stale": true
+  },
+  {
+   "conv": "3f1026d7-b694-421c-90f6-8e47e3705878",
+   "lastEvent": 1784986243542,
+   "lastKind": "query",
+   "title": "Implement changes.jsonl changelog tooling",
+   "stale": true
+  },
+  {
+   "conv": "cc733937-bb5b-4cbc-a6d0-f7e3734fa30d",
+   "lastEvent": 1784985696194,
+   "lastKind": "query",
+   "title": "Debug and fix Power BI group performance completion stats",
+   "tags": {
+    "org": "HopeVentures",
+    "project": "CircuitBreaker",
+    "repo": "CircuitBreaker-Platform",
+    "worktree": "group-performance-attendance-stats",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "4da27859-db7a-4d85-98a4-42ac81c41fdb",
+   "lastEvent": 1784985474327,
+   "lastKind": "query",
+   "title": "Review PR without gatekeeper skill",
+   "stale": true
+  },
+  {
+   "conv": "a9580b58-c3e9-4b0d-97b7-9f1bbc21c000",
+   "lastEvent": 1784985217166,
+   "lastKind": "query",
+   "title": "Review PR with adversarial perspective",
+   "stale": true
+  },
+  {
+   "conv": "976d68c7-c232-4471-8d34-c746a47f9648",
+   "lastEvent": 1784984853356,
+   "lastKind": "query",
+   "title": "Review bridge service requests PR",
+   "stale": true
+  },
+  {
+   "conv": "5408cf8e-cbe1-4399-901b-f2bb098e69d3",
+   "lastEvent": 1784984836783,
+   "lastKind": "message",
+   "title": "Test file deletion permissions and approvals",
+   "tags": {
+    "org": "@shellicar"
+   }
+  },
+  {
+   "conv": "b6d2696f-8d33-42b4-81b8-8a89b2db6415",
+   "lastEvent": 1784984261006,
+   "lastKind": "query",
+   "title": "Serve both frontends on separate ports",
+   "stale": true
+  },
+  {
+   "conv": "01b7b3c1-abbc-4c35-ba11-3056479f68c8",
+   "lastEvent": 1784984251196,
+   "lastKind": "query",
+   "title": "Review PR #56 for core-di singleton changes",
+   "stale": true
+  },
+  {
+   "conv": "ee960a4a-ef4f-4ce7-b280-572db31328fc",
+   "lastEvent": 1784983284998,
+   "lastKind": "query",
+   "title": "Implement chdir request in bridge service",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "f72d43b1-08b0-4b1f-8f8a-81801cf9aa3b",
+   "lastEvent": 1784983154162,
+   "lastKind": "query",
+   "title": "Review PR #11 towerd server changes",
+   "stale": true
+  },
+  {
+   "conv": "f67e8ac5-26aa-4b25-96c1-8061725c7cd5",
+   "lastEvent": 1784982924875,
+   "lastKind": "usage",
+   "title": "Load gatekeeper skill and review PR",
+   "stale": true
+  },
+  {
+   "conv": "d2a74d9f-3855-432f-a7db-155db645108f",
+   "lastEvent": 1784982877126,
+   "lastKind": "query",
+   "title": "Add keyword-gate rule to baseline",
+   "stale": true
+  },
+  {
+   "conv": "d9b16d3d-ef81-43eb-ad02-08f4d4554b92",
+   "lastEvent": 1784981764496,
+   "lastKind": "query",
+   "title": "Review PR with adversarial feedback on port binding",
+   "stale": true
+  },
+  {
+   "conv": "05026430-7590-4fe2-a294-51e1703ad7d0",
+   "lastEvent": 1784981003062,
+   "lastKind": "query",
+   "title": "Review multi-frontend server configuration PR",
+   "stale": true
+  },
+  {
+   "conv": "720e7bd8-3f7d-4177-a261-68289409c66a",
+   "lastEvent": 1784980652910,
+   "lastKind": "query",
+   "title": "Review PR for serving both frontends",
+   "stale": true
+  },
+  {
+   "conv": "3c1c2df5-7bf2-46b0-9d33-5bf27b4aef9d",
+   "lastEvent": 1784980428173,
+   "lastKind": "query",
+   "title": "Bank reconciliation backlog and payroll corrections",
+   "stale": true
+  },
+  {
+   "conv": "a5482bac-92aa-4fbf-8cea-9908157a2e89",
+   "lastEvent": 1784979903204,
+   "lastKind": "query",
+   "title": "Release core-di libraries 5.0.0-alpha.2",
+   "stale": true
+  },
+  {
+   "conv": "23b4e852-1312-41cd-8a6b-4d5461110a28",
+   "lastEvent": 1784979468320,
+   "lastKind": "query",
+   "title": "Bash AST parser and executor research",
+   "tags": {
+    "org": "shellicar",
+    "repo": "claude-swe",
+    "platform": "github"
+   }
+  },
+  {
+   "conv": "60e4d2de-9f8c-4348-810e-d93426adf574",
+   "lastEvent": 1784978429481,
+   "lastKind": "query",
+   "title": "Refactor DI dependencies and migrate to core-di",
+   "stale": true
+  },
+  {
+   "conv": "046483d1-3c1e-4163-b24e-c2c9a78a42a1",
+   "lastEvent": 1784977031139,
+   "lastKind": "query",
+   "title": "Per-agent working directory for bridge",
+   "stale": true
+  },
+  {
+   "conv": "a9c3f915-2048-475b-9b95-a0e4877f16d8",
+   "lastEvent": 1784976163111,
+   "lastKind": "query",
+   "title": "Windows support and CI pipeline for tower",
+   "stale": true
+  },
+  {
+   "conv": "f1e2cfa9-f791-44ba-b284-feff1daef79b",
+   "lastEvent": 1784975800957,
+   "lastKind": "query",
+   "title": "Review PR on per-conversation chdir implementation",
+   "stale": true
+  },
+  {
+   "conv": "cab7db94-4396-4d53-a13d-a00184098c4d",
+   "lastEvent": 1784975787377,
+   "lastKind": "query",
+   "title": "Review PR #6 workspace merge and rename",
+   "stale": true
+  },
+  {
+   "conv": "4db755e7-ad2b-4b63-9814-5816a74e0853",
+   "lastEvent": 1784975543419,
+   "lastKind": "query",
+   "title": "Design and build Orchestrate: composable tool orchestration engine",
+   "stale": true
+  },
+  {
+   "conv": "6537f0f6-4ac4-4704-9651-a134e1345564",
+   "lastEvent": 1784974900530,
+   "lastKind": "query",
+   "title": "Review PR with gatekeeper schema validation",
+   "stale": true
+  },
+  {
+   "conv": "cce90f53-1549-4ed9-8c3c-cda774d1f09d",
+   "lastEvent": 1784974474107,
+   "lastKind": "query",
+   "title": "Build Azure DevOps skills and fix PR commit disciplines",
+   "stale": true
+  },
+  {
+   "conv": "3d6d1a67-8699-4bdd-85da-09ef7d9ca031",
+   "lastEvent": 1784974313412,
+   "lastKind": "query",
+   "title": "Check branching convention for releases",
+   "stale": true
+  },
+  {
+   "conv": "14179ce7-aec2-4049-a864-c3613bea176c",
+   "lastEvent": 1784973382068,
+   "lastKind": "query",
+   "title": "Rebuild core-di default lifetime and captive throw",
+   "stale": true
+  },
+  {
+   "conv": "11bfe442-e985-4545-88ae-b209ae538695",
+   "lastEvent": 1784971884759,
+   "lastKind": "query",
+   "title": "Review DI package requirements and documentation",
+   "stale": true
+  },
+  {
+   "conv": "7b7804b6-bfd3-4fba-b8ff-c8dc15e72756",
+   "lastEvent": 1784971884689,
+   "lastKind": "query",
+   "title": "Implement defaultLifetime and captive-throw default in core-di",
+   "stale": true
+  },
+  {
+   "conv": "9b23bf66-df8b-4274-935d-9789aaa9aa9d",
+   "lastEvent": 1784971646391,
+   "lastKind": "query",
+   "title": "Review PR with compile error and undeclared changes",
+   "stale": true
+  },
+  {
+   "conv": "276036a1-decc-4201-aa8b-b49294366f88",
+   "lastEvent": 1784970980511,
+   "lastKind": "query",
+   "title": "Port Leptos virtual list for conversation panel",
+   "stale": true
+  },
+  {
+   "conv": "e0be841f-9b46-4157-91eb-c1bc3631ea16",
+   "lastEvent": 1784970689293,
+   "lastKind": "query",
+   "title": "Fix cargo fmt workflow flag issue",
+   "stale": true
+  },
+  {
+   "conv": "d619814c-136b-4e55-9145-9f307ddecf4f",
+   "lastEvent": 1784967736459,
+   "lastKind": "query",
+   "title": "Review and fix virtual list box model bug",
+   "stale": true
+  },
+  {
+   "conv": "859e15bf-f2f3-4a2e-9d06-3e33b2f64787",
+   "lastEvent": 1784966165142,
+   "lastKind": "query",
+   "title": "Debug time system reminder corrupting conversations",
+   "stale": true
+  },
+  {
+   "conv": "cb2fff54-a61a-4f06-98a5-66d8384b1949",
+   "lastEvent": 1784965665226,
+   "lastKind": "query",
+   "title": "Release Claude SDK CLI beta.23",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "7e21371b-ed88-46d1-9672-ae378d22b383",
+   "lastEvent": 1784963784194,
+   "lastKind": "query",
+   "title": "Reproduce core-di disposal bug and implement beta.2 changes",
+   "stale": true
+  },
+  {
+   "conv": "46dd3aea-1998-417f-9093-2786b97741ac",
+   "lastEvent": 1784961490074,
+   "lastKind": "query",
+   "title": "Fix Azure DevOps PR tools account resolution and caching",
+   "stale": true
+  },
+  {
+   "conv": "03f313b9-1780-441d-82db-c23385829d0d",
+   "lastEvent": 1784958473512,
+   "lastKind": "query",
+   "title": "Review PR for adversarial gatekeeper approval",
+   "stale": true
+  },
+  {
+   "conv": "a5d78cd3-a7aa-4452-9fdb-dc661ea621ff",
+   "lastEvent": 1784958214408,
+   "lastKind": "query",
+   "title": "Review ADO PR account refactoring code",
+   "stale": true
+  },
+  {
+   "conv": "8638093b-101b-476c-bed1-53f28d8d3c4c",
+   "lastEvent": 1784957693369,
+   "lastKind": "query",
+   "title": "Define SC proxy success function and authorisation rules",
+   "stale": true
+  },
+  {
+   "conv": "181d695e-f73b-4d56-b0e3-15205bbd6a56",
+   "lastEvent": 1784957385439,
+   "lastKind": "query",
+   "title": "Review sc-proxy skill implementation",
+   "stale": true
+  },
+  {
+   "conv": "e5ce191e-4a0d-48aa-a20f-29c34ec166d2",
+   "lastEvent": 1784956126225,
+   "lastKind": "query",
+   "title": "Reconcile vehicle logbook photos and extract trip data",
+   "tags": {
+    "org": "Hellicar-Solutions",
+    "project": "Hellicar-Solutions",
+    "repo": "Vehicle-Logbook",
+    "platform": "devops"
+   },
+   "stale": true
+  },
+  {
+   "conv": "7fef9ce6-a881-483b-8a38-a234ac6f3853",
+   "lastEvent": 1784955358582,
+   "lastKind": "query",
+   "title": "Review Leptos virtual list PR",
+   "stale": true
+  },
+  {
+   "conv": "417bd175-bacb-4b0c-828a-10eb53447722",
+   "lastEvent": 1784951875927,
+   "lastKind": "query",
+   "title": "Remove pull request ID requirement from GitHub tools",
+   "stale": true
+  },
+  {
+   "conv": "a2117d14-ad6f-431f-92e1-baae5b3565f7",
+   "lastEvent": 1784951635569,
+   "lastKind": "query",
+   "title": "Review PR for GitHub tools enhancement",
+   "stale": true
+  },
+  {
+   "conv": "b80756fb-438e-4ae9-881b-ebe0a0a6a8a1",
+   "lastEvent": 1784947122582,
+   "lastKind": "query",
+   "title": "Business admin reconciliation handover process",
+   "tags": {
+    "org": "Hellicar-Solutions",
+    "repo": "claude-fleet-hellicar-solutions",
+    "worktree": "billable-expense",
+    "role": "handler",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "45320759-0103-472f-845c-9961887f65ab",
+   "lastEvent": 1784946450519,
+   "lastKind": "query",
+   "title": "Session handover and business admin work"
+  },
+  {
+   "conv": "77007607-cee4-4736-824e-5f7290aef8d6",
+   "lastEvent": 1784946126647,
+   "lastKind": "query",
+   "title": "Fix git stash pop security gap and billable-expense handover",
+   "tags": {
+    "org": "Hellicar-Solutions",
+    "repo": "claude-fleet-hellicar-solutions",
+    "role": "handler",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "1b794385-a819-4955-ba4d-8e970af4236f",
+   "lastEvent": 1784945871648,
+   "lastKind": "query",
+   "title": "Investigate stalled xero-admin billable expense mission",
+   "stale": true
+  },
+  {
+   "conv": "eb541774-e923-4991-9b79-89fef9615cae",
+   "lastEvent": 1784944924957,
+   "lastKind": "query",
+   "title": "Complete testament reconciliation review",
+   "stale": true
+  },
+  {
+   "conv": "7678301b-0c59-4d51-a8f5-9ce8f49da235",
+   "lastEvent": 1784912094667,
+   "lastKind": "query",
+   "title": "Migrate core-di-lite to v5 and expose concrete dependency design flaw",
+   "stale": true
+  },
+  {
+   "conv": "58b5c1c5-45d5-43b8-a7f5-9fd1d8f9f803",
+   "lastEvent": 1784909976864,
+   "lastKind": "query",
+   "title": "Port markdown rendering to Leptos frontend",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "0746a08c-26fa-4aba-ad92-39366282de2b",
+   "lastEvent": 1784908400967,
+   "lastKind": "query",
+   "title": "Update sync-repos.sh with rebase retry logic",
+   "tags": {
+    "org": "personal",
+    "repo": "dotfiles",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "b7a45c36-14df-4d71-9f55-ca600d22a12a",
+   "lastEvent": 1784907998769,
+   "lastKind": "query",
+   "title": "Generate service principals and certs for Hope Ventures",
+   "stale": true
+  },
+  {
+   "conv": "58bbcc4a-96ba-4489-adb9-fc5714efbea3",
+   "lastEvent": 1784907923552,
+   "lastKind": "query",
+   "title": "Investigate bash parser feasibility for AST execution",
+   "stale": true
+  },
+  {
+   "conv": "03bd5974-c8be-41f1-8733-aa0049c3d5a0",
+   "lastEvent": 1784907629887,
+   "lastKind": "query",
+   "title": "Tower performance tuning and conformance fixes",
+   "stale": true
+  },
+  {
+   "conv": "64c865c3-5ef8-4cf7-83b1-e3d9ff84cda1",
+   "lastEvent": 1784907078523,
+   "lastKind": "query",
+   "title": "Compare frontend and frontend-leptos implementations",
+   "stale": true
+  },
+  {
+   "conv": "69ba955d-c79e-47c0-a2f0-7954a948f926",
+   "lastEvent": 1784898884201,
+   "lastKind": "query",
+   "title": "Add Dependabot config and CodeQL workflow",
+   "stale": true
+  },
+  {
+   "conv": "26d289bb-5c01-4111-9eee-289247383a7c",
+   "lastEvent": 1784898634103,
+   "lastKind": "query",
+   "title": "Check security scanning configuration",
+   "stale": true
+  },
+  {
+   "conv": "fcf97c26-7513-4c3f-8489-ef8d5e22f4e5",
+   "lastEvent": 1784897118959,
+   "lastKind": "query",
+   "title": "Improve error messages and bridge binary resolution",
+   "stale": true
+  },
+  {
+   "conv": "56274890-5254-41eb-a8d4-ed27abc6b929",
+   "lastEvent": 1784896566896,
+   "lastKind": "tool_use",
+   "title": "List files in home directory",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "8c280151-78f5-48e2-9c3a-2e856a582c01",
+   "lastEvent": 1784895737431,
+   "lastKind": "query",
+   "title": "Implement permissions matrix for bridge tools",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "5e341939-a9be-4183-82ad-7fe7074d50a5",
+   "lastEvent": 1784889340484,
+   "lastKind": "query",
+   "title": "Investigate interprocess crate for Windows attach channel",
+   "stale": true
+  },
+  {
+   "conv": "6c74b36b-570d-485f-b767-48dd05c56104",
+   "lastEvent": 1784876866644,
+   "lastKind": "query",
+   "title": "CircuitBreaker FPR delivery and fleet infrastructure updates",
+   "tags": {
+    "org": "HopeVentures",
+    "repo": "claude-fleet-hopeventures",
+    "role": "handler",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "4a7be37c-9dd4-44f7-b9f9-20f75b35b9d3",
+   "lastEvent": 1784876252114,
+   "lastKind": "query",
+   "title": "Evaluate hiring decision for Courtney",
+   "stale": true
+  },
+  {
+   "conv": "2529481e-7bf5-46d7-a962-9632fe1418d5",
+   "lastEvent": 1784874529362,
+   "lastKind": "query",
+   "title": "Complete PROJ-2 phone and timezone country derivation",
+   "tags": {
+    "org": "HopeVentures",
+    "repo": "claude-fleet-hopeventures",
+    "worktree": "proj-2-org-country-derive",
+    "role": "handler",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "0a8d438c-6c91-4cf0-93bc-91db984a6ed9",
+   "lastEvent": 1784743181311,
+   "lastKind": "query",
+   "title": "Build comprehensive Git tool suite with safety guards",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "feature-git-tool",
+    "pr": "462",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "e15b4c4f-9db6-4ec0-96ea-d0618f430f52",
+   "lastEvent": 1784737339402,
+   "lastKind": "query",
+   "title": "Add reconnect with backoff to Leptos transport",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "cb85c8e4-3e88-42d2-873f-b69a471846e0",
+   "lastEvent": 1784734334636,
+   "lastKind": "query",
+   "title": "Document missing frame families in tower-ws-spec",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "bc100e50-6245-41e7-9bf9-9149fcc4ef4c",
+   "lastEvent": 1784733293305,
+   "lastKind": "query",
+   "title": "Remove stale from field from tool_result fixture",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "68e66900-8811-4b4c-a1db-07b4aaee7c4b",
+   "lastEvent": 1784731012329,
+   "lastKind": "query",
+   "title": "Thread bucket through attachment uploads",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "tower",
+    "platform": "github"
+   },
+   "stale": true
+  },
+  {
+   "conv": "1e78e5f1-9551-49bc-8530-b70d8033e89b",
+   "lastEvent": 1784730920865,
+   "lastKind": "query",
+   "title": "Configure home network switches and tooling",
+   "stale": true
+  },
+  {
+   "conv": "6d8ebee0-56ea-4289-b315-c40c08ecf88b",
+   "lastEvent": 1784730422364,
+   "lastKind": "query",
+   "title": "Fix wt alias directory stripping issue",
+   "stale": true
+  },
+  {
+   "conv": "62f19bde-e0b9-43c9-9269-ba909464490b",
+   "lastEvent": 1784730023531,
+   "lastKind": "query",
+   "title": "Tower conformance audit across five moving parts",
+   "stale": true
+  },
+  {
+   "conv": "549b8b1b-1031-4c3c-9ead-614bea57f631",
+   "lastEvent": 1784729310658,
+   "lastKind": "query",
+   "title": "Audit Tower frontend parity and document gaps",
+   "stale": true
+  },
+  {
+   "conv": "5f20d13e-de62-4684-a3ee-246129bbe28a",
+   "lastEvent": 1784727020805,
+   "lastKind": "query",
+   "title": "Implement markdown rendering for assistant text",
+   "stale": true
+  },
+  {
+   "conv": "5a31be30-961a-41fd-a3c6-28f20ca03c81",
+   "lastEvent": 1784654456118,
+   "lastKind": "query",
+   "title": "Security review of Git tool integration",
+   "tags": {
+    "org": "@shellicar",
+    "repo": "claude-cli",
+    "worktree": "feature-git-tool",
+    "platform": "github",
+    "pr": "462"
+   },
+   "stale": true
+  },
+  {
+   "conv": "8218f11f-cc70-4613-8b97-9e6d52c72403",
+   "lastEvent": 1784654456012,
+   "lastKind": "query",
+   "title": "Merge GitVersion fix and update build-version package",
+   "stale": true
+  },
+  {
+   "conv": "4156d996-3deb-4c24-a8a6-d24c67318b99",
+   "lastEvent": 1784654258926,
+   "lastKind": "query",
+   "title": "Add git divergence and worktree tracking to reminder",
+   "stale": true
+  },
+  {
+   "conv": "9fcafb1f-4dd6-43e6-9991-327aa156ffad",
+   "lastEvent": 1784653116338,
+   "lastKind": "query",
+   "title": "Fix GitVersion tag resolution and refactor build-version strategies",
+   "stale": true
+  },
+  {
+   "conv": "a54de652-3bb6-4b91-b244-f033a7c3df24",
+   "lastEvent": 1784649701688,
+   "lastKind": "query",
+   "title": "Make ExecV3 safety rules configurable",
+   "stale": true
+  },
+  {
+   "conv": "e259db15-11ab-49cf-b9a0-f9c519732fcb",
+   "lastEvent": 1784649410375,
+   "lastKind": "query",
+   "title": "Markdown rendering, links, and table fixes for helm",
+   "stale": true
+  },
+  {
+   "conv": "d65ad5bb-74bb-40b3-ba66-8e20eed6f47c",
+   "lastEvent": 1784645251082,
+   "lastKind": "query",
+   "title": "Verify text height measurement accuracy",
+   "stale": true
+  },
+  {
+   "conv": "059a25d6-2b4d-4b3b-81ae-a8caca6ff7b5",
+   "lastEvent": 1784643245794,
+   "lastKind": "query",
+   "title": "Build helm TUI from scratch with async/attach channel",
+   "stale": true
+  },
+  {
+   "conv": "a27ed520-506a-43a9-b16f-98f90de0944d",
+   "lastEvent": 1784640996031,
+   "lastKind": "query",
+   "title": "Implement exact-height measurement for virtual list rows",
+   "stale": true
+  },
+  {
+   "conv": "5ee768f8-727b-4384-b97b-9fca3d87ef4d",
+   "lastEvent": 1784639339479,
+   "lastKind": "query",
+   "title": "Apply pnpm audit updates and fix type-check"
+  },
+  {
+   "conv": "a5725ad1-e3cb-454a-8c8c-071e30aec456",
+   "lastEvent": 1784638452298,
+   "lastKind": "query",
+   "title": "Resolve tmux VS16 emoji width rendering issue",
+   "stale": true
+  },
+  {
+   "conv": "5b3e9604-5a31-4c8a-a35e-c63549f1a518",
+   "lastEvent": 1784638106821,
+   "lastKind": "query",
+   "title": "Fix timestamp injection before user messages",
+   "stale": true
+  },
+  {
+   "conv": "69fac182-c19c-447d-90c2-f74166275c52",
+   "lastEvent": 1784637079205,
+   "lastKind": "query",
+   "title": "Implement virtual list for message rendering",
+   "stale": true
+  },
+  {
+   "conv": "7b7c3974-cb1e-478a-a76b-fb7f618cc50e",
+   "lastEvent": 1784634179463,
+   "lastKind": "query",
+   "title": "Implement declarative, configurable exec safety rules"
+  },
+  {
+   "conv": "e14d4a31-b3fe-4d9d-9f54-b74c7c4bc65f",
+   "lastEvent": 1784634017161,
+   "lastKind": "query",
+   "title": "Virtual scrolling investigation and performance fixes"
+  },
+  {
+   "conv": "44bcc82d-afc6-45ca-b2a5-cffefac05d54",
+   "lastEvent": 1784633837585,
+   "lastKind": "query",
+   "title": "Port Svelte reactivity fixes from Leptos",
+   "stale": true
+  },
+  {
+   "conv": "ce48f18d-9a3f-46fe-bde5-70f345f91b38",
+   "lastEvent": 1784632776546,
+   "lastKind": "query",
+   "title": "Fix MCP package READMEs to remove CLI references",
+   "stale": true
+  },
+  {
+   "conv": "8f859df2-77da-4a1b-8596-ad5f614c8222",
+   "lastEvent": 1784628618784,
+   "lastKind": "query",
+   "title": "Hello from attach_probe",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "316d66ab-7838-4694-a2f9-49830a079bd0",
+   "lastEvent": 1784572714689,
+   "lastKind": "query",
+   "title": "Initial hello from attach_probe",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "997f6d17-51e5-45b6-a832-e355643c9a82",
+   "lastEvent": 1784572708534,
+   "lastKind": "query",
+   "title": "Initial greeting from attach_probe",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "67385ea2-0e84-4827-8d24-515f9991578a",
+   "lastEvent": 1784571432493,
+   "lastKind": "query",
+   "title": "Hello from attach_probe",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "8e499acf-598c-4415-907d-4a3b4aaef215",
+   "lastEvent": 1784570182358,
+   "lastKind": "query",
+   "title": "Release beta 22 for six packages",
+   "stale": true
+  },
+  {
+   "conv": "2ea9a578-e33f-4d5e-85ec-a710985a5c16",
+   "lastEvent": 1784568133060,
+   "lastKind": "query",
+   "title": "Fix promise concurrency and timestamp bugs",
+   "stale": true
+  },
+  {
+   "conv": "a35f20d7-7fcd-46f6-9cf7-3d138d24355e",
+   "lastEvent": 1784567537297,
+   "lastKind": "query",
+   "title": "Fix ESC cancellation lag and tool status glyphs"
+  },
+  {
+   "conv": "ec384250-4252-406e-b85f-2f4f25b10a34",
+   "lastEvent": 1784566313199,
+   "lastKind": "query",
+   "title": "Review PR: fix denied tool status display",
+   "stale": true
+  },
+  {
+   "conv": "8a86ca1d-4a6c-42da-ba08-44dc42455175",
+   "lastEvent": 1784563452690,
+   "lastKind": "query",
+   "title": "Initial greeting and assistance request",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "51dc8858-67c7-4f3e-b55c-687df5cba39a",
+   "lastEvent": 1784563181367,
+   "lastKind": "turn_started",
+   "title": "New coding session",
+   "tags": {
+    "org": "@shellicar"
+   }
+  },
+  {
+   "conv": "7865381b-18f6-47db-b54b-d477f8cd3cf8",
+   "lastEvent": 1784563163383,
+   "lastKind": "query",
+   "title": "Initial conversation greeting",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "0afcd01a-e828-42bf-a9ca-cc8b8185f6ac",
+   "lastEvent": 1784562550955,
+   "lastKind": "query",
+   "title": "Initial greeting and help request",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "f202fcae-429a-44e4-b65d-8af6783b9027",
+   "lastEvent": 1784561358041,
+   "lastKind": "query",
+   "title": "Move time reminder to message prepend"
+  },
+  {
+   "conv": "cce468f5-8c60-4dd8-91af-53fe113d7b9e",
+   "lastEvent": 1784561097299,
+   "lastKind": "query",
+   "title": "Initial conversation greeting",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "f38af981-1a2b-4701-b6be-8f2cdf9628f7",
+   "lastEvent": 1784559353192,
+   "lastKind": "query",
+   "title": "Review and fix test tier coverage and documentation"
+  },
+  {
+   "conv": "5c479673-fc65-4f5d-b680-b90dfa66903f",
+   "lastEvent": 1784558778185,
+   "lastKind": "query",
+   "title": "Run helm approval test command",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "b68fee80-549f-46e2-9b4e-5593693b0841",
+   "lastEvent": 1784558680500,
+   "lastKind": "tool_use",
+   "title": "Run helm approval test command",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "99dfb17b-8425-47d3-a7f8-2f50c2b9b47e",
+   "lastEvent": 1784558590557,
+   "lastKind": "query",
+   "title": "Testing and getting started",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "1143d3e6-83d9-4724-a8b5-b34bb20b1a5a",
+   "lastEvent": 1784557836503,
+   "lastKind": "query",
+   "title": "Initial greeting and session setup",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "6ef3b929-2e08-4318-ba68-6582a94d37c5",
+   "lastEvent": 1784557547646,
+   "lastKind": "query",
+   "title": "Fix ReadFile JSON output formatting",
+   "stale": true
+  },
+  {
+   "conv": "7f4cdd13-064c-4cfe-a7dd-84472651201d",
+   "lastEvent": 1784555801179,
+   "lastKind": "query",
+   "title": "Hello from attach_probe",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "223e05db-da87-44d8-b0fc-82c330b2fbad",
+   "lastEvent": 1784555706525,
+   "lastKind": "query",
+   "title": "Initial conversation with attach_probe",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "610493f2-43fe-4cf9-a175-3baf57759074",
+   "lastEvent": 1784553467594,
+   "lastKind": "query",
+   "title": "Complete Leptos frontend, fix bridge production bugs",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "9b9b63c2-e54b-40e6-b833-98baa55141ed",
+   "lastEvent": 1784545736172,
+   "lastKind": "query",
+   "title": "Add live disabledTools config to hide tools from model",
+   "stale": true
+  },
+  {
+   "conv": "a20a3b22-7fb5-47a9-951a-2fdc3974c5d7",
+   "lastEvent": 1784545735053,
+   "lastKind": "query",
+   "title": "Fix tool concurrency and Azure session caching",
+   "stale": true
+  },
+  {
+   "conv": "e70d4563-6b2f-4128-9100-2295fd4d4506",
+   "lastEvent": 1784545462243,
+   "lastKind": "query",
+   "title": "Fix disabled tools not being hidden from model",
+   "stale": true
+  },
+  {
+   "conv": "2e98613a-4eb7-4d5f-b63b-c6d6fbcc7672",
+   "lastEvent": 1784544933426,
+   "lastKind": "query",
+   "title": "Review and fix concurrent cancellation and cache race bugs",
+   "stale": true
+  },
+  {
+   "conv": "56f11f29-bef6-410a-9e7f-cbb34ca335ec",
+   "lastEvent": 1784544527432,
+   "lastKind": "message",
+   "title": "Adversarial code review for security issues",
+   "stale": true
+  },
+  {
+   "conv": "792ecf7c-8368-421e-bdbe-3c34b58c3780",
+   "lastEvent": 1784543586166,
+   "lastKind": "query",
+   "title": "Review and verify streaming markdown and grapheme boundary fixes",
+   "stale": true
+  },
+  {
+   "conv": "3f255eda-e96c-4747-82a0-0114977cee1f",
+   "lastEvent": 1784543366999,
+   "lastKind": "query",
+   "title": "Fix performance issues in CLI rendering and input",
+   "stale": true
+  },
+  {
+   "conv": "2983fe3e-72bf-4201-b42f-c156c59e54a5",
+   "lastEvent": 1784542525084,
+   "lastKind": "query",
+   "title": "Publish core-di v5 alpha releases and fix missing READMEs",
+   "stale": true
+  },
+  {
+   "conv": "add4a80a-ae32-405e-96b8-a9738680ca0b",
+   "lastEvent": 1784542301288,
+   "lastKind": "query",
+   "title": "Fix GitVersion executable permissions in CI",
+   "stale": true
+  },
+  {
+   "conv": "94e326d5-620d-4a75-a5c5-416ec7455898",
+   "lastEvent": 1784538292118,
+   "lastKind": "query",
+   "title": "Fix core-di v5 README and CI workflow badges",
+   "stale": true
+  },
+  {
+   "conv": "dca4a2b3-3b2f-4dfd-ad1f-099f791ca55c",
+   "lastEvent": 1784537390339,
+   "lastKind": "query",
+   "title": "Update CI workflow badges across packages",
+   "stale": true
+  },
+  {
+   "conv": "035c26ad-0157-487c-862a-f02ab4e56e22",
+   "lastEvent": 1784533264857,
+   "lastKind": "query",
+   "title": "Fix mcp-memory to use XDG data directory",
+   "stale": true
+  },
+  {
+   "conv": "afc1f8d4-0fef-40e0-acf6-45f80a1ee1da",
+   "lastEvent": 1784532575529,
+   "lastKind": "query",
+   "title": "Debug CLI performance freezing iTerm2",
+   "stale": true
+  },
+  {
+   "conv": "315ce006-b931-4491-936b-2c8a0643c2e2",
+   "lastEvent": 1784529774552,
+   "lastKind": "query",
+   "title": "Claude CLI project discussion and planning",
+   "stale": true
+  },
+  {
+   "conv": "ea93299b-5f13-4774-bdbc-8b59fb53c04f",
+   "lastEvent": 1784508474197,
+   "lastKind": "query",
+   "title": "Fix GPG key generation and commit changes",
+   "stale": true
+  },
+  {
+   "conv": "ed4914a5-e807-4e15-be26-c811e842eb3c",
+   "lastEvent": 1784457275562,
+   "lastKind": "query",
+   "title": "Building a conversational AI infrastructure from scratch",
+   "tags": {
+    "org": "@shellicar"
+   },
+   "stale": true
+  },
+  {
+   "conv": "eb75dc00-3cbf-426e-a07b-88f31ae63cbf",
+   "lastEvent": 1784455447928,
+   "lastKind": "query",
+   "title": "Update dependabot config for pnpm workspace support",
+   "stale": true
+  },
+  {
+   "conv": "eb78cfef-fab3-4b61-9ecf-50e240990844",
+   "lastEvent": 1784454651765,
+   "lastKind": "query",
+   "title": "Audit participant onboarding flow",
+   "tags": {
+    "org": "HopeVentures",
+    "role": "handler"
+   },
+   "stale": true
+  },
+  {
+   "conv": "264013db-ce08-43fc-aa5a-9cb62440f7ea",
+   "lastEvent": 1784454529331,
+   "lastKind": "query",
+   "title": "Fix code review findings and cleanup",
+   "stale": true
+  },
+  {
+   "conv": "90c328cd-150c-402b-be64-c5879d1c69d2",
+   "lastEvent": 1784453486377,
+   "lastKind": "query",
+   "title": "Implement Azure CLI escalation with service principals",
+   "stale": true
+  },
+  {
+   "conv": "37d3fe78-1d1b-49af-98ff-b6dec0106c04",
+   "lastEvent": 1784450749519,
+   "lastKind": "query",
+   "title": "Test Azure and DevOps tools with restricted access",
+   "stale": true
+  },
+  {
+   "conv": "ae2e65cf-ac5c-45df-8fbb-6ef82a974921",
+   "lastEvent": 1784450679967,
+   "lastKind": "query",
+   "title": "Adversarial code review of entire repo for bugs",
+   "stale": true
+  },
+  {
+   "conv": "7171610c-8078-4963-9f21-15d9d93f2ff2",
+   "lastEvent": 1784448228410,
+   "lastKind": "query",
+   "title": "Abstract node:fs imports and process platform/arch",
+   "stale": true
+  },
+  {
+   "conv": "a49ef5a6-1f33-48a4-b2f8-ee34ce423d1b",
+   "lastEvent": 1784446578567,
+   "lastKind": "query",
+   "title": "Bridge agent parity plan and tower infrastructure"
+  },
+  {
+   "conv": "c32b3aeb-26ef-43d1-b54e-4a0dab0601ed",
+   "lastEvent": 1784446279702,
+   "lastKind": "query",
+   "title": "Add duration tracking to ExecV3 responses",
+   "stale": true
+  },
+  {
+   "conv": "20c77815-a36b-4349-89b0-e85d663ad3f9",
+   "lastEvent": 1784440304973,
+   "lastKind": "query",
+   "title": "Launch mechanism test and investigation",
+   "stale": true
+  },
+  {
+   "conv": "04eb855f-aaba-4ef0-88b1-65b6aa965892",
+   "lastEvent": 1784436174474,
+   "lastKind": "query",
+   "title": "Enable command mode entry and exit at any time",
+   "stale": true
+  },
+  {
+   "conv": "13fee331-cd51-4920-9b5d-b1236f98c978",
+   "lastEvent": 1784435479271,
+   "lastKind": "query",
+   "title": "Show conversation ID on CLI exit for resume",
+   "stale": true
+  },
+  {
+   "conv": "cfa2c136-ced7-4f38-a6c7-fbaa3e1b6f35",
+   "lastEvent": 1784435080248,
+   "lastKind": "query",
+   "title": "Add merge strategy to AutoMerge tool",
+   "stale": true
+  },
+  {
+   "conv": "e54fd59d-9af5-42ac-ac1c-55f209f107a9",
+   "lastEvent": 1784434882672,
+   "lastKind": "query",
+   "title": "Test sleep command execution",
+   "stale": true
+  },
+  {
+   "conv": "980abf83-dca6-4d07-9923-4022409f5534",
+   "lastEvent": 1784434728073,
+   "lastKind": "query",
+   "title": "Test sleep command execution",
+   "stale": true
+  },
+  {
+   "conv": "d42fdf58-1690-463e-acc2-92757d4d43f2",
+   "lastEvent": 1784434590946,
+   "lastKind": "query",
+   "title": "Test sleep command execution",
+   "stale": true
+  },
+  {
+   "conv": "d41c0631-e182-4bc8-87a9-f36463b9aa51",
+   "lastEvent": 1784433968245,
+   "lastKind": "query",
+   "title": "Debug and fix CI failures in PR #41"
+  },
+  {
+   "conv": "c537b39f-1d2e-4e8b-a10d-bad6c35c76db",
+   "lastEvent": 1784433189564,
+   "lastKind": "query",
+   "title": "Fix CI workflow and GraphQL build issues",
+   "stale": true
+  },
+  {
+   "conv": "9eb4c456-36cf-49f3-83a7-134baeb1768e",
+   "lastEvent": 1784424225342,
+   "lastKind": "query",
+   "title": "Fix GitVersion install and CI pipeline",
+   "stale": true
+  },
+  {
+   "conv": "380403d5-7564-4209-a651-2b59a205e924",
+   "lastEvent": 1784416568588,
+   "lastKind": "query",
+   "title": "Test bridge memory and search tools",
+   "stale": true
+  },
+  {
+   "conv": "765a1fb5-1678-4fcd-9214-48b3f0b7a68f",
+   "lastEvent": 1784404766618,
+   "lastKind": "query",
+   "title": "Test file operations with tools in bridge-smoke",
+   "stale": true
+  },
+  {
+   "conv": "1278bea4-2900-4b00-ae17-28d43f1c34b7",
+   "lastEvent": 1784402158734,
+   "lastKind": "query",
+   "title": "Migrate claude-cli to conversation v2 and add agent concern",
+   "stale": true
+  },
+  {
+   "conv": "f050cd0e-232f-47f6-96d5-53aea5658afb",
+   "lastEvent": 1784235499752,
+   "lastKind": "query",
+   "title": "New coding session"
+  },
+  {
+   "conv": "b0ebdb61-5cd7-49d1-9958-1ed9da63a70a",
+   "lastEvent": 1784076113450,
+   "lastKind": "query",
+   "title": "Test Tower bridge bash tool and approval system",
+   "stale": true
+  },
+  {
+   "conv": "880bc999-60aa-4edf-bcc5-3f3a84f3405e",
+   "lastEvent": 1784069357414,
+   "lastKind": "query",
+   "title": "Load and initialize tmux skill",
+   "stale": true
+  },
+  {
+   "conv": "72c6d36c-eb71-4d4e-9af5-473fc4728ddd",
+   "lastEvent": 1784065255845,
+   "lastKind": "query",
+   "title": "Load tmux skill",
+   "stale": true
+  },
+  {
+   "conv": "45d6c987-be15-4a66-8aa3-57438ef50bac",
+   "lastEvent": 1784064175139,
+   "lastKind": "query",
+   "title": "Load tmux skill",
+   "stale": true
+  },
+  {
+   "conv": "e7fb8582-c236-4b43-bfe1-f0955bb099e6",
+   "lastEvent": 1784063977585,
+   "lastKind": "query",
+   "title": "Load tmux skill",
+   "stale": true
+  },
+  {
+   "conv": "fa01240d-c9e9-4706-9046-4b120622861b",
+   "lastEvent": 1784059618406,
+   "lastKind": "query",
+   "title": "Review available skills and capabilities",
+   "stale": true
+  },
+  {
+   "conv": "8c63e01a-9431-4d4e-b8df-1018bc12039a",
+   "lastEvent": 1784059583407,
+   "lastKind": "message",
+   "title": "Review user skills assessment"
+  },
+  {
+   "conv": "b79d5006-39c1-4f79-80fa-955c49fda2aa",
+   "lastEvent": 1784058746015,
+   "lastKind": "query",
+   "title": "Review available skills and capabilities",
+   "stale": true
+  },
+  {
+   "conv": "70bb09d4-6187-49a3-8e55-a2e07242666f",
+   "lastEvent": 1784058693534,
+   "lastKind": "query",
+   "title": "Load and review summarize-changes skill",
+   "stale": true
+  },
+  {
+   "conv": "454a4903-a8f2-4e15-8cfa-f6240e42baa5",
+   "lastEvent": 1784057898825,
+   "lastKind": "query",
+   "title": "Review available skills",
+   "stale": true
+  },
+  {
+   "conv": "4dc7f2f5-c769-4738-b47a-47baa0b78657",
+   "lastEvent": 1784057854972,
+   "lastKind": "query",
+   "title": "Check available skills and access",
+   "stale": true
+  }
+ ],
+ "layout": {
+  "spaces": [
+   {
+    "id": "s-tower",
+    "name": "tower",
+    "parent": null
+   },
+   {
+    "id": "s-dotfiles",
+    "name": "dotfiles",
+    "parent": null
+   },
+   {
+    "id": "s-skills",
+    "name": "skills",
+    "parent": null
+   },
+   {
+    "id": "s-flightrac",
+    "name": "flightrac",
+    "parent": null
+   },
+   {
+    "id": "s-swe",
+    "name": "swe",
+    "parent": null
+   },
+   {
+    "id": "s-hopeventures",
+    "name": "hopeventures",
+    "parent": null
+   }
+  ],
+  "placements": [
+   {
+    "conv": "7875ef21-b79d-424f-8996-1b4e34521d90",
+    "space": "s-tower",
+    "drawn": true
+   },
+   {
+    "conv": "74ab7b2a-a87a-4e5b-b64d-44c0fa23646c",
+    "space": "s-tower",
+    "drawn": true
+   },
+   {
+    "conv": "fa60fc32-aa3c-4a1a-8ec1-72c965aa3f89",
+    "space": "s-dotfiles",
+    "drawn": true
+   },
+   {
+    "conv": "37eef5b4-b124-4f15-8737-ef79dfeaf017",
+    "space": "s-dotfiles",
+    "drawn": true
+   },
+   {
+    "conv": "6f32c76c-6079-4fe8-a54b-994a395ff849",
+    "space": "s-skills",
+    "drawn": true
+   },
+   {
+    "conv": "e5f9f0a3-7fd6-43cb-ac9e-7d73247d612d",
+    "space": "s-skills",
+    "drawn": true
+   },
+   {
+    "conv": "0b1148e0-66d9-4e6c-a2d4-5d53ed1414a2",
+    "space": "s-skills",
+    "drawn": true
+   },
+   {
+    "conv": "2dfda638-6759-4ec8-81de-2a313e0d7f33",
+    "space": "s-flightrac",
+    "drawn": true
+   },
+   {
+    "conv": "6edc210c-cf7f-4c56-b5b2-463cb8d12abd",
+    "space": "s-flightrac",
+    "drawn": true
+   },
+   {
+    "conv": "db7184f5-b1df-488e-9337-899258aafbf4",
+    "space": "s-swe",
+    "drawn": true
+   },
+   {
+    "conv": "8fe63efb-d647-4816-a7f5-0f1527835aaf",
+    "space": "s-swe",
+    "drawn": true
+   },
+   {
+    "conv": "dbcf93f6-ee75-463f-82c2-f815505419fc",
+    "space": "s-swe",
+    "drawn": true
+   },
+   {
+    "conv": "1d78c5ae-0150-4c4b-a2e0-2df6b4f0d523",
+    "space": "s-hopeventures",
+    "drawn": true
+   },
+   {
+    "conv": "2b0974f1-cf56-4962-8b28-6ff8ca5fc764",
+    "space": "s-hopeventures",
+    "drawn": true
+   },
+   {
+    "conv": "8d0d6b88-3d85-4dac-99a3-2ded366a13e7",
+    "space": "s-hopeventures",
+    "drawn": true
+   }
+  ]
+ },
+ "notes": {
+  "conversations": 638,
+  "titled": 632,
+  "tagged": 236,
+  "placed": 15,
+  "droppedDuplicatePlacements": [],
+  "placedButNotInTheRegister": []
+ }
+}
