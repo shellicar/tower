@@ -41,13 +41,19 @@
   type SpaceView = { filters: Record<string, string[]>; groupKey: string; hideUntagged: boolean };
   const blank = (): SpaceView => ({ filters: {}, groupKey: '', hideUntagged: false });
 
+  // Never written to: a space that has never been narrowed reads through this
+  // rather than being created by the act of looking at it.
+  const unnarrowed: SpaceView = blank();
+
   let views = $state<Record<string, SpaceView>>({});
   // Standing in no space is still somewhere to hold a view for.
   const key = $derived(live.model.shownSpace ?? '');
-  const view = $derived.by(() => {
+  const view = $derived(views[key] ?? unnarrowed);
+
+  function edit(change: (view: SpaceView) => void): void {
     if (views[key] === undefined) views[key] = blank();
-    return views[key] as SpaceView;
-  });
+    change(views[key] as SpaceView);
+  }
 
   let expandedKey = $state('');
   let unreadOnly = $state(false);
@@ -115,8 +121,12 @@
   });
 
   function toggleFilter(value: string) {
-    const vs = view.filters[expandedKey] ?? [];
-    view.filters[expandedKey] = vs.includes(value) ? vs.filter((v) => v !== value) : [...vs, value];
+    edit((v) => {
+      const held = v.filters[expandedKey] ?? [];
+      v.filters[expandedKey] = held.includes(value)
+        ? held.filter((x) => x !== value)
+        : [...held, value];
+    });
   }
 
   const selectedCount = (k: string) => view.filters[k]?.length ?? 0;
@@ -167,7 +177,13 @@
         : live.model.nameOf(live.model.shownSpace)}">group</span>
     <select
       class="border border-neutral-700 bg-neutral-900 px-1 text-neutral-300 disabled:cursor-default disabled:opacity-40"
-      bind:value={view.groupKey}
+      value={view.groupKey}
+      onchange={(e) => {
+        const chosen = e.currentTarget.value;
+        edit((v) => {
+          v.groupKey = chosen;
+        });
+      }}
       disabled={searching}
     >
       <option value="">none</option>
@@ -179,7 +195,10 @@
           ? 'border-sky-600 text-sky-300'
           : 'border-neutral-700 text-neutral-500'}"
         disabled={searching}
-        onclick={() => (view.hideUntagged = !view.hideUntagged)}>hide untagged</button
+        onclick={() =>
+          edit((v) => {
+            v.hideUntagged = !v.hideUntagged;
+          })}>hide untagged</button
       >
     {/if}
     <span class="ml-2 text-neutral-500">show</span>
