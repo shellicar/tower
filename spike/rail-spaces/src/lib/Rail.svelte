@@ -314,7 +314,7 @@
   {#each sections as section (section.label ?? '')}
     {#if section.label !== null}
       <li class="flex justify-between gap-2 border-b border-neutral-800 bg-neutral-900 px-3 py-1 text-xs">
-        <span class="truncate" style="color: {tagKeys[groupKey] ?? '#999'}">{section.label}</span>
+        <span class="truncate" style="color: {tagKeys[view.groupKey] ?? '#999'}">{section.label}</span>
         <span class="shrink-0 text-neutral-500"
           >{section.convs.length} · <span class={heat(now, section.max)}>{age(now, section.max)}</span></span
         >
