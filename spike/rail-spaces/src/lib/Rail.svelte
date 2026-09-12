@@ -33,10 +33,23 @@
   // The view machine: filter → group → sort, all from tags. Ported from
   // mvp/frontend-svelte RowList.svelte, which is where it lives in tower too:
   // the model takes the list this leaves behind.
+  //
+  // What a control is about decides what it belongs to. Narrowing and grouping
+  // are about a subject, and a space is a subject, so they are held per space.
+  // Attention and row shape are about how you are looking rather than what at,
+  // so they travel with you.
+  type SpaceView = { filters: Record<string, string[]>; groupKey: string; hideUntagged: boolean };
+  const blank = (): SpaceView => ({ filters: {}, groupKey: '', hideUntagged: false });
+
+  let views = $state<Record<string, SpaceView>>({});
+  // Standing in no space is still somewhere to hold a view for.
+  const key = $derived(live.model.shownSpace ?? '');
+  const view = $derived.by(() => {
+    if (views[key] === undefined) views[key] = blank();
+    return views[key] as SpaceView;
+  });
+
   let expandedKey = $state('');
-  let filters = $state<Record<string, string[]>>({});
-  let groupKey = $state('');
-  let hideUntagged = $state(false);
   let unreadOnly = $state(false);
   let liveOnly = $state(false);
   let alwaysShow = $state<string[]>(['repo', 'role']);
@@ -45,7 +58,7 @@
 
   // OR within a key, AND across keys.
   const matches = (r: Row) =>
-    Object.entries(filters).every(([k, vs]) => vs.length === 0 || vs.includes(tagOf(r, k)));
+    Object.entries(view.filters).every(([k, vs]) => vs.length === 0 || vs.includes(tagOf(r, k)));
   const stateMatches = (r: Row) =>
     (!unreadOnly || r.stale === true) && (!liveOnly || verdicts.get(r.conv) === 'alive');
 
@@ -60,12 +73,12 @@
   const sections = $derived.by(() => {
     // Grouping suspends with the chips: a search result must not be sectioned
     // away from whoever named it.
-    if (searching || !groupKey) return [{ label: null as string | null, convs: listed, max: 0 }];
+    if (searching || !view.groupKey) return [{ label: null as string | null, convs: listed, max: 0 }];
     const m = new Map<string, string[]>();
     for (const conv of listed) {
       const row = byId.get(conv);
-      const v = row?.tags?.[groupKey];
-      if (v === undefined && hideUntagged) continue;
+      const v = row?.tags?.[view.groupKey];
+      if (v === undefined && view.hideUntagged) continue;
       const label = v ?? '(untagged)';
       if (!m.has(label)) m.set(label, []);
       (m.get(label) as string[]).push(conv);
@@ -89,7 +102,7 @@
     const others = rows.filter(
       (r) =>
         stateMatches(r) &&
-        Object.entries(filters).every(
+        Object.entries(view.filters).every(
           ([k, vs]) => k === expandedKey || vs.length === 0 || vs.includes(tagOf(r, k)),
         ),
     );
@@ -102,11 +115,12 @@
   });
 
   function toggleFilter(value: string) {
-    const vs = filters[expandedKey] ?? [];
-    filters[expandedKey] = vs.includes(value) ? vs.filter((v) => v !== value) : [...vs, value];
+    const vs = view.filters[expandedKey] ?? [];
+    view.filters[expandedKey] = vs.includes(value) ? vs.filter((v) => v !== value) : [...vs, value];
   }
 
-  const selectedCount = (k: string) => filters[k]?.length ?? 0;
+  const selectedCount = (k: string) => view.filters[k]?.length ?? 0;
+  const narrowed = $derived(Object.values(view.filters).some((vs) => vs.length > 0));
 
   let refused = $state('');
 
@@ -148,22 +162,24 @@
     <span class="text-neutral-500">{listed.length}/{register.length}</span>
   </div>
   <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-    <span class="text-neutral-500">group</span>
+    <span class="text-neutral-500" title="grouping and narrowing belong to {live.model.shownSpace === null
+        ? 'standing nowhere'
+        : live.model.nameOf(live.model.shownSpace)}">group</span>
     <select
       class="border border-neutral-700 bg-neutral-900 px-1 text-neutral-300 disabled:cursor-default disabled:opacity-40"
-      bind:value={groupKey}
+      bind:value={view.groupKey}
       disabled={searching}
     >
       <option value="">none</option>
       {#each keys as k (k)}<option value={k}>{k}</option>{/each}
     </select>
-    {#if groupKey}
+    {#if view.groupKey}
       <button
-        class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {hideUntagged
+        class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {view.hideUntagged
           ? 'border-sky-600 text-sky-300'
           : 'border-neutral-700 text-neutral-500'}"
         disabled={searching}
-        onclick={() => (hideUntagged = !hideUntagged)}>hide untagged</button
+        onclick={() => (view.hideUntagged = !view.hideUntagged)}>hide untagged</button
       >
     {/if}
     <span class="ml-2 text-neutral-500">show</span>
@@ -221,17 +237,27 @@
     <div class="mt-1.5 flex flex-wrap gap-1">
       {#each facetValues as [value, count] (value)}
         <button
-          class="cursor-pointer rounded-full border px-2 disabled:cursor-default disabled:opacity-40 {filters[
+          class="cursor-pointer rounded-full border px-2 disabled:cursor-default disabled:opacity-40 {view.filters[
             expandedKey
           ]?.includes(value)
             ? 'border-current'
             : 'border-neutral-700 text-neutral-400'}"
           disabled={searching}
-          style={filters[expandedKey]?.includes(value) ? `color: ${tagKeys[expandedKey]}` : ''}
+          style={view.filters[expandedKey]?.includes(value) ? `color: ${tagKeys[expandedKey]}` : ''}
           onclick={() => toggleFilter(value)}>{value} ({count})</button
         >
       {/each}
     </div>
+  {/if}
+  {#if narrowed || view.groupKey !== ''}
+    <p class="mt-1.5 text-neutral-500">
+      narrowed for {live.model.shownSpace === null
+        ? 'standing nowhere'
+        : (live.model.nameOf(live.model.shownSpace) ?? '')}
+      <button class="ml-1 cursor-pointer rounded border border-neutral-700 px-1.5 hover:text-neutral-200" onclick={() => (views[key] = blank())}
+        >clear</button
+      >
+    </p>
   {/if}
   <p class="mt-1.5 text-neutral-600">
     click goes where it lives and shows it · right click puts it in {live.model.shownSpace === null
