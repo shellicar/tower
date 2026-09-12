@@ -2,6 +2,7 @@ packages:
   - mvp/frontend-svelte
   - mvp/scripts
   - scripts
+  - spike/rail-spaces
 
 ignoreScripts: false
 minimumReleaseAge: 1440
