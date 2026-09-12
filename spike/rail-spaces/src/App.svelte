@@ -5,6 +5,7 @@
   import SpaceStrip from './lib/SpaceStrip.svelte';
   import { livenessVerdict } from './lib/core/time';
   import { reactive } from './lib/reactive.svelte';
+  import { resizeWidth } from './lib/resize';
   import { Layout } from './model/layout';
 
   const rows = new Map(fixture.conversations.map((r) => [r.conv, r]));
@@ -25,25 +26,11 @@
 
   // The rail's width is this browser's own business, so it is kept here rather
   // than in the layout, and survives a reload because this gets reloaded a lot.
-  const MIN = 240;
-  const MAX = 720;
-  let railWidth = $state(Number(localStorage.getItem('railWidth') ?? 320));
-
-  function startResize(event: PointerEvent) {
-    event.preventDefault();
-    const handle = event.currentTarget as HTMLElement;
-    handle.setPointerCapture(event.pointerId);
-    const move = (moved: PointerEvent) => {
-      railWidth = Math.min(MAX, Math.max(MIN, moved.clientX));
-    };
-    const done = () => {
-      handle.removeEventListener('pointermove', move);
-      handle.removeEventListener('pointerup', done);
-      localStorage.setItem('railWidth', String(railWidth));
-    };
-    handle.addEventListener('pointermove', move);
-    handle.addEventListener('pointerup', done);
-  }
+  const RAIL_MIN = 240;
+  const RAIL_MAX = 720;
+  const RAIL_DEFAULT = 320;
+  const held = localStorage.getItem('railWidth');
+  let railWidth = $state(held === null ? RAIL_DEFAULT : Number(held));
 
   // Which panel was asked for, when several are drawn.
   let arrived = $state('');
@@ -62,7 +49,12 @@
       title="drag to resize the rail"
       role="separator"
       aria-orientation="vertical"
-      onpointerdown={startResize}
+      {@attach resizeWidth({
+        min: RAIL_MIN,
+        max: RAIL_MAX,
+        onWidth: (width) => (railWidth = width),
+        onSettled: (width) => localStorage.setItem('railWidth', String(width)),
+      })}
     ></div>
     <header class="flex items-baseline justify-between border-b border-neutral-700 px-3 py-2">
       <h1 class="text-sm font-bold">Tower <span class="font-normal text-neutral-600">rail spaces spike</span></h1>
