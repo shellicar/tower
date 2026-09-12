@@ -116,13 +116,11 @@ both already mean something else in tower.
     doesn't invent one for me.
 18. As Stephen, I want deleting a space to release everything in it, so that the
     conversations survive and only the arrangement goes.
-19. As Stephen, I want a script to be able to file conversations, so that filing can be
-    automated without tower deciding anything about where work belongs.
-20. As Stephen, I want minimised conversations to stop streaming, so that a space holding
+19. As Stephen, I want minimised conversations to stop streaming, so that a space holding
     thirty doesn't cost thirty conversations' worth of traffic to stand in.
-21. As Stephen, I want every client I have open to show the same arrangement, so that two
+20. As Stephen, I want every client I have open to show the same arrangement, so that two
     browsers agree about where things live.
-22. As Stephen, I want each client to choose which space it is showing, so that two
+21. As Stephen, I want each client to choose which space it is showing, so that two
     windows can show two different clients' work at the same time.
 
 ## Implementation Decisions
@@ -203,10 +201,6 @@ all. Nothing creates a default space.
 components currently answer for themselves: what is displayed here, and where does this
 conversation live. The components stop reading the membership list directly. Without this,
 splitting membership from visibility leaves every one of those readers ambiguous.
-
-**Filing is reachable from outside the browser**, at first by whatever route the existing
-tagging script uses. Deciding where a conversation belongs is a script's opinion and never
-the daemon's.
 
 ## Presentation
 

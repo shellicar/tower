@@ -3,6 +3,11 @@
 **What to build:** a space can hold other spaces, so that organising by client and then by
 project, or not, is a choice you make in the data rather than a change to the model.
 
+**Seams:** the model on its own, for nesting to any depth. The daemon over the socket,
+for a space's parent being stored.
+
+**Frontend:** the Rust frontend only. The Svelte port is ticket 09.
+
 **Blocked by:** 03.
 
 **Status:** ready-for-agent

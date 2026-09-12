@@ -4,6 +4,11 @@
 recreate it, and this feature turns that from tedious into destructive, because closing a
 space now releases everything in it.
 
+**Seams:** the model on its own, for sibling order. The daemon over the socket, for the
+order being part of the stored arrangement.
+
+**Frontend:** the Rust frontend only. The Svelte port is ticket 09.
+
 **Blocked by:** 07.
 
 **Status:** ready-for-agent

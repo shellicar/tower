@@ -3,6 +3,11 @@
 **What to build:** the rail can narrow to one space, or to everything living nowhere, so
 that unfiled work becomes a queue you can work down rather than a state you notice.
 
+**Seams:** the model on its own. The rail's scope and where a conversation resolves to are
+both inside it.
+
+**Frontend:** the Rust frontend only. The Svelte port is ticket 09.
+
 **Blocked by:** 03.
 
 **Status:** ready-for-agent
@@ -13,5 +18,6 @@ that unfiled work becomes a queue you can work down rather than a state you noti
       minimised, and can be restored from there.
 - [ ] A search by conversation id overrides the scope, the same way it already overrides
       every other filter.
-- [ ] The scope is remembered per space, and stays with the client rather than being part
-      of the shared arrangement.
+- [ ] The scope travels with the reader rather than being held per space, so walking into
+      a space never silently changes what the rail is showing. It stays with the client
+      rather than being part of the shared arrangement.
