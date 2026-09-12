@@ -27,12 +27,12 @@
     <span class="flex shrink-0 items-center gap-2">
       <button
         class="cursor-pointer text-base text-neutral-400 hover:text-neutral-200"
-        title="put it away: off the screen, still in this space"
+        title="minimise: stop drawing it, without taking it out of this space"
         onclick={onMinimise}>–</button
       >
       <button
         class="cursor-pointer text-base text-neutral-400 hover:text-red-400"
-        title="take it out of this space: it goes back to living nowhere"
+        title="unplace: take it out of this space"
         onclick={onUnplace}>×</button
       >
     </span>
@@ -59,7 +59,7 @@
     </p>
     <textarea
       class="max-h-48 min-h-16 w-full resize-none overflow-y-auto border border-neutral-700 bg-neutral-900 px-2 py-1.5 [field-sizing:content]"
-      placeholder="say something (the spike has no transport, so it goes nowhere)"
+      placeholder="say something (the spike has no transport, so nothing is sent)"
     ></textarea>
     <div class="mt-1">
       <button class="cursor-pointer rounded border border-neutral-700 px-1.5 text-neutral-400 hover:text-neutral-200"

@@ -4,7 +4,7 @@
   import Rail from './lib/Rail.svelte';
   import SpaceStrip from './lib/SpaceStrip.svelte';
   import { livenessVerdict } from './lib/core/time';
-  import { live } from './lib/reactive.svelte';
+  import { reactive } from './lib/reactive.svelte';
   import { Layout } from './model/layout';
 
   const rows = new Map(fixture.conversations.map((r) => [r.conv, r]));
@@ -18,12 +18,12 @@
   const stale = new Set(fixture.conversations.filter((r) => r.stale).map((r) => r.conv));
   const staleCount = (convs: string[]) => convs.filter((c) => stale.has(c)).length;
 
-  const model = live(new Layout(fixture.layout));
+  const model = reactive(new Layout(fixture.layout));
 
-  const drawn = $derived(model.model.drawn);
-  const shown = $derived(model.model.shownSpace);
+  const drawn = $derived(model.layout.drawn);
+  const shown = $derived(model.layout.shownSpace);
 
-  // Which panel you came for, when you arrive among several.
+  // Which panel was asked for, when several are drawn.
   let arrived = $state('');
   let clearArrival: ReturnType<typeof setTimeout> | undefined;
   function arriveAt(conv: string) {
@@ -41,7 +41,7 @@
     </header>
     <div class="min-h-0 flex-1 overflow-y-auto">
       <Rail
-        live={model}
+        {model}
         rows={fixture.conversations}
         tagKeys={fixture.tagKeys}
         {now}
@@ -51,7 +51,7 @@
     </div>
   </aside>
   <main class="flex min-h-0 min-w-0 flex-col">
-    <SpaceStrip live={model} {staleCount} />
+    <SpaceStrip {model} {staleCount} />
     <div class="flex min-h-0 flex-1 overflow-x-auto">
       {#each drawn as conv (conv)}
         {@const row = rowOf(conv)}
@@ -66,11 +66,11 @@
       {:else}
         <p class="m-auto max-w-md text-center text-neutral-500">
           {#if shown === null}
-            No space in front. Pick one above, or click a conversation to go where it lives.
-          {:else if model.model.placedIn(shown).length === 0}
-            Nothing lives here yet. Right click a conversation in the rail to put it in.
+            No space shown. Pick one above, or click a conversation to show the space it is placed in.
+          {:else if model.layout.placedIn(shown).length === 0}
+            Nothing is placed here yet. Right click a conversation in the rail to place it here.
           {:else}
-            Everything that lives here is away. Scope the rail to this space to bring one back.
+            Every conversation placed here is minimised. Scope the rail to this space to draw one again.
           {/if}
         </p>
       {/each}

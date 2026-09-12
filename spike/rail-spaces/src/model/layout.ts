@@ -124,10 +124,10 @@ export class Layout {
     this.#shown = space;
   }
 
-  /** Go to where a conversation lives and show it. One operation, so running
-   *  it again lands in the same state rather than putting the thing away. A
-   *  conversation living nowhere has nowhere to go, and this reports that
-   *  rather than inventing somewhere. */
+  /** Show the space a conversation is placed in, and draw the conversation.
+   *  One operation, so running it again lands in the same state rather than
+   *  minimising it. An unplaced conversation has no space to show, and this
+   *  reports that rather than inventing one. */
   goTo(conv: ConvId): boolean {
     const held = this.#placements.get(conv);
     if (held === undefined) return false;
@@ -173,7 +173,7 @@ export class Layout {
     return held === undefined ? undefined : { ...held };
   }
 
-  /** Where a conversation lives, or nowhere. */
+  /** The space a conversation is placed in, or null when it is unplaced. */
   spaceOf(conv: ConvId): SpaceId | null {
     return this.#placements.get(conv)?.space ?? null;
   }

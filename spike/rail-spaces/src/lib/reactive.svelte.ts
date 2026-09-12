@@ -1,21 +1,21 @@
 import type { Layout } from '../model/layout';
 
-export type Live = {
-  readonly model: Layout;
-  act(change: (model: Layout) => void): void;
+export type Reactive = {
+  readonly layout: Layout;
+  act(change: (layout: Layout) => void): void;
 };
 
 /** The whole of the framework's involvement with the model: the class reports
  *  no changes, so reading it goes through a counter the operations bump. */
-export function live(model: Layout): Live {
+export function reactive(layout: Layout): Reactive {
   let tick = $state(0);
   return {
-    get model() {
+    get layout() {
       void tick;
-      return model;
+      return layout;
     },
     act(change) {
-      change(model);
+      change(layout);
       tick += 1;
     },
   };

@@ -2,17 +2,17 @@
   import type { Row } from '../fixture';
   import type { RailScope } from '../model/layout';
   import { age, heat } from './core/time';
-  import type { Live } from './reactive.svelte';
+  import type { Reactive } from './reactive.svelte';
 
   const {
-    live,
+    model,
     rows,
     tagKeys,
     now,
     verdicts,
     onArrive,
   }: {
-    live: Live;
+    model: Reactive;
     rows: Row[];
     tagKeys: Record<string, string>;
     now: number;
@@ -22,8 +22,8 @@
 
   const scopes: { value: RailScope; label: string; title: string }[] = [
     { value: 'all', label: 'all', title: 'every conversation' },
-    { value: 'space', label: 'this space', title: 'only what lives in the space in front' },
-    { value: 'unplaced', label: 'unplaced', title: 'only conversations that are in no space' },
+    { value: 'space', label: 'this space', title: 'only what is placed in the space shown' },
+    { value: 'unplaced', label: 'unplaced', title: 'only conversations with no placement' },
   ];
 
   const keys = $derived(Object.keys(tagKeys).sort());
@@ -34,21 +34,21 @@
   // mvp/frontend-svelte RowList.svelte, which is where it lives in tower too:
   // the model takes the list this leaves behind.
   //
-  // What a control is about decides what it belongs to. Narrowing and grouping
+  // What a control is about decides what it belongs to. Filtering and grouping
   // are about a subject, and a space is a subject, so they are held per space.
   // Attention and row shape are about how you are looking rather than what at,
   // so they travel with you.
   type SpaceView = { filters: Record<string, string[]>; groupKey: string; hideUntagged: boolean };
   const blank = (): SpaceView => ({ filters: {}, groupKey: '', hideUntagged: false });
 
-  // Never written to: a space that has never been narrowed reads through this
+  // Never written to: a space that has never been filtered reads through this
   // rather than being created by the act of looking at it.
-  const unnarrowed: SpaceView = blank();
+  const unfiltered: SpaceView = blank();
 
   let views = $state<Record<string, SpaceView>>({});
-  // Standing in no space is still somewhere to hold a view for.
-  const key = $derived(live.model.shownSpace ?? '');
-  const view = $derived(views[key] ?? unnarrowed);
+  // Showing no space is still somewhere to hold a view for.
+  const key = $derived(model.layout.shownSpace ?? '');
+  const view = $derived(views[key] ?? unfiltered);
 
   function edit(change: (view: SpaceView) => void): void {
     if (views[key] === undefined) views[key] = blank();
@@ -68,9 +68,9 @@
   const stateMatches = (r: Row) =>
     (!unreadOnly || r.stale === true) && (!liveOnly || verdicts.get(r.conv) === 'alive');
 
-  const searching = $derived(live.model.searchText !== '');
+  const searching = $derived(model.layout.searchText !== '');
   const listed = $derived(
-    live.model.railRows(
+    model.layout.railRows(
       register,
       rows.filter((r) => matches(r) && stateMatches(r)).map((r) => r.conv),
     ),
@@ -130,22 +130,22 @@
   }
 
   const selectedCount = (k: string) => view.filters[k]?.length ?? 0;
-  const narrowed = $derived(Object.values(view.filters).some((vs) => vs.length > 0));
+  const filtered = $derived(Object.values(view.filters).some((vs) => vs.length > 0));
 
   let refused = $state('');
 
   function goTo(conv: string) {
     refused = '';
-    live.act((m) => {
+    model.act((m) => {
       if (m.goTo(conv)) onArrive(conv);
       else refused = conv;
     });
   }
 
   function file(conv: string) {
-    const shown = live.model.shownSpace;
+    const shown = model.layout.shownSpace;
     if (shown === null) return;
-    live.act((m) => m.place(conv, shown));
+    model.act((m) => m.place(conv, shown));
   }
 
   function fileByGesture(conv: string, event: MouseEvent) {
@@ -160,21 +160,24 @@
     <span class="text-neutral-500">scope</span>
     {#each scopes as s (s.value)}
       <button
-        class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {live.model
+        class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {model.layout
           .railScope === s.value
           ? 'border-sky-600 text-sky-300'
           : 'border-neutral-700 text-neutral-400'}"
         title={s.title}
         disabled={searching}
-        onclick={() => live.act((m) => m.setScope(s.value))}>{s.label}</button
+        onclick={() => model.act((m) => m.setScope(s.value))}>{s.label}</button
       >
     {/each}
     <span class="text-neutral-500">{listed.length}/{register.length}</span>
   </div>
   <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-    <span class="text-neutral-500" title="grouping and narrowing belong to {live.model.shownSpace === null
-        ? 'standing nowhere'
-        : live.model.nameOf(live.model.shownSpace)}">group</span>
+    <span
+      class="text-neutral-500"
+      title="grouping and filtering belong to {model.layout.shownSpace === null
+        ? 'no space'
+        : model.layout.nameOf(model.layout.shownSpace)}">group</span
+    >
     <select
       class="border border-neutral-700 bg-neutral-900 px-1 text-neutral-300 disabled:cursor-default disabled:opacity-40"
       value={view.groupKey}
@@ -220,8 +223,8 @@
       class="w-36 min-w-0 border border-neutral-700 bg-neutral-900 px-1 text-neutral-300 placeholder:text-neutral-600"
       placeholder="conversation id"
       title="find a conversation by its id; suspends everything else"
-      value={live.model.searchText}
-      oninput={(e) => live.act((m) => m.setSearch(e.currentTarget.value))}
+      value={model.layout.searchText}
+      oninput={(e) => model.act((m) => m.setSearch(e.currentTarget.value))}
     />
     <button
       class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {liveOnly
@@ -268,23 +271,25 @@
       {/each}
     </div>
   {/if}
-  {#if narrowed || view.groupKey !== ''}
+  {#if filtered || view.groupKey !== ''}
     <p class="mt-1.5 text-neutral-500">
-      narrowed for {live.model.shownSpace === null
-        ? 'standing nowhere'
-        : (live.model.nameOf(live.model.shownSpace) ?? '')}
-      <button class="ml-1 cursor-pointer rounded border border-neutral-700 px-1.5 hover:text-neutral-200" onclick={() => (views[key] = blank())}
-        >clear</button
+      these belong to {model.layout.shownSpace === null
+        ? 'no space'
+        : (model.layout.nameOf(model.layout.shownSpace) ?? '')}
+      <button
+        class="ml-1 cursor-pointer rounded border border-neutral-700 px-1.5 hover:text-neutral-200"
+        onclick={() => (views[key] = blank())}>clear</button
       >
     </p>
   {/if}
   <p class="mt-1.5 text-neutral-600">
-    click goes where it lives and shows it · right click puts it in {live.model.shownSpace === null
-      ? 'nothing: no space in front'
-      : (live.model.nameOf(live.model.shownSpace) ?? '')}
+    click shows the space a conversation is placed in · right click places it in {model.layout.shownSpace ===
+    null
+      ? 'nothing: no space shown'
+      : (model.layout.nameOf(model.layout.shownSpace) ?? '')}
   </p>
   {#if refused !== ''}
-    <p class="mt-1 text-amber-500">{refused} lives nowhere, so there is nowhere to go</p>
+    <p class="mt-1 text-amber-500">{refused} is unplaced, so there is no space to show</p>
   {/if}
 </div>
 
@@ -300,8 +305,8 @@
     {/if}
     {#each section.convs as conv (conv)}
       {@const row = byId.get(conv)}
-      {@const where = live.model.spaceOf(conv)}
-      {@const placement = live.model.placementOf(conv)}
+      {@const where = model.layout.spaceOf(conv)}
+      {@const placement = model.layout.placementOf(conv)}
       <li>
         <button
           title={conv}
@@ -327,13 +332,11 @@
           <span class="flex shrink-0 items-baseline gap-2 text-neutral-400">
             {#if where !== null}
               <span
-                class="rounded px-1.5 {where === live.model.shownSpace
+                class="rounded px-1.5 {where === model.layout.shownSpace
                   ? 'bg-sky-900 text-sky-100'
                   : 'border border-neutral-700 text-neutral-400'} {placement?.drawn === false ? 'opacity-40' : ''}"
-                title="{where === live.model.shownSpace
-                  ? 'in the space you are standing in'
-                  : `lives in ${live.model.nameOf(where)}`}{placement?.drawn === false ? ', off the screen' : ''}"
-                >{live.model.nameOf(where)}</span
+                title="placed in {model.layout.nameOf(where)}{placement?.drawn === false ? ', minimised' : ''}"
+                >{model.layout.nameOf(where)}</span
               >
             {/if}
             <span>{row?.lastKind}</span>

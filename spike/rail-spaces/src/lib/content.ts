@@ -75,7 +75,7 @@ const tools: { name: string; input: unknown; result: string }[] = [
   {
     name: 'Match',
     input: { paths: ['src/lib'], pattern: 'placement|spaceOf' },
-    result: 'src/lib/Rail.svelte:74:  {@const where = live.model.spaceOf(conv)}\nsrc/lib/Panels.svelte:21:  const away = ...',
+    result: 'src/lib/Rail.svelte:74:  {@const where = model.layout.spaceOf(conv)}\nsrc/lib/Panel.svelte:21:  const drawn = ...',
   },
   {
     name: 'EditFile',

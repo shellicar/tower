@@ -12,7 +12,7 @@ function twoSpaces(): Layout {
 }
 
 describe('where a conversation lives', () => {
-  test('a placed conversation lives in the space it was put in', () => {
+  test('a placed conversation is placed in the space it was put in', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
 
@@ -22,7 +22,7 @@ describe('where a conversation lives', () => {
     expect(actual).toBe(expected);
   });
 
-  test('a conversation nobody has filed lives nowhere', () => {
+  test('an unplaced conversation is in no space', () => {
     const layout = twoSpaces();
 
     const expected = null;
@@ -42,7 +42,7 @@ describe('where a conversation lives', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('a conversation placed twice lives in the space it went to last', () => {
+  test('a conversation placed twice is placed in the space it went to last', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
     layout.place('c-alpha', swe);
@@ -53,7 +53,7 @@ describe('where a conversation lives', () => {
     expect(actual).toBe(expected);
   });
 
-  test('taking a conversation out leaves it living nowhere', () => {
+  test('taking a conversation out leaves it unplaced', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
     layout.unplace('c-alpha');
@@ -88,7 +88,7 @@ describe('the filing gesture', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('filing a conversation that is away leaves it away', () => {
+  test('filing a conversation that is minimised leaves it minimised', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
     layout.minimise('c-alpha');
@@ -150,7 +150,7 @@ describe('placement order', () => {
   });
 });
 
-describe('clearing a conversation off the screen', () => {
+describe('minimising a conversation', () => {
   test('a minimised conversation keeps its space', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
@@ -173,7 +173,7 @@ describe('clearing a conversation off the screen', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('a space lists the conversations of its own that are off the screen', () => {
+  test('a space lists its own minimised conversations', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
     layout.minimise('c-alpha');
@@ -211,7 +211,7 @@ describe('clearing a conversation off the screen', () => {
 });
 
 describe('what is on the screen', () => {
-  test('the space in front draws the conversations placed in it', () => {
+  test('the space shown draws the conversations placed in it', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
     layout.place('c-beta', swe);
@@ -223,7 +223,7 @@ describe('what is on the screen', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('standing in no space draws nothing', () => {
+  test('showing no space draws nothing', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
 
@@ -233,7 +233,7 @@ describe('what is on the screen', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('a space whose conversations are all minimised is walked into empty', () => {
+  test('a space whose conversations are all minimised draws nothing', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
     layout.minimise('c-alpha');
@@ -245,7 +245,7 @@ describe('what is on the screen', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('what streams is what is on the screen', () => {
+  test('what streams is what is drawn', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
     layout.place('c-beta', tower);
@@ -272,7 +272,7 @@ describe('what is on the screen', () => {
 });
 
 describe('going to a conversation', () => {
-  test('going to a conversation lands in the space it lives in', () => {
+  test('going to a conversation shows the space it is placed in', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', swe);
     layout.showSpace(tower);
@@ -284,7 +284,7 @@ describe('going to a conversation', () => {
     expect(actual).toBe(expected);
   });
 
-  test('going to a conversation leaves it in the space it lives in', () => {
+  test('going to a conversation leaves it in the space it is placed in', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', swe);
     layout.place('c-beta', swe);
@@ -296,7 +296,7 @@ describe('going to a conversation', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('going to a minimised conversation brings it back onto the screen', () => {
+  test('going to a minimised conversation draws it again', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', swe);
     layout.minimise('c-alpha');
@@ -308,7 +308,7 @@ describe('going to a conversation', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('going to a conversation that is already on the screen leaves the order alone', () => {
+  test('going to a conversation that is already drawn leaves the order alone', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', swe);
     layout.place('c-beta', swe);
@@ -320,7 +320,7 @@ describe('going to a conversation', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('a conversation living nowhere offers nowhere to go', () => {
+  test('an unplaced conversation offers no space to show', () => {
     const layout = twoSpaces();
 
     const expected = false;
@@ -329,7 +329,7 @@ describe('going to a conversation', () => {
     expect(actual).toBe(expected);
   });
 
-  test('failing to go somewhere leaves you where you were', () => {
+  test('failing to go somewhere leaves the space shown as it was', () => {
     const layout = twoSpaces();
     layout.showSpace(tower);
     layout.goTo('c-alpha');
@@ -354,7 +354,7 @@ describe('the rail', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('narrowed to this space, the rail lists only what lives here', () => {
+  test('scoped to this space, the rail lists only what is placed here', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
     layout.place('c-beta', swe);
@@ -367,7 +367,7 @@ describe('the rail', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('narrowed to this space while standing nowhere, the rail lists nothing', () => {
+  test('scoped to this space while no space is shown, the rail lists nothing', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
     layout.setScope('space');
@@ -378,7 +378,7 @@ describe('the rail', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('narrowed to the unfiled, the rail lists only conversations living nowhere', () => {
+  test('scoped to unplaced, the rail lists only conversations with no placement', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
 
@@ -390,7 +390,7 @@ describe('the rail', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('a conversation filed away leaves the unfiled queue', () => {
+  test('a conversation placed in a space leaves the unplaced list', () => {
     const layout = twoSpaces();
     layout.setScope('unplaced');
     layout.place('c-beta', tower);
@@ -401,7 +401,7 @@ describe('the rail', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('a search by id finds a conversation the narrowing had hidden', () => {
+  test('a search by id finds a conversation the scope had hidden', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
     layout.showSpace(tower);
@@ -424,7 +424,7 @@ describe('the rail', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('the scope narrows what the rail was already showing', () => {
+  test('the scope filters what the rail was already showing', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
     layout.place('c-beta', tower);
@@ -549,7 +549,7 @@ describe('deleting a space', () => {
     expect(actual).toBe(expected);
   });
 
-  test('deleting the space you are standing in leaves you standing nowhere', () => {
+  test('deleting the space being shown leaves no space shown', () => {
     const layout = twoSpaces();
     layout.showSpace(tower);
     layout.deleteSpace(tower);
