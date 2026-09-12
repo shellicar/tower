@@ -155,105 +155,130 @@
   }
 </script>
 
+<!-- Yours: the way you are looking, whatever space is in front. -->
 <div class="border-b border-neutral-800 px-3 py-2 text-xs">
-  <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+  <div class="grid grid-cols-[auto_1fr] items-baseline gap-x-2 gap-y-1.5">
     <span class="text-neutral-500">scope</span>
-    {#each scopes as s (s.value)}
+    <span class="flex flex-wrap items-center gap-1">
+      {#each scopes as s (s.value)}
+        <button
+          class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {model.layout
+            .railScope === s.value
+            ? 'border-sky-600 text-sky-300'
+            : 'border-neutral-700 text-neutral-400'}"
+          title={s.title}
+          disabled={searching}
+          onclick={() => model.act((m) => m.setScope(s.value))}>{s.label}</button
+        >
+      {/each}
+      <span class="text-neutral-500">{listed.length}/{register.length}</span>
+    </span>
+
+    <span class="text-neutral-500">filter</span>
+    <span class="flex flex-wrap items-center gap-1">
+      <input
+        class="w-36 min-w-0 border border-neutral-700 bg-neutral-900 px-1 text-neutral-300 placeholder:text-neutral-600"
+        placeholder="conversation id"
+        title="find a conversation by its id; suspends everything else"
+        value={model.layout.searchText}
+        oninput={(e) => model.act((m) => m.setSearch(e.currentTarget.value))}
+      />
       <button
-        class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {model.layout
-          .railScope === s.value
+        class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {liveOnly
+          ? 'border-green-600 text-green-300'
+          : 'border-neutral-700 text-neutral-400'}"
+        title="only conversations a live agent is serving, as at the snapshot"
+        disabled={searching}
+        onclick={() => (liveOnly = !liveOnly)}>live</button
+      >
+      <button
+        class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {unreadOnly
           ? 'border-sky-600 text-sky-300'
           : 'border-neutral-700 text-neutral-400'}"
-        title={s.title}
+        title="only conversations nobody's looked at since they last got new content"
         disabled={searching}
-        onclick={() => model.act((m) => m.setScope(s.value))}>{s.label}</button
+        onclick={() => (unreadOnly = !unreadOnly)}>unread</button
       >
-    {/each}
-    <span class="text-neutral-500">{listed.length}/{register.length}</span>
+    </span>
+
+    <span class="text-neutral-500">show</span>
+    <span class="flex flex-wrap items-center gap-1">
+      {#each keys as k (k)}
+        <button
+          class="cursor-pointer rounded border px-1.5 {alwaysShow.includes(k)
+            ? 'border-current'
+            : 'border-neutral-700 text-neutral-500'}"
+          style={alwaysShow.includes(k) ? `color: ${tagKeys[k]}` : ''}
+          onclick={() =>
+            (alwaysShow = alwaysShow.includes(k) ? alwaysShow.filter((x) => x !== k) : [...alwaysShow, k])}
+          >{k}</button
+        >
+      {/each}
+    </span>
   </div>
-  <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-    <span
-      class="text-neutral-500"
-      title="grouping and filtering belong to {model.layout.shownSpace === null
+</div>
+
+<!-- The space's own: they stay with it when you walk away. -->
+<div class="border-b border-neutral-800 bg-neutral-950 px-3 py-2 text-xs">
+  <div class="mb-1.5 flex items-baseline justify-between gap-2">
+    <span class="truncate text-neutral-300"
+      >{model.layout.shownSpace === null
         ? 'no space'
-        : model.layout.nameOf(model.layout.shownSpace)}">group</span
+        : (model.layout.nameOf(model.layout.shownSpace) ?? '')}</span
     >
-    <select
-      class="border border-neutral-700 bg-neutral-900 px-1 text-neutral-300 disabled:cursor-default disabled:opacity-40"
-      value={view.groupKey}
-      onchange={(e) => {
-        const chosen = e.currentTarget.value;
-        edit((v) => {
-          v.groupKey = chosen;
-        });
-      }}
-      disabled={searching}
-    >
-      <option value="">none</option>
-      {#each keys as k (k)}<option value={k}>{k}</option>{/each}
-    </select>
-    {#if view.groupKey}
+    {#if filtered || view.groupKey !== ''}
       <button
-        class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {view.hideUntagged
-          ? 'border-sky-600 text-sky-300'
-          : 'border-neutral-700 text-neutral-500'}"
-        disabled={searching}
-        onclick={() =>
-          edit((v) => {
-            v.hideUntagged = !v.hideUntagged;
-          })}>hide untagged</button
+        class="shrink-0 cursor-pointer rounded border border-neutral-700 px-1.5 text-neutral-400 hover:text-neutral-200"
+        onclick={() => (views[key] = blank())}>clear</button
       >
     {/if}
-    <span class="ml-2 text-neutral-500">show</span>
-    {#each keys as k (k)}
-      <button
-        class="cursor-pointer rounded border px-1.5 {alwaysShow.includes(k)
-          ? 'border-current'
-          : 'border-neutral-700 text-neutral-500'}"
-        style={alwaysShow.includes(k) ? `color: ${tagKeys[k]}` : ''}
-        onclick={() =>
-          (alwaysShow = alwaysShow.includes(k) ? alwaysShow.filter((x) => x !== k) : [...alwaysShow, k])}
-        >{k}</button
-      >
-    {/each}
   </div>
-  <div class="mt-1.5 flex flex-wrap items-center gap-1">
-    <span class="text-neutral-500">filter</span>
-    <input
-      class="w-36 min-w-0 border border-neutral-700 bg-neutral-900 px-1 text-neutral-300 placeholder:text-neutral-600"
-      placeholder="conversation id"
-      title="find a conversation by its id; suspends everything else"
-      value={model.layout.searchText}
-      oninput={(e) => model.act((m) => m.setSearch(e.currentTarget.value))}
-    />
-    <button
-      class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {liveOnly
-        ? 'border-green-600 text-green-300'
-        : 'border-neutral-700 text-neutral-400'}"
-      title="only conversations a live agent is serving, as at the snapshot"
-      disabled={searching}
-      onclick={() => (liveOnly = !liveOnly)}>live</button
-    >
-    <button
-      class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {unreadOnly
-        ? 'border-sky-600 text-sky-300'
-        : 'border-neutral-700 text-neutral-400'}"
-      title="only conversations nobody's looked at since they last got new content"
-      disabled={searching}
-      onclick={() => (unreadOnly = !unreadOnly)}>unread</button
-    >
-    {#each keys as k (k)}
-      <button
-        class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {expandedKey ===
-          k || selectedCount(k)
-          ? 'border-sky-600 text-sky-300'
-          : 'border-neutral-700 text-neutral-400'}"
+  <div class="grid grid-cols-[auto_1fr] items-baseline gap-x-2 gap-y-1.5">
+    <span class="text-neutral-500">group</span>
+    <span class="flex flex-wrap items-center gap-1">
+      <select
+        class="border border-neutral-700 bg-neutral-900 px-1 text-neutral-300 disabled:cursor-default disabled:opacity-40"
+        value={view.groupKey}
+        onchange={(e) => {
+          const chosen = e.currentTarget.value;
+          edit((v) => {
+            v.groupKey = chosen;
+          });
+        }}
         disabled={searching}
-        onclick={() => (expandedKey = expandedKey === k ? '' : k)}
       >
-        {k}{selectedCount(k) ? ` (${selectedCount(k)})` : ''}
-      </button>
-    {/each}
+        <option value="">none</option>
+        {#each keys as k (k)}<option value={k}>{k}</option>{/each}
+      </select>
+      {#if view.groupKey}
+        <button
+          class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {view.hideUntagged
+            ? 'border-sky-600 text-sky-300'
+            : 'border-neutral-700 text-neutral-500'}"
+          disabled={searching}
+          onclick={() =>
+            edit((v) => {
+              v.hideUntagged = !v.hideUntagged;
+            })}>hide untagged</button
+        >
+      {/if}
+    </span>
+
+    <span class="text-neutral-500">filter</span>
+    <span class="flex flex-wrap items-center gap-1">
+      {#each keys as k (k)}
+        <button
+          class="cursor-pointer rounded border px-1.5 disabled:cursor-default disabled:opacity-40 {expandedKey ===
+            k || selectedCount(k)
+            ? 'border-sky-600 text-sky-300'
+            : 'border-neutral-700 text-neutral-400'}"
+          disabled={searching}
+          onclick={() => (expandedKey = expandedKey === k ? '' : k)}
+        >
+          {k}{selectedCount(k) ? ` (${selectedCount(k)})` : ''}
+        </button>
+      {/each}
+    </span>
   </div>
   {#if expandedKey}
     <div class="mt-1.5 flex flex-wrap gap-1">
@@ -271,18 +296,10 @@
       {/each}
     </div>
   {/if}
-  {#if filtered || view.groupKey !== ''}
-    <p class="mt-1.5 text-neutral-500">
-      these belong to {model.layout.shownSpace === null
-        ? 'no space'
-        : (model.layout.nameOf(model.layout.shownSpace) ?? '')}
-      <button
-        class="ml-1 cursor-pointer rounded border border-neutral-700 px-1.5 hover:text-neutral-200"
-        onclick={() => (views[key] = blank())}>clear</button
-      >
-    </p>
-  {/if}
-  <p class="mt-1.5 text-neutral-600">
+</div>
+
+<div class="border-b border-neutral-800 px-3 py-1.5 text-xs">
+  <p class="text-neutral-600">
     click shows the space a conversation is placed in · right click places it in {model.layout.shownSpace ===
     null
       ? 'nothing: no space shown'
