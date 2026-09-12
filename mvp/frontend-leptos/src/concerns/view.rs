@@ -19,7 +19,7 @@
 //! — the same "held annotation survives the upsert" pattern the rail uses
 //! for titles.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ws_types::{ClientMsg, ServerMsg, WsTab};
 
@@ -149,6 +149,36 @@ impl View {
         &self.tabs[self.active.min(self.tabs.len() - 1)]
     }
 
+    /// What is displayed in the space in front. Owned rather than a borrow of
+    /// the space's own list: what is displayed stops being that list the
+    /// moment visibility splits from membership.
+    pub fn displayed(&self) -> Vec<String> {
+        self.tab().convs.clone()
+    }
+
+    /// Where a conversation lives: the space holding it, by the same index
+    /// `switch_tab` takes, or `None` when it lives in none. Membership is not
+    /// exclusive yet, so a conversation can sit in two spaces at once; the one
+    /// in front wins, which is what keeps this agreeing with `displayed`.
+    pub fn space_of(&self, conv: &str) -> Option<usize> {
+        let holds = |t: &Tab| t.convs.iter().any(|c| c == conv);
+        let front = self.active.min(self.tabs.len() - 1);
+        if holds(&self.tabs[front]) {
+            Some(front)
+        } else {
+            self.tabs.iter().position(holds)
+        }
+    }
+
+    /// How many of a space's conversations the rail is reporting unread. The
+    /// stale set is passed in rather than read: no concern reaches into
+    /// another.
+    pub fn unread_count(&self, space: usize, stale: &HashSet<String>) -> usize {
+        self.tabs
+            .get(space)
+            .map_or(0, |t| t.convs.iter().filter(|c| stale.contains(*c)).count())
+    }
+
     fn set_layout_msg(&self, id: String) -> ClientMsg {
         ClientMsg::SetLayout {
             id,
@@ -200,7 +230,7 @@ impl View {
     }
 
     /// Adds to the active tab's open set if not already there. The caller
-    /// (composition root) follows this with `Conversations::set_open(tab().convs)`.
+    /// (composition root) follows this with `Conversations::set_open(displayed())`.
     /// `None` when the conversation was already open (nothing changed to send).
     pub fn open_conversation(&mut self, conv: &str, id: String) -> Option<ClientMsg> {
         let active = self.active.min(self.tabs.len() - 1);
@@ -369,6 +399,87 @@ mod tests {
 
         let expected = "";
         let actual = v.conv_search;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn the_space_in_front_displays_the_conversations_in_it() {
+        let mut v = View::default();
+        v.open_conversation("a", "r1".into());
+        v.open_conversation("b", "r2".into());
+
+        let expected = ["a", "b"];
+
+        let actual = v.displayed();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn what_is_displayed_is_the_space_in_fronts_own_conversations() {
+        let mut v = View::default();
+        v.open_conversation("a", "r1".into());
+        v.add_tab("r2".into());
+        v.open_conversation("b", "r3".into());
+
+        let expected = ["b"];
+
+        let actual = v.displayed();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_conversation_lives_in_the_space_it_was_put_in() {
+        let mut v = View::default();
+        v.add_tab("r1".into());
+        v.open_conversation("a", "r2".into());
+        v.switch_tab(0);
+
+        let expected = Some(1);
+
+        let actual = v.space_of("a");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_conversation_in_no_space_lives_nowhere() {
+        let v = View::default();
+
+        let expected = None;
+
+        let actual = v.space_of("a");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_conversation_in_two_spaces_lives_in_the_one_in_front() {
+        let mut v = View::default();
+        v.open_conversation("a", "r1".into());
+        v.add_tab("r2".into());
+        v.open_conversation("a", "r3".into());
+
+        let expected = Some(1);
+
+        let actual = v.space_of("a");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn a_spaces_unread_count_counts_only_the_conversations_in_it() {
+        let mut v = View::default();
+        v.open_conversation("a", "r1".into());
+        v.add_tab("r2".into());
+        v.open_conversation("b", "r3".into());
+        let stale = HashSet::from(["a".to_owned(), "b".to_owned()]);
+
+        let expected = 1;
+
+        let actual = v.unread_count(0, &stale);
 
         assert_eq!(actual, expected);
     }

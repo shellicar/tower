@@ -123,10 +123,10 @@ pub fn RailView(
     approvals: RwSignal<Approvals>,
     view: RwSignal<View>,
     now: RwSignal<Millis>,
-    /// The active tab's open set — a row is "selected" if it's in it. A
-    /// derived `Signal`, not the `View` concern itself: this component reads
-    /// one fact (which convs are open), not the whole tab machine.
-    open_convs: Signal<Vec<String>>,
+    /// What is displayed in the space in front — a row is "selected" when its
+    /// conversation is in it. A derived `Signal`, not the `View` concern
+    /// itself: this component reads one fact, not the whole view concern.
+    displayed: Signal<Vec<String>>,
     status: Signal<Status>,
     on_toggle: Callback<String>,
     on_dismiss_attachment: Callback<String>,
@@ -372,7 +372,7 @@ pub fn RailView(
                                 let cwd = p.cwd.map(str::to_owned);
                                 let stranded = p.verdict == Some(Liveness::Stranded);
                                 let dot = if stranded { "stranded" } else { "alive" };
-                                let selected = open_convs.with(|c| c.contains(&conv));
+                                let selected = displayed.with(|c| c.contains(&conv));
                                 view! {
                                     <li
                                         class:selected=selected
@@ -486,7 +486,7 @@ pub fn RailView(
                                     let label = row.title.clone().unwrap_or_else(|| conv.clone());
                                     let is_pending = pending.contains(&conv);
                                     let live = rail.with(|r| r.verdict(&conv, now.get()));
-                                    let selected = open_convs.with(|c| c.contains(&conv));
+                                    let selected = displayed.with(|c| c.contains(&conv));
                                     let heat = heat_class(now.get(), row.last_event);
                                     let chips: Vec<_> = always_show
                                         .iter()

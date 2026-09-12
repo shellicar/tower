@@ -72,7 +72,7 @@ fn save_active(i: usize) {
 pub fn App(ws_url: String) -> impl IntoView {
     let rail = RwSignal::new(Rail::default());
     // NOT an `RwSignal`: which conversations exist is already reactive
-    // through `view.tab().convs`; each open conversation's OWN content lives
+    // through `view.displayed()`; each open conversation's OWN content lives
     // in its own `RwSignal<ConversationState>` (see concerns/conversation.rs)
     // so a delta in one panel cannot invalidate another's render — the fix
     // for CPU that scaled with open-panel count under load.
@@ -125,12 +125,12 @@ pub fn App(ws_url: String) -> impl IntoView {
     let send = move |msg: ClientMsg| transport.with_value(|t| t.send(&msg));
     let next_id = move || ids.try_update_value(|c| c.next()).expect("id counter");
 
-    // Reconcile the wire-open set to the active tab's convs after a view
-    // mutation: the tab change itself already went out as `SetLayout`
+    // Reconcile the wire-open set to what the space in front displays after a
+    // view mutation: the tab change itself already went out as `SetLayout`
     // (returned by the `View` action and sent below); this is the sibling
     // send that opens/closes the actual conversations named in it.
     let sync_open = move || {
-        let wanted = view.with(|v| v.tab().convs.clone());
+        let wanted = view.with(|v| v.displayed());
         let mut mint = next_id;
         let msgs = conversations.try_update_value(|c| c.set_open(&wanted, &mut mint));
         for msg in msgs.into_iter().flatten() {
@@ -150,7 +150,7 @@ pub fn App(ws_url: String) -> impl IntoView {
     // messages, `set_open` already being idempotent makes this safe
     // alongside every explicit `sync_open()` call above.
     Effect::new(move |_| {
-        view.with(|v| v.tab().convs.clone());
+        view.with(|v| v.displayed());
         sync_open();
     });
 
@@ -163,7 +163,7 @@ pub fn App(ws_url: String) -> impl IntoView {
     });
 
     let on_toggle = Callback::new(move |conv: String| {
-        if view.with(|v| v.tab().convs.contains(&conv)) {
+        if view.with(|v| v.displayed().contains(&conv)) {
             let msg = view.try_update(|v| v.close_conversation(&conv, next_id()));
             if let Some(msg) = msg {
                 send(msg);
@@ -240,7 +240,7 @@ pub fn App(ws_url: String) -> impl IntoView {
         }
     });
 
-    let open_convs = Signal::derive(move || view.with(|v| v.tab().convs.clone()));
+    let displayed = Signal::derive(move || view.with(|v| v.displayed()));
 
     view! {
         <div class="tower">
@@ -249,7 +249,7 @@ pub fn App(ws_url: String) -> impl IntoView {
                 approvals=approvals
                 view=view
                 now=now
-                open_convs=open_convs
+                displayed=displayed
                 status=status
                 on_toggle=on_toggle
                 on_dismiss_attachment=dismiss_attachment
@@ -283,17 +283,17 @@ pub fn App(ws_url: String) -> impl IntoView {
                         })
                     }}
                     {move || {
-                        let convs = view.with(|v| v.tab().convs.clone());
-                        (convs.is_empty() && !view.with(|v| v.approvals_open) && !view.with(|v| v.unread_open))
+                        let nothing_displayed = view.with(|v| v.displayed().is_empty());
+                        (nothing_displayed && !view.with(|v| v.approvals_open) && !view.with(|v| v.unread_open))
                             .then(|| view! { <p class="empty">"Open a conversation from the rail."</p> })
                     }}
                     <For
-                        each=move || view.with(|v| v.tab().convs.clone())
+                        each=move || view.with(|v| v.displayed())
                         key=|conv| conv.clone()
                         let(conv)
                     >
                         {
-                            // Rendering is driven by `view.tab().convs`
+                            // Rendering is driven by `view.displayed()`
                             // (reactive); `conversations` (a `StoredValue`) is
                             // not, so this must tolerate the open-set not
                             // having caught up yet rather than filter the

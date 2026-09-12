@@ -32,14 +32,11 @@ pub fn TabBar(
                         .map(|(i, tab)| {
                             let name = tab.name.clone();
                             let is_active = i == active;
-                            let stale_count = rail.with(|r| {
-                                let stale = r.stale_convs();
-                                tab.convs.iter().filter(|c| stale.contains(*c)).count()
-                            });
+                            let unread_count = rail.with(|r| v.unread_count(i, r.stale_convs()));
                             view! {
                                 <span class="tab" class:active=is_active>
-                                    {(stale_count > 0).then(|| view! {
-                                        <span class="tab-unread" title="unread in this tab">{format!("● {stale_count}")}</span>
+                                    {(unread_count > 0).then(|| view! {
+                                        <span class="tab-unread" title="unread in this tab">{format!("● {unread_count}")}</span>
                                     })}
                                     <button
                                         class="tab-name"
