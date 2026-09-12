@@ -234,7 +234,7 @@
     </div>
   {/if}
   <p class="mt-1.5 text-neutral-600">
-    click goes where it lives and shows it · right click, or ⊕, puts it in {live.model.shownSpace === null
+    click goes where it lives and shows it · right click puts it in {live.model.shownSpace === null
       ? 'nothing: no space in front'
       : (live.model.nameOf(live.model.shownSpace) ?? '')}
   </p>
@@ -257,7 +257,7 @@
       {@const row = byId.get(conv)}
       {@const where = live.model.spaceOf(conv)}
       {@const placement = live.model.placementOf(conv)}
-      <li class="group relative">
+      <li>
         <button
           title={conv}
           class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900"
@@ -284,11 +284,11 @@
               <span
                 class="rounded px-1.5 {where === live.model.shownSpace
                   ? 'bg-sky-900 text-sky-100'
-                  : 'border border-neutral-700 text-neutral-400'}"
-                title={where === live.model.shownSpace
+                  : 'border border-neutral-700 text-neutral-400'} {placement?.drawn === false ? 'opacity-40' : ''}"
+                title="{where === live.model.shownSpace
                   ? 'in the space you are standing in'
-                  : `lives in ${live.model.nameOf(where)}`}
-                >{live.model.nameOf(where)}{placement?.drawn === false ? ' · away' : ''}</span
+                  : `lives in ${live.model.nameOf(where)}`}{placement?.drawn === false ? ', off the screen' : ''}"
+                >{live.model.nameOf(where)}</span
               >
             {/if}
             <span>{row?.lastKind}</span>
@@ -307,13 +307,6 @@
             </span>
           {/if}
         </button>
-        {#if live.model.shownSpace !== null && where !== live.model.shownSpace}
-          <button
-            class="absolute top-1.5 right-1.5 hidden cursor-pointer rounded border border-neutral-700 bg-neutral-900 px-1 text-neutral-400 group-hover:block hover:border-sky-600 hover:text-sky-300"
-            title="put it in {live.model.nameOf(live.model.shownSpace)}"
-            onclick={() => file(conv)}>⊕</button
-          >
-        {/if}
       </li>
     {/each}
   {:else}
