@@ -59,8 +59,10 @@ nothing draws it. It still appears in the rail, because the rail lists conversat
 rather than placements.
 
 **minimise** — stop drawing a conversation without removing its placement. It keeps its
-space and its position among the others. Because it isn't displayed, its content isn't
-subscribed, so nothing streams for it.
+space. Because it isn't displayed, its content isn't subscribed, so nothing streams for
+it. Restoring draws it last among the others rather than returning it to where it sat,
+which is what makes minimising and restoring the way to reorder a space until reordering
+has a gesture of its own.
 
 Selecting a space draws its placements: every conversation placed in it that isn't
 minimised appears as a panel, tiled, in placement order.
@@ -69,8 +71,8 @@ minimised appears as a panel, tiled, in placement order.
 
 1. As Stephen, I want to click a conversation in the rail and land in the space it lives
    in, so that I stop reconstructing where things are in my head.
-2. As Stephen, I want clicking a conversation to change nothing, so that navigating is
-   safe to do without thinking about it.
+2. As Stephen, I want clicking a conversation never to change where it lives, so that
+   navigating is safe to do without thinking about it.
 3. As Stephen, I want a conversation to live in exactly one space, so that going through
    my spaces means going through my work.
 4. As Stephen, I want to see at a glance which conversations live nowhere, so that work
@@ -136,23 +138,45 @@ has to exist regardless, since an empty space must be able to exist and sibling 
 live somewhere, so duplication buys nothing and pays with an invariant no database can
 hold.
 
-**The browser contract carries spaces and placements.** The exact frame shape is
-determined by the spike and written into the browser contract document before any
-implementation begins. Clients send a whole snapshot rather than individual operations,
-and last write wins; operations would only earn their keep to stop a stale client
-clobbering, which is not a concern at this scale.
+**The browser contract carries spaces and placements.** The frame shape was determined by
+the spike and is written into `tower-ws-spec.md`, under `set_layout` and `layout`. Clients
+send a whole snapshot rather than individual operations, and last write wins; operations
+would only earn their keep to stop a stale client clobbering, which is not a concern at
+this scale. Three things the spike settled and the contract now states: the client mints
+space ids, because a snapshot must be able to name a space it creates in the same breath;
+there is no position field, because array order cannot disagree with itself; and
+placements are a flat list keyed by conversation rather than nested inside spaces, because
+nesting would make one conversation in two spaces expressible.
 
 **What stays with the client.** Which space a client is showing, and how it has sliced the
 rail, are facts about that client and not part of the layout.
 
-**Navigation and filing are different mouse buttons.** The primary button on a rail row
-goes to the space the conversation lives in and changes nothing; a conversation living
-nowhere offers no navigation. The secondary button toggles the conversation's placement in
-the space currently shown, and because placement is exclusive, placing it there removes
-any previous placement. The browser's own menu stays available behind a modifier.
+**Navigation and filing are different mouse buttons, and neither is routed by state.** An
+operation that does one thing when something is placed and another when it is not leaves
+you unable to predict the fifth click from the first, which is the fault of the taskbar
+button that minimises or restores depending on what it is already doing.
 
-**The panel's close control minimises.** It does not unplace. Restoring is offered on the
-rail row, which is where a space's minimised conversations are listed.
+The primary button on a rail row shows the space the conversation is placed in and draws
+the conversation, restoring it if it was minimised. Running it again lands in the same
+state rather than putting it away. An unplaced conversation has no space to show, so it
+does nothing and says so.
+
+The secondary button places the conversation in the space shown. It never removes: already
+there, it does nothing, and anywhere else, it moves here, which because placement is
+exclusive takes it out of where it was. Every press ends in the same sentence, that this
+conversation is in this space. The browser's own menu stays available behind a modifier.
+
+**The panel carries both controls, with the meanings every window manager already gives
+them.** `–` minimises, and `×` takes the conversation out of the space. The earlier
+decision that `×` should minimise was justified by unplacing being destructive and hard to
+undo, and that reasoning does not hold: removal is meant to be easy rather than guarded,
+and unplacing is rare, so it gets the cheapest control that already exists. Finishing with
+something happens on the thing itself, rather than by hunting its row in a rail of
+hundreds.
+
+**Restoring is offered on the rail row.** Scoped to the space shown, the rail is that
+space's index: every conversation placed there, with the minimised ones marked. There is
+no second surface on the panel region, which was tried and removed.
 
 **Subscription follows what is drawn.** The set of conversations whose content streams is
 the set on screen, rather than the set placed in the current space. A minimised
@@ -172,6 +196,100 @@ splitting membership from visibility leaves every one of those readers ambiguous
 **Filing is reachable from outside the browser**, at first by whatever route the existing
 tagging script uses. Deciding where a conversation belongs is a script's opinion and never
 the daemon's.
+
+## Presentation
+
+Worked out by building it and using it, September 2026, in the spike at
+`spike/rail-spaces/`. The first implementation is in Rust and cannot read that markup, so
+what it settled is written out here. The words are the Vocabulary's throughout: a
+conversation is placed or unplaced, drawn or minimised, and the region holding the panels
+has no name.
+
+### The rail row
+
+Left to right: the unread dot, the liveness dot, the title or the id when it has no title.
+Then, right-aligned, the space it is placed in, the last event kind, and its age coloured
+by heat. Tag badges sit on a second line, and carry the value alone because the colour
+already says which key it is.
+
+**The space reads as a filled badge when the conversation is placed in the space shown,
+and as an outlined one when it is placed somewhere else.** Minimised dims the same badge
+rather than adding a word beside it, so the row's width does not move as conversations
+come and go.
+
+**An unplaced conversation shows nothing in that slot, and carries no highlight.** The
+rail lists the register and only a handful of conversations are ever placed, so unplaced
+is what a conversation normally is, and a highlight on the normal state is decoration. The
+filed ones are what the eye should catch. Arrivals are not lost by this: the rail is
+ordered by last event with the age coloured, so something that has just moved and has no
+space sits at the top, fresh, with an empty slot. The scope below is the deliberate look.
+
+### The rail's controls, and what each belongs to
+
+The header is two blocks, because two different things own these controls and a reader
+otherwise cannot tell which will follow them out of the space.
+
+The first block is the reader's, and travels with them:
+
+- **scope**, one of all, this space, unplaced. Two of its three values are written
+  relative to the space shown, so it re-evaluates as you walk and the rail follows you.
+  Holding it per space would instead mean walking into a space silently changed what the
+  rail was showing.
+- **filter**: the conversation id box, and the live and unread toggles. These are about
+  attention rather than about a subject, and sweeping for what needs you is the act they
+  serve, so they must survive walking between spaces.
+- **show**, which tag keys appear as badges on a row. This is about the shape of a row.
+  Per space it would usefully hide the badge that is redundant inside a space, but a badge
+  that vanishes as you walk reads as missing data rather than as a setting.
+
+The second block is the space's, headed by its name, on its own ground, with its own
+control to clear it. It holds **group** (and hide untagged) and **filter** by tag. Both
+are about a subject, and a space is a subject: standing in flightrac you want repo
+Flightrac, and carrying that into tower is wrong every time. A space with nothing set
+shows an empty block rather than creating one, and showing no space is itself a heading,
+so the controls still work when nothing is in front.
+
+`filter` therefore appears in both blocks. That is correct rather than a collision:
+there are filters in both, and the block a filter sits in is what says whose it is. The
+leading word of each row sits in a column down the left rather than inline, because at the
+rail's width the chips wrap and an inline word gets pushed away from what it labels.
+
+The id search suspends everything else rather than composing with it, which is the
+existing rule. It is not cleared for the reader when they navigate: it announces itself
+loudly, because every other control greys out while it is set, so deciding on their behalf
+that they have finished with it buys nothing.
+
+**The model is handed the whole register alongside the filtered list.** The id search has
+to reach past the rail's own filters as well as past the scope, so a model given only what
+the filters left cannot honour the rule that an id always finds its conversation.
+
+### The space strip
+
+Two rows rather than indentation. The first holds the top-level spaces. Once one of them
+is shown, whether directly or through one of its children, a second row appears beneath it
+holding that space's children. Containment is carried by the row, which an indent prefix
+fails to do once there are real sibling counts.
+
+A chip shows the space's name, the count of conversations placed there when it is not
+zero, and the unread count when there is one. Clicking a chip always shows that space and
+never does anything else. Each row's own `+` creates a space at that row's level, and the
+chip for the space being shown carries the control to delete it, which confirms and says
+what will be released.
+
+### The panel
+
+`–` minimises and `×` unplaces, as above. The panel a reader arrived at by clicking a rail
+row is ringed briefly, because arriving among eight panels otherwise means re-reading
+titles to find the one you asked for.
+
+### What has no design yet
+
+Placing always draws, and nothing limits how many conversations a space holds, so a space
+with eight in it tiles eight panels and the region scrolls sideways past the window's
+edge. Whether that should be capped, paged, or left alone is open.
+
+Reordering conversations within a space is minimising and restoring, which is a side
+effect rather than a gesture. It belongs with reordering spaces, which is already parked.
 
 ## Testing Decisions
 
@@ -248,10 +366,15 @@ shape two compiled consumers have already agreed on. Both land in the same pull 
 so nothing merges until both work; whichever is unported mid-branch will be broken rather
 than merely behind.
 
-**The spike.** The demo is a spike whose output is knowledge plus one artifact that
-survives: the model as a plain class. Its last act is writing the frame shape into the
-browser contract. Without that, the shape gets written to suit whatever the daemon finds
-convenient to serialise, and the client adapts to it for the rest of its life.
+**The spike.** Built at `spike/rail-spaces/`, against a static fixture taken from a
+read-only snapshot of the live database: every conversation, real titles, real tags, the
+spaces that already exist, and the standing agent attachments so liveness folds as it
+really does. The spaces arrive empty, because placing is the operation everything else
+hangs off and an app that starts arranged never gets it tried. Two things survive it: the
+model as a plain class, with its tests, and the two sections above. The frame shape is
+written into the browser contract, without which it would have been written to suit
+whatever the daemon found convenient to serialise, and the client would have adapted to it
+for the rest of its life.
 
 **Naming findings, not part of this change.** The word "stale" carries three unrelated
 meanings in tower: how long since a conversation moved, an unattended episode past its
@@ -279,4 +402,14 @@ agreed. The following are Claude's:
   his.
 - The three test scopes and the argument that each substitution belongs on a communication
   boundary.
+- The whole Presentation section, except where it records a decision he made while using
+  it: that restoring appends, that there is one surface for a space's minimised
+  conversations rather than two, and that the id search is not cleared on his behalf.
+- The argument that the panel should carry both controls, and that `×` should mean what it
+  means everywhere else. He accepted it and supplied the reason the original decision was
+  wrong.
+- The argument for dropping the unplaced highlight.
 - Every phrasing in this document, and its section order.
+
+The rule that an operation must never be routed by state is his, and it settled the
+mouse buttons.
