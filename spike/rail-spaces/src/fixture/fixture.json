@@ -1,6 +1,6 @@
 {
  "takenFrom": "/Users/stephen/repos/@shellicar/tower--rail-spaces-spike/spike/rail-spaces/.snapshot/tower-v2-snapshot.db",
- "takenAt": "2026-09-12T06:32:54.201Z",
+ "takenAt": "2026-09-12T08:14:19.040Z",
  "tagKeys": {
   "org": "#8ec07c",
   "repo": "#83a598",
@@ -5589,6 +5589,11 @@
     "parent": null
    },
    {
+    "id": "s-exec-az",
+    "name": "exec-az",
+    "parent": "s-tower"
+   },
+   {
     "id": "s-dotfiles",
     "name": "dotfiles",
     "parent": null
@@ -5689,6 +5694,76 @@
     "conv": "8d0d6b88-3d85-4dac-99a3-2ded366a13e7",
     "space": "s-hopeventures",
     "drawn": true
+   },
+   {
+    "conv": "de5538ec-d3e3-4d05-9c42-843e7a666aca",
+    "space": "s-tower",
+    "drawn": true
+   },
+   {
+    "conv": "bad5683a-4786-450c-8982-47f4649759b0",
+    "space": "s-tower",
+    "drawn": true
+   },
+   {
+    "conv": "b2e8479f-1083-43a5-afca-58a2bf23a662",
+    "space": "s-tower",
+    "drawn": false
+   },
+   {
+    "conv": "e2352d77-e161-4c09-b59a-f4ea3d6f61c7",
+    "space": "s-exec-az",
+    "drawn": true
+   },
+   {
+    "conv": "3ac8a420-ea1c-4d93-9db5-4ac04736aacb",
+    "space": "s-exec-az",
+    "drawn": true
+   },
+   {
+    "conv": "80d285d7-e773-4a5a-9293-ba1fe4089113",
+    "space": "s-exec-az",
+    "drawn": true
+   },
+   {
+    "conv": "6a4b08b5-5bdf-40ee-bd1e-82f40cf00cac",
+    "space": "s-dotfiles",
+    "drawn": true
+   },
+   {
+    "conv": "c086cfd6-8397-4fee-a69d-3deb4aea8682",
+    "space": "s-dotfiles",
+    "drawn": true
+   },
+   {
+    "conv": "12da3104-e39d-4d35-9874-58877eec1854",
+    "space": "s-skills",
+    "drawn": true
+   },
+   {
+    "conv": "13b872ca-8577-43b9-bfff-5cd945ce9db1",
+    "space": "s-skills",
+    "drawn": false
+   },
+   {
+    "conv": "6dc7822a-e6c2-4905-920c-4f54790b2ea0",
+    "space": "s-flightrac",
+    "drawn": true
+   },
+   {
+    "conv": "a759b5aa-d42d-4bce-ad35-d431dccbbd3a",
+    "space": "s-flightrac",
+    "drawn": true
+   },
+   {
+    "conv": "1c14c53f-cf92-46fd-890f-f627893c8e65",
+    "space": "s-swe",
+    "drawn": true
+   },
+   {
+    "conv": "616bc9c4-8e71-47ff-8012-18a3c71e13bb",
+    "space": "s-hopeventures",
+    "drawn": true
    }
   ]
  },
@@ -5696,7 +5771,7 @@
   "conversations": 638,
   "titled": 632,
   "tagged": 236,
-  "placed": 15,
+  "placed": 29,
   "droppedDuplicatePlacements": [],
   "placedButNotInTheRegister": []
  }
