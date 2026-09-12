@@ -39,7 +39,11 @@ A conversation has one placement. The rail shows where it is, and clicking it go
 
 ## Vocabulary
 
-Used throughout this spec and in the code.
+These words are binding rather than descriptive. They are what the code calls things,
+what the interface shows, and what we say to each other, and they are the same word in
+all three. A synonym invented in a component is a defect rather than a style choice: the
+moment the model says `minimised` and the screen says something else, nobody can tell
+whether the two are the same thing.
 
 **layout** — one representation of how conversations are organised: the spaces, their
 nesting, and each conversation's placement among them. A conversation has at most one
@@ -64,6 +68,13 @@ subscribed, so nothing streams for it.
 
 Selecting a space draws its placements: every conversation placed in it that isn't
 minimised appears as a panel, tiled, in placement order.
+
+**Words already rejected**, recorded so they stop being reinvented by anyone who wasn't
+in the conversation that rejected them. `stage` for the region panels are drawn in: too
+overloaded, and `deck` is the word to reach for if it ever needs one. `hide` for
+minimise: hidden means gone from the rail as well, which is what archive will need.
+`tab` for space: a browser tab is transient and a space is durable. `open` and `show`:
+both already mean something else in tower.
 
 ## User Stories
 
