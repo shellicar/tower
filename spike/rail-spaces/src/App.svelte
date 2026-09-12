@@ -17,8 +17,16 @@
   const model = live(new Layout(fixture.layout));
 
   const drawn = $derived(model.model.drawn);
-  const away = $derived(model.model.minimised);
   const shown = $derived(model.model.shownSpace);
+
+  // Which panel you came for, when you arrive among several.
+  let arrived = $state('');
+  let clearArrival: ReturnType<typeof setTimeout> | undefined;
+  function arriveAt(conv: string) {
+    arrived = conv;
+    clearTimeout(clearArrival);
+    clearArrival = setTimeout(() => (arrived = ''), 1500);
+  }
 </script>
 
 <div class="grid h-screen grid-cols-[320px_1fr]">
@@ -28,7 +36,13 @@
       <span class="text-sky-300">● {stale.size}</span>
     </header>
     <div class="min-h-0 flex-1 overflow-y-auto">
-      <Rail live={model} rows={fixture.conversations} tagKeys={fixture.tagKeys} {now} />
+      <Rail
+        live={model}
+        rows={fixture.conversations}
+        tagKeys={fixture.tagKeys}
+        {now}
+        onArrive={arriveAt}
+      />
     </div>
   </aside>
   <main class="flex min-h-0 min-w-0 flex-col">
@@ -37,31 +51,24 @@
       {#each drawn as conv (conv)}
         {@const row = rowOf(conv)}
         {#if row !== undefined}
-          <Panel {row} onMinimise={() => model.act((m) => m.minimise(conv))} />
+          <Panel
+            {row}
+            arrived={arrived === conv}
+            onMinimise={() => model.act((m) => m.minimise(conv))}
+            onUnplace={() => model.act((m) => m.unplace(conv))}
+          />
         {/if}
       {:else}
-        <p class="m-auto text-neutral-500">
+        <p class="m-auto max-w-md text-center text-neutral-500">
           {#if shown === null}
             No space in front. Pick one above, or click a conversation to go where it lives.
           {:else if model.model.placedIn(shown).length === 0}
-            Nothing lives here yet. Right click a conversation in the rail to file it in.
+            Nothing lives here yet. Right click a conversation in the rail to put it in.
           {:else}
-            Nothing on screen. Everything that lives here is away.
+            Everything that lives here is away. Scope the rail to this space to find it.
           {/if}
         </p>
       {/each}
     </div>
-    {#if away.length > 0}
-      <div class="flex flex-wrap items-center gap-1.5 border-t border-neutral-700 px-3 py-1.5 text-xs">
-        <span class="text-neutral-500">away</span>
-        {#each away as conv (conv)}
-          <button
-            class="max-w-72 cursor-pointer truncate rounded border border-dashed border-neutral-700 px-1.5 text-neutral-400 hover:text-neutral-100"
-            title="bring it back onto the screen"
-            onclick={() => model.act((m) => m.restore(conv))}>{rowOf(conv)?.title ?? conv}</button
-          >
-        {/each}
-      </div>
-    {/if}
   </main>
 </div>

@@ -66,9 +66,10 @@ describe('where a conversation lives', () => {
 });
 
 describe('the filing gesture', () => {
-  test('the gesture files a conversation into the space it is not in', () => {
+  test('filing a conversation twice leaves it in the same space', () => {
     const layout = twoSpaces();
-    layout.togglePlacement('c-alpha', tower);
+    layout.place('c-alpha', tower);
+    layout.place('c-alpha', tower);
 
     const expected = tower;
     const actual = layout.spaceOf('c-alpha');
@@ -76,21 +77,33 @@ describe('the filing gesture', () => {
     expect(actual).toBe(expected);
   });
 
-  test('the same gesture takes it out again', () => {
+  test('filing never takes a conversation out of a space', () => {
     const layout = twoSpaces();
-    layout.togglePlacement('c-alpha', tower);
-    layout.togglePlacement('c-alpha', tower);
+    layout.place('c-alpha', tower);
+    layout.place('c-alpha', tower);
 
-    const expected = null;
-    const actual = layout.spaceOf('c-alpha');
+    const expected = ['c-alpha'];
+    const actual = layout.placedIn(tower);
 
-    expect(actual).toBe(expected);
+    expect(actual).toEqual(expected);
   });
 
-  test('the gesture in a second space moves it there rather than taking it out', () => {
+  test('filing a conversation that is away leaves it away', () => {
     const layout = twoSpaces();
-    layout.togglePlacement('c-alpha', tower);
-    layout.togglePlacement('c-alpha', swe);
+    layout.place('c-alpha', tower);
+    layout.minimise('c-alpha');
+    layout.place('c-alpha', tower);
+
+    const expected = ['c-alpha'];
+    const actual = layout.minimisedIn(tower);
+
+    expect(actual).toEqual(expected);
+  });
+
+  test('filing into a second space moves it there', () => {
+    const layout = twoSpaces();
+    layout.place('c-alpha', tower);
+    layout.place('c-alpha', swe);
 
     const expected = swe;
     const actual = layout.spaceOf('c-alpha');
@@ -183,26 +196,14 @@ describe('clearing a conversation off the screen', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('a conversation that has been away keeps its position among the others', () => {
+  test('a conversation brought back comes back last, which is how a space is reordered', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', tower);
     layout.place('c-beta', tower);
     layout.minimise('c-alpha');
     layout.restore('c-alpha');
 
-    const expected = ['c-alpha', 'c-beta'];
-    const actual = layout.drawnIn(tower);
-
-    expect(actual).toEqual(expected);
-  });
-
-  test('filing a minimised conversation into the space it is already in brings it back', () => {
-    const layout = twoSpaces();
-    layout.place('c-alpha', tower);
-    layout.minimise('c-alpha');
-    layout.place('c-alpha', tower);
-
-    const expected = ['c-alpha'];
+    const expected = ['c-beta', 'c-alpha'];
     const actual = layout.drawnIn(tower);
 
     expect(actual).toEqual(expected);
@@ -283,7 +284,7 @@ describe('going to a conversation', () => {
     expect(actual).toBe(expected);
   });
 
-  test('going to a conversation changes nothing about where it lives', () => {
+  test('going to a conversation leaves it in the space it lives in', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', swe);
     layout.place('c-beta', swe);
@@ -295,14 +296,26 @@ describe('going to a conversation', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('going to a minimised conversation does not bring it back onto the screen', () => {
+  test('going to a minimised conversation brings it back onto the screen', () => {
     const layout = twoSpaces();
     layout.place('c-alpha', swe);
     layout.minimise('c-alpha');
     layout.goTo('c-alpha');
 
-    const expected: string[] = [];
+    const expected = ['c-alpha'];
     const actual = layout.drawn;
+
+    expect(actual).toEqual(expected);
+  });
+
+  test('going to a conversation that is already on the screen leaves the order alone', () => {
+    const layout = twoSpaces();
+    layout.place('c-alpha', swe);
+    layout.place('c-beta', swe);
+    layout.goTo('c-alpha');
+
+    const expected = ['c-alpha', 'c-beta'];
+    const actual = layout.drawnIn(swe);
 
     expect(actual).toEqual(expected);
   });

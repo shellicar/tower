@@ -9,11 +9,13 @@
     rows,
     tagKeys,
     now,
+    onArrive,
   }: {
     live: Live;
     rows: Row[];
     tagKeys: Record<string, string>;
     now: number;
+    onArrive: (conv: string) => void;
   } = $props();
 
   const scopes: { value: RailScope; label: string; title: string }[] = [
@@ -107,16 +109,21 @@
   function goTo(conv: string) {
     refused = '';
     live.act((m) => {
-      if (!m.goTo(conv)) refused = conv;
+      if (m.goTo(conv)) onArrive(conv);
+      else refused = conv;
     });
   }
 
-  function file(conv: string, event: MouseEvent) {
-    if (event.shiftKey) return;
-    event.preventDefault();
+  function file(conv: string) {
     const shown = live.model.shownSpace;
     if (shown === null) return;
-    live.act((m) => m.togglePlacement(conv, shown));
+    live.act((m) => m.place(conv, shown));
+  }
+
+  function fileByGesture(conv: string, event: MouseEvent) {
+    if (event.shiftKey) return;
+    event.preventDefault();
+    file(conv);
   }
 </script>
 
@@ -215,7 +222,7 @@
     </div>
   {/if}
   <p class="mt-1.5 text-neutral-600">
-    click goes where it lives · right click files it into {live.model.shownSpace === null
+    click goes where it lives and shows it · right click, or ⊕, puts it in {live.model.shownSpace === null
       ? 'nothing: no space in front'
       : (live.model.nameOf(live.model.shownSpace) ?? '')}
   </p>
@@ -238,15 +245,15 @@
       {@const row = byId.get(conv)}
       {@const where = live.model.spaceOf(conv)}
       {@const placement = live.model.placementOf(conv)}
-      <li>
+      <li class="group relative">
         <button
           title={conv}
           class="flex w-full cursor-pointer flex-wrap justify-between gap-x-2 border-b border-neutral-800 px-3 py-2 text-left hover:bg-neutral-900 {where !==
             null && where === live.model.shownSpace
             ? 'bg-slate-800'
-            : ''} {where === null ? 'border-l-2 border-l-amber-700' : ''}"
+            : ''}"
           onclick={() => goTo(conv)}
-          oncontextmenu={(e) => file(conv, e)}
+          oncontextmenu={(e) => fileByGesture(conv, e)}
         >
           <span class="flex min-w-0 items-center gap-1.5">
             {#if row?.stale}<span
@@ -256,9 +263,7 @@
             <span class="truncate" class:text-neutral-200={row?.title}>{row?.title ?? conv}</span>
           </span>
           <span class="flex shrink-0 items-baseline gap-2 text-neutral-400">
-            {#if where === null}
-              <span class="text-amber-600">nowhere</span>
-            {:else}
+            {#if where !== null}
               <span class="text-sky-200/70">{live.model.nameOf(where)}</span>
               {#if placement?.drawn === false}<span class="text-neutral-600" title="in this space, off the screen"
                   >away</span
@@ -280,6 +285,13 @@
             </span>
           {/if}
         </button>
+        {#if live.model.shownSpace !== null && where !== live.model.shownSpace}
+          <button
+            class="absolute top-1.5 right-1.5 hidden cursor-pointer rounded border border-neutral-700 bg-neutral-900 px-1 text-neutral-400 group-hover:block hover:border-sky-600 hover:text-sky-300"
+            title="put it in {live.model.nameOf(live.model.shownSpace)}"
+            onclick={() => file(conv)}>⊕</button
+          >
+        {/if}
       </li>
     {/each}
   {:else}

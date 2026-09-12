@@ -61,7 +61,20 @@ const tabs = JSON.parse(db.prepare('select tabs from layout where layout_id = ?'
 
 const slug = (name) => 's-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
-const spaces = tabs.map(({ name }) => ({ id: slug(name), name, parent: null }));
+// Two of them nest, so nesting is in front of him rather than imagined. The
+// child names are real: repos under the HopeVentures org, worktrees under the
+// Flightrac one.
+const children = {
+  hopeventures: ['CircuitBreaker', 'claude-fleet-hopeventures'],
+  flightrac: ['transport-graphql', 'socket-integration'],
+};
+
+const spaces = [];
+for (const { name } of tabs) {
+  spaces.push({ id: slug(name), name, parent: null });
+  for (const child of children[name] ?? [])
+    spaces.push({ id: slug(`${name}-${child}`), name: child, parent: slug(name) });
+}
 const placements = [];
 
 db.close();

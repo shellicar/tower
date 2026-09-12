@@ -1,6 +1,6 @@
 {
  "takenFrom": "/Users/stephen/repos/@shellicar/tower--rail-spaces-spike/spike/rail-spaces/.snapshot/tower-v2-snapshot.db",
- "takenAt": "2026-09-12T08:15:57.688Z",
+ "takenAt": "2026-09-12T08:37:28.061Z",
  "tagKeys": {
   "org": "#8ec07c",
   "repo": "#83a598",
@@ -5604,6 +5604,16 @@
     "parent": null
    },
    {
+    "id": "s-flightrac-transport-graphql",
+    "name": "transport-graphql",
+    "parent": "s-flightrac"
+   },
+   {
+    "id": "s-flightrac-socket-integration",
+    "name": "socket-integration",
+    "parent": "s-flightrac"
+   },
+   {
     "id": "s-swe",
     "name": "swe",
     "parent": null
@@ -5612,6 +5622,16 @@
     "id": "s-hopeventures",
     "name": "hopeventures",
     "parent": null
+   },
+   {
+    "id": "s-hopeventures-circuitbreaker",
+    "name": "CircuitBreaker",
+    "parent": "s-hopeventures"
+   },
+   {
+    "id": "s-hopeventures-claude-fleet-hopeventures",
+    "name": "claude-fleet-hopeventures",
+    "parent": "s-hopeventures"
    }
   ],
   "placements": []
@@ -5621,6 +5641,6 @@
   "titled": 632,
   "tagged": 236,
   "placed": 0,
-  "spaces": 6
+  "spaces": 10
  }
 }

@@ -88,16 +88,13 @@ export class Layout {
     if (this.#shown !== null && going.has(this.#shown)) this.#shown = null;
   }
 
-  /** Put a conversation in a space, which takes it out of wherever it was:
-   *  one placement per conversation. Placing into the space it already sits in
-   *  keeps its position and draws it. */
+  /** Put a conversation in a space, which takes it out of wherever it was: one
+   *  placement per conversation. Never removes and never reorders, so the
+   *  operation is the same sentence however many times it runs: this
+   *  conversation is in this space. Already there, nothing happens. */
   place(conv: ConvId, space: SpaceId): void {
     if (!this.#spaces.some((s) => s.id === space)) return;
-    const held = this.#placements.get(conv);
-    if (held?.space === space) {
-      held.drawn = true;
-      return;
-    }
+    if (this.#placements.get(conv)?.space === space) return;
     this.#placements.delete(conv);
     this.#placements.set(conv, { conv, space, drawn: true });
   }
@@ -106,22 +103,20 @@ export class Layout {
     this.#placements.delete(conv);
   }
 
-  /** The one gesture that files and unfiles: in this space already, it comes
-   *  out; anywhere else or nowhere, it goes in. */
-  togglePlacement(conv: ConvId, space: SpaceId): void {
-    if (this.#placements.get(conv)?.space === space) this.unplace(conv);
-    else this.place(conv, space);
-  }
-
   /** Stop drawing it without taking it out of its space. */
   minimise(conv: ConvId): void {
     const held = this.#placements.get(conv);
     if (held !== undefined) held.drawn = false;
   }
 
+  /** Draw it again, last among the others. Appending rather than returning it
+   *  to where it sat is what makes minimise-then-restore the way to reorder a
+   *  space. */
   restore(conv: ConvId): void {
     const held = this.#placements.get(conv);
-    if (held !== undefined) held.drawn = true;
+    if (held === undefined) return;
+    this.#placements.delete(conv);
+    this.#placements.set(conv, { ...held, drawn: true });
   }
 
   showSpace(space: SpaceId | null): void {
@@ -129,13 +124,15 @@ export class Layout {
     this.#shown = space;
   }
 
-  /** Go to where a conversation lives, changing nothing else. A conversation
-   *  living nowhere has nowhere to go, and this reports that rather than
-   *  inventing somewhere. */
+  /** Go to where a conversation lives and show it. One operation, so running
+   *  it again lands in the same state rather than putting the thing away. A
+   *  conversation living nowhere has nowhere to go, and this reports that
+   *  rather than inventing somewhere. */
   goTo(conv: ConvId): boolean {
     const held = this.#placements.get(conv);
     if (held === undefined) return false;
     this.#shown = held.space;
+    if (!held.drawn) this.restore(conv);
     return true;
   }
 

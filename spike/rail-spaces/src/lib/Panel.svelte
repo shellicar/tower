@@ -3,7 +3,12 @@
   import MessageView from './MessageView.svelte';
   import { messagesFor, usageFor } from './content';
 
-  const { row, onMinimise }: { row: Row; onMinimise: () => void } = $props();
+  const {
+    row,
+    arrived,
+    onMinimise,
+    onUnplace,
+  }: { row: Row; arrived: boolean; onMinimise: () => void; onUnplace: () => void } = $props();
 
   const messages = $derived(messagesFor(row));
   const usage = $derived(usageFor(row));
@@ -12,14 +17,25 @@
   const formatUsd = (n: number) => `$${n.toFixed(2)}`;
 </script>
 
-<section class="flex h-full min-w-[480px] flex-1 flex-col border-r border-neutral-700">
+<section
+  class="flex h-full min-w-[480px] flex-1 flex-col border-r border-neutral-700 {arrived
+    ? 'ring-2 ring-sky-500/70 ring-inset'
+    : ''}"
+>
   <header class="flex items-center justify-between gap-2 border-b border-neutral-700 px-3 py-2">
     <span class="min-w-0 truncate text-sky-300">{row.title ?? row.conv}</span>
-    <button
-      class="cursor-pointer text-base text-neutral-400 hover:text-neutral-200"
-      title="clear it off the screen; it stays in this space"
-      onclick={onMinimise}>×</button
-    >
+    <span class="flex shrink-0 items-center gap-2">
+      <button
+        class="cursor-pointer text-base text-neutral-400 hover:text-neutral-200"
+        title="put it away: off the screen, still in this space"
+        onclick={onMinimise}>–</button
+      >
+      <button
+        class="cursor-pointer text-base text-neutral-400 hover:text-red-400"
+        title="take it out of this space: it goes back to living nowhere"
+        onclick={onUnplace}>×</button
+      >
+    </span>
   </header>
   <div class="min-h-0 flex-1 overflow-y-auto px-3 py-2">
     {#each messages as message (message.id)}
