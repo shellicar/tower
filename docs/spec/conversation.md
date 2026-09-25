@@ -591,7 +591,7 @@ const turnRef = { queryId: z.string(), turnId: z.string() };
 
 // conv.v2.{conversationId}.telemetry.>
 export const conversationTelemetry = {
-  'turn.started': z.looseObject({ ts, ...turnRef, service: z.string(), model: z.string(), thinking: z.boolean(), effort: z.string().optional(), maxTokens: z.number().int() }),
+  'turn.started': z.looseObject({ ts, ...turnRef, service: z.string(), model: z.string(), thinking: z.boolean(), effort: z.string().optional(), maxTokens: z.number().int().optional() }),
   'turn.ended': z.looseObject({ ts, ...turnRef, stopReason: z.string() }),
   'turn.cancelled': z.looseObject({ ts, ...turnRef }),
   'turn.aborted': z.looseObject({ ts, ...turnRef }),
