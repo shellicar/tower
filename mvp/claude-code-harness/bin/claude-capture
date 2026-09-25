@@ -1,0 +1,4 @@
+#!/bin/sh
+# The SDK's pathToClaudeCodeExecutable. No file extension, so the SDK runs it
+# directly as a native binary rather than handing it to a JS runtime.
+exec node --disable-warning=ExperimentalWarning "$(dirname "$0")/../src/capture.mts" "$@"

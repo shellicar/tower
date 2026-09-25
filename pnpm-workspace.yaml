@@ -1,4 +1,5 @@
 packages:
+  - mvp/claude-code-harness
   - mvp/frontend-svelte
   - mvp/scripts
   - scripts
