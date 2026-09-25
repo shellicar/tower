@@ -66,8 +66,8 @@ pub struct TurnStarted {
     pub thinking: bool,
     #[serde(default)]
     pub effort: Option<String>,
-    #[serde(rename = "maxTokens")]
-    pub max_tokens: i64,
+    #[serde(rename = "maxTokens", default)]
+    pub max_tokens: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

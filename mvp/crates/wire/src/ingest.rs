@@ -352,6 +352,18 @@ mod tests {
     }
 
     #[test]
+    fn turn_started_without_max_tokens_is_still_a_turn_start() {
+        // maxTokens is optional (conversation.md): a publisher that can't see
+        // its own limit still starts turns, and towerd/helm must count them.
+        let payload = br#"{"ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false}"#;
+        let event = conv_event("conv.v2.conv-abc.telemetry.turn.started", payload);
+        assert!(matches!(
+            event.kind,
+            EventKind::Telemetry(ConvTelemetry::TurnStarted(_))
+        ));
+    }
+
+    #[test]
     fn deltas_discriminate_on_the_body_type() {
         let event = conv_event(
             "conv.v2.conv-abc.deltas",
