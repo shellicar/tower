@@ -4,9 +4,10 @@
 //
 // It sets nothing about Claude Code's behaviour. Model, permission mode,
 // tools, messages and interrupts come from the proof. What it does set:
-// CLAUDE_CONFIG_DIR (a fresh directory per run) and
-// pathToClaudeCodeExecutable (the capture wrapper, which runs the SDK's own
-// bundled binary).
+// CLAUDE_CONFIG_DIR (a fresh directory per run), CLAUDE_SECURESTORAGE_CONFIG_DIR
+// (empty, for the shared login), pathToClaudeCodeExecutable (the capture
+// wrapper, which runs the SDK's own bundled binary), and it strips a parent
+// Claude Code session's variables from the environment.
 
 import { createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -21,13 +22,42 @@ const PACKAGE_ROOT = join(HERE, '..');
 const RUNS_ROOT = join(PACKAGE_ROOT, 'runs');
 const WRAPPER = join(PACKAGE_ROOT, 'bin', 'claude-capture');
 
-// TODO: undecided. Where the live config directory lives. It is outside the
-// repo because, depending on the login way Stephen picks, Claude Code may
-// write credentials into it, and no credential may land under the repo; the
-// run directory gets a filtered copy. Alternatives: under runs/ (everything
-// in one place, but credentials could land in the repo), or deleted after
-// the copy (nothing lingers, but a later proof can't inspect or resume it).
+// TODO: undecided. Where the live config directory lives, and whether it is
+// kept. Outside the repo, kept, is what's built: nothing Claude Code writes
+// there can reach the repo unfiltered (with the shared login no credential
+// file should be written there, but that rests on the login staying shared),
+// and the run directory gets a filtered copy. Alternatives: under runs/
+// (everything in one place, but anything Claude Code writes lands in the repo
+// unfiltered), or deleted after the copy (nothing lingers, but a later proof
+// can't inspect or resume it).
 const CONFIG_DIRS_ROOT = join(homedir(), '.local', 'state', 'tower-claude-code-harness', 'config-dirs');
+
+// What a parent Claude Code session passes down to the processes it starts.
+// Source: claude 2.1.282, the env it builds for child processes (CLAUDECODE,
+// CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_CHILD_SESSION,
+// CLAUDE_CODE_SESSION_ATTENDED, CLAUDE_PID, AI_AGENT, CLAUDE_EFFORT), its
+// Bash tool's list (adds CLAUDE_CODE_EXECPATH, CLAUDE_CODE_INVOKED_SKILLS),
+// its MCP/hook env (CLAUDE_PROJECT_DIR), and what a live session's shell was
+// seen to hold (CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_MESSAGING_SOCKET,
+// CLAUDE_CODE_MESSAGING_TOKEN, CLAUDE_CODE_BRIDGE_SESSION_ID). Generic names
+// it also sets (GIT_EDITOR, TRACEPARENT, TMPDIR) are left alone: a user's
+// own shell sets those too.
+const PARENT_SESSION_VARS = [
+  'CLAUDECODE',
+  'CLAUDE_PID',
+  'CLAUDE_EFFORT',
+  'AI_AGENT',
+  'CLAUDE_PROJECT_DIR',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_SESSION_ATTENDED',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_EXECPATH',
+  'CLAUDE_CODE_INVOKED_SKILLS',
+  'CLAUDE_CODE_MESSAGING_SOCKET',
+  'CLAUDE_CODE_MESSAGING_TOKEN',
+  'CLAUDE_CODE_BRIDGE_SESSION_ID',
+];
 
 // Files never copied out of the config directory, whatever they hold.
 const NEVER_COPY = new Set(['.credentials.json']);
@@ -220,19 +250,27 @@ export function startRun(args: StartRunArgs): Run {
 
   const realBinary = resolveRealBinary();
 
-  // TODO: undecided. Whether to strip the environment inherited from a
-  // parent Claude Code session. When a proof runs from inside Claude Code,
-  // CLAUDECODE, CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_SESSION_ID,
-  // CLAUDE_CODE_MESSAGING_SOCKET/TOKEN, CLAUDE_EFFORT and others are in
-  // process.env and reach the child unchanged (the SDK only sets
-  // CLAUDE_CODE_ENTRYPOINT when it's absent). Passing them through is the
-  // SDK's default and what's built; stripping them keeps the parent out of
-  // the proof but is a filter the harness would be choosing.
+  // A parent Claude Code's session variables are stripped (Stephen, 26 Sep:
+  // the runs are isolated), from options.env too, since a proof building its
+  // env from process.env would carry them in.
+  const base: Record<string, string | undefined> = { ...(options.env ?? process.env) };
+  const stripped = PARENT_SESSION_VARS.filter((name) => name in base);
+  for (const name of stripped) {
+    delete base[name];
+  }
+
+  // The login (Stephen, 26 Sep, way 1): settings and config in the run's own
+  // CLAUDE_CONFIG_DIR, the login in the default store. An empty
+  // CLAUDE_SECURESTORAGE_CONFIG_DIR makes Claude Code use ~/.claude for the
+  // credential file, its refresh lock and (macOS) the default Keychain item,
+  // so this run and Stephen's own Claude Code share one login and one
+  // refresh lock. Undocumented in 2.1.282; see README.
   //
   // CLAUDE_CONFIG_DIR is always the run's own, even if options.env names one.
   const env: Record<string, string | undefined> = {
-    ...(options.env ?? process.env),
+    ...base,
     CLAUDE_CONFIG_DIR: configDir,
+    CLAUDE_SECURESTORAGE_CONFIG_DIR: '',
     HARNESS_CAPTURE_DIR: captureDir,
     HARNESS_REAL_CLAUDE: realBinary,
   };
@@ -246,6 +284,7 @@ export function startRun(args: StartRunArgs): Run {
       realBinary,
       wrapper: WRAPPER,
       sdkVersion: sdkVersion(),
+      strippedEnv: stripped,
       options: describeOptions(options),
     }),
   );
