@@ -255,7 +255,14 @@ export class Publisher {
           // TODO: undecided. The API's message id and request id, which
           // Claude Code reads back from the last assistant entry on resume
           // (diagnostics.previous_message_id, billing header cc_prev_req).
-          ccResponse: { messageId: msgId, ...(typeof item.entry.requestId === 'string' ? { requestId: item.entry.requestId } : {}) },
+          ccResponse: {
+            messageId: msgId,
+            ...(typeof item.entry.requestId === 'string' ? { requestId: item.entry.requestId } : {}),
+            // Proof 20: Claude Code's own assistant entry for an API error
+            // (e.g. the output limit), never sent to the model; load() must
+            // mark it so again. TODO: undecided (publish it, and how).
+            ...(item.entry.isApiErrorMessage === true ? { isApiErrorMessage: true, model: msg.model, ...(item.entry.apiError !== undefined ? { apiError: item.entry.apiError } : {}) } : {}),
+          },
         });
         this.timing.write({ at: stamp(), seq, role: 'assistant', id: item.entry.uuid, appendedAt: item.appendedAt, waitAfterAppendMs: Date.now() - item.appendedMs, publishedMs: Date.now(), msgId, turnId });
         await this.drainUsage(msgId);

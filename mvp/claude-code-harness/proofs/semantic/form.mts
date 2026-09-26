@@ -195,11 +195,12 @@ export function rebuild(messages: TowerMessage[], modelByTurn: Map<string, strin
       // publish.mts), else the turnId, so the pieces of one response join.
       const r = m.ccResponse as Json | undefined;
       const message: Json = { id: typeof r?.messageId === 'string' ? r.messageId : m.turnId, type: 'message', role: 'assistant', content: m.content };
-      const model = modelByTurn.get(m.turnId);
+      const model = r?.isApiErrorMessage === true ? r.model : modelByTurn.get(m.turnId);
       if (model) {
         message.model = model;
       }
-      out.push({ ...common, uuid: m.id, type: 'assistant', ...(typeof r?.requestId === 'string' ? { requestId: r.requestId } : {}), message });
+      const apiError = r?.isApiErrorMessage === true ? { isApiErrorMessage: true, ...(r.apiError !== undefined ? { apiError: r.apiError, error: r.apiError } : {}) } : {};
+      out.push({ ...common, uuid: m.id, type: 'assistant', ...(typeof r?.requestId === 'string' ? { requestId: r.requestId } : {}), ...apiError, message });
       continue;
     }
     // Strict: only the entries that produced something the model saw.
