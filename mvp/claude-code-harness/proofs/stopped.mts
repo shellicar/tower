@@ -1625,14 +1625,25 @@ function analyseDrive(driveDir: string): string {
   for (const c of hs.conversations) {
     w();
     w(`== ${c.label}: run ${relative(PACKAGE_ROOT, c.runDir)}; session ${c.sessionId}${c.resumedFrom ? ' (resumed through the store)' : ''}`);
-    const file = findTranscript(c);
-    if (!file) {
+    // The final transcript is copied (redacted) into the drive dir the first
+    // time the drive is analysed: a resumed one lives only in /tmp, and a run
+    // whose host died never got the harness's config-dir copy.
+    const saved = join(driveDir, 'transcripts', `${c.label}.jsonl`);
+    const savedFrom = `${saved}.source`;
+    const live = findTranscript(c);
+    if (live && !existsSync(saved)) {
+      mkdirSync(dirname(saved), { recursive: true });
+      writeFileSync(saved, redact(readFileSync(live, 'utf8')).text);
+      writeFileSync(savedFrom, `${live}\n`);
+    }
+    if (!existsSync(saved)) {
       w('  transcript: not found (config dir or /tmp/claude-resume-*)');
       continue;
     }
-    const root = file.slice(0, file.indexOf('/projects/'));
-    w(`  transcript left at ${file}${root.startsWith(tmpdir()) ? ' (SDK resume temp dir)' : ' (the run\'s config dir)'}`);
-    const lines = transcriptLinesOf(file, root);
+    const origin = readFileSync(savedFrom, 'utf8').trim();
+    const root = origin.slice(0, origin.indexOf('/projects/'));
+    w(`  transcript left at ${origin}${root.startsWith(tmpdir()) ? ' (SDK resume temp dir)' : " (the run's config dir)"}; copy: ${relative(PACKAGE_ROOT, saved)} (line numbers below are its lines)`);
+    const lines = transcriptLinesOf(saved, dirname(saved));
     const stored = storeEntries(c.runDir);
     // A resumed transcript starts with what load() returned; those lines are
     // the ones before this run's first append.
@@ -1641,7 +1652,7 @@ function analyseDrive(driveDir: string): string {
       const firstIdx = lines.findIndex((l) => l.canon === stored[0]?.canon);
       loaded = lines.slice(0, Math.max(0, firstIdx)).map((l) => l.canon);
     }
-    const abs = (l: Line): string => `${join(root, l.file)}:${l.line}`;
+    const abs = (l: Line): string => `${origin}:${l.line}`;
     const { rows, notInStore } = lineTable(lines, stored, loaded, seen, abs, t0, windows);
     w(`  ${lines.length} lines; ${loaded.length} loaded by resume; ${stored.length} appended this run; ${notInStore.length} lines NOT in the store (${notInStore.reduce((n, l) => n + l.bytes, 0)} bytes)`);
     w(`  ${flagsSummary(lines, stored)}`);
