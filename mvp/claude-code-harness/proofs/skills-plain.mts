@@ -39,7 +39,7 @@ import { startRun } from '../src/harness.mts';
 import { redact, stamp } from '../src/record.mts';
 
 const [model, scenario] = process.argv.slice(2);
-const SCENARIOS = ['user-closed', 'user-open', 'user-open-late', 'user-open-links', 'user-open-nosync', 'managed', 'project-adddir', 'canusetool-closed', 'canusetool-open', 'register-root-open', 'bare-adddir', 'bare-adddir-closed'];
+const SCENARIOS = ['user-closed', 'user-open', 'user-open-late', 'user-open-links', 'user-open-nosync', 'managed', 'project-adddir', 'project-config-root-open', 'canusetool-closed', 'canusetool-open', 'register-root-open', 'bare-adddir', 'bare-adddir-closed'];
 if (!model || !scenario || !SCENARIOS.includes(scenario)) {
   process.stderr.write(`usage: node proofs/skills-plain.mts <model> <${SCENARIOS.join('|')}>\n`);
   process.exit(2);
@@ -183,6 +183,7 @@ function instrument(name: string): { bodiesDir: string; debugFile: string; env: 
 
 interface Listing {
   ts: string;
+  isInitial: boolean;
   names: string[];
   skillCount: number;
   content: string;
@@ -223,20 +224,22 @@ function report(runDir: string, bodiesDir: string, extraFiles: Record<string, st
   const lines = transcriptLines(runDir);
   const listings: Listing[] = [];
   for (const rec of lines) {
-    const att = rec.attachment as { type?: string; names?: string[]; skillCount?: number; content?: string } | undefined;
-    if (att?.type === 'skill_listing') listings.push({ ts: String(rec.timestamp), names: att.names ?? [], skillCount: att.skillCount ?? -1, content: att.content ?? '' });
+    const att = rec.attachment as { type?: string; names?: string[]; skillCount?: number; content?: string; isInitial?: boolean } | undefined;
+    if (att?.type === 'skill_listing') listings.push({ ts: String(rec.timestamp), isInitial: att.isInitial === true, names: att.names ?? [], skillCount: att.skillCount ?? -1, content: att.content ?? '' });
   }
   log(`skill_listing attachments (${listings.length}), p19 names only; the rest are the account's built-ins:`);
   for (const l of listings) {
     const p19 = l.names.filter((n) => n.includes('p19'));
     const markers = [...l.content.matchAll(/MARKER=(\w+)/g)].map((m) => m[1]);
-    log(`  ${l.ts} skillCount=${l.skillCount} p19=${JSON.stringify(p19)} markers=${JSON.stringify(markers)}`);
+    log(`  ${l.ts} isInitial=${l.isInitial} skillCount=${l.skillCount} p19=${JSON.stringify(p19)} markers=${JSON.stringify(markers)}`);
   }
   const commandNames = lines
     .map((rec) => JSON.stringify(rec))
     .flatMap((s) => [...s.matchAll(/<command-name>([^<]*)<\/command-name>/g)].map((m) => m[1]))
     .filter((v, i, a) => a.indexOf(v) === i);
   log(`<command-name> values in the transcript: ${JSON.stringify(commandNames)}`);
+  const bodyMarkers = [...new Set(lines.map((rec) => JSON.stringify(rec)).flatMap((t) => [...t.matchAll(/BODY-MARKER-\w+/g)].map((m) => m[0])))];
+  log(`BODY-MARKER values anywhere in the transcript: ${JSON.stringify(bodyMarkers)}`);
   const attachmentTypes = [...new Set(lines.map((rec) => (rec.attachment as { type?: string } | undefined)?.type).filter(Boolean))];
   log(`transcript attachment types: ${JSON.stringify(attachmentTypes)}`);
 
@@ -292,6 +295,9 @@ async function liveSequence(run: Run, dirs: { A: string; B: string }, repoint: (
   log(`re-pointed to ${dirs.B}; settling ${SETTLE_MS}ms`);
   await sleep(SETTLE_MS);
   await turn(run, 'T5 after re-point, no reload call', OK);
+  // Is a re-point a removal, or only an addition? Invoke a skill that is
+  // only in the old directory, still with no reload call.
+  await turn(run, 'T5b invoke /p19-a1 (only in the old directory), no reload call', '/p19-a1');
 
   await reloadSkills(run, 'after re-point');
   await turn(run, 'T6 after reloadSkills()', OK);
@@ -448,6 +454,40 @@ try {
     const run = startRun({ name, options: { model, debugFile: inst.debugFile, env: inst.env } });
     log(`run dir: ${run.dir}`);
     await liveSequence(run, dirs, () => swapLink(link, dirs.B));
+    // Managed is not watched. A body-only edit (description unchanged), no
+    // reload: is the new body what an invocation injects?
+    writeSkill(dirs.B, 'p19-b1', 'B', '', 'BODY-MARKER-V2. Reply with the single word DONE.');
+    log(`edited p19-b1's body only (BODY-MARKER-V2), no reload call`);
+    await turn(run, 'T7 invoke /p19-b1 after a body-only edit, no reload call', '/p19-b1');
+    // What a reload costs when nothing changed: does each one re-attach a
+    // full listing?
+    await reloadSkills(run, 'no change 1');
+    await turn(run, 'T8 after reloadSkills() with nothing changed', OK);
+    await reloadSkills(run, 'no change 2');
+    await turn(run, 'T9 after a second reloadSkills() with nothing changed', OK);
+    await finish(run, inst.bodiesDir, { declaredDirHook: dirs.hookRanDecl, skillFrontmatterHook: dirs.hookRanSkill, pluginShapedEntryHook: dirs.hookRanPluginShaped });
+  } else if (scenario === 'project-config-root-open') {
+    // projectConfigRoot as the skill source, projectSettings opened:
+    // <projectConfigRoot>/.claude/skills is a symlink to the declared
+    // directory. Same CLAUDE.md guard as project-adddir.
+    const dirs = declaredDirs();
+    const pcr = join(root, 'pcr');
+    mkdirSync(join(pcr, '.claude'), { recursive: true });
+    const link = join(pcr, '.claude', 'skills');
+    symlinkSync(dirs.A, link);
+    const run = startRun({
+      name,
+      options: {
+        model,
+        debugFile: inst.debugFile,
+        env: { ...inst.env, CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' },
+        extraArgs: { 'setting-sources': 'project' },
+        projectConfigRoot: pcr,
+      },
+    });
+    log(`run dir: ${run.dir}\nprojectConfigRoot: ${pcr} (.claude/skills -> ${dirs.A})`);
+    await liveSequence(run, dirs, () => swapLink(link, dirs.B));
+    await hooksAndRules(run, 'end');
     await finish(run, inst.bodiesDir, { declaredDirHook: dirs.hookRanDecl, skillFrontmatterHook: dirs.hookRanSkill, pluginShapedEntryHook: dirs.hookRanPluginShaped });
   } else if (scenario === 'project-adddir') {
     // additionalDirectories with projectSettings opened. The add-dir is a
@@ -565,6 +605,7 @@ try {
     log(`re-pointed ${join(child, '.claude', 'skills')} to ${dirs.B}; settling ${SETTLE_MS}ms`);
     await sleep(SETTLE_MS);
     await turn(run, 'T4 after re-point, no reload call', OK);
+    await turn(run, 'T5 invoke /p19-a1 (only in the old directory), no reload call', '/p19-a1');
     await finish(run, inst.bodiesDir, { declaredDirHook: dirs.hookRanDecl, pluginShapedEntryHook: dirs.hookRanPluginShaped });
   } else if (scenario === 'bare-adddir' || scenario === 'bare-adddir-closed') {
     // --bare with projectSettings opened and one add-dir. The binary's
