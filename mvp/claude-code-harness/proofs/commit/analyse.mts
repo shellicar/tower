@@ -16,7 +16,7 @@
 //
 //   node proofs/commit/analyse.mts <index.json> [...]   (writes next to it)
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 type Json = Record<string, unknown>;
@@ -212,6 +212,20 @@ interface Kept {
   toolUses: string[];
   toolResults: string[];
   markers: string[];
+  previous?: string;
+  continues?: string;
+}
+
+// A continue request carries only new messages; the model gets the thread the
+// server holds up to previous_message_id. Which of the step's responses is it?
+function describeContinue(r: RunData, previous: string | undefined, from: number, to: number): string {
+  const starts = r.events.filter((e) => e.ms >= from && e.ms < to && e.src === 'sdk' && e.kind === 'stream:message_start' && e.parent === null).map((e) => String(e.id));
+  const stops = r.events.filter((e) => e.ms >= from && e.ms < to && e.src === 'sdk' && e.kind === 'stream:message_stop' && e.parent === null).length;
+  const i = previous === undefined ? -1 : starts.indexOf(previous);
+  if (i < 0) {
+    return `not a response of this step (the step's responses: ${starts.join(', ') || 'none'})`;
+  }
+  return `the step's response ${i + 1} of ${starts.length} (${stops} message_stop seen in the step)`;
 }
 
 const isReminder = (t: string): boolean => t.startsWith('<system-reminder>');
@@ -259,7 +273,7 @@ function groundTruth(r: RunData, afterMs: number, probe: string, model: string, 
     const key = promptText.slice(0, 40);
     let start = msgs.findIndex((m) => JSON.stringify(m.content).includes(key));
     const lines: string[] = [];
-    const k: Kept = { run: r.dir, file: String(q.file), seenMs: q.ms, thread, lines, prompt: 'absent', thinkingSigs: [], textChars: 0, toolUses: [], toolResults: [], markers: [] };
+    const k: Kept = { previous: (body.thread as Json).previous_message_id as string | undefined, run: r.dir, file: String(q.file), seenMs: q.ms, thread, lines, prompt: 'absent', thinkingSigs: [], textChars: 0, toolUses: [], toolResults: [], markers: [] };
     if (start < 0) {
       k.prompt = thread === 'continue' ? `not in body (continue from ${String((body.thread as Json).previous_message_id)})` : 'absent';
       start = Math.max(0, msgs.length - 3);
@@ -372,6 +386,27 @@ function analyseCell(row: Json, out: string[], summary: Json[]): void {
     out.push(`stop: ${String(trig.method)} aimed at ${String(trig.ending)}; issued ${st.how ? `on ${st.how}` : 'never'}; actual: ${st.actual}`);
     out.push(`  at the stop: ${st.messageStarts} message_start(s); blocks ${st.blocks.map((b) => `${b.type}[${b.chars}ch${b.open ? ', open' : ''}]`).join(', ') || 'none'}; PreToolUse ${st.preToolUse}; PostToolUse ${st.postToolUse}`);
     out.push(`  streamed after the stop: ${st.after.join(', ') || 'nothing'}`);
+    // The capture wrapper's record of the binary's end: signals the SDK sent
+    // it and its exit, on the wall clock (ts), against the stop's ts.
+    const stopTs = main.events.find((e) => e.src === 'proof' && e.kind === 'stop')?.ts;
+    for (const n of existsSync(join(main.dir, 'claude')) ? readdirSync(join(main.dir, 'claude')) : []) {
+      const f = join(main.dir, 'claude', n, 'exit.json');
+      if (existsSync(f) && stopTs) {
+        const x = JSON.parse(readFileSync(f, 'utf8')) as Json;
+        // Each process stamps from its own start-time wall clock, and WSL
+        // steps the wall clock, so align the wrapper's clock to ours by the
+        // step's prompt: its stdin line against our send.
+        const parse = (ts: string): number => Date.parse(ts.replace(/(\.\d{3})\d+Z$/, '$1Z'));
+        const stdinLine = readFileSync(join(main.dir, 'claude', n, 'stdin.txt'), 'utf8')
+          .split('\n')
+          .find((l) => l.includes(JSON.stringify(promptText).slice(1, 40)));
+        const sendTs = main.events.find((e) => e.src === 'proof' && e.kind === 'send' && e.step === 1)?.ts;
+        const offset = stdinLine && sendTs ? parse(stdinLine.slice(0, stdinLine.indexOf(' '))) - parse(sendTs) : 0;
+        const rel = (ts: unknown): string => `${((parse(String(ts)) - offset - parse(stopTs)) / 1000).toFixed(3)} s`;
+        const sigs = ((x.forwardedSignals as Json[] | undefined) ?? []).map((g) => `${String(g.signal)} at ${rel(g.at)}`);
+        out.push(`  binary ${n}: ${sigs.join(', ') || 'no signals'}; exited at ${rel(x.exitedAt)} after the stop, code ${String(x.code)}, signal ${String(x.signal)}`);
+      }
+    }
   }
   out.push('', 'what Claude Code wrote (transcript lines in the step, ms from the step\'s send; S = the store got it):');
   for (const l of w.lines) {
@@ -395,7 +430,11 @@ function analyseCell(row: Json, out: string[], summary: Json[]): void {
       }
     }
   } else {
-    kepts.push(['same process', groundTruth(main, sendMs(main, 2) ?? Infinity, PROBE, model, promptText)]);
+    const same = groundTruth(main, sendMs(main, 2) ?? Infinity, PROBE, model, promptText);
+    if (same && same.thread === 'continue') {
+      same.continues = describeContinue(main, same.previous, stepFrom, stepTo);
+    }
+    kepts.push(['same process', same]);
     if (resumes.transcript) {
       const r = load(String(resumes.transcript));
       kepts.push(['resume from transcript (AGAIN probe)', groundTruth(r, 0, PROBE_AGAIN, model, promptText)]);
@@ -412,8 +451,11 @@ function analyseCell(row: Json, out: string[], summary: Json[]): void {
     for (const l of k.lines) {
       out.push(`    ${l}`);
     }
+    if (k.continues) {
+      out.push(`  continues the server-side thread from ${k.previous}: ${k.continues}`);
+    }
     out.push(`  prompt: ${k.prompt}; thinking kept: ${k.thinkingSigs.length}; reply text kept: ${k.textChars}ch; tool_use kept: ${k.toolUses.length}; tool_results: ${k.toolResults.length}; markers: ${JSON.stringify(k.markers)}`);
-    keptSummary[label] = { prompt: k.prompt, thinking: k.thinkingSigs.length, textChars: k.textChars, toolUses: k.toolUses.length, toolResults: k.toolResults, markers: k.markers, thread: k.thread, file: `${k.run}/api-bodies/${k.file}` };
+    keptSummary[label] = { continues: k.continues ?? null, prompt: k.prompt, thinking: k.thinkingSigs.length, textChars: k.textChars, toolUses: k.toolUses.length, toolResults: k.toolResults, markers: k.markers, thread: k.thread, file: `${k.run}/api-bodies/${k.file}` };
   }
   // Written vs streamed, for the reply.
   const wroteThinking = w.lines.filter((l) => l.entry.type === 'assistant' && Array.isArray(l.entry.content) && (l.entry.content as Json[]).some((b) => b.type === 'thinking')).length;

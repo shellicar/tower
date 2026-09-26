@@ -22,8 +22,10 @@
 //   transcript  resume with no sessionStore: Claude Code loads its own
 //               transcript from the config directory
 // After an abort both run (the probe is sent into each). After an interrupt
-// the transcript resume runs too, with a second probe, to compare what is on
-// disk with what the running Claude Code had in memory.
+// (and after a cell with no stop) the transcript resume runs too, with a
+// second probe, to compare what is on disk with what the running Claude Code
+// had in memory, and to get the history whole when the probe's request only
+// continues a server-side thread.
 //
 // Every candidate signal is recorded in the same runs, passively, into
 // commit-events.jsonl: SDK messages (stream events, per-block assistant
@@ -123,12 +125,21 @@ const PROMPTS: Record<Ending, string> = {
   'tool-exec': 'Run this exact Bash command, once: `sleep 20; echo DONE`. Then reply with its output only.',
 };
 
+// The retry cell: Claude Code's own API timeout, set short enough that every
+// attempt fails (Haiku, 27 Sep: API_TIMEOUT_MS 800 failed every attempt; 830,
+// 870, 950, 1000, 1100 and 2500 never timed out; CLAUDE_STREAM_FIRST_BYTE_
+// TIMEOUT_MS is clamped to at least 10 s and produced no retry). So the cell
+// is a request retried and then given up, an API-error ending. A retry that
+// then succeeds was not produced without routing traffic.
+// P23_RETRY_ENV (JSON) overrides it.
+const RETRY_ENV = JSON.parse(process.env.P23_RETRY_ENV ?? '{"API_TIMEOUT_MS":"800","CLAUDE_CODE_MAX_RETRIES":"2"}') as Record<string, string>;
+
 function cells(): Cell[] {
   const out: Cell[] = [
     { id: 'normal', prompt: `What is 17 times 23? Work it out, then reply with the number only. ${NO_TOOLS}` },
     { id: 'thinking-only', prompt: `Think carefully about whether 391 is prime. Then end your turn with an empty reply: write no text at all, not even a single word or punctuation mark. ${NO_TOOLS}` },
     { id: 'thinking-only-limit', prompt: `${HARD} Reply with the number only. ${NO_TOOLS}`, env: { CLAUDE_CODE_MAX_OUTPUT_TOKENS: '256' } },
-    { id: 'retry', prompt: `What is 17 times 23? Work it out, then reply with the number only. ${NO_TOOLS}`, env: { CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS: '1' } },
+    { id: 'retry', prompt: `What is 17 times 23? Work it out, then reply with the number only. ${NO_TOOLS}`, env: RETRY_ENV },
   ];
   for (const ending of ENDINGS) {
     for (const method of ['interrupt', 'abort'] as const) {
@@ -840,7 +851,9 @@ async function runCell(model: string, cell: Cell, index: Json[]): Promise<void> 
       resumes.store = s.dir;
       const t = await runOne({ label: `${label}-resume-transcript`, model, cell: { ...cell, env: undefined }, steps: [PROBE], resume: { sessionId: main.sessionId, source: 'transcript' } });
       resumes.transcript = t.dir;
-    } else if (cell.method === 'interrupt') {
+    } else {
+      // Every other cell: the running Claude Code's view (the probe) is in
+      // the main run; this adds what its own transcript gives back.
       const t = await runOne({ label: `${label}-resume-transcript`, model, cell: { ...cell, env: undefined }, steps: [PROBE_AGAIN], resume: { sessionId: main.sessionId, source: 'transcript' } });
       resumes.transcript = t.dir;
     }
