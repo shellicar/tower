@@ -197,3 +197,41 @@ stamps its own records from the wall clock (`Date`), because the harness's
 
 File-backed stores live under `~/.local/state/tower-claude-code-harness/stores/`
 and debug logs under `.../debug/`, outside the repo.
+
+## Proof 17: recovery when nobody knows how the last run ended
+
+`proofs/recovery.mts` (modes and TODOs at the top of the file). A participant
+is its own process (`participant <spec.json>`). Its spec holds, per
+conversation, only a session id (none for a new one) and the message to say.
+Everything else it knows is a constant in the file: the store root, the
+config-dirs root, `os.tmpdir()`, its working directory and the model. Before
+any Claude Code starts, it runs the same check on every conversation it is
+given a session id for, twice:
+
+- It looks for `<session>.jsonl` under every config dir and every
+  `/tmp/claude-resume-*`.
+- It looks for a matching `sessions/<pid>.json` (live when the pid is alive
+  and `procStart` equals field 22 of `/proc/<pid>/stat`), and for command
+  lines naming the session.
+- It reads each transcript with `importSessionToStore` and appends what the
+  store lacks (by uuid; entries without one by content).
+
+The driver (`case <model> <case> <fresh|resumed>`) ends a participant one way
+and serves again with a new one. It keeps a copy of every transcript line it
+sees (generations kept when a file shrinks or comes back), and scores the
+serve: lost entries, branches in the store, and whether the last-written
+entries are in the resumed Claude Code's first API request
+(`OTEL_LOG_RAW_API_BODIES`).
+
+```sh
+sh proofs/recovery-all.sh <model>     # every case, four lanes
+node proofs/recovery.mts case <model> kill-orphan fresh
+```
+
+Each `runs/<ts>-recovery-<case>-<variant>/` has `driver-log.txt`,
+`ending.json`, `keeper.jsonl`, `seen/`, `result.json` and one directory per
+participant (`spec.json`, `participant-log.txt`, `check-<tag>.json`, and for
+a serve that asks, `score.json` and `first-request-<tag>.json`). The store is
+`~/.local/state/tower-claude-code-harness/stores/proof-17-recovery/`. The
+reboot cases delete only the resume dirs that hold their own sessions, not
+every `/tmp/claude-resume-*`, because other sessions on the machine use them.

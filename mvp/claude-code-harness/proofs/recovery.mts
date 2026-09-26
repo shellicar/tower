@@ -33,7 +33,10 @@
 //
 //   case <model> <case> <fresh|resumed>
 //       case: press1 press2 press3 kill kill-orphan crash claude-kill abort
-//             reboot kill-twice (kill-twice is resumed only)
+//             reboot reboot-later kill-twice (kill-twice is resumed only).
+//       reboot: participant SIGKILLed, then every Claude Code process at
+//       once, then this case's resume dirs deleted. reboot-later: the same
+//       after the orphans have finished on their own.
 //
 //   --analyse <case dir>
 //
@@ -1136,7 +1139,7 @@ function firstRequest(bodies: string): string | null {
   return JSON.stringify(JSON.parse(readFileSync(join(bodies, String(first.request_file)), 'utf8')));
 }
 
-type CaseName = 'press1' | 'press2' | 'press3' | 'kill' | 'kill-orphan' | 'crash' | 'claude-kill' | 'abort' | 'reboot' | 'kill-twice';
+type CaseName = 'press1' | 'press2' | 'press3' | 'kill' | 'kill-orphan' | 'crash' | 'claude-kill' | 'abort' | 'reboot' | 'reboot-later' | 'kill-twice';
 
 const WORDS: Record<string, string> = { R: 'PERIWINKLE', T: 'MARIGOLD' };
 
@@ -1220,6 +1223,7 @@ async function runCase(model: string, name: CaseName, variant: 'fresh' | 'resume
     case 'kill':
     case 'kill-orphan':
     case 'reboot':
+    case 'reboot-later':
     case 'kill-twice':
       process.kill(h.pid, 'SIGKILL');
       log(`KILL: SIGKILL to participant ${h.pid}`);
@@ -1284,6 +1288,16 @@ async function runCase(model: string, name: CaseName, variant: 'fresh' | 'resume
   }
   await sleep(500);
   keeper.scan();
+  if (name === 'reboot-later') {
+    // A reboot after the orphans have finished: /tmp emptied, config dirs
+    // kept. Only this case's own resume dirs are deleted.
+    const mine = resumeDirs().filter((d) => Object.values(sids).some((sid) => subdirs(join(d, 'projects')).some((p) => existsSync(join(p, `${sid}.jsonl`)))));
+    for (const d of mine) {
+      rmSync(d, { recursive: true, force: true });
+    }
+    ending.rebootDeleted = mine;
+    log(`reboot-later: orphans gone; deleted ${JSON.stringify(mine)}`);
+  }
   ending.resumeDirsLeft = resumeDirs().filter((d) => Object.values(sids).some((sid) => subdirs(join(d, 'projects')).some((p) => existsSync(join(p, `${sid}.jsonl`)))));
   log(`after the ending: resume dirs holding these sessions: ${JSON.stringify(ending.resumeDirsLeft)}`);
 
@@ -1311,7 +1325,7 @@ async function runCase(model: string, name: CaseName, variant: 'fresh' | 'resume
 // ---------------------------------------------------------------------------
 
 const [mode, ...rest] = process.argv.slice(2);
-const CASES = ['press1', 'press2', 'press3', 'kill', 'kill-orphan', 'crash', 'claude-kill', 'abort', 'reboot', 'kill-twice'];
+const CASES = ['press1', 'press2', 'press3', 'kill', 'kill-orphan', 'crash', 'claude-kill', 'abort', 'reboot', 'reboot-later', 'kill-twice'];
 if (mode === 'participant' && rest[0]) {
   await participant(rest[0]);
 } else if (mode === 'case' && rest[0] && CASES.includes(rest[1] ?? '') && (rest[2] === 'fresh' || rest[2] === 'resumed')) {

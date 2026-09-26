@@ -15,5 +15,5 @@ lane() {
 lane "press1 fresh" "press1 resumed" "press2 fresh" "press2 resumed" "press3 fresh" &
 lane "press3 resumed" "kill fresh" "kill resumed" "abort fresh" "abort resumed" &
 lane "kill-orphan fresh" "kill-orphan resumed" "crash fresh" "crash resumed" "kill-twice resumed" &
-lane "claude-kill fresh" "claude-kill resumed" "reboot fresh" "reboot resumed" &
+lane "claude-kill fresh" "claude-kill resumed" "reboot fresh" "reboot resumed" "reboot-later fresh" "reboot-later resumed" &
 wait
