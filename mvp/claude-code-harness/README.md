@@ -76,10 +76,9 @@ no session store, and two Claude Codes can meet on one session.
 ## A clean start
 
 `pnpm reset-config-dir <name>`, from `mvp/claude-code-harness/`, is the only
-way to reset an agent's config directory. Never `rm` it, or anything under
-`~/.local/state/tower-claude-code-harness/`, by hand: "deleting is fine /
-what i meant is, we shouldnt make the agents use rm / ie they use a script to
-do it 'safely'" (Stephen, 27 Sep).
+way to reset an agent's config directory; no agent `rm`s a config directory
+by hand: "deleting is fine / what i meant is, we shouldnt make the agents use
+rm / ie they use a script to do it 'safely'" (Stephen, 27 Sep).
 
 ```sh
 pnpm reset-config-dir <name>
