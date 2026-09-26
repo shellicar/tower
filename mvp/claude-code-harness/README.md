@@ -169,3 +169,31 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 7: the participant stopped or killed mid-turn
+
+`proofs/stopped.mts` (modes described at the top of the file). Claude Code is
+spawned by the host directly (the SDK's `spawnClaudeCodeProcess` hook, same
+command line, env and abort signal), not through the capture wrapper, so the
+process tree is host -> claude and a process-group signal arrives once. The
+hook still writes `claude/<n>/` (real pid in `argv.json`) and adds a
+`--debug-file`, copied redacted into the run as `debug-<n>.log`. Proof 7
+stamps its own records from the wall clock (`Date`), because the harness's
+`stamp()` was seen 140-170 ms away from the clock strace and Claude Code use.
+
+- `sh proofs/stopped-q1.sh <model>`: one Claude Code stopped mid-reply and
+  mid-tool by abort, `interrupt()`, SIGINT and SIGTERM, each once under
+  `strace` and once without. Each run has `stop.json`, `strace.txt` (traced)
+  and `analysis.txt`.
+- `sh proofs/stopped-q2.sh <model>` (`GAPS="100 3000"` for other gaps): three
+  Claude Codes, three Ctrl-C presses from a driver process, to the host or to
+  its process group. Each `runs/<ts>-stopped-drive-*/` has `strace.txt`,
+  `host-log.txt`, `drive-log.txt`, `snapshots.jsonl`, `transcript-watch.jsonl`
+  and `analysis.txt`; each Claude Code's own run dir has `store-appends.jsonl`.
+- `node proofs/stopped.mts seed <model>`, then `drive <model> kill-fresh` and
+  `drive <model> kill-resume <seed dir>`: SIGKILL to the host.
+- `node proofs/stopped.mts recover <model> <kill drive dir>`: finds the
+  transcripts, publishes what the store lacks, resumes and asks.
+
+File-backed stores live under `~/.local/state/tower-claude-code-harness/stores/`
+and debug logs under `.../debug/`, outside the repo.
