@@ -243,3 +243,48 @@ export function resumeReport(dirs: string[]): string {
   }
   return `${out.join('\n')}\n`;
 }
+
+// Does a resume send the history the seed sent? The seed's last main request
+// that carried its whole history (not a thread continue) against the
+// resume's first main request, message by message over the seed's length:
+// what Claude Code builds itself on resume (tool_addition blocks, the batching
+// reminder) shows up here as the same or not.
+export function historyReport(seedDir: string, resumeDirs: string[]): string {
+  const out: string[] = [];
+  const index = read(join(seedDir, 'api-bodies'), 'index.jsonl').filter((e) => e.query_source === 'sdk');
+  let seedBody: (Json & { messages: ApiMessage[] }) | undefined;
+  let seedFile = '';
+  for (const e of index) {
+    const b = JSON.parse(readFileSync(join(seedDir, 'api-bodies', String(e.request_file)), 'utf8')) as Json & { messages: ApiMessage[] };
+    if ((b.thread as Json | undefined)?.type !== 'continue') {
+      seedBody = b;
+      seedFile = String(e.request_file);
+    }
+  }
+  if (!seedBody) {
+    return 'no seed request with its whole history\n';
+  }
+  out.push(`== seed ${seedDir.split('/').slice(-1)[0]} ${seedFile.slice(0, 8)}: ${seedBody.messages.length} messages`);
+  for (const d of resumeDirs) {
+    const r = firstMain(d);
+    if (!r) {
+      out.push(`   ${d}: no main request`);
+      continue;
+    }
+    const diffs: number[] = [];
+    for (let i = 0; i < seedBody.messages.length; i += 1) {
+      const a = seedBody.messages[i] as ApiMessage;
+      const b = r.body.messages[i];
+      if (!b || msgKey(a) !== msgKey(b)) {
+        diffs.push(i);
+      }
+    }
+    const types = (m: ApiMessage | undefined): string => (m ? blocksOf(m.content).map((b) => b.type).join(',') : '-');
+    out.push(`-- ${r.source} ${d.split('/').slice(-1)[0]}: the seed's history ${diffs.length === 0 ? 'sent again unchanged' : `differs at ${diffs.join(', ')}`}`);
+    for (const i of diffs.slice(0, 8)) {
+      out.push(`      [${i}] seed:   ${describe(seedBody.messages[i])} [${types(seedBody.messages[i])}]`);
+      out.push(`           resume: ${describe(r.body.messages[i])} [${types(r.body.messages[i])}]`);
+    }
+  }
+  return `${out.join('\n')}\n`;
+}
