@@ -111,13 +111,13 @@ for (const logPath of process.argv.slice(2)) {
     const sigs = trace.filter((s) => s.pid === pid && s.t >= death - 50 && s.kind === 'signal' && s.signal !== 'SIGPIPE').map((s) => `${s.signal} from ${who(s.from, pid)} at +${s.t - death} ms`);
     const pipes = trace.filter((s) => s.pid === pid && s.signal === 'SIGPIPE').length;
     const exit = trace.find((s) => s.pid === pid && s.kind === 'exit');
-    // The orphan's transcript: the file of this session that grew between the
-    // held serve's message and the death (the keeper can miss a pid file
-    // removed within its 20 ms scan).
-    const heldAt = new Date(String(c.sentAt)).getTime();
+    // The orphan's transcript: in the CLAUDE_CONFIG_DIR its spawn was given
+    // (the agent's config dir when fresh, its resume dir when resumed), as its
+    // argv.json records.
+    const argv = readJson(join(String(c.runDir), 'claude', '1', 'argv.json'));
+    const root = argv ? String(argv.configDir) : null;
     const sizeOf = keeper.filter((k) => k.event === 'size' && String(k.file).endsWith(`/${sid}.jsonl`));
-    const heldFile = sizeOf.filter((k) => new Date(String(k.ts)).getTime() >= heldAt && new Date(String(k.ts)).getTime() <= death).at(-1)?.file;
-    const root = heldFile ? String(heldFile).slice(0, String(heldFile).indexOf('/projects/')) : null;
+    const heldFile = root ? sizeOf.find((k) => String(k.file).startsWith(`${root}/projects/`))?.file : undefined;
     const pfGone = keeper.find((k) => k.event === 'pidfile-gone' && Number(k.pid) === pid);
     const writes = sizeOf.filter((k) => k.file === heldFile);
     const writesAfterDeath = writes.filter((k) => new Date(String(k.ts)).getTime() > death);
