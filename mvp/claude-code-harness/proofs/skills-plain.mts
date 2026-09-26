@@ -39,7 +39,7 @@ import { startRun } from '../src/harness.mts';
 import { redact, stamp } from '../src/record.mts';
 
 const [model, scenario] = process.argv.slice(2);
-const SCENARIOS = ['user-closed', 'user-open', 'user-open-late', 'user-open-links', 'managed', 'project-adddir', 'canusetool-closed', 'canusetool-open', 'register-root-open', 'bare-adddir'];
+const SCENARIOS = ['user-closed', 'user-open', 'user-open-late', 'user-open-links', 'user-open-nosync', 'managed', 'project-adddir', 'canusetool-closed', 'canusetool-open', 'register-root-open', 'bare-adddir'];
 if (!model || !scenario || !SCENARIOS.includes(scenario)) {
   process.stderr.write(`usage: node proofs/skills-plain.mts <model> <${SCENARIOS.join('|')}>\n`);
   process.exit(2);
@@ -297,6 +297,15 @@ async function liveSequence(run: Run, dirs: { A: string; B: string }, repoint: (
   await turn(run, 'T6 after reloadSkills()', OK);
 }
 
+// What is in each declared directory after the run: Claude Code may write
+// into a directory it reaches through a symlink (skills sync's synced/).
+function listDeclared(): void {
+  for (const d of ['declared-a', 'declared-b']) {
+    const dir = join(root, d);
+    if (existsSync(dir)) log(`declared dir ${d} top-level entries after the run: ${JSON.stringify(readdirSync(dir).sort())}`);
+  }
+}
+
 async function finish(run: Run, bodiesDir: string, files: Record<string, string>): Promise<void> {
   run.end();
   try {
@@ -306,6 +315,9 @@ async function finish(run: Run, bodiesDir: string, files: Record<string, string>
   }
   log(`run dir: ${run.dir}`);
   report(run.dir, bodiesDir, files);
+  listDeclared();
+  const cfgSkills = join(run.configDir, 'skills');
+  if (existsSync(cfgSkills)) log(`<CLAUDE_CONFIG_DIR>/skills entries after the run: ${JSON.stringify(readdirSync(cfgSkills).sort())}`);
 }
 
 function swapLink(link: string, target: string): void {
@@ -317,7 +329,7 @@ try {
   const name = `skills-plain-${scenario}`;
   const inst = instrument(name);
 
-  if (scenario === 'user-closed' || scenario === 'user-open' || scenario === 'user-open-late') {
+  if (scenario === 'user-closed' || scenario === 'user-open' || scenario === 'user-open-late' || scenario === 'user-open-nosync') {
     // <CLAUDE_CONFIG_DIR>/skills as a symlink to the declared directory.
     // user-closed: the harness's settingSources [] untouched.
     // user-open / user-open-late: the proof opens userSettings with
@@ -332,6 +344,10 @@ try {
         debugFile: inst.debugFile,
         env: inst.env,
         ...(open ? { extraArgs: { 'setting-sources': 'user' } } : {}),
+        // syncClaudeAiSkills (a settings key found in the binary, next to
+        // syncClaudeAiPlugins): off here to see whether it stops Claude Code
+        // writing the account's skills into <CLAUDE_CONFIG_DIR>/skills/synced.
+        ...(scenario === 'user-open-nosync' ? { settings: { syncClaudeAiSkills: false } } : {}),
       },
     });
     const link = join(run.configDir, 'skills');
@@ -362,19 +378,33 @@ try {
       await hooksAndRules(run, 'after T2');
     } else if (scenario === 'user-open') {
       await liveSequence(run, dirs, () => swapLink(link, dirs.B));
+    } else if (scenario === 'user-open-nosync') {
+      // user-open's run wrote synced/ a few seconds in; give it time.
+      await turn(run, 'T1 initial listing', OK);
+      await sleep(SETTLE_MS);
+      await turn(run, 'T2 after a settle', OK);
     } else {
-      // The skills dir does not exist when the watcher starts.
+      // No skills dir set when the run starts; set one after the first turn.
       await turn(run, 'T1 initial listing, no skills dir yet', OK);
-      symlinkSync(dirs.A, link);
-      log(`created ${link} -> ${dirs.A} mid-run; settling ${SETTLE_MS}ms`);
+      if (existsSync(link)) {
+        // Claude Code made <CLAUDE_CONFIG_DIR>/skills itself (seen in the
+        // first draft of this scenario: EEXIST on the symlink). Link each
+        // declared skill into it instead.
+        log(`Claude Code created ${link} itself; entries: ${JSON.stringify(readdirSync(link))}`);
+        for (const entry of ['p19-a1', 'p19-hooked']) symlinkSync(join(dirs.A, entry), join(link, entry));
+        log(`linked p19-a1, p19-hooked from ${dirs.A} into ${link} mid-run; settling ${SETTLE_MS}ms`);
+      } else {
+        symlinkSync(dirs.A, link);
+        log(`created ${link} -> ${dirs.A} mid-run; settling ${SETTLE_MS}ms`);
+      }
       await sleep(SETTLE_MS);
       await turn(run, 'T2 after creating the skills dir, no reload call', OK);
       await reloadSkills(run, 'after late create');
       await turn(run, 'T3 after reloadSkills()', OK);
-      writeSkill(dirs.A, 'p19-a2', 'NEW');
-      log(`wrote new skill p19-a2; settling ${SETTLE_MS}ms`);
+      writeFileSync(join(dirs.A, 'p19-a1', 'SKILL.md'), skillMd('p19-a1', 'V2'));
+      log(`edited p19-a1 MARKER=V1 -> V2; settling ${SETTLE_MS}ms`);
       await sleep(SETTLE_MS);
-      await turn(run, 'T4 after adding p19-a2, no reload call', OK);
+      await turn(run, 'T4 after editing p19-a1, no reload call', OK);
     }
     await finish(run, inst.bodiesDir, { configDirHook: hookRanConfig, declaredDirHook: dirs.hookRanDecl, skillFrontmatterHook: dirs.hookRanSkill, pluginShapedEntryHook: dirs.hookRanPluginShaped });
   } else if (scenario === 'user-open-links') {
