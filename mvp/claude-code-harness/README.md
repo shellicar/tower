@@ -275,3 +275,29 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 23: when Claude Code commits
+
+`proofs/commit/run.mts <model> <cell ...|all>` runs each cell as its own
+session under the agent name `p23-<model>`: a warm-up turn, the cell's
+prompt stopped at the cell's ending by `interrupt()` or by the SDK's abort
+(`Options.abortController`), then a probe prompt whose request's history is
+the ground truth. After an abort there is no process left, so the probe goes
+into two resumes: one through a `sessionStore` whose `load()` returns what
+`append()` got, one from the transcript in the config directory. Every other
+cell also gets a transcript resume with a second probe. The endings, the
+retry cell's timeout and every other choice are at the top of the file.
+
+Every candidate commit signal is recorded passively into each run's
+`commit-events.jsonl` (monotonic `ms` and wall-clock `wall`): SDK messages,
+store appends, the transcript file's new lines, request and response files
+and `index.jsonl` from `OTEL_LOG_RAW_API_BODIES`, and hooks. Raw bodies and
+raw store appends stay under
+`~/.local/state/tower-claude-code-harness/proof-23/`; the run directory gets
+copies with tokens and email addresses redacted.
+
+```sh
+node proofs/commit/run.mts claude-sonnet-5 all > runs/p23-<round>-sonnet-5.log
+node proofs/commit/analyse.mts runs/p23-index-<model>-<ts>.json   # .report.txt, .summary.json
+node proofs/commit/table.mts runs/*.summary.json                   # rounds side by side
+```
