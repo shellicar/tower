@@ -1,13 +1,17 @@
 // The proof harness: runs Claude Code through the Agent SDK as one query()
-// fed a stream of messages, in a fresh config directory of its own, and
-// records everything raw into a run directory.
+// fed a stream of messages and records everything raw into a run directory.
 //
-// It sets nothing about Claude Code's behaviour. Model, permission mode,
-// tools, messages and interrupts come from the proof. What it does set:
-// CLAUDE_CONFIG_DIR (a fresh directory per run), CLAUDE_SECURESTORAGE_CONFIG_DIR
-// (empty, for the shared login), pathToClaudeCodeExecutable (the capture
-// wrapper, which runs the SDK's own bundled binary), and it strips a parent
-// Claude Code session's variables from the environment.
+// Isolation is the harness's baseline, not the proof's choice (Stephen,
+// 26 Sep: "the whole point is this is the BASELINE"). Every run gets:
+// settingSources [] (no user, project or local settings, no CLAUDE.md), a
+// fresh CLAUDE_CONFIG_DIR, the shared login (CLAUDE_SECURESTORAGE_CONFIG_DIR
+// empty), and an environment stripped of a parent Claude Code session's
+// variables. It also sets the working directory (the proof's own, reused
+// across its runs) and pathToClaudeCodeExecutable (the capture wrapper, which
+// runs the SDK's own bundled binary).
+//
+// Everything else comes from the proof: "let each do its own settings". The
+// harness has no defaults of its own.
 
 import { createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -30,7 +34,14 @@ const WRAPPER = join(PACKAGE_ROOT, 'bin', 'claude-capture');
 // (everything in one place, but anything Claude Code writes lands in the repo
 // unfiltered), or deleted after the copy (nothing lingers, but a later proof
 // can't inspect or resume it).
-const CONFIG_DIRS_ROOT = join(homedir(), '.local', 'state', 'tower-claude-code-harness', 'config-dirs');
+const STATE_ROOT = join(homedir(), '.local', 'state', 'tower-claude-code-harness');
+const CONFIG_DIRS_ROOT = join(STATE_ROOT, 'config-dirs');
+
+// Each proof's working directory, named after the proof and reused by every
+// run of it (Stephen, 26 Sep: "each agent gets its own directory, and can keep
+// reusing it, ie its not a random directory every run"). Created the first
+// time, never cleared.
+const WORK_ROOT = join(STATE_ROOT, 'work');
 
 // What a parent Claude Code session passes down to the processes it starts.
 // Source: claude 2.1.282, the env it builds for child processes (CLAUDECODE,
@@ -62,10 +73,15 @@ const PARENT_SESSION_VARS = [
 // Files never copied out of the config directory, whatever they hold.
 const NEVER_COPY = new Set(['.credentials.json']);
 
-export type HarnessOptions = Omit<Options, 'pathToClaudeCodeExecutable'> & { model: string };
+// What the harness sets is not the proof's to pass: settingSources (the
+// isolation baseline), cwd (the proof's own directory) and the executable.
+// CLAUDE_CONFIG_DIR and CLAUDE_SECURESTORAGE_CONFIG_DIR in options.env are
+// overridden the same way.
+export type HarnessOptions = Omit<Options, 'pathToClaudeCodeExecutable' | 'settingSources' | 'cwd'> & { model: string };
 
 export interface StartRunArgs {
-  // Names the run directory: runs/<timestamp>-<name>/.
+  // The proof's name. Names the run directory (runs/<timestamp>-<name>/) and
+  // the working directory (~/.local/state/tower-claude-code-harness/work/<name>/).
   name: string;
   options: HarnessOptions;
 }
@@ -78,6 +94,7 @@ export interface Run {
   readonly id: string;
   readonly dir: string;
   readonly configDir: string;
+  readonly cwd: string;
   // The SDK's query object, for any control call (setModel,
   // setPermissionMode, ...). Calls made on it directly are not logged in
   // harness-events.jsonl; their effect shows in the binary's stdin capture.
@@ -245,8 +262,10 @@ export function startRun(args: StartRunArgs): Run {
   const dir = join(RUNS_ROOT, id);
   const captureDir = join(dir, 'claude');
   const configDir = join(CONFIG_DIRS_ROOT, id);
+  const cwd = join(WORK_ROOT, name);
   mkdirSync(dir, { recursive: true });
   mkdirSync(configDir, { recursive: true });
+  mkdirSync(cwd, { recursive: true });
 
   const realBinary = resolveRealBinary();
 
@@ -281,6 +300,8 @@ export function startRun(args: StartRunArgs): Run {
       id,
       startedAt,
       configDir,
+      cwd,
+      settingSources: [],
       realBinary,
       wrapper: WRAPPER,
       sdkVersion: sdkVersion(),
@@ -300,7 +321,9 @@ export function startRun(args: StartRunArgs): Run {
 
   const q = query({
     prompt: inbox,
-    options: { ...options, env, pathToClaudeCodeExecutable: WRAPPER },
+    // The harness's values last, so a proof that passes them anyway (from
+    // untyped code) cannot switch the baseline off.
+    options: { ...options, env, settingSources: [], cwd, pathToClaudeCodeExecutable: WRAPPER },
   });
   event('start');
 
@@ -336,6 +359,7 @@ export function startRun(args: StartRunArgs): Run {
     id,
     dir,
     configDir,
+    cwd,
     query: q,
     send(message) {
       event('send', message);

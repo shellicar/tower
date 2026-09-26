@@ -19,15 +19,13 @@ Claude Code over time and interrupt it:
 - `run.done`: settles once the binary has exited and the config directory has
   been copied; rejects with the query's error, if any.
 
-Everything about Claude Code's behaviour comes from the proof's `options`
-(model, permission mode, tools, setting sources, ...). `options.model` is
-required. The harness sets only:
+Isolation is the harness's baseline, not the proof's choice. Every run gets:
 
+- `settingSources: []`: no user, project or local settings files, and no
+  CLAUDE.md. A proof can't pass `settingSources`; the harness's value wins.
 - `CLAUDE_CONFIG_DIR`: a fresh, empty directory per run, under
   `~/.local/state/tower-claude-code-harness/config-dirs/<run id>`.
 - `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`: the login (below).
-- `pathToClaudeCodeExecutable`: `bin/claude-capture`, which runs the SDK's own
-  bundled `claude` binary and records it.
 - It strips a parent Claude Code session's variables from the environment
   (from `options.env` too): `CLAUDECODE`, `CLAUDE_PID`, `CLAUDE_EFFORT`,
   `AI_AGENT`, `CLAUDE_PROJECT_DIR`, `CLAUDE_CODE_SESSION_ID`,
@@ -36,6 +34,19 @@ required. The harness sets only:
   `CLAUDE_CODE_INVOKED_SKILLS`, `CLAUDE_CODE_MESSAGING_SOCKET`,
   `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_CODE_BRIDGE_SESSION_ID`. The ones
   actually found are listed in the run's `run.json` as `strippedEnv`.
+
+The harness also sets:
+
+- `cwd`: the proof's own working directory,
+  `~/.local/state/tower-claude-code-harness/work/<name>/`, named after the
+  proof (`startRun`'s `name`), created the first time and reused by every run
+  of that proof. Never cleared. A proof can't pass `cwd`.
+- `pathToClaudeCodeExecutable`: `bin/claude-capture`, which runs the SDK's own
+  bundled `claude` binary and records it.
+
+Everything else comes from the proof's `options` (model, permission mode,
+tools, plugins, skills, ...). The harness has no defaults of its own.
+`options.model` is required.
 
 ## The login
 
@@ -64,7 +75,7 @@ Things to know:
 
 | Path | What |
 | --- | --- |
-| `run.json` | run id, config dir, real binary, SDK version, options as passed (env as names only), stripped env names |
+| `run.json` | run id, config dir, working dir, setting sources, real binary, SDK version, options as passed (env as names only), stripped env names |
 | `sdk-messages.jsonl` | every SDK message, `{ts, message}` |
 | `harness-events.jsonl` | send, end, interrupt, errors, done |
 | `claude/<n>/argv.json` | argv of the real binary, cwd, env names (not values) |
@@ -82,7 +93,27 @@ tokens) is replaced with `sk-ant-[REDACTED]` in every file the harness
 writes. The copied `.claude.json` does hold account details (name, email,
 organisation). The live config directories outside the repo are kept.
 
-## Re-running the smoke run
+## The smoke run
+
+`proofs/smoke.mts` proves the isolation baseline, with a positive and a
+negative test:
+
+- **Negative:** it writes a dummy skill, `tower-harness-negative-probe`, to
+  `~/.claude/skills/` for the length of the run. It must not appear. The run
+  refuses to start if that directory already exists, and removes it
+  afterwards whatever happens.
+- **Positive:** it passes its own plugin, `proofs/smoke-plugin/`, through the
+  SDK's `plugins` option (`--plugin-dir`). The plugin carries a dummy skill,
+  `tower-harness-positive-probe`, which must appear, as
+  `tower-harness-smoke:tower-harness-positive-probe`. With `settingSources: []`
+  a plugin is the route that still loads a skill.
+- It asks Claude which skills it has, which CLAUDE.md files are in its
+  context, whether it has any permission rules, and whether two phrases from
+  `~/.claude/CLAUDE.md` are in its context. Skills that come with the
+  account show up too; the dummies are told apart by name.
+
+It prints the init message's skills and plugins, Claude's answer, and whether
+each dummy was named in each.
 
 From the repo root, once:
 
@@ -90,38 +121,27 @@ From the repo root, once:
 pnpm install
 ```
 
-Then, from `mvp/claude-code-harness/`:
+Then, from `mvp/claude-code-harness/`, under a file-access trace:
 
 ```sh
 mkdir -p runs
-strace -f -s 4096 -e trace=%file -o runs/smoke.strace node proofs/smoke.mts claude-haiku-4-5
+timeout 300 strace -f -s 4096 -e trace=%file,%process -o runs/smoke.strace node proofs/smoke.mts claude-haiku-4-5
+mv runs/smoke.strace runs/<run dir it printed>/
 ```
 
-It prints the run directory, `assistant: pong`, `result: success` and `done`.
-Move the trace into the run directory it printed:
+`%process` puts every fork and exec in the trace, so each file access can be
+attributed to the process that made it: the proof's node, the capture
+wrapper, Claude Code, or one of Claude Code's own children (git, rg, sh, ps,
+tmux, and on WSL `reg.exe`).
 
-```sh
-mv runs/smoke.strace runs/<run dir>/
-```
+What to check, in the run directory:
 
-### Checking `~/.claude/settings.json` was not read
-
-`strace -e trace=%file` records every syscall that names a path (open, stat,
-access, readlink, ...), in every process the run started. In the run
-directory:
-
-```sh
-grep -c "\"$HOME/.claude/settings.json\"" smoke.strace
-grep -o "\"$HOME/.claude/[^\"]*\"" smoke.strace | sort | uniq -c
-grep -o '"[^"]*settings[^"]*\.json"' smoke.strace | sort | uniq -c
-```
-
-The first should print `0`. The second is the control: it shows
-`~/.claude/.credentials.json` opened, so the trace does see file access under
-`~/.claude`. The third lists every settings file Claude Code looked for,
-which should include the run's own config dir's `settings.json`.
-
-The same trace shows `~/.claude/CLAUDE.md` is read, not through the config
-dir but because the working directory is under `$HOME`: Claude Code walks up
-the parent directories for `.claude/CLAUDE.md`, and reaches `$HOME/.claude/`.
-The session transcript lists it as "project instructions".
+- The skills the model was actually shown are in the transcript's
+  `skill_listing` attachment, in
+  `config-dir/projects/<project>/<session>.jsonl`. The init message's
+  `skills` in `sdk-messages.jsonl` is a different list (the skills that are
+  also slash commands).
+- Nothing Claude Code loaded as instructions: the transcript has no CLAUDE.md
+  attachment, and the trace has no access to `~/.claude/CLAUDE.md`.
+- `grep -o "\"$HOME/[^\"]*\"" smoke.strace | sort | uniq -c` lists every
+  path under `$HOME` the run touched.
