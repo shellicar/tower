@@ -174,31 +174,44 @@ each request's `thinking` and `betas`.
 
 Three scripts, one working directory in the file, no broker needed.
 
-`proofs/dir-remove.mts <route>` (`cliarg`, `session`, `flag`, `flaglive`,
-`race`) adds the same kind of scratch directory four ways and tries to
-remove it with `removeDirectories`, matching and mismatched
-`PermissionUpdateDestination` values, plus the shallow-merge-replace hazard
-in `applyFlagSettings`, plus a batched pair of tool calls racing a mid-turn
-removal. Every `HOOK_EVENTS` member gets a logging hook. `canUseTool` always
-allows a Read against a separate, never-granted trigger directory (the only
-way to deliver `updatedPermissions`, since it only exists on the `allow`
-branch) and piggybacks whatever update the step queued; a Read against the
-directory under test is otherwise denied, with one deliberate, single-use
-exception for the natural ask-then-grant route. Each removeDirectories
-attempt is its own trigger read against a fresh, never-before-read trigger
-file: Claude Code silently dedupes a repeated Read of a file unchanged since
-the last Read, before `canUseTool` would fire again.
+`proofs/dir-remove.mts <route> [arg]` (`cliarg`, `session`, `flag`,
+`flaglive`, `race`) adds the same kind of scratch directory four ways
+(`cliarg`: `additionalDirectories` at start; `session`: `canUseTool`'s
+`addDirectories` on the natural first ask; `flag`: `options.settings` at
+start; `flaglive`: `applyFlagSettings` called live) and tries to remove it
+with `removeDirectories`, matching and mismatched `PermissionUpdateDestination`
+values, restoring the grant live before each attempt so every destination is
+tested against a directory that is actually still there, plus the
+shallow-merge-replace hazard in `applyFlagSettings`, plus (`race`) a batched
+pair of tool calls racing a mid-turn removal. `cliarg`'s optional second
+argument overrides which destination its first removal tries (default
+`cliArg`); `race`'s overrides the trigger's `canUseTool` delay in ms
+(default 3000; 0 tests the opposite ordering). Every `HOOK_EVENTS` member
+gets a logging hook. `canUseTool` always allows a Read against a separate,
+never-granted trigger directory (the only way to deliver `updatedPermissions`,
+since it only exists on the `allow` branch) and piggybacks whatever update
+the step queued; a Read against the directory under test is otherwise
+denied, with one deliberate, single-use exception for the natural
+ask-then-grant route. Each removeDirectories/addDirectories attempt is its
+own trigger read against a fresh, never-before-read trigger file: Claude
+Code silently dedupes a repeated Read of a file unchanged since the last
+Read, before `canUseTool` would fire again.
 
 `proofs/perm-mode.mts <mode>` (`default`, `acceptEdits`, `bypassPermissions`,
-`bypassPermissions-block`, `plan`, `dontAsk`, `auto`, `auto-live`) reads (and,
-under `acceptEdits`, writes) a file inside the working directory and one
-outside it, and logs whether `canUseTool` fires, what it is asked
-(`decisionReason`, `title`, `blockedPath`), and the tool result. `auto`/
-`auto-live` run on `claude-sonnet-4-6` (auto mode requires Opus 4.6+/Sonnet
-4.6+/Fable); `auto-live` starts in `default` and calls
-`query.setPermissionMode('auto')` mid-session. After the run, `claude/<n>/
-stdout.txt` is grepped for `request_user_dialog`/`dialog_kind`/`elicitation`,
-whether or not `onUserDialog` was wired.
+`bypassPermissions-block`, `plan`, `dontAsk`, `auto`, `auto-live`,
+`auto-dialog`) reads (and, under `acceptEdits`, writes) a file inside the
+working directory and one outside it, and logs whether `canUseTool` fires,
+what it is asked (`decisionReason`, `title`, `blockedPath`), and the tool
+result. `auto`/`auto-live`/`auto-dialog` run on `claude-sonnet-4-6` (auto
+mode requires Opus 4.6+/Sonnet 4.6+/Fable); `auto-live` starts in `default`
+and calls `query.setPermissionMode('auto')` mid-session; `auto-dialog`
+declares `supportedDialogKinds: ['auto_mode_outside_reads']` and an
+`onUserDialog` that answers `cancelled`, to test whether the one-time
+auto-mode outside-read prompt is reachable at all in a streaming-input SDK
+session, once a client actually declares it can render that kind (found by
+`strings` on the real binary, sdk.d.ts never names it). After the run,
+`claude/<n>/stdout.txt` is grepped for
+`request_user_dialog`/`dialog_kind`/`elicitation` regardless.
 
 `proofs/resume-dir.mts` (no args) seeds one conversation through a
 file-backed `SessionStore` (the `FileStore` pattern from proof 8's
