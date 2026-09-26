@@ -169,3 +169,28 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 5: what Claude Code sends about subagents and shells
+
+`proofs/subagents-shells.mts <model> <case> [--display summarized|default] [NAME=value ...]`
+runs one case: a foreground or background subagent, each with and without
+`forwardSubagentText` (`fg`, `fg-forward`, `bg`, `bg-forward`), or a
+background shell (`shell`), a background shell the host stops with
+`stopTask` (`shell-stop`), or a foreground shell the host moves to the
+background with `backgroundTasks` (`shell-fg-to-bg`). The cases are
+described at the top of the file. `--display` picks thinking
+`{adaptive, display 'summarized'}` or `{adaptive}` with no display.
+
+Every run streams, has in-process hook callbacks on the tool, subagent, task
+and stop events, and turns on `agentProgressSummaries` for subagent cases.
+The input stays open while a background task is live, so the turn Claude
+Code starts itself when one finishes is recorded too. Besides the harness's
+own records, the run directory gets:
+
+| Path | What |
+| --- | --- |
+| `proof-summary.txt` | what the proof printed: one line per subagent, shell or task message with its line in `sdk-messages.jsonl`, then tallies by `parent_tool_use_id`, hooks fired, and each API request's query source and `thinking` |
+| `hooks.jsonl` | every hook callback's input |
+| `otel.jsonl` | Claude Code's OpenTelemetry export (metrics, logs, and traces with `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA`), received by a local OTLP/HTTP JSON endpoint the proof runs on 127.0.0.1 |
+| `api-bodies/`, `debug.log` | as proof 1 |
+| `task-outputs/` | copies of the output files named by task notifications and tool results, with `index.json` mapping each original path |
