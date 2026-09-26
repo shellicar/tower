@@ -39,7 +39,7 @@ import { startRun } from '../src/harness.mts';
 import { redact, stamp } from '../src/record.mts';
 
 const [model, scenario] = process.argv.slice(2);
-const SCENARIOS = ['user-closed', 'user-open', 'user-open-late', 'user-open-links', 'user-open-nosync', 'managed', 'project-adddir', 'canusetool-closed', 'canusetool-open', 'register-root-open', 'bare-adddir'];
+const SCENARIOS = ['user-closed', 'user-open', 'user-open-late', 'user-open-links', 'user-open-nosync', 'managed', 'project-adddir', 'canusetool-closed', 'canusetool-open', 'register-root-open', 'bare-adddir', 'bare-adddir-closed'];
 if (!model || !scenario || !SCENARIOS.includes(scenario)) {
   process.stderr.write(`usage: node proofs/skills-plain.mts <model> <${SCENARIOS.join('|')}>\n`);
   process.exit(2);
@@ -522,6 +522,8 @@ try {
     });
     log(`run dir: ${run.dir}\nwrapper: ${wrap}`);
     await turn(run, 'T1 Read a file in the wrapper (fires canUseTool)', `Use the Read tool to read ${join(wrap, 'README.txt')} and reply with its contents.`);
+    // Whether the addDirectories update took: workspaceDirectories.
+    await hooksAndRules(run, 'after T1');
     await sleep(SETTLE_MS);
     await turn(run, 'T2 after the directory was added, no reload call', OK);
     await reloadSkills(run, 'after addDirectories');
@@ -554,8 +556,17 @@ try {
     await turn(run, 'T1 before register_repo_root', OK);
     log(`register_repo_root: ${JSON.stringify(await raw(run, { subtype: 'register_repo_root', directory: child, reload_skills: true }))}`);
     await turn(run, 'T2 after register_repo_root', OK);
+    await hooksAndRules(run, 'after T2');
+    writeSkill(dirs.A, 'p19-a2', 'NEW');
+    log(`wrote new skill p19-a2 into ${dirs.A}; settling ${SETTLE_MS}ms`);
+    await sleep(SETTLE_MS);
+    await turn(run, 'T3 after adding p19-a2, no reload call', OK);
+    swapLink(join(child, '.claude', 'skills'), dirs.B);
+    log(`re-pointed ${join(child, '.claude', 'skills')} to ${dirs.B}; settling ${SETTLE_MS}ms`);
+    await sleep(SETTLE_MS);
+    await turn(run, 'T4 after re-point, no reload call', OK);
     await finish(run, inst.bodiesDir, { declaredDirHook: dirs.hookRanDecl, pluginShapedEntryHook: dirs.hookRanPluginShaped });
-  } else if (scenario === 'bare-adddir') {
+  } else if (scenario === 'bare-adddir' || scenario === 'bare-adddir-closed') {
     // --bare with projectSettings opened and one add-dir. The binary's
     // loader, in bare mode, reads only each add-dir's .claude/skills, and
     // only when projectSettings is on (Wr("skills", {explicitlyRequested})).
@@ -571,7 +582,8 @@ try {
         model,
         debugFile: inst.debugFile,
         env: { ...inst.env, CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' },
-        extraArgs: { 'setting-sources': 'project', bare: null },
+        // bare-adddir-closed leaves the harness's settingSources [] alone.
+        extraArgs: scenario === 'bare-adddir' ? { 'setting-sources': 'project', bare: null } : { bare: null },
         additionalDirectories: [wrap],
         projectConfigRoot: emptyRoot,
       },
