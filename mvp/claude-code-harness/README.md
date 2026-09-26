@@ -169,3 +169,18 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 3: the session store as the commit signal
+
+`proofs/session-store.mts` passes a recording `sessionStore` and records, per
+run, when each transcript entry reaches it. Modes (`turns`, `resume`,
+`shutdown`, `--analyse`) are described at the top of the file. Beyond the
+harness's own files, a run directory holds:
+
+| Path | What |
+| --- | --- |
+| `store-appends.jsonl` | every `append()` call: time, key, entries (and `load()` calls) |
+| `transcript-watch.jsonl` | when each transcript line first appeared on disk; for a store resume, the SDK's `claude-resume-*` directories (names, sizes, modes only) |
+| `proof-log.txt`, `host-log.txt` | what the proof did, stamped |
+| `transcript-at-host-exit.json`, `host-exit.json` | shutdown: the transcripts as they stood when the host exited |
+| `analysis.txt` | transcript vs store, line by line, with timings |
