@@ -14,7 +14,7 @@ for sc in $SCENARIOS; do
   echo "$SEEDLINE"
   S=$(echo "$SEEDLINE" | cut -d' ' -f2)
   [ -z "$S" ] && { echo "seed $sc failed: $OUT-seed.out"; continue; }
-  for src in full A A-silent A-silent-sc; do
+  for src in full A A-silent A-silent-sc full; do
     PROOF20_FIRST_DELAY_MS=20000 timeout 300 node proofs/body-copy.mts resume "$MODEL" $src "$S" > "$OUT-resume-$src.out" 2>&1
     grep '^RESUME ' "$OUT-resume-$src.out" || echo "RESUME $src FAILED $OUT-resume-$src.out"
   done

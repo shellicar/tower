@@ -62,6 +62,10 @@ export interface CcEntry {
   attachment?: Json;
   // user entries: the flags that decide how Claude Code folds them.
   isMeta?: boolean;
+  // Proof 20: a user entry's `origin` (e.g. { kind: "task-notification" }):
+  // Claude Code wraps such an entry's text when it sends it, so load() must
+  // give it back. TODO: undecided (part of the ccEntries shape).
+  origin?: Json;
   // The entry's content was a string, not blocks: Claude Code sends such an
   // entry, when it stands alone, as a string. TODO: undecided.
   contentString?: boolean;
@@ -237,7 +241,7 @@ export function rebuild(messages: TowerMessage[], modelByTurn: Map<string, strin
           return s.start === undefined ? b : { type: 'text', text: spanText(m.content, s) };
         });
         const content = c.contentString && blocks.length === 1 && blocks[0]?.type === 'text' ? textOf(blocks[0]) : blocks;
-        out.push({ ...common, uuid: c.uuid, type: 'user', ...(c.isMeta ? { isMeta: true } : {}), message: { role: 'user', content } });
+        out.push({ ...common, uuid: c.uuid, type: 'user', ...(c.isMeta ? { isMeta: true } : {}), ...(c.origin ? { origin: c.origin } : {}), message: { role: 'user', content } });
       }
     }
   }

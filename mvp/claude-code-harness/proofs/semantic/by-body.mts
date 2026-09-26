@@ -237,6 +237,7 @@ export function attributeMessages(added: { role: string; content: Block[] }[], p
         type: c.type === 'attachment' ? 'attachment' : 'user',
         ...(c.type === 'attachment' ? { attachment: c.attachment as Json } : {}),
         ...(c.isMeta === true ? { isMeta: true } : {}),
+        ...(c.type === 'user' && c.origin !== undefined ? { origin: c.origin as Json } : {}),
       ...(c.type === 'user' && typeof (c.message as Json).content === 'string' ? { contentString: true } : {}),
         spans: parts.get(c) as Span[],
       }));
