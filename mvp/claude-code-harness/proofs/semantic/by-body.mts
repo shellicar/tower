@@ -85,33 +85,81 @@ export function attributeMessages(added: { role: string; content: Block[] }[], p
           return;
         }
         // Proof 20, problem 4: reminders Claude Code folded into the
-        // tool_result's content (models without system turns; code vUe): the
-        // entry's own content trimmed, then each reminder trimmed, joined by
-        // a blank line. String content, or the last text part of an array.
+        // tool_result's content (models without system turns; code a5t/vUe):
+        //   string content: the entry's own content trimmed, then each
+        //     reminder trimmed, joined by a blank line;
+        //   array content, fold on: the same inside the last text part;
+        //   array content, fold off: the last text part gains a newline and
+        //     each reminder follows as a text part of its own, untrimmed.
+        // The entry's own content is one span (the last own part, sliced);
+        // each reminder a span inside its part.
         const sent = b.content;
-        const part = typeof sent === 'string' ? undefined : blocksOf(sent).map((x, i) => ({ x, i })).filter(({ x }) => x.type === 'text').at(-1)?.i;
-        const inText = typeof sent === 'string' ? sent : part === undefined ? undefined : textOf(blocksOf(sent)[part] as Block);
-        const ownText = typeof own.content === 'string' || own.content === undefined ? String(own.content ?? '').trim() : blocksOf(own.content).filter((x) => x.type === 'text').map(textOf).at(-1)?.trim();
-        if (inText === undefined || ownText === undefined || !inText.startsWith(ownText)) {
+        const ownParts = typeof own.content === 'string' || own.content === undefined ? undefined : blocksOf(own.content);
+        const sentParts = typeof sent === 'string' || sent === undefined ? undefined : blocksOf(sent);
+        const reminders = (part: number | undefined, text: string, from: number, trimmed: boolean): number => {
+          const found = findInside(text, from, candidates, (c) => used.has(c) || c === e, trimmed);
+          let cursor = from;
+          for (const f of found) {
+            const gap = text.slice(cursor, f.start);
+            if (!SEPARATOR.test(gap)) {
+              out.uncovered.push({ message: mi, block: bi, text: `inside tool_result: ${gap}` });
+            }
+            add(f.e, { block: bi, inResult: true, ...(part === undefined ? {} : { part }), start: f.start, length: f.length });
+            cursor = f.start + f.length;
+          }
+          if (text.slice(cursor).trim() !== '') {
+            out.uncovered.push({ message: mi, block: bi, text: `inside tool_result: ${text.slice(cursor)}` });
+          }
+          return found.length;
+        };
+        if (ownParts === undefined && sentParts === undefined) {
+          const inText = String(sent ?? '');
+          const ownText = String(own.content ?? '').trim();
+          if (!inText.startsWith(ownText)) {
+            add(e, { block: bi });
+            out.uncovered.push({ message: mi, block: bi, text: `tool_result ${String(b.tool_use_id)}: content differs from its entry's` });
+            return;
+          }
+          add(e, { block: bi, inResult: true, start: 0, length: ownText.length });
+          reminders(undefined, inText, ownText.length, true);
+          return;
+        }
+        const ownList = ownParts ?? [{ type: 'text', text: String(own.content ?? '') }];
+        const sentList = sentParts ?? [{ type: 'text', text: String(sent ?? '') }];
+        const last = ownList.length - 1;
+        const sameBefore = ownList.slice(0, last).every((x, i) => sentList[i] !== undefined && JSON.stringify(stripCacheControl(x)) === JSON.stringify(stripCacheControl(sentList[i] as Block)));
+        const ownLast = ownList[last] as Block | undefined;
+        const sentLast = sentList[last] as Block | undefined;
+        if (!sameBefore || !ownLast || !sentLast || ownLast.type !== 'text' || sentLast.type !== 'text') {
           add(e, { block: bi });
           out.uncovered.push({ message: mi, block: bi, text: `tool_result ${String(b.tool_use_id)}: content differs from its entry's` });
           return;
         }
-        add(e, { block: bi, inResult: true, ...(part === undefined ? {} : { part }), start: 0, length: ownText.length });
-        const found = findInside(inText, ownText.length, candidates, (c) => used.has(c) || c === e, true);
-        let cursor = ownText.length;
-        for (const f of found) {
-          const gap = inText.slice(cursor, f.start);
-          if (!SEPARATOR.test(gap)) {
-            out.uncovered.push({ message: mi, block: bi, text: `inside tool_result: ${gap}` });
+        const ownText = textOf(ownLast);
+        const sentText = textOf(sentLast);
+        if (sentText === ownText || sentText === `${ownText}\n`) {
+          // Fold off: reminders are the parts after it.
+          add(e, { block: bi, inResult: true, part: last, start: 0, length: ownText.length });
+          for (let k = last + 1; k < sentList.length; k += 1) {
+            const t = textOf(sentList[k] as Block);
+            if (reminders(k, t, 0, false) === 0 && t.trim() !== '') {
+              out.uncovered.pop();
+              reminders(k, t, 0, true);
+            }
           }
-          add(f.e, { block: bi, inResult: true, ...(part === undefined ? {} : { part }), start: f.start, length: f.length });
-          cursor = f.start + f.length;
+          return;
         }
-        const rest = inText.slice(cursor);
-        if (rest.trim() !== '') {
-          out.uncovered.push({ message: mi, block: bi, text: `inside tool_result: ${rest}` });
+        if (sentText.startsWith(ownText.trim())) {
+          // Fold on: reminders inside the last own part.
+          add(e, { block: bi, inResult: true, part: last, start: 0, length: ownText.trim().length });
+          reminders(last, sentText, ownText.trim().length, true);
+          for (let k = last + 1; k < sentList.length; k += 1) {
+            reminders(k, textOf(sentList[k] as Block), 0, true);
+          }
+          return;
         }
+        add(e, { block: bi });
+        out.uncovered.push({ message: mi, block: bi, text: `tool_result ${String(b.tool_use_id)}: content differs from its entry's` });
         return;
       }
       if (b.type === 'tool_addition' || b.type === 'tool_removal') {

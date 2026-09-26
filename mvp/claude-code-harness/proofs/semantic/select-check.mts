@@ -50,7 +50,9 @@ export function selectRun(runDirArg: string): SelectRow[] {
   const { entries, source } = runEntries(runDir, sessionId);
   const incompleteRecord = source === 'store-appends.jsonl' && existsSync(join(runDir, 'store-load.jsonl')) && readJsonl(join(runDir, 'store-load.jsonl')).some((l) => [l.returned, l.count].some((n) => typeof n === 'number' && n > 0));
   const main = entries.filter((e) => e.isSidechain !== true);
-  const files = [...index.map((e) => String(e.request_file)).filter((f) => existsSync(join(dir, f))), ...readdirSync(dir).filter((f) => f.endsWith('.request.json') && !bySource.has(f))];
+  // Proof 20's runs record the order the request files appeared in.
+  const seenOrder = existsSync(join(runDir, 'request-files.jsonl')) ? readJsonl(join(runDir, 'request-files.jsonl')).map((r) => String(r.file)) : [];
+  const files = seenOrder.length > 0 ? seenOrder.filter((f) => existsSync(join(dir, f))) : [...index.map((e) => String(e.request_file)).filter((f) => existsSync(join(dir, f))), ...readdirSync(dir).filter((f) => f.endsWith('.request.json') && !bySource.has(f))];
   const accepted: Accepted[] = [];
   const placed = new Set<string>();
   const rows: SelectRow[] = [];

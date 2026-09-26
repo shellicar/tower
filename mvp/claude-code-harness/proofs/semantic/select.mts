@@ -21,10 +21,12 @@
 //
 // What a request adds is what follows its last assistant message, less what
 // an earlier main request with the same last assistant message already sent:
-// when the response between two requests is dropped from the history, the
-// later request re-sends the earlier one's added messages (merged into one
-// user message; the earlier text block gains a trailing newline, R12). Proof
-// 16 counted that re-sent copy as a block with no entry behind it.
+// when the response between two requests is dropped from the history (a
+// thinking-only response) or never came (an abort before the first byte),
+// the later request re-sends the earlier one's added blocks (merged into one
+// user message; a text block followed by another gains a trailing newline,
+// R12; new reminders can land ahead of them, R6). Proof 16 counted a re-sent
+// copy as a block with no entry behind it.
 //
 // A request whose history and added messages equal an earlier main request's
 // is another attempt at it (a retry).
@@ -255,11 +257,26 @@ function judge(body: Json & { messages: ApiMessage[] }, ctx: SelectContext, seg:
   if (before && tail.length === before.tail.length && tail.every((f, i) => same(f, before.tail[i] as Flat))) {
     return { ...base, main: true, retry: true, reason: 'same history and added messages as a request already taken: another attempt', resent: tail.length, added: [] };
   }
+  // The earlier request's added blocks, re-sent: found in order among this
+  // request's (new reminders can land ahead of them, R6), and cut.
   let skip = 0;
-  if (before && before.tail.length < tail.length && before.tail.every((f, i) => resent(tail[i] as Flat, f))) {
-    skip = before.tail.length;
+  let kept = tail;
+  if (before && before.tail.length < tail.length) {
+    const keep: Flat[] = [];
+    let j = 0;
+    for (const f of tail) {
+      if (j < before.tail.length && resent(f, before.tail[j] as Flat)) {
+        j += 1;
+      } else {
+        keep.push(f);
+      }
+    }
+    if (j === before.tail.length) {
+      skip = j;
+      kept = keep;
+    }
   }
-  const added = regroup(tail.slice(skip));
+  const added = regroup(kept);
   const from = seg.start + (at >= 0 ? (responses[at] as MainResponse).last + 1 : 0);
   const next = responses.slice(at + 1).find((r) => r.key !== THINKING_ONLY);
   const to = next ? seg.start + next.first : ctx.main.length;

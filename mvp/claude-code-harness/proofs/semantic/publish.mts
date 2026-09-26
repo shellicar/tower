@@ -18,6 +18,13 @@ import { checkMessage, type Tower, tsNow } from './tower.mts';
 
 const SERVICE = 'anthropic.messages';
 
+// Proof 20: the copies under runs/ also lose email addresses (the request
+// bodies carry the account's; raw copies stay outside the repo).
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
+export function redactEmails(text: string): string {
+  return text.replace(EMAIL, '[email redacted]');
+}
+
 export class Recorder {
   path: string | undefined;
   pending: string[] = [];
@@ -33,7 +40,7 @@ export class Recorder {
     this.pending = [];
   }
   write(value: unknown): void {
-    const line = `${redact(typeof value === 'string' ? value : JSON.stringify(value)).text}\n`;
+    const line = `${redactEmails(redact(typeof value === 'string' ? value : JSON.stringify(value)).text)}\n`;
     if (this.path) {
       appendFileSync(this.path, line);
     } else {
@@ -64,6 +71,15 @@ export class Publisher {
   readonly pendingUsage = new Map<string, Json[]>();
   // A: turns minted per request, taken by the next new response id.
   readonly requestTurns: string[] = [];
+  // Proof 20: the turn of the latest main request taken (a retry keeps it);
+  // a response takes the turn current when its first piece is published,
+  // instead of the next one minted (proof 16's queue, which a retry or an
+  // abort shifts by one).
+  currentTurn: string | undefined;
+  // Proof 20: every main entry appended, in record order (the selector's
+  // history), and the main requests taken so far.
+  readonly main: Json[] = [];
+  readonly accepted: { anchor: string; tail: unknown[] }[] = [];
   lastMsgId: string | undefined;
   lastModel: string | undefined;
   queryId = randomUUID();
@@ -108,6 +124,7 @@ export class Publisher {
     const at = stamp();
     const ms = Date.now();
     this.noteAppended(entries);
+    this.main.push(...entries.filter((e) => e.isSidechain !== true));
     return this.serial(async () => {
       for (const e of entries) {
         if (typeof e.uuid === 'string') {
@@ -154,16 +171,29 @@ export class Publisher {
         const at = (u: string): number => this.recordIndex.get(u) ?? Number.MAX_SAFE_INTEGER;
         first.ccEntries = [...first.ccEntries, ...extra].sort((x, y) => at(x.uuid) - at(y.uuid));
       }
+      // Proof 20: every message of one request rides on the earliest of its
+      // entries in the outbox, so they publish together and in the order the
+      // request sent them (proof 16 hosted each on its own first entry, which
+      // could put a system message ahead of the user message it follows). A
+      // message no entry accounts for gets an id of its own and rides along.
+      const all = new Set(forms.flatMap((f) => f.ccEntries.filter((c) => c.spans.length > 0).map((c) => c.uuid)));
+      const items = this.outbox.filter((i) => i.kind === 'carrier' && all.has(String(i.entry.uuid)));
+      for (const i of items) {
+        i.state = 'resolved';
+      }
+      let host = items[0];
+      if (!host && forms.length > 0) {
+        // Nothing pending behind any of them: publish after what is queued.
+        host = { entry: {}, kind: 'other', appendedAt: signalAt, appendedMs: signalMs, queryId: this.queryId, state: 'resolved' };
+        this.outbox.push(host);
+      }
       for (const form of forms) {
-        const ids = new Set(form.ccEntries.filter((c) => c.spans.length > 0).map((c) => c.uuid));
-        const items = this.outbox.filter((i) => i.kind === 'carrier' && ids.has(String(i.entry.uuid)));
-        for (const i of items) {
-          i.state = 'resolved';
+        if (form.ccEntries.every((c) => c.spans.length === 0)) {
+          // TODO: undecided (the id of a message with no entry behind it).
+          form.id = randomUUID();
         }
-        const holder = items.find((i) => String(i.entry.uuid) === messageId(form)) ?? items[0];
-        const host = items[0];
+        const holder = items.find((i) => String(i.entry.uuid) === messageId(form)) ?? host;
         if (!host || !holder) {
-          this.timing.write({ at: stamp(), UNHOSTED: form.ccEntries.map((c) => c.uuid) });
           continue;
         }
         host.forms = [...(host.forms ?? []), { form, turnId, signal, signalAt, signalMs, queryId: holder.queryId }];
@@ -203,14 +233,14 @@ export class Publisher {
           return { uuid: c.uuid, appendedAt: it?.at, appendedMs: it?.ms };
         });
         const lastAppend = Math.max(...entryTimes.map((t) => t.appendedMs ?? 0));
-        this.timing.write({ at: stamp(), seq, role: f.form.role, id, signal: f.signal, signalAt: f.signalAt, entries: entryTimes, waitAfterLastEntryMs: Date.now() - lastAppend, signalAfterLastEntryMs: f.signalMs - lastAppend });
+        this.timing.write({ at: stamp(), seq, role: f.form.role, id, signal: f.signal, signalAt: f.signalAt, entries: entryTimes, waitAfterLastEntryMs: Date.now() - lastAppend, signalAfterLastEntryMs: f.signalMs - lastAppend, publishedMs: Date.now(), lastEntryMs: lastAppend });
       }
       if (item.kind === 'assistant') {
         const msg = item.entry.message as Json;
         const msgId = String(msg.id);
         let turnId = this.turnByMsgId.get(msgId);
         if (!turnId) {
-          turnId = this.requestTurns.shift() ?? randomUUID();
+          turnId = this.currentTurn ?? this.requestTurns.shift() ?? randomUUID();
           this.turnByMsgId.set(msgId, turnId);
         }
         const seq = await this.publish('changes.message', {
@@ -227,7 +257,7 @@ export class Publisher {
           // (diagnostics.previous_message_id, billing header cc_prev_req).
           ccResponse: { messageId: msgId, ...(typeof item.entry.requestId === 'string' ? { requestId: item.entry.requestId } : {}) },
         });
-        this.timing.write({ at: stamp(), seq, role: 'assistant', id: item.entry.uuid, appendedAt: item.appendedAt, waitAfterAppendMs: Date.now() - item.appendedMs });
+        this.timing.write({ at: stamp(), seq, role: 'assistant', id: item.entry.uuid, appendedAt: item.appendedAt, waitAfterAppendMs: Date.now() - item.appendedMs, publishedMs: Date.now(), msgId, turnId });
         await this.drainUsage(msgId);
       }
     }
@@ -273,6 +303,7 @@ export class Publisher {
         this.lastMsgId = String(m.id);
         this.lastModel = String(m.model);
         this.queueUsage(this.lastMsgId, this.lastModel, m.usage as Json);
+        this.responseStarted(this.lastMsgId);
       } else if (event.type === 'message_delta' && this.lastMsgId && this.lastModel) {
         this.queueUsage(this.lastMsgId, this.lastModel, event.usage as Json);
       } else {
@@ -282,6 +313,38 @@ export class Publisher {
         await this.drainUsage(this.lastMsgId);
       }
     });
+  }
+
+  // Proof 20: a main response takes the turn of the latest main request that
+  // has no response yet; one that starts before its request has been taken
+  // (the request file is looked at SETTLE_MS after it appears) waits for the
+  // next request taken. A retry keeps its request's turn.
+  turnAwaitingResponse: string | undefined;
+  readonly responsesAwaitingTurn: string[] = [];
+  responseStarted(msgId: string): void {
+    if (this.currentTurn === undefined && this.requestTurns.length > 0) {
+      return; // proof 16's queue
+    }
+    if (this.turnByMsgId.has(msgId)) {
+      return;
+    }
+    if (this.turnAwaitingResponse !== undefined) {
+      this.turnByMsgId.set(msgId, this.turnAwaitingResponse);
+      this.turnAwaitingResponse = undefined;
+    } else {
+      this.responsesAwaitingTurn.push(msgId);
+    }
+  }
+  // A main request taken (not a retry): its turn.
+  requestTaken(turnId: string): void {
+    this.currentTurn = turnId;
+    const waiting = this.responsesAwaitingTurn.shift();
+    if (waiting !== undefined) {
+      this.turnByMsgId.set(waiting, turnId);
+      this.turnAwaitingResponse = undefined;
+    } else {
+      this.turnAwaitingResponse = turnId;
+    }
   }
 
   queueUsage(msgId: string, model: string, usage: Json | undefined): void {
