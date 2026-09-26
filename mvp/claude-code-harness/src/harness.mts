@@ -18,7 +18,7 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type Options, type Query, query, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { type Options, type Query, query, type SDKMessage, type SDKUserMessage, type SettingSource } from '@anthropic-ai/claude-agent-sdk';
 import { redact, stamp } from './record.mts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -84,6 +84,30 @@ export interface StartRunArgs {
   // the working directory (~/.local/state/tower-claude-code-harness/work/<name>/).
   name: string;
   options: HarnessOptions;
+  // TODO: undecided (proof 11, Stephen not asked). Opt-in escape hatch from
+  // the isolation baseline, for proof 11 alone: it needs settingSources
+  // enabled to observe how CLAUDE.md reaches the model, which the baseline
+  // (settingSources: []) forbids by design ("A proof can't pass
+  // settingSources; the harness's value wins", README). Kept as a separate
+  // field, not part of HarnessOptions, so no proof can carry it through
+  // options by accident; every other proof is unaffected (field absent ->
+  // [], the unchanged baseline) and run.json records the real value instead
+  // of the old hardcoded []. Alternative not taken: a standalone script
+  // outside the harness, which would lose env stripping, the fresh config
+  // dir, capture and redaction. Raised to Stephen in proof 11's report.
+  settingSources?: SettingSource[];
+  // TODO: undecided (proof 11, same call). Files written into the run's
+  // CLAUDE_CONFIG_DIR before query() starts, keyed by path relative to it
+  // (e.g. "CLAUDE.md" for what settingSources: ['user'] reads as
+  // ~/.claude/CLAUDE.md). Exists because configDir's path isn't known until
+  // startRun runs, and the query begins pulling from the prompt channel
+  // right away, so writing into it afterwards races the binary's own read
+  // (see proof 11's report). Writing first removes the race for this one
+  // seeded file; it does not touch the isolation baseline otherwise.
+  seedConfigDir?: Record<string, string>;
+  // Same reasoning, for the proof's cwd (e.g. "CLAUDE.md" for what
+  // settingSources: ['project'] reads from the working directory).
+  seedCwd?: Record<string, string>;
 }
 
 export interface RunResult {
@@ -249,7 +273,7 @@ async function waitForBinaryExit(captureDir: string, timeoutMs: number): Promise
 }
 
 export function startRun(args: StartRunArgs): Run {
-  const { name, options } = args;
+  const { name, options, settingSources = [], seedConfigDir, seedCwd } = args;
   if (!/^[A-Za-z0-9._-]+$/.test(name)) {
     throw new Error(`harness: run name must match [A-Za-z0-9._-]+, got ${JSON.stringify(name)}`);
   }
@@ -266,6 +290,20 @@ export function startRun(args: StartRunArgs): Run {
   mkdirSync(dir, { recursive: true });
   mkdirSync(configDir, { recursive: true });
   mkdirSync(cwd, { recursive: true });
+
+  // Seeded before query() starts pulling from the prompt channel, so the
+  // binary's own read of configDir (e.g. ~/.claude/CLAUDE.md under
+  // settingSources: ['user']) can't race the write.
+  for (const [relPath, content] of Object.entries(seedConfigDir ?? {})) {
+    const target = join(configDir, relPath);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, content);
+  }
+  for (const [relPath, content] of Object.entries(seedCwd ?? {})) {
+    const target = join(cwd, relPath);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, content);
+  }
 
   const realBinary = resolveRealBinary();
 
@@ -301,7 +339,7 @@ export function startRun(args: StartRunArgs): Run {
       startedAt,
       configDir,
       cwd,
-      settingSources: [],
+      settingSources,
       realBinary,
       wrapper: WRAPPER,
       sdkVersion: sdkVersion(),
@@ -323,7 +361,7 @@ export function startRun(args: StartRunArgs): Run {
     prompt: inbox,
     // The harness's values last, so a proof that passes them anyway (from
     // untyped code) cannot switch the baseline off.
-    options: { ...options, env, settingSources: [], cwd, pathToClaudeCodeExecutable: WRAPPER },
+    options: { ...options, env, settingSources, cwd, pathToClaudeCodeExecutable: WRAPPER },
   });
   event('start');
 

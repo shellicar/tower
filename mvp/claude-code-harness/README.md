@@ -22,7 +22,28 @@ Claude Code over time and interrupt it:
 Isolation is the harness's baseline, not the proof's choice. Every run gets:
 
 - `settingSources: []`: no user, project or local settings files, and no
-  CLAUDE.md. A proof can't pass `settingSources`; the harness's value wins.
+  CLAUDE.md. A proof can't pass `settingSources` through `options` (the type
+  omits it); the harness's value wins there.
+- TODO: undecided (added for proof 11, Stephen not asked). `startRun` takes
+  two more fields, outside `options`, that opt out of parts of the baseline
+  for one run: `settingSources` (overrides the `[]` above when given) and
+  `seedConfigDir`/`seedCwd` (files written into the run's `CLAUDE_CONFIG_DIR`
+  or `cwd` before `query()` starts pulling from the prompt channel, so a
+  proof testing `settingSources: ['user']` or `['project']` isn't racing the
+  binary's own read of those directories). Both default to the unchanged
+  baseline, so every other proof is unaffected. Whether this escape hatch
+  should exist at all, versus a standalone script outside the harness (which
+  would lose env stripping, the fresh config dir, capture and redaction), is
+  Stephen's call. See `proofs/context.mts`.
+- **Risk found using this escape hatch (proof 11):** `settingSources:
+  ['project']` walks up from `cwd` for `.claude/CLAUDE.md`/`CLAUDE.md`, the
+  same as the real CLI. The harness's own working directories live under
+  `~/.local/state/...`, itself under `$HOME`, so that walk reaches
+  `~/.claude/CLAUDE.md` (a real file, if the account running the harness has
+  one) and sends its content in the API request, mislabeled by Claude Code
+  as project scope ("checked into the codebase") rather than personal. A
+  proof that opts into `settingSources: ['project']` picks this up
+  unasked. `runs/` is gitignored and nothing here quotes that content.
 - `CLAUDE_CONFIG_DIR`: a fresh, empty directory per run, under
   `~/.local/state/tower-claude-code-harness/config-dirs/<run id>`.
 - `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`: the login (below).
@@ -165,6 +186,28 @@ redacted, into the run directory:
 | `api-bodies/*.request.json` | each request body as sent, including `thinking` and `betas`; earlier assistant thinking text replaced with `<REDACTED>` by Claude Code |
 | `api-bodies/*.response.json` | each response, assembled; thinking text replaced with `<REDACTED>` |
 | `debug.log` | Claude Code's debug log |
+
+## Proof 11: the participant's own context
+
+`proofs/context.mts <model> <baseline|scopes>` puts a distinct sentinel
+string behind every real way to get text into a conversation and checks the
+raw request bodies (same `OTEL_LOG_RAW_API_BODIES` capture as proof 1) for
+which sentinels arrived, and how each was wrapped:
+
+- `baseline` (`settingSources: []`, the unchanged isolation baseline): a
+  `<system-reminder>` block built by hand into the first user message
+  (bridge's own mechanism), a `SessionStart` hook's `additionalContext`, a
+  `UserPromptSubmit` hook's `additionalContext` (a fresh sentinel each of two
+  turns), a `systemPrompt` preset `append`, an inline `settings.claudeMd`,
+  and a `CLAUDE.md` seeded into `cwd` before the binary starts.
+- `scopes` (`settingSources: ['project', 'user']`, opted in through
+  `startRun`'s escape hatch above): a `CLAUDE.md` seeded into `cwd` and
+  another into `CLAUDE_CONFIG_DIR`, via `seedCwd`/`seedConfigDir` so there is
+  no race with the binary's own read.
+
+An `InstructionsLoaded` hook logs every file Claude Code actually loaded
+(`file_path`, `memory_type`, `load_reason`) as direct evidence alongside the
+request bodies.
 
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
