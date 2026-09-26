@@ -362,8 +362,10 @@ node proofs/skills-user-level-trace.mts runs/<stamp>-p22-pair-hook.strace
 - Real `~/.claude`: the credential file is opened read-only only (shared
   login), in every run. With the user source closed, the only other access is
   a read of `~/.claude/state/unattended-serving-consent.json` (absent). With
-  it open, both fresh and resumed Claude Codes also run the retention
-  cleanup, which uses hard-coded home paths: they list `~/.claude/bridge-spawn`
+  it open, fresh and resumed Claude Codes alike also run the retention
+  cleanup (every one in these runs except the three shortest, which ended
+  within about 7 s; when it starts was not measured), which uses hard-coded
+  home paths: they list `~/.claude/bridge-spawn`
   (the cleanup deletes entries older than 1 day there), open
   `~/.claude/state/served-calls` (absent) and read and unlink
   `~/.claude/state/settings-review.json` (absent). Nothing there was changed
