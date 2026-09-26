@@ -551,3 +551,195 @@ source has nothing to filter.
   fixture-cleanup line above; the safety check against Stephen's own
   `~/.claude` (not a fixture, and not covered by that line) was run once,
   by hand, after both settings runs.
+
+## Proof 19: skills from config-declared directories, without a prefix
+
+The question: which routes load skills from a directory the participant's
+config names, listed and invoked by their plain names (`p19-a1`, not
+`x:p19-a1`), settable and re-pointable live, and loading nothing but skills.
+Proof 12 covered the plugin routes (always prefixed); this one covers the
+routes it left untested.
+
+`proofs/skills-plain.mts <model> <scenario>` runs one route per process.
+`proofs/private-etc.sh <command>` runs a command with a private `/etc` (user
+and mount namespace, `/etc` overlaid with a throwaway upper directory, then
+back to the caller's own uid); the `managed` scenario refuses to run without
+it. The real `/etc/claude-code` does not exist before or after.
+
+Every scenario uses the same fixtures. Declared directory A holds `p19-a1`,
+`p19-hooked` (a skill whose frontmatter carries a `PostToolUse` hook), and
+sentinels: `agents/`, `commands/`, `hooks/hooks.json`, `settings.json`,
+`.mcp.json`, `CLAUDE.md` and a plugin-shaped entry `p19-pluginshaped/`
+(`.claude-plugin/plugin.json`, a `skills/` child, the same sentinels).
+Declared directory B holds `p19-b1`. The live sequence is:
+
+1. list
+2. invoke `/p19-hooked` by its bare name
+3. add `p19-a2`, wait 8 s, list
+4. edit `p19-a1`'s description, wait 8 s, list
+5. re-point to B, wait 8 s, list
+6. invoke `/p19-a1`, which exists only in A
+7. `reloadSkills()`, list
+
+Each run directory also holds:
+
+- `debug.log`: the loader's "Loading skills from" and "Loaded N unique skills
+  (managed: X, user: Y, ...)" lines, and the watcher's lines
+- `api-bodies/`: every request body, searched for the sentinel markers
+- `proof-stdout.txt`: the proof's own output, including `get_hooks_listing`
+  and `list_permission_rules`
+- `run.strace`: some runs only
+
+Ground truth for names is the transcript's `skill_listing`. It is a delta:
+after the first turn only changed skills are attached, and
+`isInitial: true` marks a full list.
+
+Opening a setting source is done in the proof, with
+`extraArgs: {'setting-sources': ...}`. The CLI receives `--setting-sources=`
+from the SDK and then the proof's flag, and the last one wins
+(`claude/1/argv.json`). `run.json` still records `settingSources: []` for
+those runs.
+
+Sources in the 2.1.282 binary (minified names):
+
+- `L$o`, the skill loader:
+  - managed `<Ik()>/.claude/skills` loads as policySettings, with no
+    settingSources gate, only `CLAUDE_CODE_DISABLE_POLICY_SKILLS`
+  - user `<CLAUDE_CONFIG_DIR>/skills` is gated by `userSettings`
+  - `--add-dir` and project dirs are gated by `projectSettings`
+  - `--bare` reads only add-dirs, and only when `projectSettings` is on
+- `X()`, the watcher: user, project and add-dir skill directories, if they
+  exist when it starts. Not the managed one.
+- `H5e`: adopts plugin-shaped entries of skill directories as plugins.
+- `Ph()`/`HDr()`: the managed path. `HDr()` is a stub in this build, so
+  nothing relocates it.
+
+### Runs
+
+| Scenario | Run |
+| --- | --- |
+| user-closed | `runs/2026-09-26T163003288077Z-skills-plain-user-closed` |
+| user-open | `runs/2026-09-26T164112434281Z-skills-plain-user-open` |
+| user-open-late | `runs/2026-09-26T163047630042Z-skills-plain-user-open-late` |
+| user-open-links | `runs/2026-09-26T162826834004Z-skills-plain-user-open-links` |
+| user-open-nosync | `runs/2026-09-26T163149619533Z-skills-plain-user-open-nosync` |
+| managed | `runs/2026-09-26T164308135474Z-skills-plain-managed` |
+| project-adddir | `runs/2026-09-26T164152394485Z-skills-plain-project-adddir` |
+| project-config-root-open | `runs/2026-09-26T164021917994Z-skills-plain-project-config-root-open` |
+| register-root-open | `runs/2026-09-26T164244797727Z-skills-plain-register-root-open` |
+| canusetool-closed | `runs/2026-09-26T163355342755Z-skills-plain-canusetool-closed` |
+| canusetool-open | `runs/2026-09-26T163503903272Z-skills-plain-canusetool-open` |
+| bare-adddir | `runs/2026-09-26T163435067429Z-skills-plain-bare-adddir` |
+| bare-adddir-closed | `runs/2026-09-26T163543082345Z-skills-plain-bare-adddir-closed` |
+
+Earlier runs of the same scenarios, from before the removed-skill and
+plugin-shaped checks were added, are kept alongside.
+
+### Findings
+
+**User skills directory (`<CLAUDE_CONFIG_DIR>/skills` as a symlink to the
+declared directory, `userSettings` opened).**
+
+- Under `settingSources: []` nothing loads (user-closed:
+  `user: 0`, even after `reloadSkills()`).
+- Opened, the names are plain, and `/p19-hooked` dispatched by its bare name.
+- The watcher picked up each of these with no reload call:
+  - a new skill
+  - an edited description
+  - a swapped symlink
+- After the swap, `/p19-a1` was not dispatched. The listing only ever
+  announced `p19-b1` as an addition; the full list came back only after
+  `reloadSkills()`.
+- Declaring the directory after start doesn't use the watcher.
+  - Claude Code had already created `<CLAUDE_CONFIG_DIR>/skills/` itself,
+    for `synced/`, so the proof linked skills into it.
+  - Those links needed `reloadSkills()`, and later edits there were not
+    picked up (user-open-late).
+- Several declared directories work through per-skill symlinks in a real
+  `skills/`. Adding and removing links were picked up live
+  (user-open-links).
+- Costs:
+  - Opening `userSettings` loads the config directory's `CLAUDE.md`,
+    `rules/`, `agents/`, `commands/` and `settings.json`, including its hooks
+    and permission rules. All six sentinels showed up.
+  - Claude Code's claude.ai skills sync wrote `synced/` into declared
+    directory B, through the symlink. `syncClaudeAiSkills: false` in
+    `options.settings` stopped that, and the account's skills stopped
+    appearing (user-open-nosync).
+  - `synced` is a reserved skill name.
+  - The plugin-shaped entry was adopted as a plugin:
+    - its skill was listed prefixed, `p19-pluginshaped:p19-inner`
+    - its agent, command and MCP server loaded
+    - its `hooks.json` hook ran
+  - The declared directory's own top-level `agents/`, `commands/`, hooks,
+    `.mcp.json` and `CLAUDE.md` did not load.
+
+**Managed skills directory (`/etc/claude-code/.claude/skills`, private
+`/etc`).**
+
+- Loads under `settingSources: []` untouched (`managed: 2`), with plain names
+  and bare-name dispatch.
+- Not watched. With no reload call:
+  - a new skill, an edit and a re-point never reached the listing
+  - `/p19-a1` still dispatched after its directory was swapped away
+  - after a body-only edit, `/p19-b1` injected the old body (`BODY-MARKER-V2`
+    appears nowhere in the transcript)
+- Every `reloadSkills()` attached another full listing (`isInitial: true`),
+  even with nothing changed.
+- No sentinel loaded, and the plugin-shaped entry was not adopted.
+- In production the path is machine-wide and root-owned, so every Claude
+  Code on the machine sees these skills. It is not per-process.
+
+**`--add-dir` (`additionalDirectories` of a wrapper whose `.claude/skills`
+links to the declared directory, `projectSettings` opened).**
+
+- Plain names, bare-name dispatch.
+- Watched: a new skill, an edit and a re-point were picked up with no
+  reload, and `/p19-a1` was not dispatched after the swap.
+- No sentinel loaded, and the plugin-shaped entry was not adopted.
+- `projectConfigRoot` set to an empty directory kept the cwd's
+  `.claude/skills` probe and `.claude/settings.json` (hook, permission rule)
+  out.
+- Cost: the wrapper becomes a working directory (`workspaceDirectories`,
+  source `cliArg`), which grants file-tool access to it.
+
+**`projectConfigRoot` as the source (`<root>/.claude/skills` linking to the
+declared directory, `projectSettings` opened).**
+
+- Same results as `--add-dir`: plain names, watched, removal effective on
+  dispatch, no sentinel loaded, plugin-shaped entry not adopted.
+- No `workspaceDirectories` entry.
+- The loader walked up from the root and found only that one directory
+  (`project=[.../pcr/.claude/skills]`).
+
+**`register_repo_root`** (internal control request, `projectSettings`
+opened, the registered directory a child of a launch `--add-dir`):
+
+- Loads the child's `.claude/skills` on the next turn, with plain names.
+- New skills and a re-point were then watched.
+- Proof 12 found it loads nothing under `[]`.
+
+**canUseTool `addDirectories`** (destination `session`):
+
+- The directory was added (`workspaceDirectories`, source `session`).
+- No skill loaded from it, with `projectSettings` opened or not, even after
+  `reloadSkills()`.
+
+**`--bare`:**
+
+- With `projectSettings` opened it loaded the add-dir skills, plain names in
+  `init` and in `reloadSkills()`.
+- No turn ran ("Not logged in"), so there is no `skill_listing`. The shared
+  login is not used in bare mode.
+- Under `[]`: "[reduced mode] Skipping skill dir discovery".
+
+**Every route:** `p19-hooked`'s frontmatter hook was registered as a session
+hook when the skill was invoked, and it ran. No route keeps a skill's own
+hooks out.
+
+`project-*`, `register-root-open` and `bare-adddir` set
+`CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`. With `projectSettings` open, the
+CLAUDE.md ancestor walk would otherwise read above cwd, up through `$HOME`.
+The strace of those runs shows the same `~/.claude` accesses as the
+`[]`-only canusetool-closed run: `.credentials.json` and `state/`, from the
+shared login.
