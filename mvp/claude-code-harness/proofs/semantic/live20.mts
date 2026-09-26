@@ -580,7 +580,10 @@ export async function resume(model: string, source: Source, sessionId: string): 
   const bodies = bodiesDirFor(`resume-${short(model)}-${seedRec.scenario}-${source}`);
   const tunnel = new Tunnel();
   const otel = new Otel();
-  const fault = faultEnv(await tunnel.start(), await otel.start());
+  // PROOF20_NO_FAULT_ENV=1: neither the tunnel nor telemetry, to check that
+  // they don't change what Claude Code sends.
+  const noFaultEnv = process.env.PROOF20_NO_FAULT_ENV === '1';
+  const fault = noFaultEnv ? {} : faultEnv(await tunnel.start(), await otel.start());
   const otelRec = new Recorder('otel-events.jsonl');
   otel.onEvent = (e) => otelRec.write(e);
   const logRec = new Recorder('proof-log.txt');
@@ -591,7 +594,7 @@ export async function resume(model: string, source: Source, sessionId: string): 
     r.attach(run.dir);
   }
   const log = makeLog(logRec);
-  writeFileSync(join(run.dir, 'resume.json'), `${JSON.stringify({ source, model, firstDelayMs, cwd: run.cwd, sessionId, seedRun: seedRec.seedRun, upto: seedRec.upto, reset }, null, 2)}\n`);
+  writeFileSync(join(run.dir, 'resume.json'), `${JSON.stringify({ source: noFaultEnv ? `${source}-no-fault-env` : source, model, firstDelayMs, cwd: run.cwd, sessionId, seedRun: seedRec.seedRun, upto: seedRec.upto, reset, faultEnv: !noFaultEnv }, null, 2)}\n`);
   log(`run dir: ${run.dir}; resume ${source}; session ${sessionId}; reset ${reset}`);
   const d: Drive = { armed: undefined, trigger: () => {} };
   await drive(run, RESUME_STEPS, log, events, d, () => {}, firstDelayMs);
@@ -602,7 +605,9 @@ export async function resume(model: string, source: Source, sessionId: string): 
     process.exitCode = 1;
   }
   await new Promise((r) => setTimeout(r, 1500));
-  await Promise.all([tunnel.stop(), otel.stop()]);
+  if (!noFaultEnv) {
+    await Promise.all([tunnel.stop(), otel.stop()]);
+  }
   copyBodies(bodies, run.dir);
   log('done');
   process.stdout.write(`RESUME ${source} ${run.dir}\n`);
