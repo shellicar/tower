@@ -28,31 +28,50 @@
 //
 //   node proofs/dir-remove.mts <route>
 //
-//   cliarg    additionalDirectories at start; removeDirectories destination
-//             cliArg (matching), then session (mismatched)
+//   cliarg    additionalDirectories at start (a real --add-dir in argv,
+//             confirmed by reading claude/1/argv.json in this route's own
+//             run directory); removeDirectories destination <firstDestination>
+//             (argv[3], default cliArg, matching) against that genuine
+//             launch-time grant, no restore yet; then a live
+//             addDirectories(destination=cliArg) restore; then
+//             removeDirectories destination=session (mismatched against
+//             that restored, still cliArg-labeled grant, not against the
+//             original launch-time one, which the first attempt already
+//             consumed)
 //   session   canUseTool addDirectories on the natural first ask; then
-//             removeDirectories destination session (matching), then a
-//             mismatched destination
+//             removeDirectories destination session (matching), a live
+//             restore, then removeDirectories destination cliArg
+//             (mismatched)
 //   flag      options.settings.permissions.additionalDirectories at start,
-//             alongside an unrelated allow rule. Surprise (found by running
-//             this route first): list_permission_rules reports this
-//             directory's source as 'localSettings', NOT 'flagSettings',
-//             despite Options.settings sharing applyFlagSettings' value
-//             shape (sdk.d.ts:357). Passing it at START time apparently
-//             takes a different path (the sibling docs-research agent
-//             confirmed via argv.json: it becomes a --settings CLI arg) than
-//             calling applyFlagSettings LIVE does. So this route is kept as
-//             its own finding (source=localSettings; removed by every
-//             destination tried, same as cliArg/session), and 'flaglive'
-//             below is the one that actually reaches the flagSettings layer.
+//             alongside an unrelated allow rule (a real --settings '{...}'
+//             in argv, no --add-dir at all, confirmed the same way).
+//             Surprise, found by running this route first:
+//             list_permission_rules reports this directory's source as
+//             'localSettings', NOT 'flagSettings', despite Options.settings
+//             sharing applyFlagSettings' value shape (sdk.d.ts:357;
+//             Options.settings itself is sdk.d.ts:2209), while the
+//             unrelated allow RULE from the exact same options.settings
+//             payload IS correctly labeled 'flagSettings'. Only the
+//             directory gets mislabeled, on both routes, whether delivered
+//             at start (this route) or live (flaglive, below).
 //   flaglive  applyFlagSettings({permissions:{additionalDirectories:[target],
-//             allow:[...]}}) called LIVE as the first thing (no model turn),
-//             confirmed via list_permission_rules to land as
-//             source=flagSettings; then removeDirectories tried with every
-//             PermissionUpdateDestination value; then
-//             applyFlagSettings({permissions:{additionalDirectories: []}})
-//             to test the shallow-merge-replace hazard: does the unrelated
-//             allow rule set in the same earlier call survive?
+//             allow:[...]}}) called LIVE as the first thing, no model turn.
+//             Confirmed via argv.json: NEITHER --add-dir NOR --settings
+//             appears anywhere, since this is a control_request sent after
+//             the process is already running. list_permission_rules still
+//             reports the directory as source 'localSettings', not
+//             'flagSettings', the same mislabeling as 'flag' above, while
+//             the allow rule from the same call IS labeled 'flagSettings'.
+//   Both flag and flaglive then try removeDirectories with every
+//   PermissionUpdateDestination value, restoring the grant live via
+//   applyFlagSettings before each attempt after the first. An earlier
+//   version of this file tested all 5 destinations sequentially with no
+//   restore, so only the first one ever ran against a real grant; caught
+//   by review, not left in. Both routes end with
+//   applyFlagSettings({permissions:{additionalDirectories: []}}) once more,
+//   to test the shallow-merge-replace hazard: does the unrelated allow rule
+//   set in an earlier applyFlagSettings call survive a later call that only
+//   means to clear directories?
 //   race      Q2: one user turn asking for two Read tool calls "together",
 //             one on the trigger dir (canUseTool delayed 3s, then allows +
 //             removeDirectories the already-session-granted target dir),
@@ -74,9 +93,20 @@ const ROUTES = ['cliarg', 'session', 'flag', 'flaglive', 'race'] as const;
 type Route = (typeof ROUTES)[number];
 const route = process.argv[2] as Route;
 if (!ROUTES.includes(route)) {
-  process.stderr.write(`usage: node proofs/dir-remove.mts <${ROUTES.join('|')}>\n`);
+  process.stderr.write(`usage: node proofs/dir-remove.mts <${ROUTES.join('|')}> [firstDestination for cliarg, default cliArg]\n`);
   process.exit(2);
 }
+// cliarg only: which destination the FIRST removal attempt tries, against
+// the genuine launch-time --add-dir grant (every later attempt in that
+// route restores live via addDirectories first, so only the first attempt
+// is ever tested against the real launch-time grant without an
+// intervening live restore).
+const cliargFirstDestination = (process.argv[3] as PermissionUpdateDestination | undefined) ?? 'cliArg';
+// race only: the trigger call's canUseTool delay in ms (argv[3], default
+// 3000). 0 tests the opposite ordering: the removal resolves and lands
+// BEFORE raceFile's read is asked about, instead of long after it already
+// ran unasked.
+const raceDelayMs = route === 'race' && process.argv[3] ? Number(process.argv[3]) : 3000;
 
 const STATE_ROOT = join(homedir(), '.local', 'state', 'tower-claude-code-harness');
 const name = `proof10-dir-remove-${route}`;
@@ -93,6 +123,8 @@ writeFileSync(join(target, 'second.txt'), 'MARKER-SECOND-7702\n');
 writeFileSync(join(target, 'third.txt'), 'MARKER-THIRD-7703\n');
 writeFileSync(join(target, 'fourth.txt'), 'MARKER-FOURTH-7704\n');
 writeFileSync(join(target, 'raceFile.txt'), 'MARKER-RACE-7705\n');
+writeFileSync(join(target, 'fifth.txt'), 'MARKER-FIFTH-7706\n');
+writeFileSync(join(target, 'sixth.txt'), 'MARKER-SIXTH-7707\n');
 // Ten distinct trigger files, one per removeAttempt call: Claude Code
 // dedupes a repeated Read of a file unchanged since the last Read
 // ("Wasted call, file unchanged since your last Read"), client-side,
@@ -236,8 +268,8 @@ function stepsFor(r: Route): Step[] {
     case 'cliarg':
       return [
         { label: 'initial: cliArg grant at start', before: async () => listRules('cliarg-0-initial'), prompt: askText('marker.txt') },
-        triggerCall('remove destination=cliArg (matching)', { type: 'removeDirectories', directories: [target], destination: 'cliArg' }),
-        verifyStep('verify after remove destination=cliArg', 'second.txt', 'cliarg-1-after-remove-cliArg'),
+        triggerCall(`remove destination=${cliargFirstDestination} (against the genuine launch-time --add-dir grant, no restore yet)`, { type: 'removeDirectories', directories: [target], destination: cliargFirstDestination }),
+        verifyStep(`verify after remove destination=${cliargFirstDestination}`, 'second.txt', `cliarg-1-after-remove-${cliargFirstDestination}`),
         triggerCall('restore: addDirectories destination=cliArg (so the next removal is genuinely mismatched)', { type: 'addDirectories', directories: [target], destination: 'cliArg' }),
         { label: 'confirm restore', before: async () => listRules('cliarg-1b-after-restore-cliArg') },
         triggerCall('remove destination=session (mismatched, the grant is cliArg)', { type: 'removeDirectories', directories: [target], destination: 'session' }),
@@ -256,46 +288,46 @@ function stepsFor(r: Route): Step[] {
         triggerCall('remove destination=cliArg (mismatched, the grant is session)', { type: 'removeDirectories', directories: [target], destination: 'cliArg' }),
         verifyStep('verify after remove destination=cliArg (mismatched)', 'fourth.txt', 'session-3-after-remove-cliArg-mismatched'),
       ];
-    case 'flag': {
-      const destinations: PermissionUpdateDestination[] = ['session', 'cliArg', 'userSettings', 'projectSettings', 'localSettings'];
-      const steps: Step[] = [{ label: 'initial: options.settings grant + allow rule at start', before: async () => listRules('flag-0-initial'), prompt: askText('marker.txt') }];
-      for (const d of destinations) {
-        steps.push(triggerCall(`remove destination=${d}`, { type: 'removeDirectories', directories: [target], destination: d }));
-        steps.push(verifyStep(`verify after remove destination=${d}`, 'second.txt', `flag-after-remove-${d}`));
-      }
-      steps.push({
-        label: 'applyFlagSettings({permissions:{additionalDirectories: []}}), the shallow-merge-replace hazard: does the allow rule survive?',
-        before: async () => {
-          await run.query.applyFlagSettings({ permissions: { additionalDirectories: [] } });
-        },
-        prompt: askText('third.txt'),
-        after: async () => listRules('flag-9-after-applyFlagSettings-clear-dirs'),
-      });
-      return steps;
-    }
+    case 'flag':
     case 'flaglive': {
       const destinations: PermissionUpdateDestination[] = ['session', 'cliArg', 'userSettings', 'projectSettings', 'localSettings'];
-      const steps: Step[] = [
-        {
-          label: 'applyFlagSettings LIVE: grant + allow rule, before any model turn',
-          before: async () => {
-            await run.query.applyFlagSettings({ permissions: { additionalDirectories: [target], allow: ['WebFetch(domain:proof10-hazard-probe.invalid)'] } });
-            await listRules('flaglive-0-after-applyFlagSettings-grant');
-          },
-        },
-        verifyStep('verify grant landed, no ask expected', 'marker.txt', 'flaglive-0b-after-verify'),
-      ];
-      for (const d of destinations) {
+      const files = ['second.txt', 'third.txt', 'fourth.txt', 'raceFile.txt', 'fifth.txt'];
+      const grantLive = async (): Promise<void> => {
+        await run.query.applyFlagSettings({ permissions: { additionalDirectories: [target], allow: ['WebFetch(domain:proof10-hazard-probe.invalid)'] } });
+      };
+      const steps: Step[] =
+        r === 'flag'
+          ? [{ label: 'initial: options.settings grant + allow rule at start', before: async () => listRules('flag-0-initial'), prompt: askText('marker.txt') }]
+          : [
+              { label: 'applyFlagSettings LIVE: grant + allow rule, before any model turn', before: async () => { await grantLive(); await listRules('flaglive-0-after-applyFlagSettings-grant'); } },
+              verifyStep('verify grant landed, no ask expected', 'marker.txt', 'flaglive-0b-after-verify'),
+            ];
+      // Every destination is tested against a FRESH grant, restored live
+      // between attempts: testing all 5 sequentially without restoring
+      // would test only the first destination against a real grant, since
+      // that first removal already empties workspaceDirectories and every
+      // later "removal" would be a no-op against nothing (a real bug in an
+      // earlier version of this file, caught by review before this run).
+      // The restore uses applyFlagSettings even for 'flag' (whose original
+      // grant was options.settings at start): both land as source
+      // 'localSettings' in list_permission_rules (see the header comment),
+      // so this substitution is fair for destinations 2 through 5, not
+      // identical to the original delivery route for destination 1 alone.
+      destinations.forEach((d, idx) => {
+        if (idx > 0) {
+          steps.push({ label: `restore via applyFlagSettings LIVE before testing destination=${d}`, before: grantLive });
+        }
         steps.push(triggerCall(`remove destination=${d}`, { type: 'removeDirectories', directories: [target], destination: d }));
-        steps.push(verifyStep(`verify after remove destination=${d}`, 'second.txt', `flaglive-after-remove-${d}`));
-      }
+        steps.push(verifyStep(`verify after remove destination=${d}`, files[idx], `${r}-after-remove-${d}`));
+      });
       steps.push({
-        label: 'applyFlagSettings({permissions:{additionalDirectories: []}}), the shallow-merge-replace hazard: does the allow rule survive?',
+        label: 'restore once more, then applyFlagSettings({permissions:{additionalDirectories: []}}), the shallow-merge-replace hazard: does the allow rule survive?',
         before: async () => {
+          await grantLive();
           await run.query.applyFlagSettings({ permissions: { additionalDirectories: [] } });
         },
-        prompt: askText('third.txt'),
-        after: async () => listRules('flaglive-9-after-applyFlagSettings-clear-dirs'),
+        prompt: askText('sixth.txt'),
+        after: async () => listRules(`${r}-9-after-applyFlagSettings-clear-dirs`),
       });
       return steps;
     }
@@ -384,7 +416,7 @@ async function driveRace(): Promise<void> {
         await listRules('race-0-after-grant');
         phase = 'race';
         pendingUpdate = [{ type: 'removeDirectories', directories: [target], destination: 'session' }];
-        triggerDelayMs = 3000;
+        triggerDelayMs = raceDelayMs;
         note('send', { step: 1, label: 'race: two Read calls in one turn' });
         run.send({
           type: 'user',
