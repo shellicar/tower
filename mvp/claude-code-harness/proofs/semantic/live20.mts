@@ -47,6 +47,9 @@ type Fault = 'kill-first-byte' | 'kill-mid-stream' | 'abort-first-byte' | 'abort
 interface Step {
   prompt: string;
   midTurn?: string[];
+  // Send midTurn this long after the prompt instead of at the first tool_use
+  // (so it waits for the first tool round, whatever the tool).
+  midTurnAfterMs?: number;
   fault?: Fault;
 }
 
@@ -86,8 +89,9 @@ const SCENARIOS: Record<string, Scenario> = {
     files: { 'note.txt': 'BIRCH 2020' },
     steps: [
       {
-        prompt: 'Use the Read tool to read note.txt. Then run this exact Bash command, once: `sleep 6; echo done`. Reply with the file contents and the command output, nothing else.',
-        midTurn: ['One more thing: after the output, add the word PINEAPPLE on its own line.'],
+        prompt: 'Use the Read tool to read note.txt, and nothing else. Reply with the file contents only.',
+        midTurn: ['One more thing: after the contents, add the word PINEAPPLE on its own line.'],
+        midTurnAfterMs: 300,
       },
       { prompt: 'Reply with the word OK only.' },
     ],
@@ -296,6 +300,16 @@ async function drive(run: Run, steps: Step[], log: (s: string) => void, events: 
     midTurnSent = false;
     d.armed = step.fault ? { fault: step.fault, step: index + 1 } : undefined;
     run.send(user(step.prompt));
+    if (step.midTurn && step.midTurnAfterMs !== undefined) {
+      midTurnSent = true;
+      setTimeout(() => {
+        for (const text of step.midTurn ?? []) {
+          log(`${step.midTurnAfterMs} ms after the prompt: mid-turn send ${JSON.stringify(text)}`);
+          events.write({ ts: stamp(), midTurn: text });
+          run.send(user(text));
+        }
+      }, step.midTurnAfterMs);
+    }
   };
   const advance = (): void => {
     quiet = undefined;
