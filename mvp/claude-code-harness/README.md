@@ -26,9 +26,10 @@ Isolation is the harness's baseline, not the proof's choice. Every run gets:
 - `CLAUDE_CONFIG_DIR`: the agent's own directory,
   `~/.local/state/tower-claude-code-harness/config-dirs/<name>/`, named after
   the proof (`startRun`'s `name`), created the first time and reused by every
-  run of that proof. The harness never clears it. "its ONE directory PER
-  agent" (Stephen, 27 Sep). A proof can't pass it: `options.env`'s
-  `CLAUDE_CONFIG_DIR` is overridden. See below.
+  run of that proof. The harness never deletes it; `resetConfigDir` moves it
+  aside for a clean start. "its ONE directory PER agent" (Stephen, 27 Sep). A
+  proof can't pass it: `options.env`'s `CLAUDE_CONFIG_DIR` is overridden. See
+  below.
 - `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`: the login (below).
 - It strips a parent Claude Code session's variables from the environment
   (from `options.env` too): `CLAUDECODE`, `CLAUDE_PID`, `CLAUDE_EFFORT`,
@@ -44,7 +45,8 @@ The harness also sets:
 - `cwd`: the proof's own working directory,
   `~/.local/state/tower-claude-code-harness/work/<name>/`, named after the
   proof (`startRun`'s `name`), created the first time and reused by every run
-  of that proof. Never cleared. A proof can't pass `cwd`.
+  of that proof. Never cleared, and `resetConfigDir` leaves it alone. A proof
+  can't pass `cwd`.
 - `pathToClaudeCodeExecutable`: `bin/claude-capture`, which runs the SDK's own
   bundled `claude` binary and records it.
 
@@ -63,13 +65,58 @@ a proof meets Claude Code's state from earlier runs the way a real
 participant would: a later run can resume an earlier run's session by id with
 no session store, and two Claude Codes can meet on one session.
 
-- A proof that needs a clean start has no way to get one (undecided).
+- A proof that needs a clean start calls `resetConfigDir(name)` before
+  `startRun` (below).
 - Claude Code 2.1.282 skips its transcript retention cleanup here: with
   `settingSources: []` the user settings are disabled, and no enabled source
   gives `cleanupPeriodDays` (its default is 30 days). It still writes
   `.last-cleanup`, the marker for its other housekeeping.
 - Config directories from before this, one per run, are the timestamped
   `config-dirs/<timestamp>-<name>/` directories. They are kept.
+
+## A clean start
+
+`resetConfigDir(name)` in `src/harness.mts` gives an agent an empty config
+directory without deleting anything: "a way for an agent to 'reset' their
+directory for a clean start / ie safely, without using rm" (Stephen, 27 Sep).
+
+- It moves `config-dirs/<name>/`, whole, to
+  `config-dirs/.reset/<name>-<timestamp>/` (a rename, so the same directory,
+  files untouched), and makes a new empty `config-dirs/<name>/`. It returns
+  both paths.
+- It refuses while any Claude Code is still running with that directory: a
+  `sessions/<pid>.json` whose pid is alive and whose `procStart` equals field
+  22 of `/proc/<pid>/stat` (the check proof 17 validated). The error names
+  each pid, its pid file and both start times. `liveClaudeCodes(configDir)`
+  is the same check on its own.
+- It refuses the names `.` and `..`, which would point at `config-dirs/`
+  itself or the state folder above it. It refuses to overwrite an existing
+  `.reset/<name>-<timestamp>/`.
+- A name with no config directory yet gets an empty one; nothing is moved
+  (undecided: it could refuse instead).
+- The working directory, `work/<name>/`, is not reset.
+- Nothing is ever taken out of `.reset/`.
+
+Where the check can miss a running Claude Code (undecided, see the TODO in
+`src/harness.mts`): without `/proc` (macOS) every pid reads as not running;
+a pid file that can't be parsed is skipped; a Claude Code that hasn't written
+its pid file yet, and a run whose harness is still copying the config
+directory after Claude Code exited, have none; and a run can start between
+the check and the move. Also undecided: a proof named `.reset` would use the
+archive as its config directory, and `startRun` still accepts `.` and `..`.
+
+`proofs/reset.mts <model>` proves it, under the name `reset`, printing a
+`CHECK PASS`/`CHECK FAIL` line for each: `.` and `..` refused with nothing
+moved; run 1 to the end; reset, with the moved-aside directory the same
+inode and the same files (path, size, sha256) and the new one empty; run 2
+starting from the empty directory and ending with only its own session in
+it; and a reset refused, with nothing moved, while run 2's Claude Code is
+still running. `.credentials.json`, if present, is listed by name and never
+read. From `mvp/claude-code-harness/`:
+
+```sh
+node proofs/reset.mts claude-haiku-4-5 | tee runs/<timestamp>-reset-proof.log
+```
 
 ## The login
 
