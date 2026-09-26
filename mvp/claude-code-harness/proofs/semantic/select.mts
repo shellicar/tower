@@ -265,8 +265,14 @@ function judge(body: Json & { messages: ApiMessage[] }, ctx: SelectContext, seg:
     const keep: Flat[] = [];
     let j = 0;
     for (const f of tail) {
-      if (j < before.tail.length && resent(f, before.tail[j] as Flat)) {
+      const b = before.tail[j];
+      if (b && resent(f, b)) {
         j += 1;
+      } else if (b && f.role === b.role && f.block.type === 'text' && b.block.type === 'text' && String(f.block.text).startsWith(`${String(b.block.text)}\n\n`)) {
+        // Joined with new reminders into one system text block: the rest of
+        // the block is new.
+        j += 1;
+        keep.push({ role: f.role, block: { ...f.block, text: String(f.block.text).slice(String(b.block.text).length + 2) } });
       } else {
         keep.push(f);
       }
