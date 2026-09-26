@@ -30,6 +30,8 @@
 //   pd-stop    layer 1; SIGKILL; served again at once with layer 2.
 //   pd-kill    layer 1; SIGKILL; as kill.
 //   pd-crash   layer 1; uncaught exception; as kill.
+//   crash-stop, pd-crash-stop
+//              an uncaught exception, served again at once with layer 2.
 // Every case then serves each conversation twice (serve 2 and serve 3), both
 // with layer 2, and scores each serve's first request against every
 // transcript line the driver saw.
@@ -53,7 +55,7 @@
 //
 // Modes (from mvp/claude-code-harness/):
 //   participant <spec.json>
-//   case <model> <stop|kill|crash|pd-stop|pd-kill|pd-crash> <fresh|resumed>
+//   case <model> <stop|kill|crash|pd-stop|pd-kill|pd-crash|crash-stop|pd-crash-stop> <fresh|resumed>
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -1431,16 +1433,16 @@ function snapshot(ctx: Ctx, label: string, heldSentAt: Record<string, string>): 
   return out;
 }
 
-type CaseName = 'stop' | 'kill' | 'crash' | 'pd-stop' | 'pd-kill' | 'pd-crash';
+type CaseName = 'stop' | 'kill' | 'crash' | 'pd-stop' | 'pd-kill' | 'pd-crash' | 'crash-stop' | 'pd-crash-stop';
 type Variant = 'fresh' | 'resumed';
-const CASES: CaseName[] = ['stop', 'kill', 'crash', 'pd-stop', 'pd-kill', 'pd-crash'];
+const CASES: CaseName[] = ['stop', 'kill', 'crash', 'pd-stop', 'pd-kill', 'pd-crash', 'crash-stop', 'pd-crash-stop'];
 
 async function runCase(model: string, name: CaseName, variant: Variant): Promise<void> {
   const caseDir = join(RUNS, `${stamp().replace(/[:.]/g, '')}-orphans-${name}-${variant}`);
   mkdirSync(caseDir, { recursive: true });
   const log = makeLog(new Recorder(join(caseDir, 'driver-log.txt')), 'driver: ');
   const pd = name.startsWith('pd-');
-  const how: 'kill' | 'crash' = name.endsWith('crash') ? 'crash' : 'kill';
+  const how: 'kill' | 'crash' = name.includes('crash') ? 'crash' : 'kill';
   const immediate = name.endsWith('stop');
   log(`case ${name} ${variant}; layer 1 ${pd}; ending ${how}; served ${immediate ? 'at once' : 'after the orphans exit'}; dir ${caseDir}`);
 
