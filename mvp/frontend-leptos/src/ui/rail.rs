@@ -2,14 +2,12 @@
 //! pending-marker and the void-list are each concern's own slice, not a
 //! shared store — Decision 2's default). Owns no state of its own; the open
 //! conversation and every action are the composition root's.
-
-use std::collections::HashMap;
-
 use leptos::prelude::*;
 
 use crate::concerns::approvals::Approvals;
 use crate::concerns::rail::Rail;
 use crate::concerns::view::View;
+use crate::facets::{facet_values, matches, tag_of};
 use crate::time::{Liveness, Millis, age};
 use crate::transport::Status;
 use ws_types::WsRow;
@@ -92,22 +90,12 @@ fn heat_class(now: Millis, ts: Millis) -> &'static str {
 
 /// One section of grouped rows, or the single flat group when ungrouped.
 struct Section {
-    label: Option<String>,
+    /// `None` is the flat group, which draws no header. `Some(value)` is a
+    /// real group, whose value is `None` when its rows carry no value for the
+    /// group key.
+    group: Option<Option<String>>,
     rows: Vec<WsRow>,
     max: Millis,
-}
-
-fn tag_of(row: &WsRow, key: &str) -> String {
-    row.tags
-        .get(key)
-        .cloned()
-        .unwrap_or_else(|| "(untagged)".to_owned())
-}
-
-fn matches(row: &WsRow, filters: &HashMap<String, Vec<String>>) -> bool {
-    filters
-        .iter()
-        .all(|(k, vs)| vs.is_empty() || vs.contains(&tag_of(row, k)))
 }
 
 /// The two state filters, read from the same facts the dots are drawn from so
@@ -306,28 +294,21 @@ pub fn RailView(
                     (!ek.is_empty()).then(|| {
                         let ek3 = ek.clone();
                         let colour = rail.with(|r| r.tag_keys().get(&ek).cloned().unwrap_or_default());
-                        // Value counts honour the OTHER keys' filters.
-                        let mut counts: HashMap<String, usize> = HashMap::new();
-                        rail.with(|r| {
-                            let filters = view.with(|v| v.view_config().filters.clone());
-                            let live_only = view.with(|v| v.view_config().live_only);
-                            let unread_only = view.with(|v| v.view_config().unread_only);
-                            let now_ms = now.get();
-                            for row in r.ordered() {
-                                let others_match = filters.iter().all(|(k, vs)| k == &ek || vs.is_empty() || vs.contains(&tag_of(row, k)));
-                                let state_match = state_matches(r, &row.conv, live_only, unread_only, now_ms);
-                                if others_match && state_match && let Some(v) = row.tags.get(&ek) {
-                                    *counts.entry(v.clone()).or_insert(0) += 1;
-                                }
-                            }
+                        let filters = view.with(|v| v.view_config().filters.clone());
+                        let live_only = view.with(|v| v.view_config().live_only);
+                        let unread_only = view.with(|v| v.view_config().unread_only);
+                        let now_ms = now.get();
+                        let values = rail.with(|r| {
+                            facet_values(&r.ordered(), &ek, &filters, |conv| {
+                                state_matches(r, conv, live_only, unread_only, now_ms)
+                            })
                         });
-                        let mut values: Vec<(String, usize)> = counts.into_iter().collect();
-                        values.sort_by(|a, b| b.1.cmp(&a.1));
                         view! {
                             <div class="controls-row facet-values">
-                                {values.into_iter().map(|(value, count)| {
-                                    let selected = view.with(|v| v.view_config().filters.get(&ek3).map(|vs| vs.contains(&value)).unwrap_or(false));
-                                    let value2 = value.clone();
+                                {values.into_iter().map(|fv| {
+                                    let selected = view.with(|v| v.view_config().filters.get(&ek3).map(|vs| vs.contains(&fv.value)).unwrap_or(false));
+                                    let label = format!("{} ({})", fv.value.as_deref().unwrap_or("(untagged)"), fv.count);
+                                    let value2 = fv.value.clone();
                                     let ek4 = ek3.clone();
                                     let colour = colour.clone();
                                     view! {
@@ -337,10 +318,10 @@ pub fn RailView(
                                             disabled=searching
                                             style=move || selected.then(|| format!("color: {colour}")).unwrap_or_default()
                                             on:click=move |_| {
-                                                view.update(|v| v.toggle_filter(&ek4, &value2));
+                                                view.update(|v| v.toggle_filter(&ek4, value2.as_deref()));
                                                 save_view(&tab_name(), &view.get_untracked());
                                             }
-                                        >{format!("{value} ({count})")}</button>
+                                        >{label}</button>
                                     }
                                 }).collect_view()}
                             </div>
@@ -437,30 +418,29 @@ pub fn RailView(
                         // drops rows, and a search result must not be
                         // sectioned away from the reader who named it.
                         let sections: Vec<Section> = if !search.is_empty() || group_key.is_empty() {
-                            vec![Section { label: None, rows: visible, max: 0 }]
+                            vec![Section { group: None, rows: visible, max: 0 }]
                         } else {
-                            let mut grouped: Vec<(String, Vec<WsRow>)> = Vec::new();
+                            let mut grouped: Vec<(Option<String>, Vec<WsRow>)> = Vec::new();
                             for row in visible {
-                                let value = row.tags.get(&group_key).cloned();
+                                let value = tag_of(&row, &group_key).map(str::to_owned);
                                 if value.is_none() && hide_untagged {
                                     continue;
                                 }
-                                let label = value.unwrap_or_else(|| "(untagged)".to_owned());
-                                match grouped.iter_mut().find(|(l, _)| l == &label) {
+                                match grouped.iter_mut().find(|(v, _)| v == &value) {
                                     Some((_, rows)) => rows.push(row),
-                                    None => grouped.push((label, vec![row])),
+                                    None => grouped.push((value, vec![row])),
                                 }
                             }
                             let mut sections: Vec<Section> = grouped
                                 .into_iter()
-                                .map(|(label, rows)| {
+                                .map(|(value, rows)| {
                                     let max = rows.iter().map(|r| r.last_event).max().unwrap_or(0);
-                                    Section { label: Some(label), rows, max }
+                                    Section { group: Some(value), rows, max }
                                 })
                                 .collect();
                             sections.sort_by(|a, b| {
-                                let ua = (a.label.as_deref() == Some("(untagged)")) as u8;
-                                let ub = (b.label.as_deref() == Some("(untagged)")) as u8;
+                                let ua = u8::from(matches!(&a.group, Some(None)));
+                                let ub = u8::from(matches!(&b.group, Some(None)));
                                 ua.cmp(&ub).then(b.max.cmp(&a.max))
                             });
                             sections
@@ -468,7 +448,8 @@ pub fn RailView(
                         sections
                             .into_iter()
                             .map(|section| {
-                                let header = section.label.clone().map(|label| {
+                                let header = section.group.clone().map(|value| {
+                                    let label = value.unwrap_or_else(|| "(untagged)".to_owned());
                                     let count = section.rows.len();
                                     let max = section.max;
                                     let heat = heat_class(now.get(), max);
