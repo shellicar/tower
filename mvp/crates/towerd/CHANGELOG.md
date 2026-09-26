@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- Print towerd's version, commit and build time on startup.
+
 ### Fixed
 
 - Open towerd's database in WAL mode.

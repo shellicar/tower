@@ -42,6 +42,7 @@ jobs:
   checks:
     if: github.ref_type != 'tag'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,8 +64,7 @@ jobs:
             echo "fmt_packages=" >> "$GITHUB_OUTPUT"
           fi
         working-directory: mvp
-      - run: cargo test ${{ steps.scope.outputs.packages }}
-        working-directory: mvp
+      # cargo test runs in test-matrix.yml, on all three platforms.
       - run: cargo clippy ${{ steps.scope.outputs.packages }}
         working-directory: mvp
       - run: cargo fmt --check ${{ steps.scope.outputs.fmt_packages }}
@@ -87,11 +87,16 @@ jobs:
           node scripts/generate-all-changelogs.mts
           git diff --exit-code -- '*/CHANGELOG.md'
 
+  test-matrix:
+    if: github.ref_type != 'tag'
+    uses: ./.github/workflows/test-matrix.yml
+
   # Splits the pushed tag (`<app>@<version>`) into its two halves. Empty on
   # pull_request/branch push — nothing here reads its outputs on those
   # triggers.
   detect:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     outputs:
       app: ${{ steps.tag.outputs.app }}
       version: ${{ steps.tag.outputs.version }}
@@ -175,6 +180,7 @@ jobs:
     needs:
       [
         checks,
+        test-matrix,
         detect,
         binary,
         frontend-svelte,
@@ -182,6 +188,7 @@ jobs:
       ]
     if: always()
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Require every needed job to have succeeded or skipped
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}

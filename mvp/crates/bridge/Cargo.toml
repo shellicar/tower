@@ -43,6 +43,9 @@ tokio.workspace = true
 uuid.workspace = true
 yaml_serde.workspace = true
 
+[build-dependencies]
+buildstamp = { path = "../buildstamp" }
+
 [dev-dependencies]
 # The only fake (bridge-testkit's FakeBroker) plus a test scratch-dir
 # helper. A dev-dependency compiles for any test/bench in this crate,

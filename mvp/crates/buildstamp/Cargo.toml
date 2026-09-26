@@ -1,0 +1,9 @@
+# The build stamp every binary carries: which commit it was built from, and
+# whether the files it compiled matched that commit. std only.
+[package]
+name = "buildstamp"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true

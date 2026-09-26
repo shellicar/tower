@@ -34,13 +34,23 @@ jobs:
           - runner: windows-2022
             platform: win32-x64
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: mvp
-      - run: cargo build --release -p ${{ inputs.package }}
+      - name: Build
+        shell: bash
         working-directory: mvp
+        run: |
+          set -eu
+          cargo build --release -p ${{ inputs.package }}
+          PREFIX=$(echo '${{ inputs.package }}' | tr '[:lower:]-' '[:upper:]_')
+          STAMP=$(cargo run -q -p buildstamp -- "target/release/${{ inputs.package }}.d")
+          echo "stamping ${{ inputs.package }} as $STAMP"
+          export "BUILDSTAMP_$PREFIX=$STAMP"
+          cargo build --release -p ${{ inputs.package }}
       - name: Package
         shell: bash
         env:

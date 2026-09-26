@@ -80,6 +80,14 @@ fn resolve_bridge_path() -> String {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Before ratatui claims the screen, the last moment stderr reaches it.
+    eprintln!(
+        "helm {} ({}) built {}",
+        env!("CARGO_PKG_VERSION"),
+        env!("HELM_GIT_HASH"),
+        env!("HELM_BUILD_TIME"),
+    );
+
     let bridge_path = resolve_bridge_path();
 
     // Args: `--adopt <conv-id>` resumes an existing conversation (history
