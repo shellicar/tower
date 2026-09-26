@@ -1,93 +1,69 @@
-// Proof 17: recovering unpublished entries when nobody knows how the last run
-// ended.
+// Proof 21: stopping an orphaned Claude Code, before serving and at the
+// source.
 //
-// Stephen (27 Sep): "they need to prove its resilient / you cant just say 'i
-// know how to recover from SIGKILL when I knew it was SIGKILL' that doesnt
-// work". Proof 7's recover mode took the session ids, config dirs and store
-// from the killed run's own record, and only ran after every orphan had
-// exited. Here the check is blind: the same check runs on every serve, before
-// the conversation's Claude Code starts, knowing only what a participant would
-// know.
+// Built on proof 17b's recovery proof (proofs/recovery.mts, brought in from
+// proof-17b-shared-dir): its store, its blind recovery check (check(), copied
+// here unchanged), its transcript keeper and its request scoring. What is new:
 //
-// What the participant knows (its "own config"), all constants in this file:
-//   - the store root (STORE_DIR), the same for every run of this proof
-//   - the root the harness puts every CLAUDE_CONFIG_DIR under (CONFIG_DIRS_ROOT)
-//   - os.tmpdir(), where the SDK makes /tmp/claude-resume-* when resuming
-//   - the working directory it runs Claude Code in (WORK)
-//   - the model
-// and, per conversation it is asked to serve: the session id (none for a new
-// one) and the message to say. The participant process is started with a
-// spec file holding only those two per conversation (plus where to write its
-// own log). It never reads a previous participant's files.
+// Layer 2 (stopLive): before serving a conversation the participant
+//   1. finds any live Claude Code on its session: a sessions/<pid>.json naming
+//      the session, in the agent's config dir or in any /tmp/claude-resume-*,
+//      whose pid is alive and whose procStart equals /proc/<pid>/stat field 22
+//   2. sends it SIGINT
+//   3. waits until it has exited
+//   4. runs proof 17's recovery check
+//   5. then serves.
 //
-// The driver is the test operator. It ends each participant in one of the
-// case's ways, keeps copies of every transcript line it sees (the SDK deletes
-// its resume dirs), and scores each serve against what was actually written.
-// Only the driver reads previous runs' records, and only to score.
+// Layer 1 (spawnWith, pdeathsig): each Claude Code is launched through
+// `setpriv --pdeathsig SIGINT -- <claude> <args>` from the SDK's
+// spawnClaudeCodeProcess hook, so the kernel sends it SIGINT when the
+// participant dies. setpriv execs, so the pid the SDK sees is Claude Code's.
+//
+// Cases (store resume only, the path the participant uses; each fresh and
+// resumed; each serve holds one conversation mid-reply, R, and one mid-tool,
+// T, inside a 60 s `sleep`):
+//   stop       no layer 1; participant SIGKILLed; served again at once with
+//              layer 2.
+//   kill       no layer 1; participant SIGKILLed; not served until every
+//              orphan has exited on its own. Then served with layer 2.
+//   crash      no layer 1; participant throws an uncaught exception; as kill.
+//   pd-stop    layer 1; SIGKILL; served again at once with layer 2.
+//   pd-kill    layer 1; SIGKILL; as kill.
+//   pd-crash   layer 1; uncaught exception; as kill.
+// Every case then serves each conversation twice (serve 2 and serve 3), both
+// with layer 2, and scores each serve's first request against every
+// transcript line the driver saw.
+//
+// TODO: undecided. What to do if the orphan hasn't exited some time after
+// SIGINT: escalate (SIGTERM, then SIGKILL) or refuse the serve. Built: the
+// easiest, wait STOP_WAIT_MS (30 s, a value picked for this proof), then log
+// it and serve anyway, which is proof 17's orphan policy.
+//
+// TODO: undecided. What happens when setpriv isn't available. Built: nothing;
+// the spawn fails (ENOENT) and that conversation's query errors.
+//
+// TODO: undecided. Where the store lives. Built: a file store, one JSONL
+// file per session key under STORE_DIR, as proofs 7 and 17.
+//
+// Proof-only safety gate (not the participant's design): layer 2 detection is
+// blind, but before it signals a pid the pid and its start time must be on
+// the `ours` list the driver passes in (the Claude Codes this proof started
+// in this case), and every signal the driver sends is checked against the
+// start time it recorded. Refusals are logged.
 //
 // Modes (from mvp/claude-code-harness/):
-//
 //   participant <spec.json>
-//       One participant: checks each conversation it's given a session id for
-//       (twice, to show the second adds nothing), then serves them.
-//
-//   case <model> <case> <fresh|resumed>
-//       case: press1 press2 press3 kill kill-orphan crash claude-kill abort
-//             reboot reboot-later kill-twice (kill-twice is resumed only).
-//       reboot: participant SIGKILLed, then every Claude Code process at
-//       once, then this case's resume dirs deleted. reboot-later: the same
-//       after the orphans have finished on their own.
-//
-//   --rescore <case dir> [...]
-//       Rescores each serve's last-written entries against its first request
-//       by content (rescore.json); also run at the end of every case.
-//
-// TODO: undecided. Where the store lives. Built: one JSONL file per session
-// key under STORE_DIR (a file store, as proof 7), the easiest that resumes.
-//
-// TODO: undecided. Where the check looks. Built: every directory under the
-// harness's config-dirs root (each run gets a fresh CLAUDE_CONFIG_DIR, so a
-// participant that doesn't know its predecessor's has to look in all of them)
-// plus every /tmp/claude-resume-*. A participant with one fixed config dir
-// would look in one place; that is not what the harness baseline is.
-//
-// TODO: undecided. How several transcripts of one session are combined and
-// in what order what's missing is appended. Built: union by uuid (uuid-less
-// entries by content), transcripts taken oldest mtime first, each in file
-// order; missing entries appended at the end of the store's file.
-//
-// TODO: undecided. What the participant does when it finds a Claude Code
-// still running on the session it's asked to serve. Built: the easiest, which
-// is to log it and serve anyway.
-//
-// Proof 17b (27 Sep) reruns the kill-orphan case on the harness that gives
-// each agent ONE config directory, config-dirs/<name>/, reused by every run
-// under that name (RUN_NAME below), so the orphan and the Claude Code served
-// in its place share it. Variants: fresh and resumed are proof 17's (the
-// participant resumes through its store, into /tmp/claude-resume-*);
-// dir-fresh and dir-resumed give the participant no store, so every resume
-// is straight from the config directory (resume by id). Each case starts
-// with resetConfigDir(RUN_NAME). The check below is proof 17's, unchanged:
-// it still searches every directory under the config-dirs root although an
-// agent now has one.
-//
-// TODO: undecided. Whether a participant resumes through a store or straight
-// from its config directory. Built: both, as variants, to show each.
-//
-// TODO: undecided. Press handling (press 1 interrupt then drain, press 2
-// SIGTERM each Claude Code and stop waiting, press 3 process.exit) and abort
-// are carried over from proof 7 to show what each leaves behind; none of it is
-// the participant's design.
+//   case <model> <stop|kill|crash|pd-stop|pd-kill|pd-crash> <fresh|resumed>
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { importSessionToStore, type SDKUserMessage, type SessionKey, type SessionStore, type SessionStoreEntry, type SpawnedProcess, type SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import type { HarnessOptions, Run } from '../src/harness.mts';
-import { resetConfigDir, startRun } from '../src/harness.mts';
+import { startRun } from '../src/harness.mts';
 import { LineRecorder, redact } from '../src/record.mts';
 
 // Wall clock, to the millisecond, in every process (proof 7: the harness's
@@ -102,14 +78,17 @@ const DEBUG_ROOT = join(STATE, 'debug');
 const BODIES_ROOT = join(STATE, 'api-bodies');
 
 // The participant's own config.
-const STORE_DIR = join(STATE, 'stores', 'proof-17b-shared-dir');
+const STORE_DIR = join(STATE, 'stores', 'proof-21-orphans');
 const CONFIG_DIRS_ROOT = join(STATE, 'config-dirs');
-const RUN_NAME = 'recovery-17b';
+const RUN_NAME = 'orphans-21';
+const AGENT_CONFIG_DIR = join(CONFIG_DIRS_ROOT, RUN_NAME);
 const WORK = join(STATE, 'work', RUN_NAME);
 
 const TOOL_SLEEP_S = 60;
 const REPLY_CHARS = 300;
 const TOOL_DELAY_MS = 500;
+// TODO: undecided (see the header): how long layer 2 waits after SIGINT.
+const STOP_WAIT_MS = 30_000;
 
 type Json = Record<string, unknown>;
 
@@ -494,9 +473,38 @@ async function check(sessionId: string, log: (s: string) => void): Promise<Check
 }
 
 // ---------------------------------------------------------------------------
-// Direct spawn (from proof 7): the SDK's own spawn minus the capture wrapper,
-// so the tree is participant -> claude and a killed participant leaves the
-// real Claude Code as the orphan. Records claude/<n>/ like the wrapper.
+// Signals. Only ever to a process this proof started, and only while its
+// start time is still the one recorded, so a reused pid is never signalled.
+
+interface Known {
+  pid: number;
+  starttime: string;
+}
+
+function gone(k: Known): boolean {
+  const s = procStat(k.pid);
+  return s === undefined || s.state === 'Z' || s.state === 'X' || s.starttime !== k.starttime;
+}
+
+function signalChecked(k: Known, sig: NodeJS.Signals, log: (s: string) => void): boolean {
+  const s = procStat(k.pid);
+  if (!s || s.starttime !== k.starttime) {
+    log(`refused ${sig} to ${k.pid}: start time ${s?.starttime ?? 'none'} is not the recorded ${k.starttime}`);
+    return false;
+  }
+  try {
+    process.kill(k.pid, sig);
+    return true;
+  } catch (err) {
+    log(`${sig} to ${k.pid} failed: ${String(err)}`);
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Spawn (from proof 17's directSpawn): the SDK's own spawn minus the capture
+// wrapper, so the tree is participant -> claude. Layer 1 puts setpriv in
+// front: setpriv sets PR_SET_PDEATHSIG and execs claude in the same process.
 
 interface Spawned {
   pid: number;
@@ -522,55 +530,61 @@ function claimSpawnDir(root: string): string {
   }
 }
 
-function directSpawn(o: SpawnOptions): SpawnedProcess {
-  const captureRoot = String(o.env.HARNESS_CAPTURE_DIR);
-  const real = String(o.env.HARNESS_REAL_CLAUDE);
-  const env = { ...o.env };
-  delete env.HARNESS_CAPTURE_DIR;
-  delete env.HARNESS_REAL_CLAUDE;
-  const dir = claimSpawnDir(captureRoot);
-  const runId = basename(dirname(captureRoot));
-  mkdirSync(DEBUG_ROOT, { recursive: true });
-  const debugFile = join(DEBUG_ROOT, `${runId}-${basename(dir)}.log`);
-  const args = [...o.args, '--debug-file', debugFile];
-  const child = spawn(real, args, { cwd: o.cwd, env: env as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'pipe'], signal: o.signal, windowsHide: true });
-  writeFileSync(
-    join(dir, 'argv.json'),
-    `${JSON.stringify({ startedAt: stamp(), realBinary: real, argv: args, cwd: o.cwd, pid: child.pid, hostPid: process.pid, configDir: env.CLAUDE_CONFIG_DIR, debugFile, envNames: Object.keys(env).sort() }, null, 2)}\n`,
-  );
-  const stdinRec = new LineRecorder(createWriteStream(join(dir, 'stdin.txt')));
-  const stdoutRec = new LineRecorder(createWriteStream(join(dir, 'stdout.txt')));
-  const stderrRec = new LineRecorder(createWriteStream(join(dir, 'stderr.txt')));
-  for (const [stream, rec] of [
-    [child.stdout, stdoutRec],
-    [child.stderr, stderrRec],
-  ] as const) {
-    const emit = stream.emit.bind(stream);
-    stream.emit = ((event: string, ...a: unknown[]) => {
-      if (event === 'data') {
-        rec.push(a[0] as Buffer);
-      }
-      return emit(event, ...a);
-    }) as typeof stream.emit;
-  }
-  const write = child.stdin.write.bind(child.stdin) as (...a: unknown[]) => boolean;
-  child.stdin.write = ((chunk: unknown, ...a: unknown[]) => {
-    stdinRec.push(Buffer.from(chunk as string));
-    return write(chunk, ...a);
-  }) as typeof child.stdin.write;
-  let exitInfo: { at: string; code: number | null; signal: NodeJS.Signals | null } | undefined;
-  const exited = new Promise<{ at: string; code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-    child.once('exit', (code, signal) => {
-      exitInfo = { at: stamp(), code, signal };
-      resolve(exitInfo);
+function spawnWith(pdeathsig: boolean): (o: SpawnOptions) => SpawnedProcess {
+  return (o: SpawnOptions): SpawnedProcess => {
+    const captureRoot = String(o.env.HARNESS_CAPTURE_DIR);
+    const real = String(o.env.HARNESS_REAL_CLAUDE);
+    const env = { ...o.env };
+    delete env.HARNESS_CAPTURE_DIR;
+    delete env.HARNESS_REAL_CLAUDE;
+    const dir = claimSpawnDir(captureRoot);
+    const runId = basename(dirname(captureRoot));
+    mkdirSync(DEBUG_ROOT, { recursive: true });
+    const debugFile = join(DEBUG_ROOT, `${runId}-${basename(dir)}.log`);
+    const args = [...o.args, '--debug-file', debugFile];
+    // TODO: undecided (see the header): no setpriv. Built: nothing; spawn
+    // fails with ENOENT.
+    const command = pdeathsig ? 'setpriv' : real;
+    const commandArgs = pdeathsig ? ['--pdeathsig', 'SIGINT', '--', real, ...args] : args;
+    const child = spawn(command, commandArgs, { cwd: o.cwd, env: env as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'pipe'], signal: o.signal, windowsHide: true });
+    writeFileSync(
+      join(dir, 'argv.json'),
+      `${JSON.stringify({ startedAt: stamp(), launcher: pdeathsig ? 'setpriv --pdeathsig SIGINT --' : null, realBinary: real, argv: args, cwd: o.cwd, pid: child.pid, hostPid: process.pid, configDir: env.CLAUDE_CONFIG_DIR, debugFile, envNames: Object.keys(env).sort() }, null, 2)}\n`,
+    );
+    const stdinRec = new LineRecorder(createWriteStream(join(dir, 'stdin.txt')));
+    const stdoutRec = new LineRecorder(createWriteStream(join(dir, 'stdout.txt')));
+    const stderrRec = new LineRecorder(createWriteStream(join(dir, 'stderr.txt')));
+    for (const [stream, rec] of [
+      [child.stdout, stdoutRec],
+      [child.stderr, stderrRec],
+    ] as const) {
+      const emit = stream.emit.bind(stream);
+      stream.emit = ((event: string, ...a: unknown[]) => {
+        if (event === 'data') {
+          rec.push(a[0] as Buffer);
+        }
+        return emit(event, ...a);
+      }) as typeof stream.emit;
+    }
+    const write = child.stdin.write.bind(child.stdin) as (...a: unknown[]) => boolean;
+    child.stdin.write = ((chunk: unknown, ...a: unknown[]) => {
+      stdinRec.push(Buffer.from(chunk as string));
+      return write(chunk, ...a);
+    }) as typeof child.stdin.write;
+    let exitInfo: { at: string; code: number | null; signal: NodeJS.Signals | null } | undefined;
+    const exited = new Promise<{ at: string; code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+      child.once('exit', (code, signal) => {
+        exitInfo = { at: stamp(), code, signal };
+        resolve(exitInfo);
+      });
     });
-  });
-  child.once('close', async () => {
-    await Promise.all([stdinRec.end(), stdoutRec.end(), stderrRec.end()]);
-    writeFileSync(join(dir, 'exit.json'), `${JSON.stringify({ exitedAt: exitInfo?.at, closedAt: stamp(), code: exitInfo?.code, signal: exitInfo?.signal }, null, 2)}\n`);
-  });
-  spawned.set(captureRoot, [...(spawned.get(captureRoot) ?? []), { pid: child.pid as number, dir, child, exited }]);
-  return child as unknown as SpawnedProcess;
+    child.once('close', async () => {
+      await Promise.all([stdinRec.end(), stdoutRec.end(), stderrRec.end()]);
+      writeFileSync(join(dir, 'exit.json'), `${JSON.stringify({ exitedAt: exitInfo?.at, closedAt: stamp(), code: exitInfo?.code, signal: exitInfo?.signal }, null, 2)}\n`);
+    });
+    spawned.set(captureRoot, [...(spawned.get(captureRoot) ?? []), { pid: child.pid as number, dir, child, exited }]);
+    return child as unknown as SpawnedProcess;
+  };
 }
 
 function claudeOf(run: Run): Spawned | undefined {
@@ -588,6 +602,92 @@ function copyDebugLogs(runDir: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// Layer 2: stop any live Claude Code on the session before serving it.
+
+interface StopReport {
+  sessionId: string;
+  startedAt: string;
+  roots: number;
+  pidFiles: { file: string; pid: number; procStart: string; status: unknown; live: boolean }[];
+  signalled: { pid: number; procStart: string; sentAt: string; goneAt: string | null; msToGone: number | null }[];
+  refused: { pid: number; procStart: string; why: string }[];
+  ms: number;
+  outcome: string;
+}
+
+async function stopLive(sessionId: string, ours: Known[], log: (s: string) => void): Promise<StopReport> {
+  const startedAt = stamp();
+  const t0 = performance.now();
+  // The agent's config dir (a fresh Claude Code) and every resume dir (one
+  // resumed through the store): proof 17b found each lives in one of these.
+  const roots = [AGENT_CONFIG_DIR, ...resumeDirs()];
+  const pidFiles: StopReport['pidFiles'] = [];
+  for (const root of roots) {
+    let names: string[] = [];
+    try {
+      names = readdirSync(join(root, 'sessions')).filter((n) => /^\d+\.json$/.test(n));
+    } catch {}
+    for (const n of names) {
+      let d: Json;
+      try {
+        d = JSON.parse(readFileSync(join(root, 'sessions', n), 'utf8')) as Json;
+      } catch {
+        continue;
+      }
+      if (d.sessionId !== sessionId) {
+        continue;
+      }
+      const k = { pid: Number(d.pid), starttime: String(d.procStart) };
+      pidFiles.push({ file: join(root, 'sessions', n), pid: k.pid, procStart: k.starttime, status: d.status, live: Number.isInteger(k.pid) && k.pid > 0 && !gone(k) });
+    }
+  }
+  const live = [...new Map(pidFiles.filter((p) => p.live).map((p) => [p.pid, p])).values()];
+  const signalled: StopReport['signalled'] = [];
+  const refused: StopReport['refused'] = [];
+  const waits: { k: Known; row: StopReport['signalled'][number]; t: number }[] = [];
+  for (const p of live) {
+    const k = { pid: p.pid, starttime: p.procStart };
+    if (!ours.some((o) => o.pid === k.pid && o.starttime === k.starttime)) {
+      refused.push({ pid: k.pid, procStart: k.starttime, why: 'not a Claude Code this proof started (proof safety gate)' });
+      log(`stop ${sessionId}: live pid ${k.pid} is not on this proof's list; not signalled`);
+      continue;
+    }
+    if (!signalChecked(k, 'SIGINT', log)) {
+      refused.push({ pid: k.pid, procStart: k.starttime, why: 'start time changed before the signal' });
+      continue;
+    }
+    const row = { pid: k.pid, procStart: k.starttime, sentAt: stamp(), goneAt: null as string | null, msToGone: null as number | null };
+    signalled.push(row);
+    waits.push({ k, row, t: performance.now() });
+    log(`stop ${sessionId}: SIGINT to ${k.pid} (${p.file})`);
+  }
+  const deadline = performance.now() + STOP_WAIT_MS;
+  while (waits.some((w) => w.row.goneAt === null) && performance.now() < deadline) {
+    for (const w of waits) {
+      if (w.row.goneAt === null && gone(w.k)) {
+        w.row.goneAt = stamp();
+        w.row.msToGone = Math.round(performance.now() - w.t);
+      }
+    }
+    if (waits.some((w) => w.row.goneAt === null)) {
+      await sleep(10);
+    }
+  }
+  const stillRunning = signalled.filter((s) => s.goneAt === null).map((s) => s.pid);
+  const outcome =
+    live.length === 0
+      ? 'none found'
+      : stillRunning.length > 0
+        ? `still running ${STOP_WAIT_MS} ms after SIGINT: ${JSON.stringify(stillRunning)}; served anyway (TODO: undecided)`
+        : refused.length > 0
+          ? `refused ${JSON.stringify(refused.map((r) => r.pid))}; served anyway`
+          : `stopped ${JSON.stringify(signalled.map((s) => [s.pid, s.msToGone]))}`;
+  const report: StopReport = { sessionId, startedAt, roots: roots.length, pidFiles, signalled, refused, ms: Math.round(performance.now() - t0), outcome };
+  log(`stop ${sessionId}: ${roots.length} roots, pid files ${JSON.stringify(pidFiles.map((p) => ({ pid: p.pid, live: p.live, status: p.status })))}; ${outcome}; ${report.ms} ms`);
+  return report;
+}
+
+// ---------------------------------------------------------------------------
 // The participant
 
 interface ConvSpec {
@@ -598,17 +698,17 @@ interface ConvSpec {
   toolLabel?: string;
 }
 
-// store: resume through the session store (the SDK writes it into a
-// /tmp/claude-resume-* directory and points CLAUDE_CONFIG_DIR there). dir: no
-// store; resume by id straight from the agent's config directory.
-type Mode = 'store' | 'dir';
-
 interface ParticipantSpec {
   model: string;
-  mode: Mode;
   outDir: string;
   ending: 'answer' | 'hold';
   apiBodies?: boolean;
+  // Layer 1.
+  pdeathsig: boolean;
+  // Layer 2.
+  stopOrphans: boolean;
+  // The proof's safety gate for layer 2: Claude Codes this proof started.
+  ours: Known[];
   convs: ConvSpec[];
 }
 
@@ -621,37 +721,44 @@ async function participant(specPath: string): Promise<void> {
   const out = spec.outDir;
   mkdirSync(out, { recursive: true });
   const log = makeLog(new Recorder(join(out, 'participant-log.txt')), `participant ${process.pid}: `);
-  log(`start; spec ${specPath}`);
+  log(`start; spec ${specPath}; layer 1 ${spec.pdeathsig}; layer 2 ${spec.stopOrphans}`);
 
-  // 1. The check, before any Claude Code starts, so the check never sees this
-  //    serve's own Claude Code, pid file or resume dir.
-  for (const c of spec.convs) {
-    if (!c.sessionId) {
-      continue;
-    }
-    const first = await check(c.sessionId, (s) => log(`${c.tag}: ${s}`));
-    const second = await check(c.sessionId, (s) => log(`${c.tag} (again): ${s}`));
+  // Before any Claude Code of this serve starts: layer 2 (stop, wait), then
+  // proof 17's check, twice (the second shows it adds nothing more). Stops
+  // run side by side; checks one at a time (check() swaps
+  // process.env.CLAUDE_CONFIG_DIR while it reads).
+  const withSession = spec.convs.filter((c) => c.sessionId);
+  const stops = new Map<string, StopReport>();
+  if (spec.stopOrphans) {
+    await Promise.all(
+      withSession.map(async (c) => {
+        const r = await stopLive(c.sessionId as string, spec.ours, (s) => log(`${c.tag}: ${s}`));
+        stops.set(c.tag, r);
+        writeFileSync(join(out, `stop-${c.tag}.json`), `${redact(JSON.stringify(r, null, 2)).text}\n`);
+      }),
+    );
+  }
+  for (const c of withSession) {
+    const first = await check(c.sessionId as string, (s) => log(`${c.tag}: ${s}`));
+    const second = await check(c.sessionId as string, (s) => log(`${c.tag} (again): ${s}`));
     writeFileSync(join(out, `check-${c.tag}.json`), `${redact(JSON.stringify({ first, second }, null, 2)).text}\n`);
   }
 
-  // 2. Serve.
+  // Serve.
   mkdirSync(WORK, { recursive: true });
   writeFileSync(join(WORK, 'wait.sh'), `date -u +%FT%T.%NZ > "wait-$1-started.txt"\nsleep ${TOOL_SLEEP_S}\ndate -u +%FT%T.%NZ > "wait-$1-finished.txt"\necho waited\n`);
   interface Part {
     c: ConvSpec;
     run: Run;
-    abort: AbortController;
     ready: Promise<void>;
     result: Promise<string>;
     sessionId: Promise<string>;
     done: Promise<void>;
-    bodies?: string;
   }
   const parts: Part[] = [];
-  const state: Json = { participantPid: process.pid, startedAt: stamp(), convs: [] as Json[] };
+  const state: Json = { participantPid: process.pid, participantStarttime: procStat(process.pid)?.starttime ?? null, startedAt: stamp(), pdeathsig: spec.pdeathsig, convs: [] as Json[] };
   const writeState = (): void => writeFileSync(join(out, 'participant-state.json'), `${JSON.stringify(state, null, 2)}\n`);
   for (const c of spec.convs) {
-    const abort = new AbortController();
     const runStamp = stamp().replace(/[:.]/g, '');
     const bodies = spec.apiBodies ? join(BODIES_ROOT, `${runStamp}-${RUN_NAME}-${c.tag}`) : undefined;
     const store = new Store(join(out, `store-appends-${c.tag}.jsonl`));
@@ -661,16 +768,14 @@ async function participant(specPath: string): Promise<void> {
       tools: ['Read', 'Bash'],
       allowedTools: ['Read', 'Bash'],
       thinking: { type: 'adaptive', display: 'summarized' },
-      ...(spec.mode === 'store' ? { sessionStore: store, sessionStoreFlush: 'eager' as const } : {}),
-      spawnClaudeCodeProcess: directSpawn,
-      abortController: abort,
+      sessionStore: store,
+      sessionStoreFlush: 'eager',
+      spawnClaudeCodeProcess: spawnWith(spec.pdeathsig),
       ...(c.sessionId ? { resume: c.sessionId } : {}),
       ...(bodies ? { env: { ...process.env, OTEL_LOG_RAW_API_BODIES: `file:${bodies}` } } : {}),
     };
     const run = startRun({ name: RUN_NAME, options });
     run.done.catch(() => {});
-    // (Proof 17 removed stale wait files here; 17b deletes nothing, and each
-    // label is unique per case, so there is none to remove.)
     let readyR: () => void = () => {};
     let resultR: (s: string) => void = () => {};
     let sidR: (s: string) => void = () => {};
@@ -738,14 +843,14 @@ async function participant(specPath: string): Promise<void> {
       copyDebugLogs(run.dir);
     })();
     run.send(user(c.say));
-    const conv: Json = { tag: c.tag, runDir: run.dir, configDir: run.configDir, resumedFrom: c.sessionId ?? null, bodies: bodies ?? null };
+    const conv: Json = { tag: c.tag, sentAt: stamp(), runDir: run.dir, configDir: run.configDir, resumedFrom: c.sessionId ?? null, bodies: bodies ?? null, stop: stops.get(c.tag)?.outcome ?? null };
     (state.convs as Json[]).push(conv);
     void sessionId.then((sid) => {
       conv.sessionId = sid;
       writeState();
     });
-    parts.push({ c, run, abort, ready, result, sessionId, done, bodies });
-    log(`${c.tag}: run ${run.dir}${c.sessionId ? `, resuming ${c.sessionId} ${spec.mode === 'store' ? 'through the store' : 'straight from the config dir'}` : ', new conversation'}; mode ${spec.mode}`);
+    parts.push({ c, run, ready, result, sessionId, done });
+    log(`${c.tag}: run ${run.dir}${c.sessionId ? `, resuming ${c.sessionId} through the store` : ', new conversation'}`);
   }
   // A resume spawns Claude Code only after the SDK has written the resume
   // dir, so the pid is waited for rather than read once.
@@ -763,6 +868,7 @@ async function participant(specPath: string): Promise<void> {
     const found = sp;
     conv.claudePid = found.pid;
     conv.claudeStarttime = procStat(found.pid)?.starttime ?? null;
+    conv.claudeCmd = cmdline(found.pid).slice(0, 200);
     writeState();
     void found.exited.then((e) => {
       log(`${p.c.tag}: claude ${found.pid} exited ${JSON.stringify(e)}`);
@@ -773,6 +879,8 @@ async function participant(specPath: string): Promise<void> {
   writeState();
 
   if (spec.ending === 'answer') {
+    await Promise.all(pidsKnown);
+    writeState();
     for (const p of parts) {
       const answer = await Promise.race([p.result, later(180_000).then(() => '(no answer in 180 s)')]);
       const conv = (state.convs as Json[]).find((x) => x.tag === p.c.tag) as Json;
@@ -786,58 +894,11 @@ async function participant(specPath: string): Promise<void> {
     return;
   }
 
-  // Held mid-turn; the driver ends it.
-  let presses = 0;
-  let stopWaiting: () => void = () => {};
-  const stopped = new Promise<void>((r) => {
-    stopWaiting = r;
-  });
-  process.on('SIGINT', () => {
-    presses += 1;
-    log(`SIGINT ${presses}`);
-    if (presses === 1) {
-      log('press 1: interrupt each, then end input and wait for everything to exit');
-      for (const p of parts) {
-        void (async () => {
-          try {
-            await p.run.interrupt();
-            log(`${p.c.tag}: interrupt returned`);
-          } catch (err) {
-            log(`${p.c.tag}: interrupt failed: ${String(err)}`);
-          }
-          p.run.end();
-          log(`${p.c.tag}: input ended`);
-        })();
-      }
-    } else if (presses === 2) {
-      log('press 2: SIGTERM each Claude Code, stop waiting');
-      for (const p of parts) {
-        const sp = claudeOf(p.run);
-        if (sp && sp.child.exitCode === null && sp.child.signalCode === null) {
-          try {
-            process.kill(sp.pid, 'SIGTERM');
-            log(`${p.c.tag}: SIGTERM ${sp.pid}`);
-          } catch (err) {
-            log(`${p.c.tag}: SIGTERM failed: ${String(err)}`);
-          }
-        }
-      }
-      stopWaiting();
-    } else {
-      log('press 3: process.exit(130)');
-      process.exit(130);
-    }
-  });
-  process.on('SIGUSR1', () => {
-    log('SIGUSR1: abort each (the SDK abortController), wait for everything to exit');
-    for (const p of parts) {
-      p.abort.abort();
-    }
-  });
+  // Held mid-turn; the driver ends it with SIGKILL, or SIGUSR2 for a crash.
   process.on('SIGUSR2', () => {
     log('SIGUSR2: throwing an uncaught exception');
     setImmediate(() => {
-      throw new Error('proof 17: uncaught exception in the participant');
+      throw new Error('proof 21: uncaught exception in the participant');
     });
   });
   process.on('exit', (code) => {
@@ -849,13 +910,14 @@ async function participant(specPath: string): Promise<void> {
   writeState();
   log('all mid-turn');
   process.stdout.write('READY\n');
-  await Promise.race([Promise.allSettled(parts.map((p) => p.done)), stopped]);
+  await Promise.allSettled(parts.map((p) => p.done));
   writeState();
-  log('main returning (all done, or stopped waiting)');
+  log('main returning (all done)');
 }
 
 // ---------------------------------------------------------------------------
-// The driver: ends participants, keeps every transcript line it sees, scores.
+// The driver: ends participants, keeps every transcript line it sees, times
+// every Claude Code and its tool, scores each serve.
 
 // Keeps a copy of every transcript of the watched sessions, in every root,
 // updated as it grows: the SDK deletes a resume dir once its Claude Code
@@ -981,11 +1043,75 @@ class Keeper {
   }
 }
 
+// Times each process it tracks: the first moment, on the driver's clock, its
+// pid is gone, a zombie, or holds a different process. Polls every 10 ms, and
+// every 50 ms adds any new descendant of a tracked Claude Code.
+interface Tracked extends Known {
+  role: string;
+  cmd: string;
+  addedAt: string;
+  goneAt: string | null;
+  goneT: number | null;
+}
+
+class ProcWatch {
+  readonly tracked = new Map<number, Tracked>();
+  timer: NodeJS.Timeout | undefined;
+  ticks = 0;
+  add(pid: number, role: string): void {
+    if (this.tracked.has(pid)) {
+      return;
+    }
+    const s = procStat(pid);
+    if (!s || s.state === 'Z' || s.state === 'X') {
+      return;
+    }
+    this.tracked.set(pid, { pid, starttime: s.starttime, role, cmd: cmdline(pid).slice(0, 120), addedAt: stamp(), goneAt: null, goneT: null });
+  }
+  addTree(pid: number, role: string): void {
+    for (const d of descendants(pid)) {
+      this.add(d.pid, `${role}-descendant`);
+    }
+  }
+  tick(): void {
+    this.ticks += 1;
+    for (const t of this.tracked.values()) {
+      if (t.goneAt === null && gone(t)) {
+        t.goneAt = stamp();
+        t.goneT = Date.now();
+      }
+    }
+    if (this.ticks % 5 === 0) {
+      for (const t of [...this.tracked.values()]) {
+        if (t.goneAt === null && t.role.startsWith('claude') && !t.role.endsWith('descendant')) {
+          this.addTree(t.pid, t.role);
+        }
+      }
+    }
+  }
+  start(): void {
+    this.timer = setInterval(() => this.tick(), 10);
+  }
+  stop(): void {
+    this.tick();
+    if (this.timer) {
+      clearInterval(this.timer);
+    }
+  }
+  allGone(filter: (t: Tracked) => boolean = () => true): boolean {
+    return [...this.tracked.values()].filter(filter).every((t) => t.goneAt !== null);
+  }
+  alive(filter: (t: Tracked) => boolean = () => true): Tracked[] {
+    return [...this.tracked.values()].filter(filter).filter((t) => t.goneAt === null);
+  }
+}
+
 interface ParticipantHandle {
   pid: number;
+  starttime: string;
   dir: string;
   ready: Promise<boolean>;
-  exited: Promise<{ at: string; code: number | null; signal: string | null }>;
+  exited: Promise<{ at: string; t: number; code: number | null; signal: string | null }>;
 }
 
 function startParticipant(caseDir: string, label: string, spec: Omit<ParticipantSpec, 'outDir'>, log: (s: string) => void): ParticipantHandle {
@@ -1013,24 +1139,26 @@ function startParticipant(caseDir: string, label: string, spec: Omit<Participant
     }
   });
   child.stderr.on('data', (chunk: Buffer) => outFile.write(chunk));
-  const exited = new Promise<{ at: string; code: number | null; signal: string | null }>((r) =>
+  const exited = new Promise<{ at: string; t: number; code: number | null; signal: string | null }>((r) =>
     child.once('exit', (code, signal) => {
       readyR(false);
-      r({ at: stamp(), code, signal });
+      r({ at: stamp(), t: Date.now(), code, signal });
     }),
   );
-  log(`${label}: participant pid ${child.pid}, dir ${relative(PACKAGE_ROOT, dir)}`);
-  return { pid: child.pid as number, dir, ready, exited };
+  const starttime = procStat(child.pid as number)?.starttime ?? '?';
+  log(`${label}: participant pid ${child.pid} (start ${starttime}), dir ${relative(PACKAGE_ROOT, dir)}`);
+  return { pid: child.pid as number, starttime, dir, ready, exited };
 }
 
 function pstate(h: ParticipantHandle): { convs: Json[] } {
   return JSON.parse(readFileSync(join(h.dir, 'participant-state.json'), 'utf8')) as { convs: Json[] };
 }
 
+// The story is longer than proof 17's 600 words, so the reply is still
+// streaming when layer 2's SIGINT lands a few seconds after the kill.
 const PROMPTS = {
   seed: (w: string): string => `Remember the code word ${w} for later. Reply with OK and nothing else.`,
-  story: 'Write a 600-word story about a lighthouse keeper. No preamble.',
-  story2: 'Write a 600-word story about a clockmaker. No preamble.',
+  story: 'Write a 1500-word story about a lighthouse keeper. No preamble.',
   tool: (label: string): string => `Run \`bash wait.sh ${label}\` in the working directory with the Bash tool, then reply DONE.`,
 };
 
@@ -1039,130 +1167,73 @@ const QUESTIONS: Record<string, string> = {
   T: 'In your previous turn you ran wait.sh with the Bash tool. What did the tool result say, and what did you reply after it? Quote both exactly, or reply NONE for either you did not see.',
 };
 
-async function waitGone(pids: number[], timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (pids.every((p) => !alive(p))) {
-      return true;
-    }
-    await sleep(100);
-  }
-  return false;
+const WORDS: Record<string, string> = { R: 'PERIWINKLE', T: 'MARIGOLD' };
+
+function storeFilesFor(sid: string): string[] {
+  return subdirs(STORE_DIR)
+    .map((p) => join(p, `${sid}.jsonl`))
+    .filter((f) => existsSync(f));
 }
 
-async function serveAgain(caseDir: string, label: string, model: string, mode: Mode, sids: Record<string, string>, keeper: Keeper, log: (s: string) => void): Promise<Json[]> {
-  // Truth as of now: every line of these sessions the driver has seen.
-  keeper.scan();
-  const truths: Record<string, Map<string, { entry: Json; copy: string }>> = {};
-  for (const [tag, sid] of Object.entries(sids)) {
-    truths[tag] = keeper.truth(sid);
+function isMessage(e: Json): boolean {
+  return e.type === 'user' || e.type === 'assistant';
+}
+
+// A parentUuid with two or more user/assistant children: the conversation
+// forked there (proof 17's test).
+function branchesOf(entries: Json[]): { parent: string; children: string[] }[] {
+  const children = new Map<string, string[]>();
+  for (const e of entries) {
+    if (typeof e.parentUuid === 'string' && typeof e.uuid === 'string' && isMessage(e)) {
+      const list = children.get(e.parentUuid) ?? [];
+      if (!list.includes(e.uuid)) {
+        list.push(e.uuid);
+      }
+      children.set(e.parentUuid, list);
+    }
   }
-  const h = startParticipant(caseDir, label, { model, mode, ending: 'answer', apiBodies: true, convs: Object.entries(sids).map(([tag, sid]) => ({ tag, sessionId: sid, say: QUESTIONS[tag] as string, trigger: 'none' as const })) }, log);
-  const ex = await Promise.race([h.exited, later(400_000).then(() => undefined)]);
-  log(`${label}: participant exited ${JSON.stringify(ex)}`);
-  const st = pstate(h);
-  for (const c of st.convs) {
-    keeper.addRoot(String(c.configDir));
-  }
-  const rows: Json[] = [];
-  for (const [tag, sid] of Object.entries(sids)) {
-    const conv = st.convs.find((c) => c.tag === tag) as Json;
-    const checks = JSON.parse(readFileSync(join(h.dir, `check-${tag}.json`), 'utf8')) as { first: CheckReport; second: CheckReport };
-    const truth = truths[tag] as Map<string, { entry: Json; copy: string }>;
-    // What the store held right after the check: its file, cut at the
-    // length the check reported (this serve appended after).
-    const k = checks.first.keys[0];
-    const storeAfterCheck = k ? readJsonl(k.storeFile).slice(0, k.storeAfter) : [];
-    const inStore = new Set(storeAfterCheck.map(entryId));
-    const lost = [...truth.entries()].filter(([id]) => !inStore.has(id)).map(([, v]) => v);
-    // Branches in the store after the check: a parentUuid with two children.
-    const children = new Map<string, string[]>();
-    for (const e of storeAfterCheck) {
-      if (typeof e.parentUuid === 'string' && typeof e.uuid === 'string' && (e.type === 'user' || e.type === 'assistant')) {
-        children.set(e.parentUuid, [...(children.get(e.parentUuid) ?? []), e.uuid]);
+  const byUuid = new Map(entries.filter((e) => typeof e.uuid === 'string').map((e) => [e.uuid as string, e]));
+  return [...children.entries()].filter(([, v]) => v.length > 1).map(([p, c]) => ({ parent: p, children: c.map((u) => `${u} ${describeEntry(byUuid.get(u) as Json).slice(0, 90)}`) }));
+}
+
+const INVENTED = /outcome is unknown|Tool call interrupted/;
+
+function invented(entries: Json[]): string[] {
+  const out: string[] = [];
+  for (const e of entries) {
+    const content = (e.message as Json | undefined)?.content;
+    if (Array.isArray(content)) {
+      for (const b of content as Json[]) {
+        if (b.type === 'tool_result' && INVENTED.test(flat(b.content))) {
+          out.push(`${String(e.uuid)} ${flat(b.content).slice(0, 120)}`);
+        }
       }
     }
-    const branches = [...children.entries()].filter(([, v]) => v.length > 1);
-    // The part written last: the last few message entries of the truth, by
-    // timestamp, each reduced to something findable in the request body.
-    const msgs = [...truth.values()]
-      .map((v) => v.entry)
-      .filter((e) => (e.type === 'user' || e.type === 'assistant') && typeof e.timestamp === 'string')
-      .sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
-    const tail = msgs.slice(-4);
-    const bodyText = firstRequest(String(conv.bodies ?? ''));
-    const fingerprints = tail.map((e) => {
-      const fp = fingerprint(e);
-      return { uuid: e.uuid, at: e.timestamp, what: describeEntry(e).slice(0, 100), fp, inRequest: fp === null || bodyText === null ? null : bodyText.includes(fp) };
-    });
-    rows.push({
-      serve: label,
-      tag,
-      sessionId: sid,
-      check: {
-        ms: checks.first.ms,
-        roots: checks.first.rootsSearched,
-        transcripts: checks.first.transcripts.map((t) => ({ where: t.root.startsWith(tmpdir()) ? basename(t.root) : `config-dirs/${basename(t.root)}`, lines: t.lines, unparseable: t.unparseable, imported: t.imported, ageMs: Math.round(t.ageMs), importError: t.importError })),
-        pidFiles: checks.first.pidFiles.map((p) => ({ pid: p.pid, status: p.status, pidAlive: p.pidAlive, sameProcess: p.sameProcess, where: p.root.startsWith(tmpdir()) ? basename(p.root) : `config-dirs/${basename(p.root)}` })),
-        runningByCmdline: checks.first.runningByCmdline,
-        orphan: checks.first.orphanPolicy,
-        storeBefore: checks.first.keys.map((x) => x.storeBefore),
-        added: checks.first.keys.map((x) => x.missing),
-        addedEntries: checks.first.keys.flatMap((x) => x.added),
-        secondCheckAdded: checks.second.keys.map((x) => x.missing),
-        secondCheckStoreUnchanged: checks.second.keys.every((x) => x.storeShaBefore === x.storeShaAfter),
-        transcriptsUnchanged: checks.first.transcriptsUnchanged && checks.second.transcriptsUnchanged,
-      },
-      truthEntries: truth.size,
-      storeAfterCheck: storeAfterCheck.length,
-      lost: lost.map((l) => `${String(l.entry.uuid ?? '-')} ${describeEntry(l.entry).slice(0, 110)} (seen in ${l.copy})`),
-      storeBranches: branches.map(([p, c]) => ({ parent: p, children: c.map((u) => `${u} ${describeEntry(storeAfterCheck.find((e) => e.uuid === u) as Json).slice(0, 80)}`) })),
-      lastWritten: fingerprints,
-      requestFound: bodyText !== null,
-      answer: conv.answer,
-      runDir: relative(PACKAGE_ROOT, String(conv.runDir)),
-    });
-    if (bodyText !== null) {
-      writeFileSync(join(h.dir, `first-request-${tag}.json`), redact(bodyText).text);
-    }
   }
-  writeFileSync(join(h.dir, 'score.json'), `${JSON.stringify(rows, null, 2)}\n`);
-  for (const r of rows) {
-    const c = r.check as Json;
-    log(`${label} ${String(r.tag)}: found ${JSON.stringify(c.transcripts)}; pid files ${JSON.stringify(c.pidFiles)}; cmdline ${JSON.stringify(c.runningByCmdline)}; added ${JSON.stringify(c.added)} (again ${JSON.stringify(c.secondCheckAdded)}); lost ${(r.lost as string[]).length}; branches ${(r.storeBranches as Json[]).length}; last written in request ${JSON.stringify((r.lastWritten as Json[]).map((f) => f.inRequest))}; answer ${JSON.stringify(r.answer)}`);
-  }
-  return rows;
+  return out;
 }
 
-function fingerprint(e: Json): string | null {
-  const content = (e.message as Json | undefined)?.content;
-  if (typeof content === 'string') {
-    return JSON.stringify(content.slice(-60)).slice(1, -1);
-  }
-  if (!Array.isArray(content)) {
-    return null;
-  }
-  for (const b of [...content].reverse() as Json[]) {
-    if (b.type === 'text' && String(b.text).trim() !== '') {
-      return JSON.stringify(String(b.text).slice(-60)).slice(1, -1);
-    }
-    if (b.type === 'tool_use') {
-      return String(b.id);
-    }
-    if (b.type === 'tool_result') {
-      return `"tool_use_id":"${String(b.tool_use_id)}"`;
-    }
-  }
-  return null;
+// What an entry holds, for a turn's summary.
+function turnRow(e: Json, req: Json | undefined): Json {
+  const msg = e.message as Json | undefined;
+  const content = msg?.content;
+  const textChars = Array.isArray(content) ? (content as Json[]).filter((b) => b.type === 'text').reduce((n, b) => n + String(b.text).length, 0) : typeof content === 'string' ? content.length : 0;
+  return {
+    uuid: e.uuid,
+    parentUuid: e.parentUuid,
+    at: e.timestamp,
+    what: describeEntry(e).slice(0, 140),
+    stopReason: e.type === 'assistant' ? (msg?.stop_reason ?? null) : undefined,
+    textChars,
+    ...(req ? (({ what, carried: c }) => ({ carriedTest: what, carried: c }))(carried(e, req)) : { carried: null }),
+  };
 }
 
-// Whether an entry is carried by a request, by content: an assistant's last
-// text block must be one of the request's assistant text blocks; a
-// tool_result must match on tool_use_id AND content (the synthetic "[Tool
-// call interrupted...]" result carries the same id); a tool_use by id; a user
-// text by its text. The fingerprint column (fp/inRequest) in score.json is a
-// substring test that a synthetic result or a prompt saying "reply DONE"
-// passes, so rescore.json is the one to read.
+// Whether an entry is carried by a request, by content (proof 17's test): an
+// assistant's last text block must be one of the request's assistant text
+// blocks; a tool_result must match on tool_use_id AND content (a synthetic
+// "[Tool call interrupted...]" result carries the same id); a tool_use by id;
+// a user text by its text.
 function flat(c: unknown): string {
   if (typeof c === 'string') {
     return c;
@@ -1197,37 +1268,6 @@ function carried(e: Json, req: Json): { what: string; carried: boolean | null } 
   return { what: `user "${t.slice(0, 30).replace(/\n/g, ' ')}"`, carried: JSON.stringify(req).includes(JSON.stringify(t).slice(1, -1)) };
 }
 
-// Rescore every serve in a case dir from its score.json, the kept transcript
-// copies and the saved first request. Writes <serve>/rescore.json.
-function rescore(caseDir: string): void {
-  const byUuid = new Map<string, Json>();
-  for (const n of readdirSync(join(caseDir, 'seen')).filter((x) => x.endsWith('.jsonl'))) {
-    for (const e of readJsonl(join(caseDir, 'seen', n))) {
-      if (typeof e.uuid === 'string') {
-        byUuid.set(e.uuid, e);
-      }
-    }
-  }
-  for (const serve of subdirs(caseDir)) {
-    const scoreFile = join(serve, 'score.json');
-    if (!existsSync(scoreFile)) {
-      continue;
-    }
-    const out: Json[] = [];
-    for (const row of JSON.parse(readFileSync(scoreFile, 'utf8')) as Json[]) {
-      const reqFile = join(serve, `first-request-${String(row.tag)}.json`);
-      const req = existsSync(reqFile) ? (JSON.parse(readFileSync(reqFile, 'utf8')) as Json) : undefined;
-      const lastWritten = (row.lastWritten as Json[]).map((f) => {
-        const e = byUuid.get(String(f.uuid));
-        return e && req ? { uuid: f.uuid, at: f.at, ...carried(e, req) } : { uuid: f.uuid, at: f.at, what: String(f.what), carried: null };
-      });
-      out.push({ tag: row.tag, lastWritten, answer: row.answer });
-      process.stdout.write(`${basename(caseDir)} ${basename(serve)} ${String(row.tag)}: ${lastWritten.map((l) => `${l.what}=${l.carried}`).join('; ')}\n`);
-    }
-    writeFileSync(join(serve, 'rescore.json'), `${JSON.stringify(out, null, 2)}\n`);
-  }
-}
-
 // The first main-loop request Claude Code sent (query_source "sdk"), as text.
 function firstRequest(bodies: string): string | null {
   if (!bodies || !existsSync(join(bodies, 'index.jsonl'))) {
@@ -1241,26 +1281,166 @@ function firstRequest(bodies: string): string | null {
   return JSON.stringify(JSON.parse(readFileSync(join(bodies, String(first.request_file)), 'utf8')));
 }
 
-type CaseName = 'press1' | 'press2' | 'press3' | 'kill' | 'kill-orphan' | 'crash' | 'claude-kill' | 'abort' | 'reboot' | 'reboot-later' | 'kill-twice';
+interface Ctx {
+  caseDir: string;
+  model: string;
+  pd: boolean;
+  sids: Record<string, string>;
+  keeper: Keeper;
+  ours: Known[];
+  log: (s: string) => void;
+  note: (h: ParticipantHandle) => void;
+}
 
-const WORDS: Record<string, string> = { R: 'PERIWINKLE', T: 'MARIGOLD' };
+interface Window {
+  name: string;
+  from: Record<string, string>;
+  to?: Record<string, string>;
+}
 
-type Variant = 'fresh' | 'resumed' | 'dir-fresh' | 'dir-resumed';
+function readJson(path: string): Json | undefined {
+  return existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as Json) : undefined;
+}
+
+function byTime(a: Json, b: Json): number {
+  return String(a.timestamp).localeCompare(String(b.timestamp));
+}
+
+function inWindow(e: Json, w: Window, tag: string): boolean {
+  const at = String(e.timestamp ?? '');
+  const from = w.from[tag];
+  const to = w.to?.[tag];
+  return at !== '' && from !== undefined && at >= from && (to === undefined || at < to);
+}
+
+// One serve of every conversation, each asked about its previous turn. Layer 2
+// runs first in the participant, then proof 17's check.
+async function serveAgain(ctx: Ctx, label: string, windows: Window[]): Promise<{ rows: Json[]; sentAt: Record<string, string> }> {
+  const { keeper, log } = ctx;
+  const tags = Object.keys(ctx.sids);
+  const h = startParticipant(
+    ctx.caseDir,
+    label,
+    { model: ctx.model, ending: 'answer', apiBodies: true, pdeathsig: ctx.pd, stopOrphans: true, ours: [...ctx.ours], convs: tags.map((tag) => ({ tag, sessionId: ctx.sids[tag], say: QUESTIONS[tag] as string, trigger: 'none' as const })) },
+    log,
+  );
+  const ex = await Promise.race([h.exited, later(400_000).then(() => undefined)]);
+  log(`${label}: participant exited ${JSON.stringify(ex)}`);
+  ctx.note(h);
+  await sleep(300);
+  keeper.scan();
+  const st = pstate(h);
+  const rows: Json[] = [];
+  const sentAt: Record<string, string> = {};
+  for (const tag of tags) {
+    const sid = ctx.sids[tag] as string;
+    const conv = st.convs.find((c) => c.tag === tag) as Json;
+    sentAt[tag] = String(conv.sentAt);
+    const stop = readJson(join(h.dir, `stop-${tag}.json`)) as unknown as StopReport | undefined;
+    const checks = readJson(join(h.dir, `check-${tag}.json`)) as unknown as { first: CheckReport; second: CheckReport };
+    const truth = [...keeper.truth(sid).values()].map((v) => v.entry);
+    const bodyText = firstRequest(String(conv.bodies ?? ''));
+    const req = bodyText === null ? undefined : (JSON.parse(bodyText) as Json);
+    if (bodyText !== null) {
+      writeFileSync(join(h.dir, `first-request-${tag}.json`), redact(bodyText).text);
+    }
+    // Everything written on the session before this serve's message was sent
+    // (after layer 2 and the check), whoever wrote it.
+    const prior = truth.filter((e) => isMessage(e) && typeof e.timestamp === 'string' && String(e.timestamp) < sentAt[tag]).sort(byTime);
+    const priorRows = prior.map((e) => turnRow(e, req));
+    const k = checks.first.keys[0];
+    const storeAfterCheck = k ? readJsonl(k.storeFile).slice(0, k.storeAfter) : [];
+    const storeNow = storeFilesFor(sid).flatMap(readJsonl);
+    rows.push({
+      serve: label,
+      tag,
+      sessionId: sid,
+      stop: stop ? { outcome: stop.outcome, ms: stop.ms, pidFiles: stop.pidFiles, signalled: stop.signalled, refused: stop.refused } : null,
+      check: {
+        ms: checks.first.ms,
+        transcripts: checks.first.transcripts.map((t) => ({ where: t.root.startsWith(tmpdir()) ? basename(t.root) : `config-dirs/${basename(t.root)}`, lines: t.lines, imported: t.imported })),
+        stillRunningByPidFile: checks.first.runningBySessionPidFile,
+        stillRunningByCmdline: checks.first.runningByCmdline,
+        storeBefore: checks.first.keys.map((x) => x.storeBefore),
+        added: checks.first.keys.map((x) => x.missing),
+        addedEntries: checks.first.keys.flatMap((x) => x.added),
+        secondCheckAdded: checks.second.keys.map((x) => x.missing),
+      },
+      priorEntries: priorRows.length,
+      priorNotCarried: priorRows.filter((r) => r.carried === false),
+      priorUntested: priorRows.filter((r) => r.carried === null).length,
+      windows: windows.map((w) => ({ name: w.name, rows: truth.filter((e) => isMessage(e) && inWindow(e, w, tag)).sort(byTime).map((e) => turnRow(e, req)) })),
+      branches: { storeAfterCheck: branchesOf(storeAfterCheck), storeNow: branchesOf(storeNow), transcripts: branchesOf(truth) },
+      invented: { transcripts: invented(truth), store: invented(storeNow) },
+      requestFound: req !== undefined,
+      answer: conv.answer,
+      runDir: relative(PACKAGE_ROOT, String(conv.runDir)),
+    });
+  }
+  writeFileSync(join(h.dir, 'score.json'), `${JSON.stringify(rows, null, 2)}\n`);
+  for (const r of rows) {
+    const b = r.branches as Record<string, unknown[]>;
+    const inv = r.invented as Record<string, unknown[]>;
+    log(
+      `${label} ${String(r.tag)}: stop ${JSON.stringify((r.stop as Json | null)?.outcome ?? null)}; check added ${JSON.stringify((r.check as Json).added)}; prior ${String(r.priorEntries)}, not carried ${(r.priorNotCarried as unknown[]).length}, untested ${String(r.priorUntested)}; branches store-after-check ${b.storeAfterCheck?.length} store-now ${b.storeNow?.length} transcripts ${b.transcripts?.length}; invented ${inv.transcripts?.length}/${inv.store?.length}; answer ${JSON.stringify(r.answer)}`,
+    );
+  }
+  return { rows, sentAt };
+}
+
+// What the store and the transcripts hold once every orphan has exited, before
+// any check has run.
+function snapshot(ctx: Ctx, label: string, heldSentAt: Record<string, string>): Json {
+  const dir = join(ctx.caseDir, label);
+  mkdirSync(dir, { recursive: true });
+  const out: Json = { at: stamp() };
+  for (const [tag, sid] of Object.entries(ctx.sids)) {
+    const files = storeFilesFor(sid);
+    files.forEach((f, i) => copyFileSync(f, join(dir, `store-${tag}${i ? `-${i}` : ''}.jsonl`)));
+    const store = files.flatMap(readJsonl);
+    const inStore = new Set(store.map(entryId));
+    const truth = [...ctx.keeper.truth(sid).values()].map((v) => v.entry);
+    const held: Window = { name: 'held turn', from: heldSentAt };
+    out[tag] = {
+      storeFiles: files,
+      storeEntries: store.length,
+      transcriptEntries: truth.length,
+      transcriptCopies: readdirSync(join(ctx.caseDir, 'seen')).filter((n) => n.endsWith(`__${sid}.jsonl`)),
+      heldTurn: truth.filter((e) => isMessage(e) && inWindow(e, held, tag)).sort(byTime).map((e) => ({ ...turnRow(e, undefined), inStore: inStore.has(entryId(e)) })),
+      inTranscriptsNotStore: truth.filter((e) => !inStore.has(entryId(e))).map((e) => `${String(e.uuid ?? '-')} ${describeEntry(e).slice(0, 110)}`),
+      branches: { store: branchesOf(store), transcripts: branchesOf(truth) },
+      invented: { transcripts: invented(truth), store: invented(store) },
+    };
+  }
+  writeFileSync(join(dir, 'snapshot.json'), `${JSON.stringify(out, null, 2)}\n`);
+  return out;
+}
+
+type CaseName = 'stop' | 'kill' | 'crash' | 'pd-stop' | 'pd-kill' | 'pd-crash';
+type Variant = 'fresh' | 'resumed';
+const CASES: CaseName[] = ['stop', 'kill', 'crash', 'pd-stop', 'pd-kill', 'pd-crash'];
 
 async function runCase(model: string, name: CaseName, variant: Variant): Promise<void> {
-  const caseDir = join(RUNS, `${stamp().replace(/[:.]/g, '')}-recovery-${name}-${variant}`);
+  const caseDir = join(RUNS, `${stamp().replace(/[:.]/g, '')}-orphans-${name}-${variant}`);
   mkdirSync(caseDir, { recursive: true });
   const log = makeLog(new Recorder(join(caseDir, 'driver-log.txt')), 'driver: ');
-  const mode: Mode = variant.startsWith('dir-') ? 'dir' : 'store';
-  log(`case ${name} ${variant}; mode ${mode}; dir ${caseDir}`);
-  // 17b: a clean start for the agent (moves its config dir aside; refuses
-  // while a Claude Code is still running with it).
-  const reset = resetConfigDir(RUN_NAME);
-  writeFileSync(join(caseDir, 'reset.json'), `${JSON.stringify(reset, null, 2)}\n`);
-  log(`reset ${RUN_NAME}: ${JSON.stringify(reset)}`);
+  const pd = name.startsWith('pd-');
+  const how: 'kill' | 'crash' = name.endsWith('crash') ? 'crash' : 'kill';
+  const immediate = name.endsWith('stop');
+  log(`case ${name} ${variant}; layer 1 ${pd}; ending ${how}; served ${immediate ? 'at once' : 'after the orphans exit'}; dir ${caseDir}`);
+
+  // A clean start for the agent, through the harness's script.
+  const reset = spawnSync('pnpm', ['reset-config-dir', RUN_NAME], { cwd: PACKAGE_ROOT, encoding: 'utf8' });
+  writeFileSync(join(caseDir, 'reset.json'), `${JSON.stringify({ status: reset.status, stdout: reset.stdout, stderr: reset.stderr }, null, 2)}\n`);
+  log(`pnpm reset-config-dir ${RUN_NAME}: exit ${reset.status}; ${reset.stdout.trim().split('\n').at(-1)}`);
+  if (reset.status !== 0) {
+    throw new Error(`reset refused: ${reset.stderr}`);
+  }
+
   const keeper = new Keeper(caseDir);
+  keeper.addRoot(AGENT_CONFIG_DIR);
   keeper.start();
-  const tagId = `${name}-${variant}-${Date.now()}`;
+  const ours: Known[] = [];
   const sids: Record<string, string> = {};
   const note = (h: ParticipantHandle): void => {
     for (const c of pstate(h).convs) {
@@ -1269,183 +1449,127 @@ async function runCase(model: string, name: CaseName, variant: Variant): Promise
         sids[String(c.tag)] = String(c.sessionId);
         keeper.watch(String(c.sessionId));
       }
+      const pid = Number(c.claudePid);
+      if (pid > 0 && typeof c.claudeStarttime === 'string' && !ours.some((o) => o.pid === pid && o.starttime === c.claudeStarttime)) {
+        ours.push({ pid, starttime: c.claudeStarttime });
+      }
     }
   };
+  const ctx: Ctx = { caseDir, model, pd, sids, keeper, ours, log, note };
 
-  // Seed: a clean one-turn serve, so the case's serve is a resume.
-  if (variant === 'resumed' || variant === 'dir-resumed') {
-    const h = startParticipant(caseDir, '0-seed', { model, mode, ending: 'answer', convs: ['R', 'T'].map((tag) => ({ tag, say: PROMPTS.seed(WORDS[tag] as string), trigger: 'none' as const })) }, log);
+  if (variant === 'resumed') {
+    const h = startParticipant(caseDir, '0-seed', { model, ending: 'answer', pdeathsig: pd, stopOrphans: true, ours: [...ours], convs: ['R', 'T'].map((tag) => ({ tag, say: PROMPTS.seed(WORDS[tag] as string), trigger: 'none' as const })) }, log);
     const ex = await h.exited;
     note(h);
     log(`seed exited ${JSON.stringify(ex)}; sessions ${JSON.stringify(sids)}`);
   }
 
-  const heldServe = async (label: string, story: string, tool: string): Promise<{ h: ParticipantHandle; claudes: number[] }> => {
-    const convs: ConvSpec[] = [
-      { tag: 'R', say: story, trigger: 'reply', ...(sids.R ? { sessionId: sids.R } : {}) },
-      { tag: 'T', say: PROMPTS.tool(tool), trigger: 'tool', toolLabel: tool, ...(sids.T ? { sessionId: sids.T } : {}) },
-    ];
-    const h = startParticipant(caseDir, label, { model, mode, ending: 'hold', convs }, log);
-    const ok = await Promise.race([h.ready, later(240_000).then(() => false)]);
-    note(h);
-    if (!ok) {
-      throw new Error(`${label}: participant never reached mid-turn`);
-    }
-    const claudes = pstate(h)
-      .convs.map((c) => Number(c.claudePid))
-      .filter((p) => p > 0);
-    log(`${label}: READY; sessions ${JSON.stringify(sids)}; claude pids ${JSON.stringify(claudes)}`);
-    return { h, claudes };
-  };
-
-  const allOf = (claudes: number[]): number[] => [...claudes, ...claudes.flatMap((p) => descendants(p).map((d) => d.pid))];
-
-  let label = '1-serve';
-  const { h, claudes } = await heldServe(label, PROMPTS.story, `${tagId}-1`);
-  const procs = allOf(claudes);
-  log(`${label}: claude processes and descendants ${JSON.stringify(procs.map((p) => [p, cmdline(p).slice(0, 60)]))}`);
-  const ending: Json = { case: name, variant, at: stamp() };
-  const press = async (n: number): Promise<void> => {
-    if (!alive(h.pid)) {
-      log(`press ${n}: participant already exited; not sent`);
-      return;
-    }
-    process.kill(h.pid, 'SIGINT');
-    log(`PRESS ${n}: SIGINT to participant ${h.pid}`);
-  };
-  let orphanServe: Json[] | undefined;
-  switch (name) {
-    case 'press1':
-      await press(1);
-      break;
-    case 'press2':
-      await press(1);
-      await sleep(20);
-      await press(2);
-      break;
-    case 'press3':
-      await press(1);
-      await sleep(20);
-      await press(2);
-      await sleep(20);
-      await press(3);
-      break;
-    case 'kill':
-    case 'kill-orphan':
-    case 'reboot':
-    case 'reboot-later':
-    case 'kill-twice':
-      process.kill(h.pid, 'SIGKILL');
-      log(`KILL: SIGKILL to participant ${h.pid}`);
-      break;
-    case 'crash':
-      process.kill(h.pid, 'SIGUSR2');
-      log(`CRASH: SIGUSR2 to participant ${h.pid} (it throws an uncaught exception)`);
-      break;
-    case 'claude-kill':
-      for (const p of claudes) {
-        process.kill(p, 'SIGKILL');
-      }
-      log(`CLAUDE-KILL: SIGKILL to ${JSON.stringify(claudes)}; participant lives on`);
-      break;
-    case 'abort':
-      process.kill(h.pid, 'SIGUSR1');
-      log(`ABORT: SIGUSR1 to participant ${h.pid} (it aborts each query)`);
-      break;
+  const toolLabel = `${name}-${variant}-${Date.now()}`;
+  const h = startParticipant(
+    caseDir,
+    '1-serve',
+    {
+      model,
+      ending: 'hold',
+      pdeathsig: pd,
+      stopOrphans: true,
+      ours: [...ours],
+      convs: [
+        { tag: 'R', say: PROMPTS.story, trigger: 'reply', ...(sids.R ? { sessionId: sids.R } : {}) },
+        { tag: 'T', say: PROMPTS.tool(toolLabel), trigger: 'tool', toolLabel, ...(sids.T ? { sessionId: sids.T } : {}) },
+      ],
+    },
+    log,
+  );
+  const ok = await Promise.race([h.ready, later(240_000).then(() => false)]);
+  note(h);
+  if (!ok) {
+    throw new Error('1-serve: participant never reached mid-turn');
   }
-  const pex = await Promise.race([h.exited, later(120_000).then(() => undefined)]);
-  ending.participantExit = pex ?? 'still running after 120 s';
-  ending.claudesAliveAfterParticipantExit = claudes.filter(alive);
-  ending.procsAliveAfterParticipantExit = procs.filter(alive).map((p) => [p, cmdline(p).slice(0, 60)]);
-  log(`${label}: participant exit ${JSON.stringify(pex)}; claude processes alive: ${JSON.stringify(ending.claudesAliveAfterParticipantExit)}; any of their tree alive: ${JSON.stringify(ending.procsAliveAfterParticipantExit)}`);
+  const held = pstate(h).convs;
+  const heldSentAt: Record<string, string> = Object.fromEntries(held.map((c) => [String(c.tag), String(c.sentAt)]));
+  const pw = new ProcWatch();
+  pw.add(h.pid, 'participant');
+  for (const c of held) {
+    pw.add(Number(c.claudePid), `claude-${String(c.tag)}`);
+    pw.addTree(Number(c.claudePid), `claude-${String(c.tag)}`);
+  }
+  pw.start();
+  log(`1-serve: READY; sessions ${JSON.stringify(sids)}; tracked ${JSON.stringify([...pw.tracked.values()].map((t) => [t.pid, t.role, t.cmd.slice(0, 50)]))}`);
+
+  const endSentAt = stamp();
+  const endT = Date.now();
+  signalChecked({ pid: h.pid, starttime: h.starttime }, how === 'kill' ? 'SIGKILL' : 'SIGUSR2', log);
+  log(`${how === 'kill' ? 'KILL: SIGKILL' : 'CRASH: SIGUSR2 (uncaught exception)'} to participant ${h.pid}`);
+  const pex = await Promise.race([h.exited, later(60_000).then(() => undefined)]);
   if (!pex) {
-    process.kill(h.pid, 'SIGKILL');
+    throw new Error('participant still running 60 s after its ending');
   }
+  const ending: Json = {
+    case: name,
+    variant,
+    layer1: pd,
+    how,
+    endSentAt,
+    participantExit: pex,
+    msToParticipantExit: pex.t - endT,
+    claudesAliveAtParticipantExit: pw.alive((t) => t.role.startsWith('claude')).map((t) => [t.pid, t.role]),
+  };
+  log(`participant exit ${JSON.stringify(pex)}; alive then ${JSON.stringify(ending.claudesAliveAtParticipantExit)}`);
 
-  if (name === 'kill-orphan') {
-    // Served again at once, while the orphans run (T is inside a 60 s tool).
-    ending.orphansAliveAtServe = claudes.filter(alive);
-    log(`kill-orphan: serving again while ${JSON.stringify(ending.orphansAliveAtServe)} still run`);
-    orphanServe = await serveAgain(caseDir, '2-serve-while-orphan', model, mode, { ...sids }, keeper, log);
-    ending.orphansAliveAfterOrphanServe = claudes.filter(alive);
-  }
-  if (name === 'reboot') {
-    // A reboot: every process gone, /tmp emptied. Only this case's own
-    // resume dirs are deleted; other sessions on this machine have theirs.
-    for (const p of procs.filter(alive)) {
-      try {
-        process.kill(p, 'SIGKILL');
-      } catch {}
+  let serve2: { rows: Json[]; sentAt: Record<string, string> };
+  if (immediate) {
+    serve2 = await serveAgain(ctx, '2-serve', [{ name: 'held turn', from: heldSentAt }]);
+  } else {
+    const deadline = Date.now() + 240_000;
+    while (!pw.allGone((t) => t.role !== 'participant') && Date.now() < deadline) {
+      await sleep(50);
     }
-    await waitGone(procs, 10_000);
-    keeper.scan();
-    const mine = resumeDirs().filter((d) => Object.values(sids).some((sid) => subdirs(join(d, 'projects')).some((p) => existsSync(join(p, `${sid}.jsonl`)))));
-    for (const d of mine) {
-      rmSync(d, { recursive: true, force: true });
+    const left = pw.alive((t) => t.role !== 'participant');
+    if (left.length > 0) {
+      log(`still running 240 s after the ending; SIGKILL ${JSON.stringify(left.map((t) => t.pid))}`);
+      for (const t of left) {
+        signalChecked(t, 'SIGKILL', log);
+      }
+      ending.fallbackKilled = left.map((t) => [t.pid, t.role]);
     }
-    ending.rebootDeleted = mine;
-    log(`reboot: killed ${JSON.stringify(procs)}; deleted ${JSON.stringify(mine)}`);
-  }
-  const gone = await waitGone(procs, 240_000);
-  ending.allClaudeProcsGone = gone;
-  if (!gone) {
-    log('claude processes still running after 240 s; SIGKILL');
-    for (const p of procs.filter(alive)) {
-      try {
-        process.kill(p, 'SIGKILL');
-      } catch {}
-    }
-  }
-  await sleep(500);
-  keeper.scan();
-  if (name === 'reboot-later') {
-    // A reboot after the orphans have finished: /tmp emptied, config dirs
-    // kept. Only this case's own resume dirs are deleted.
-    const mine = resumeDirs().filter((d) => Object.values(sids).some((sid) => subdirs(join(d, 'projects')).some((p) => existsSync(join(p, `${sid}.jsonl`)))));
-    for (const d of mine) {
-      rmSync(d, { recursive: true, force: true });
-    }
-    ending.rebootDeleted = mine;
-    log(`reboot-later: orphans gone; deleted ${JSON.stringify(mine)}`);
-  }
-  ending.resumeDirsLeft = resumeDirs().filter((d) => Object.values(sids).some((sid) => subdirs(join(d, 'projects')).some((p) => existsSync(join(p, `${sid}.jsonl`)))));
-  log(`after the ending: resume dirs holding these sessions: ${JSON.stringify(ending.resumeDirsLeft)}`);
-
-  if (name === 'kill-twice') {
-    label = '2-serve';
-    const second = await heldServe(label, PROMPTS.story2, `${tagId}-2`);
-    const procs2 = allOf(second.claudes);
-    process.kill(second.h.pid, 'SIGKILL');
-    log(`KILL 2: SIGKILL to participant ${second.h.pid}`);
-    await second.h.exited;
-    ending.secondKillGone = await waitGone(procs2, 240_000);
     await sleep(500);
     keeper.scan();
-    ending.resumeDirsLeftAfterSecond = resumeDirs().filter((d) => Object.values(sids).some((sid) => subdirs(join(d, 'projects')).some((p) => existsSync(join(p, `${sid}.jsonl`)))));
-    log(`after the second kill: resume dirs holding these sessions: ${JSON.stringify(ending.resumeDirsLeftAfterSecond)}`);
+    ending.snapshot = snapshot(ctx, 'after-orphans', heldSentAt);
+    serve2 = await serveAgain(ctx, '2-serve', [{ name: 'held turn', from: heldSentAt }]);
   }
-  writeFileSync(join(caseDir, 'ending.json'), `${JSON.stringify(ending, null, 2)}\n`);
+  const serve3 = await serveAgain(ctx, '3-serve', [
+    { name: 'held turn', from: heldSentAt, to: serve2.sentAt },
+    { name: 'serve 2 turn', from: serve2.sentAt, to: {} },
+  ]);
 
-  const rows = await serveAgain(caseDir, name === 'kill-orphan' ? '3-serve-after-orphan' : name === 'kill-twice' ? '3-serve' : '2-serve', model, mode, { ...sids }, keeper, log);
+  // Keep timing until everything tracked is gone, or 75 s after the death.
+  const until = pex.t + 75_000;
+  while (!pw.allGone() && Date.now() < until) {
+    await sleep(50);
+  }
+  pw.stop();
   keeper.stop();
-  writeFileSync(join(caseDir, 'result.json'), `${JSON.stringify({ ending, orphanServe, serve: rows }, null, 2)}\n`);
-  rescore(caseDir);
+  const tool = {
+    label: toolLabel,
+    started: existsSync(join(WORK, `wait-${toolLabel}-started.txt`)) ? readFileSync(join(WORK, `wait-${toolLabel}-started.txt`), 'utf8').trim() : null,
+    finished: existsSync(join(WORK, `wait-${toolLabel}-finished.txt`)) ? readFileSync(join(WORK, `wait-${toolLabel}-finished.txt`), 'utf8').trim() : null,
+  };
+  const timings = [...pw.tracked.values()].map((t) => ({ pid: t.pid, role: t.role, cmd: t.cmd, goneAt: t.goneAt, msAfterParticipantExit: t.goneT === null ? null : t.goneT - pex.t }));
+  ending.stillAliveAtEnd = pw.alive().map((t) => [t.pid, t.role, t.cmd.slice(0, 60)]);
+  log(`timings after participant exit (ms): ${JSON.stringify(timings.map((t) => [t.pid, t.role, t.cmd.slice(0, 30), t.msAfterParticipantExit]))}; tool ${JSON.stringify(tool)}`);
+  writeFileSync(join(caseDir, 'result.json'), `${JSON.stringify({ ending, timings, tool, heldSentAt, ours, serve2: serve2.rows, serve3: serve3.rows }, null, 2)}\n`);
   log('case done');
 }
 
 // ---------------------------------------------------------------------------
 
 const [mode, ...rest] = process.argv.slice(2);
-const CASES = ['press1', 'press2', 'press3', 'kill', 'kill-orphan', 'crash', 'claude-kill', 'abort', 'reboot', 'reboot-later', 'kill-twice'];
-if (mode === '--rescore') {
-  for (const d of rest) {
-    rescore(d);
-  }
-} else if (mode === 'participant' && rest[0]) {
+if (mode === 'participant' && rest[0]) {
   await participant(rest[0]);
-} else if (mode === 'case' && rest[0] && CASES.includes(rest[1] ?? '') && ['fresh', 'resumed', 'dir-fresh', 'dir-resumed'].includes(rest[2] ?? '')) {
+} else if (mode === 'case' && rest[0] && CASES.includes(rest[1] as CaseName) && ['fresh', 'resumed'].includes(rest[2] ?? '')) {
   await runCase(rest[0], rest[1] as CaseName, rest[2] as Variant);
 } else {
-  process.stderr.write(`usage:\n  case <model> <${CASES.join('|')}> <fresh|resumed|dir-fresh|dir-resumed>\n  participant <spec.json>\n`);
+  process.stderr.write(`usage:\n  case <model> <${CASES.join('|')}> <fresh|resumed>\n  participant <spec.json>\n`);
   process.exit(2);
 }
