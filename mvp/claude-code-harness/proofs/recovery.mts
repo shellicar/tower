@@ -725,17 +725,29 @@ async function participant(specPath: string): Promise<void> {
     parts.push({ c, run, abort, ready, result, sessionId, done, bodies });
     log(`${c.tag}: run ${run.dir}${c.sessionId ? `, resuming ${c.sessionId} through the store` : ', new conversation'}`);
   }
-  for (const p of parts) {
+  // A resume spawns Claude Code only after the SDK has written the resume
+  // dir, so the pid is waited for rather than read once.
+  const pidsKnown = parts.map(async (p) => {
     const conv = (state.convs as Json[]).find((x) => x.tag === p.c.tag) as Json;
-    const sp = claudeOf(p.run);
-    conv.claudePid = sp?.pid ?? null;
-    conv.claudeStarttime = sp ? (procStat(sp.pid)?.starttime ?? null) : null;
-    void sp?.exited.then((e) => {
-      log(`${p.c.tag}: claude ${sp.pid} exited ${JSON.stringify(e)}`);
+    let sp = claudeOf(p.run);
+    for (let i = 0; !sp && i < 6000; i += 1) {
+      await sleep(10);
+      sp = claudeOf(p.run);
+    }
+    if (!sp) {
+      log(`${p.c.tag}: no claude process after 60 s`);
+      return;
+    }
+    const found = sp;
+    conv.claudePid = found.pid;
+    conv.claudeStarttime = procStat(found.pid)?.starttime ?? null;
+    writeState();
+    void found.exited.then((e) => {
+      log(`${p.c.tag}: claude ${found.pid} exited ${JSON.stringify(e)}`);
       conv.claudeExit = e;
       writeState();
     });
-  }
+  });
   writeState();
 
   if (spec.ending === 'answer') {
@@ -810,6 +822,7 @@ async function participant(specPath: string): Promise<void> {
     log(`exit ${code}`);
   });
   await Promise.all(parts.map((p) => p.ready));
+  await Promise.all(pidsKnown);
   await Promise.race([Promise.all(parts.map((p) => p.sessionId)), later(3000)]);
   writeState();
   log('all mid-turn');
@@ -830,6 +843,9 @@ class Keeper {
   readonly rec: Recorder;
   readonly sids = new Set<string>();
   readonly sizes = new Map<string, number>();
+  // A file that shrinks, or goes and comes back, is a new generation with its
+  // own copy, so no line once seen is overwritten.
+  readonly gens = new Map<string, number>();
   readonly pidSeen = new Map<string, string>();
   readonly extraRoots = new Set<string>();
   timer: NodeJS.Timeout | undefined;
@@ -855,9 +871,16 @@ class Keeper {
   }
   copyName(file: string): string {
     const root = file.slice(0, file.indexOf('/projects/'));
-    return `${basename(root)}__${basename(file)}`;
+    const gen = this.gens.get(file) ?? 0;
+    return `${basename(root)}${gen > 0 ? `.gen${gen}` : ''}__${basename(file)}`;
   }
   scan(): void {
+    for (const [file, size] of this.sizes) {
+      if (size !== -1 && !existsSync(file)) {
+        this.sizes.set(file, -1);
+        this.rec.write({ ts: stamp(), event: 'gone', file });
+      }
+    }
     const roots = [...this.extraRoots, ...resumeDirs()];
     for (const root of roots) {
       for (const project of subdirs(join(root, 'projects'))) {
@@ -867,14 +890,15 @@ class Keeper {
           try {
             size = statSync(file).size;
           } catch {
-            if (this.sizes.has(file) && this.sizes.get(file) !== -1) {
-              this.sizes.set(file, -1);
-              this.rec.write({ ts: stamp(), event: 'gone', file });
-            }
             continue;
           }
-          if (this.sizes.get(file) === size) {
+          const prev = this.sizes.get(file);
+          if (prev === size) {
             continue;
+          }
+          if (prev !== undefined && (prev === -1 || size < prev)) {
+            this.gens.set(file, (this.gens.get(file) ?? 0) + 1);
+            this.rec.write({ ts: stamp(), event: prev === -1 ? 'back' : 'shrank', file, from: prev, to: size, gen: this.gens.get(file) });
           }
           let text: string;
           try {
