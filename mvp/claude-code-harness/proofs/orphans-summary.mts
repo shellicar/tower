@@ -108,8 +108,11 @@ for (const logPath of process.argv.slice(2)) {
     const pid = Number(c.claudePid);
     const sid = String(c.sessionId);
     const tm = timings.find((x) => x.pid === pid);
-    const sigs = trace.filter((s) => s.pid === pid && s.t >= death - 50 && s.kind === 'signal' && s.signal !== 'SIGPIPE').map((s) => `${s.signal} from ${who(s.from, pid)} at +${s.t - death} ms`);
-    const pipes = trace.filter((s) => s.pid === pid && s.signal === 'SIGPIPE').length;
+    // Any of its threads (runs before the driver recorded thread ids have
+    // only the pid, and miss a signal delivered to another thread).
+    const ids = new Set<number>([pid, ...((tm?.tids as number[] | undefined) ?? [])]);
+    const sigs = trace.filter((s) => ids.has(s.pid) && s.t >= death - 50 && s.kind === 'signal' && s.signal !== 'SIGPIPE').map((s) => `${s.signal} from ${who(s.from, pid)} at +${s.t - death} ms${s.pid === pid ? '' : ` (thread ${s.pid})`}`);
+    const pipes = trace.filter((s) => ids.has(s.pid) && s.signal === 'SIGPIPE').length;
     const exit = trace.find((s) => s.pid === pid && s.kind === 'exit');
     // The orphan's transcript: in the CLAUDE_CONFIG_DIR its spawn was given
     // (the agent's config dir when fresh, its resume dir when resumed), as its
@@ -134,6 +137,7 @@ for (const logPath of process.argv.slice(2)) {
     const inv = (r: Json): Json => Object.fromEntries(Object.entries(r.invented as Record<string, unknown[]>).map(([k, v]) => [k, v.length]));
     (out.convs as Json)[tag] = {
       claudePid: pid,
+      threadIdsKnown: ids.size - 1,
       signalsAfterDeath: sigs,
       sigpipes: pipes,
       exit: exit ? `${exit.text} at +${exit.t - death} ms` : null,
