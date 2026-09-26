@@ -529,6 +529,38 @@ try {
     } finally {
       rmSync(cwdClaude, { recursive: true, force: true });
     }
+  } else if (scenario === 'watch-timing') {
+    // Two unmeasured cases on a watched route (user skills dir, open):
+    // a body-only edit (no description change) picked up and injected on
+    // invocation, and whether the watcher's post-idle switch to 30s polling
+    // (chokidar interval, from the binary: active 2s / idle 30s after 60s
+    // with no interaction) delays a change sent right after that idle gap.
+    const dirs = declaredDirs();
+    const run = startRun({ name, options: { model, debugFile: inst.debugFile, env: inst.env, extraArgs: { 'setting-sources': 'user' } } });
+    const link = join(run.configDir, 'skills');
+    symlinkSync(dirs.A, link);
+    log(`run dir: ${run.dir}\nsymlinked ${link} -> ${dirs.A}`);
+
+    await turn(run, 'T1 initial listing', OK);
+
+    // Body-only edit: description unchanged, body carries a new marker.
+    writeFileSync(join(dirs.A, 'p19-a1', 'SKILL.md'), skillMd('p19-a1', 'V1', '', 'BODY-MARKER-V2. Reply with the single word DONE.'));
+    log(`edited p19-a1's body only (BODY-MARKER-V2), description unchanged; settling ${SETTLE_MS}ms`);
+    await sleep(SETTLE_MS);
+    await turn(run, 'T2 invoke /p19-a1 after a body-only edit, no reload call', '/p19-a1');
+
+    // Idle past the watcher's 60s-idle threshold, then edit again and send
+    // a turn immediately (no settle), to see whether the slower poll delays
+    // pickup right after the switch.
+    log('idling 65s to cross the watcher\'s 60s-idle threshold (active 2s -> idle 30s polling)');
+    await sleep(65000);
+    writeFileSync(join(dirs.A, 'p19-a1', 'SKILL.md'), skillMd('p19-a1', 'V3'));
+    log('edited p19-a1 MARKER=V1 -> V3 right after the idle threshold; sending the next turn immediately, no settle');
+    await turn(run, 'T3 immediately after the post-idle edit, no settle, no reload call', OK);
+    await sleep(SETTLE_MS);
+    await turn(run, 'T4 after an additional settle, no reload call', OK);
+
+    await finish(run, inst.bodiesDir, {});
   } else if (scenario === 'canusetool-closed' || scenario === 'canusetool-open') {
     // A directory added mid-session through canUseTool's answer: an allow
     // with an addDirectories PermissionUpdate (destination session). It
