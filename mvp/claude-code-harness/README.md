@@ -182,8 +182,8 @@ argued from the docs alone.
 `proofs/skills-dir.mts <model> <scenario>` runs one scenario, each its own
 process: `plugin-no-manifest`, `add-dir-only`, `add-dir-reload`,
 `project-config-root`, `plugin-flat-layout`, `plugin-symlink-repoint`,
-`plugin-edit-existing`, `register-repo-root-raw`, `settings-plugin`. Ground
-truth for "did the
+`plugin-edit-existing`, `register-repo-root-raw`, `settings-plugin`,
+`settings-plugin-live`. Ground truth for "did the
 model actually see this skill" is the transcript's `skill_listing`
 attachment (`config-dir/projects/<project>/<session>.jsonl`,
 `attachment.type === "skill_listing"`, carrying `names`, `skillCount` and the
@@ -240,11 +240,13 @@ turn (not the model's reply) shows the CLI rewrote both prompts to the same
 `<command-name>/plugin:proof12-plugin-skill-a</command-name>` before Claude
 ever saw them.
 
-**A plugin's own path is fixed once the process starts; nothing in the SDK
-re-points it to a different directory, but content inside that fixed path
-can be rescanned on an explicit call, and a filesystem-level indirection
-(the path's `skills/` entry as a symlink) turns that rescan into a genuine
-re-point.** `Query` has no method that takes a plugin path: `reloadPlugins()` takes only
+**An `Options.plugins` entry's own path is fixed once the process starts;
+nothing in the SDK re-points it to a different directory, but content
+inside that fixed path can be rescanned on an explicit call, and a
+filesystem-level indirection (the path's `skills/` entry as a symlink) turns
+that rescan into a genuine re-point.** (A second finding below, on the
+settings-declared marketplace route, found the same thing true there too,
+by a different test.) `Query` has no method that takes a plugin path: `reloadPlugins()` takes only
 an optional `holdOnCacheImpact`, and `grep -o 'subtype:"[a-z_]*"'
 node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs | sort -u` lists exactly
 one plugin-related request subtype the runtime ever constructs,
@@ -312,34 +314,79 @@ builtin plugins), and the `skill_listing` never carried the skill: this is
 enforced, not merely the documented convention.
 
 **A settings-declared, directory-sourced marketplace loads a plugin from a
-local path, mid-session, entirely through `settingSources: []`, with the
-same namespacing as the `plugins` option.** `extraKnownMarketplaces` accepts
-a marketplace whose own source is a local directory
+local path, at launch or mid-session, entirely through `settingSources: []`,
+namespaced the same way as the `plugins` option, with an edit to its skill
+picked up the same way too; but re-pointing an already-adopted one to a
+different directory did not work.** `extraKnownMarketplaces` accepts a
+marketplace whose own source is a local directory
 (`code.claude.com/docs/en/settings-reference`: `"directory": { "source":
 "directory", "path": "/opt/acme-corp/approved-marketplaces" }`, "path
 required, the absolute path to a directory containing
 `.claude-plugin/marketplace.json`"), and that marketplace's own plugin
 entries can use a relative-path source inside it
-(`code.claude.com/docs/en/plugins/marketplace-reference`, "Relative path
-plugin source": "A relative path resolves only when Claude Code has the
-marketplace's files, so check the marketplace source type: `github`, `git`,
-`file`, and `directory`: Claude Code has the marketplace's files"; a
-different sentence on the same page, "`settings`: relative paths are
-rejected outright", is about a marketplace whose own source is `settings`,
-the inline-plugin-list form, not about a `directory`-sourced one). None of
-this is filesystem settings, so `settingSources` does not gate it
-(`sdk.d.ts`: `settingSources` "control[s] which filesystem settings to
-load"; `query.applyFlagSettings()`/`options.settings` is a separate,
-always-on "flag settings" layer). Run:
-`runs/2026-09-26T123446908126Z-skills-dir-settings-plugin`. A marketplace
-directory held one plugin entry, `{"name": "proof12-mp-plugin", "source":
-"./the-plugin"}`, `the-plugin/skills/proof12-mp-skill-j/SKILL.md` inside it.
-`query.applyFlagSettings({extraKnownMarketplaces: {...}, enabledPlugins:
-{"proof12-mp-plugin@proof12-marketplace": true}})` followed by
-`query.reloadPlugins()` both returned successfully, and the very next turn's
-`skill_listing` (confirmed by timestamp against the immediately preceding
-prompt) carried `proof12-mp-plugin:proof12-mp-skill-j`, namespaced the same
-way a `plugins`-option skill is.
+(`code.claude.com/docs/en/plugins/marketplace-reference`, fetched live for
+this proof, "Relative path plugin source": "A relative path resolves only
+when Claude Code has the marketplace's files, so check the marketplace
+source type: `github`, `git`, `file`, and `directory`: Claude Code has the
+marketplace's files"; a different sentence on the same page, "`settings`:
+relative paths are rejected outright", is about a marketplace whose own
+source is `settings`, the inline-plugin-list form, not about a
+`directory`-sourced one). None of this is filesystem settings, so
+`settingSources` does not gate it (`sdk.d.ts`: `settingSources` "control[s]
+which filesystem settings to load"; `query.applyFlagSettings()` and
+`options.settings` are, per the same file, the same "inline `settings`
+option of `query()`", one applied at launch and the other mid-session, and
+neither is filesystem settings).
+
+Two runs. `runs/2026-09-26T123446908126Z-skills-dir-settings-plugin`: a
+marketplace directory held one plugin entry, `{"name": "proof12-mp-plugin",
+"source": "./the-plugin"}`, `the-plugin/skills/proof12-mp-skill-j/SKILL.md`
+inside it (the entry's `name` and the plugin directory's own name,
+`the-plugin`, deliberately differ here). `query.applyFlagSettings({...})`
+followed by `query.reloadPlugins()` both returned successfully mid-session,
+and the very next turn's `skill_listing` (confirmed by timestamp) carried
+`proof12-mp-plugin:proof12-mp-skill-j`: the prefix is the marketplace
+entry's `name`, not the plugin directory's, so the prefix's text can be
+chosen independently of the directory layout, though a plugin loaded this
+way is still always namespaced, the same as `Options.plugins`.
+`runs/2026-09-26T125133520695Z-skills-dir-settings-plugin-live` declared the
+marketplace in `options.settings` at launch instead (the literal
+"declared in config" form), then: edited the skill's description
+mid-session (a `MARKER=V1`/`MARKER=V2` marker, as in the plugin
+`skills/`-directory edit test above); the turn sent three seconds later,
+no reload call, still carried `V1`, and `query.reloadSkills()` alone (no
+`reloadPlugins()` needed) picked up `V2` on the next turn, the same result
+as the direct `plugins`-option route. It then tried re-pointing the same
+already-adopted marketplace at a second, unrelated directory (a different
+skill, no relation to the first) via a second `query.applyFlagSettings()`
+naming the new `path`, followed by `query.reloadPlugins()`. That reload's
+own response still reported the plugin's path as the first directory
+(`{"name":"proof12-live-plugin","path":".../marketplace-a/the-plugin",
+...}`), and the following turn's `skill_listing`, checked by timestamp,
+still carried only the first skill; the second one never appeared. Once
+adopted under a given marketplace name, this route did not let the proof
+change what directory that marketplace pointed at; `runs/...-settings-plugin`'s
+own result (registering a marketplace and plugin that were not there
+before) is adding new content mid-session, not changing existing content's
+source, and only the first was shown to work.
+
+Cost, relative to `Options.plugins`: a plugin root with a `skills/`
+subdirectory is enough for that option; this route additionally needs a
+marketplace root, `.claude-plugin/marketplace.json` inside it naming the
+plugin by a relative path, and the settings/`enabledPlugins` declaration
+itself, two directory levels deeper than `Options.plugins`' bare plugin
+root.
+
+Safety check before relying on either result: `grep -rl proof12
+~/.claude/plugins ~/.claude/settings.json ~/.claude.json` and `find
+~/.claude -iname '*proof12*'`, run against Stephen's own, real `~/.claude`
+(the harness's shared-login credential store, not either run's own
+`CLAUDE_CONFIG_DIR`), found nothing from either run: registering the
+marketplace and enabling the plugin did not write into Stephen's own
+Claude Code configuration, and neither run's own copied `config-dir` held
+a trace of the marketplace or plugin name either, so the flag-settings
+layer used here appears to be in-memory for the session, not persisted to
+any settings file on disk.
 
 **`additionalDirectories` (`--add-dir`) does not load skills from
 `<dir>/.claude/skills/` under `settingSources: []`, and `reloadSkills()`
@@ -398,13 +445,13 @@ source has nothing to filter.
   filesystem-settings gate `additionalDirectories` and `projectConfigRoot`
   showed above.
 - Restarting the process with `resume` to change the plugin list, rather
-  than anything tried live in this proof: `code.claude.com/docs/en/agent-sdk/sessions`,
-  "What a resumed session restores": "If the session depended on
-  `--mcp-config`, `--settings`, `--plugin-dir`, `--fallback-model`, or
-  directories added with `--add-dir`, pass them again when you resume." A
-  resumed session can be handed a new `plugins` list, at the cost of the
-  process restarting; that is a different shape from any of the
-  live-changed-directory results above, all of which kept one process
+  than anything tried live in this proof: `code.claude.com/docs/en/sessions`
+  ("Manage sessions"), "What a resumed session restores": "If the session
+  depended on `--mcp-config`, `--settings`, `--plugin-dir`,
+  `--fallback-model`, or directories added with `--add-dir`, pass them again
+  when you resume." A resumed session can be handed a new `plugins` list, at
+  the cost of the process restarting; that is a different shape from any of
+  the live-changed-directory results above, all of which kept one process
   running throughout.
 
 ### Choices this proof made that the brief did not
@@ -447,3 +494,22 @@ source has nothing to filter.
 - Left the managed and user-settings skills directories, and restarting
   with `resume`, doc-only rather than live; see the reasons given with each
   above.
+- Chose the marketplace and plugin entry names in the settings scenarios
+  (`proof12-marketplace`, `proof12-mp-plugin`, `proof12-live-marketplace`,
+  `proof12-live-plugin`), and deliberately gave the plugin entry a
+  different name from its own directory (`the-plugin`) in the first one, to
+  tell which one the namespace prefix follows.
+- The first settings run (`settings-plugin`) declared the marketplace
+  mid-session with `query.applyFlagSettings()`; the second
+  (`settings-plugin-live`) declared it in `options.settings` at launch
+  instead, the literal "declared in config" form, then used
+  `applyFlagSettings()` only for the re-point attempt.
+- Fetched `code.claude.com/docs/en/plugins/marketplace-reference` live with
+  `WebFetch` partway through this proof, rather than relying on the
+  `extraKnownMarketplaces` shapes already in the scratchpad's settings-reference
+  copy, once those turned out to leave the plugin-entry source shapes
+  (relative paths inside a `directory`-sourced marketplace) unstated.
+- The settings-scenario fixtures live under `/tmp` too, covered by the
+  fixture-cleanup line above; the safety check against Stephen's own
+  `~/.claude` (not a fixture, and not covered by that line) was run once,
+  by hand, after both settings runs.

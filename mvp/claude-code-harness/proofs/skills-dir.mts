@@ -74,7 +74,7 @@ don't use it.
 const [model, scenario] = process.argv.slice(2);
 if (!model || !scenario) {
   process.stderr.write(
-    'usage: node proofs/skills-dir.mts <model> <plugin-no-manifest|add-dir-only|add-dir-reload|project-config-root|plugin-flat-layout|plugin-symlink-repoint|plugin-edit-existing|register-repo-root-raw|settings-plugin>\n',
+    'usage: node proofs/skills-dir.mts <model> <plugin-no-manifest|add-dir-only|add-dir-reload|project-config-root|plugin-flat-layout|plugin-symlink-repoint|plugin-edit-existing|register-repo-root-raw|settings-plugin|settings-plugin-live>\n',
   );
   process.exit(2);
 }
@@ -446,6 +446,99 @@ don't use it.
     run.end();
     await run.done;
     reportListings(run.dir);
+    process.stdout.write('done\n');
+  } else if (scenario === 'settings-plugin-live') {
+    // The literal "declared in config" form of the settings route: the
+    // marketplace and enabledPlugins go into options.settings AT LAUNCH,
+    // not applied mid-session with applyFlagSettings (sdk.d.ts calls
+    // applyFlagSettings "the inline `settings` option of query(), applied
+    // mid-session", so the two are documented as the same layer; this
+    // checks the launch-time form specifically). Then: does an edit to the
+    // declared marketplace's skill get picked up live, the way the plugin
+    // scenarios above were checked, and can the marketplace be re-pointed
+    // to a different directory mid-session the way the symlink scenario
+    // was checked, but through the settings layer instead of a filesystem
+    // trick.
+    const MARKETPLACE_A = join(root, 'marketplace-a');
+    const MARKETPLACE_B = join(root, 'marketplace-b');
+    const SKILL_K = 'proof12-live-skill-k';
+    const SKILL_L = 'proof12-live-skill-l';
+    const MARKETPLACE_NAME = 'proof12-live-marketplace';
+    const PLUGIN_NAME = 'proof12-live-plugin';
+    const markerSkill = (marker: string): string => `---
+name: ${SKILL_K}
+description: Dummy skill for tower proof 12 (skills-dir). MARKER=${marker}
+---
+
+Dummy skill for the tower Claude Code harness proof 12 run. It has no task,
+don't use it.
+`;
+    mkdirSync(join(MARKETPLACE_A, 'the-plugin', 'skills', SKILL_K), { recursive: true });
+    writeFileSync(join(MARKETPLACE_A, 'the-plugin', 'skills', SKILL_K, 'SKILL.md'), markerSkill('V1'));
+    mkdirSync(join(MARKETPLACE_A, '.claude-plugin'), { recursive: true });
+    writeFileSync(
+      join(MARKETPLACE_A, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({ name: MARKETPLACE_NAME, owner: { name: 'tower proof 12' }, plugins: [{ name: PLUGIN_NAME, source: './the-plugin' }] }, null, 2),
+    );
+    writeSkill(join(MARKETPLACE_B, 'the-plugin', 'skills', SKILL_L), SKILL_L, 'Behind marketplace B, after the re-point.');
+    mkdirSync(join(MARKETPLACE_B, '.claude-plugin'), { recursive: true });
+    writeFileSync(
+      join(MARKETPLACE_B, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({ name: MARKETPLACE_NAME, owner: { name: 'tower proof 12' }, plugins: [{ name: PLUGIN_NAME, source: './the-plugin' }] }, null, 2),
+    );
+
+    const run = startRun({
+      name: 'skills-dir-settings-plugin-live',
+      options: {
+        model,
+        settings: {
+          extraKnownMarketplaces: { [MARKETPLACE_NAME]: { source: { source: 'directory', path: MARKETPLACE_A } } },
+          enabledPlugins: { [`${PLUGIN_NAME}@${MARKETPLACE_NAME}`]: true },
+        },
+      },
+    });
+    process.stdout.write(`run dir: ${run.dir}\nmarketplace A: ${MARKETPLACE_A}\nmarketplace B: ${MARKETPLACE_B}\n`);
+
+    await runTurn(run, 'turn 1: marketplace declared in options.settings at launch, MARKER=V1', QUESTION);
+
+    writeFileSync(join(MARKETPLACE_A, 'the-plugin', 'skills', SKILL_K, 'SKILL.md'), markerSkill('V2'));
+    await sleep(3000);
+    await runTurn(run, 'turn 2: MARKER=V2 written, no reload call, 3s settle', QUESTION);
+
+    let sawV2 = false;
+    {
+      const reloadSkillsResult = await run.query.reloadSkills();
+      process.stdout.write(`reloadSkills() result: ${JSON.stringify(reloadSkillsResult)}\n`);
+      const { systemMessages } = await runTurn(run, 'turn 3: after reloadSkills()', QUESTION);
+      sawV2 = JSON.stringify(systemMessages).includes('MARKER=V2');
+    }
+    if (!sawV2) {
+      const reloadPluginsResult = await run.query.reloadPlugins();
+      process.stdout.write(`reloadPlugins() result: ${JSON.stringify(reloadPluginsResult)}\n`);
+      await runTurn(run, 'turn 4: after reloadPlugins() (reloadSkills() alone had not shown MARKER=V2)', QUESTION);
+    }
+
+    try {
+      await run.query.applyFlagSettings({
+        extraKnownMarketplaces: { [MARKETPLACE_NAME]: { source: { source: 'directory', path: MARKETPLACE_B } } },
+      });
+      process.stdout.write('applyFlagSettings() (re-point to marketplace B) returned\n');
+    } catch (err) {
+      process.stdout.write(`applyFlagSettings() (re-point) threw: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+    const reloadPluginsAfterRepoint = await run.query.reloadPlugins();
+    process.stdout.write(`reloadPlugins() result after re-point: ${JSON.stringify(reloadPluginsAfterRepoint)}\n`);
+    await runTurn(run, 'turn 5: after re-pointing to marketplace B + reloadPlugins()', QUESTION);
+
+    run.end();
+    await run.done;
+    const listings = skillListings(run.dir);
+    process.stdout.write(`\nskill_listing attachments recorded this run (${listings.length}):\n`);
+    listings.forEach((l, i) => {
+      process.stdout.write(
+        `  #${i}: skillCount=${l.skillCount} hasK=${l.names.some((n) => n.endsWith(SKILL_K))} hasL=${l.names.some((n) => n.endsWith(SKILL_L))} hasV2=${l.content.includes('MARKER=V2')}\n`,
+      );
+    });
     process.stdout.write('done\n');
   } else {
     process.stderr.write(`unknown scenario ${JSON.stringify(scenario)}\n`);
