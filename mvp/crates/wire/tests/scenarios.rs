@@ -96,6 +96,7 @@ fn attachment_kinds(events: &[Event]) -> Vec<&str> {
 const SCENARIO_1: &str = fixture!("v2/scenario-1.jsonl");
 const SCENARIO_2: &str = fixture!("v2/scenario-2.jsonl");
 const SCENARIO_2B: &str = fixture!("v2/scenario-2b.jsonl");
+const SCENARIO_2C: &str = fixture!("v2/scenario-2c.jsonl");
 const SCENARIO_3: &str = fixture!("v2/scenario-3.jsonl");
 const SCENARIO_4: &str = fixture!("v2/scenario-4.jsonl");
 const SCENARIO_5: &str = fixture!("v2/scenario-5.jsonl");
@@ -179,6 +180,35 @@ fn scenario_2_cancelled_turn_commits_no_message_and_the_query_closes_cancelled()
             .any(|e| matches!(&e.kind, EventKind::Change(ConvChange::Message(_))))
     );
     // The query still closed — committally, reason cancelled.
+    assert!(evs.iter().any(|e| matches!(
+        &e.kind,
+        EventKind::Change(ConvChange::Query(q)) if q.reason == "cancelled"
+    )));
+}
+
+#[test]
+fn scenario_2c_cancelled_turn_commits_its_partial_reply_and_the_query_closes_cancelled() {
+    // The other declaration of scenario 2: the implementation keeps what the
+    // assistant had written when the cancel landed. Whether the user-role
+    // half committed is not a required entry, so nothing here asserts on it.
+    let evs = events(SCENARIO_2C);
+    assert_all_known(&evs);
+    assert!(evs.iter().any(|e| matches!(
+        &e.kind,
+        EventKind::Telemetry(wire::ConvTelemetry::TurnCancelled(_))
+    )));
+    let partial = evs
+        .iter()
+        .find_map(|e| match &e.kind {
+            EventKind::Change(ConvChange::Message(m)) if m.role == "assistant" => Some(m),
+            _ => None,
+        })
+        .expect("the partial reply commits");
+    assert_eq!(partial.turn_id.0, "t3");
+    assert_eq!(
+        partial.content,
+        vec![serde_json::json!({"type":"text","text":"Deleting"})]
+    );
     assert!(evs.iter().any(|e| matches!(
         &e.kind,
         EventKind::Change(ConvChange::Query(q)) if q.reason == "cancelled"

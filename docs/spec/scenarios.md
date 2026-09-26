@@ -18,6 +18,7 @@ wrong, and the fix lands twice.
 | 1 — the plain exchange | `fixtures/scenario-1.jsonl` |
 | 2 — cancel mid-turn | `fixtures/scenario-2.jsonl` |
 | 2b — cancel after completion | `fixtures/scenario-2b.jsonl` |
+| 2c — cancel mid-turn, partial reply committed | `fixtures/scenario-2c.jsonl` |
 | 3 — edit and rewind | `fixtures/scenario-3.jsonl` |
 | 4 — revision | `fixtures/scenario-4.jsonl` |
 | 5 — stale premise | `fixtures/scenario-5.jsonl` |
@@ -33,8 +34,8 @@ them as a subsequence per subject, extras allowed (add-only honoured).
 `fixtures/v2/` carries the conversation scenarios in the v2 tree
 (conversation.md, Subjects): leaf subjects spelling each type, and a
 `query` closure change wherever a query closes — completed in scenarios 1,
-2b, and 3; cancelled in scenario 2. Scenario 5's second query never closes
-(still live when the fixture ends), scenario 7 is one turn's stream
+2b, and 3; cancelled in scenarios 2 and 2c. Scenario 5's second query never
+closes (still live when the fixture ends), scenario 7 is one turn's stream
 mid-query, and scenario 8b never opens a query at all (rejected before
 acceptance), so none of the three carries a closure. Scenario 6 is
 approval-concern traffic and has no v2 form.
@@ -94,14 +95,16 @@ accepted `cancel`.
 - Exercises: `cancel {id}` accepted; `turn_cancelled` on telemetry; the
   partial assistant message existing only as deltas — nothing committed.
 - Asserts: the telemetry/commit gap is honest — a full telemetry trail with
-  zero commits for the interrupted turn; whether the user-role half committed
-  is the implementation's declaration, visible either way.
+  zero commits for the interrupted turn; whether either half committed is the
+  implementation's declaration, visible either way.
 
 Fixture: `fixtures/scenario-2.jsonl`.
 
 The user-role commit for `q2` is deliberately absent from the required
 entries: committing it or not is the implementation's declaration, and either
-capture is compliant. No assistant commit may appear for `t3`.
+capture is compliant. This capture is an implementation that declares the
+partial assistant message uncommitted: no assistant commit appears for `t3`.
+Scenario 2c is the other declaration.
 
 ### 2b — cancel after completion
 
@@ -120,6 +123,25 @@ control loop, and a cancel landing in that gap was answered `accepted` with a
   `accepted`.
 
 Fixture: `fixtures/scenario-2b.jsonl`.
+
+### 2c — cancel mid-turn, partial reply committed
+
+Scenario 2 again, from an implementation that keeps what the assistant had
+written when the cancel landed: the partial reply commits as `t3`'s assistant
+message, its content exactly the text the deltas carried. Which of 2 and 2c
+an implementation matches is its declaration (conversation.md, The change
+stream); both are compliant.
+
+- Exercises: `cancel {id}` accepted; `turn_cancelled` on telemetry; the
+  partial assistant message committed on `changes` after the cancel.
+- Asserts: a committed assistant message for a cancelled turn is an ordinary
+  commit — it folds like any other message, and the query still closes
+  `cancelled`.
+
+Fixture: `fixtures/scenario-2c.jsonl`.
+
+The user-role commit for `q2` is absent from the required entries here too,
+for the same reason as scenario 2.
 
 ## 3. Edit and rewind
 

@@ -122,8 +122,8 @@ Two streams, two natures — the WAL is not the table:
   the fact, never speculatively. Appearance here *is* the definition of "in
   the conversation" — the record constitutes the state, and only this record.
 
-The two may legitimately disagree in the moment — a cancelled turn leaves a
-full telemetry trail and zero commits. That gap is necessary: a system that
+The two may legitimately disagree in the moment — a cancelled turn can leave
+a full telemetry trail and zero commits. That gap is necessary: a system that
 could only attempt what it had already committed could never act.
 
 ## Telemetry — `telemetry`
@@ -232,17 +232,21 @@ reason about it. This is exactly why `revision` is a first-class committal
 change and not a footnote: a reader that misses it renders the old word
 under a conversation that now holds a new one.
 
-A **cancelled turn**'s assistant message never commits: it existed only as
-deltas and never enters the store; `turn_cancelled` on telemetry is its
-trace. The user-role half — the `say` that opened the query — is the
-implementation's declaration: commit it or not, the record is the answer (see
-Implementation details). **Not committing it is the recommended declaration**:
-a cancel revokes the say, not just the turn it started — committing the user
+A **cancelled turn**'s assistant message is the implementation's
+declaration: it may commit what it had written when the cancel landed, or
+leave it as deltas that never enter the store — the record is the answer (see
+Implementation details). Either way, `turn_cancelled` on telemetry is the
+cancel's trace. The user-role half — the `say` that opened the query — is the
+implementation's declaration too: commit it or not, the record is the answer.
+**Not committing the user-role half is the recommended declaration**: a
+cancel revokes the say, not just the turn it started — committing the user
 half leaves a message its sender revoked in the conversation and moves the
 tip under them, so the released premise is no longer the tip they knew.
-Scenario 2's fixture captures the recommended shape. The *query* it ended,
-though, closed — and closure is committal: a `query` change with reason
-`cancelled` records it.
+Scenario 2's fixture captures the recommended shape for the user-role half,
+with no assistant commit; scenario 2c's captures an implementation that
+commits the partial assistant message. The *query* it ended, though, closed
+— and closure is committal: a `query` change with reason `cancelled` records
+it.
 
 | Event | Subject | Fields | Notes |
 |---|---|---|---|
@@ -534,6 +538,9 @@ implementation's own, made visible by its commits rather than specified:
   implementation declares by committing or not; the record is the answer, and
   no one has to read its source to know. Not committing is recommended — the
   cancel revokes the say, not just the turn (see The change stream).
+- Whether a cancelled turn's assistant message commits what it had written
+  when the cancel landed. The implementation declares by committing or not;
+  the record is the answer (see The change stream).
 - What is actually sent to the model. The request is a *rendering* of the
   reachable state — what the builder ships, and any presentation-time
   transformation, is between the agent and its model.
@@ -740,7 +747,7 @@ retires — they retire with v1, not with v2's arrival.
 - **The parent's wire type.** A follow-up after an interrupted query could
   anchor on a message (an exact node — but revisable, and possibly the interior
   of an incomplete turn), a turn (an outcome — but a cancelled turn's outcome
-  is nothing), or a query (the episode — surviving its internal changes). They
+  may be nothing), or a query (the episode — surviving its internal changes). They
   differ exactly when things change, which is why the type is real data; wire
   encoding unruled.
 
