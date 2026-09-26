@@ -26,9 +26,9 @@ Isolation is the harness's baseline, not the proof's choice. Every run gets:
 - `CLAUDE_CONFIG_DIR`: the agent's own directory,
   `~/.local/state/tower-claude-code-harness/config-dirs/<name>/`, named after
   the proof (`startRun`'s `name`), created the first time and reused by every
-  run of that proof. Never cleared. "its ONE directory PER agent" (Stephen,
-  27 Sep). A proof can't pass it: `options.env`'s `CLAUDE_CONFIG_DIR` is
-  overridden.
+  run of that proof. The harness never clears it. "its ONE directory PER
+  agent" (Stephen, 27 Sep). A proof can't pass it: `options.env`'s
+  `CLAUDE_CONFIG_DIR` is overridden. See below.
 - `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`: the login (below).
 - It strips a parent Claude Code session's variables from the environment
   (from `options.env` too): `CLAUDECODE`, `CLAUDE_PID`, `CLAUDE_EFFORT`,
@@ -51,6 +51,25 @@ The harness also sets:
 Everything else comes from the proof's `options` (model, permission mode,
 tools, plugins, skills, ...). The harness has no defaults of its own.
 `options.model` is required.
+
+## The config directory
+
+Claude Code keeps its own state in its config directory: transcripts
+(`projects/<project>/<session>.jsonl`), a file per running process
+(`sessions/<pid>.json`), and what it saves itself (`.claude.json`, such as a
+connector turned off at runtime). Every run under one name shares it, one
+after another or at the same time, with no lock and no per-run separation, so
+a proof meets Claude Code's state from earlier runs the way a real
+participant would: a later run can resume an earlier run's session by id with
+no session store, and two Claude Codes can meet on one session.
+
+- A proof that needs a clean start has no way to get one (undecided).
+- Claude Code 2.1.282 skips its transcript retention cleanup here: with
+  `settingSources: []` the user settings are disabled, and no enabled source
+  gives `cleanupPeriodDays` (its default is 30 days). It still writes
+  `.last-cleanup`, the marker for its other housekeeping.
+- Config directories from before this, one per run, are the timestamped
+  `config-dirs/<timestamp>-<name>/` directories. They are kept.
 
 ## The login
 
@@ -98,17 +117,13 @@ writes. The copied `.claude.json` does hold account details (name, email,
 organisation). The live config directories outside the repo are kept and
 reused.
 
-Two runs under one name at the same time share one config directory and
-write its `.claude.json` together. Nothing guards against it (undecided; see
-the TODO in `src/harness.mts`).
-
 ## The smoke run
 
 `proofs/smoke.mts` proves the isolation baseline, with a positive and a
-negative test:
+negative test, over two runs under the name `smoke`:
 
 - **Negative:** it writes a dummy skill, `tower-harness-negative-probe`, to
-  `~/.claude/skills/` for the length of the run. It must not appear. The run
+  `~/.claude/skills/` for the length of both runs. It must not appear. The run
   refuses to start if that directory already exists, and removes it
   afterwards whatever happens.
 - **Positive:** it passes its own plugin, `proofs/smoke-plugin/`, through the
@@ -116,15 +131,17 @@ negative test:
   `tower-harness-positive-probe`, which must appear, as
   `tower-harness-smoke:tower-harness-positive-probe`. With `settingSources: []`
   a plugin is the route that still loads a skill.
-- It asks Claude which skills it has, which CLAUDE.md files are in its
+- Run 1 asks Claude which skills it has, which CLAUDE.md files are in its
   context, whether it has any permission rules, and whether two phrases from
   `~/.claude/CLAUDE.md` are in its context. Skills that come with the
   account show up too; the dummies are told apart by name.
+- Run 2 resumes run 1's session by id (`resume`), straight from the shared
+  config directory with no session store, and asks Claude to quote run 1's
+  question back.
 
-It prints the init message's skills and plugins, Claude's answer, and whether
-each dummy was named in each. Before the run it prints the config directory
-and the session transcripts already in it, so a second smoke run shows the
-first run's transcript there.
+For each run it prints the config directory and the transcripts already in
+it, the init message's skills and plugins, Claude's answer, and whether each
+dummy was named in each.
 
 From the repo root, once:
 
@@ -137,12 +154,11 @@ Then, from `mvp/claude-code-harness/`, under a file-access trace:
 ```sh
 mkdir -p runs
 timeout 300 strace -f -s 4096 -e trace=%file,%process -o runs/smoke.strace node proofs/smoke.mts claude-haiku-4-5
-mv runs/smoke.strace runs/<run dir it printed>/
+mv runs/smoke.strace runs/<run 1's dir, as printed>/
 ```
 
-Run it twice to check the config directory is reused: both runs' `run.json`
-name the same `configDir`, and the second run's `config-dir/projects/`
-holds the first run's session transcript as well as its own.
+The trace covers both runs. Both runs' `run.json` name the same `configDir`,
+and run 1's transcript is already in it when run 2 starts.
 
 `%process` puts every fork and exec in the trace, so each file access can be
 attributed to the process that made it: the proof's node, the capture

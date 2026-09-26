@@ -32,10 +32,10 @@ const WRAPPER = join(PACKAGE_ROOT, 'bin', 'claude-capture');
 const STATE_ROOT = join(homedir(), '.local', 'state', 'tower-claude-code-harness');
 
 // Each agent's CLAUDE_CONFIG_DIR, config-dirs/<name>/, named after the proof
-// and reused by every run of it, never cleared: "as long as each agent gets
-// its own directory, and can keep reusing it, ie its not a random directory
-// every run, that would cause issues" (Stephen, 26 Sep); "its ONE directory
-// PER agent" (27 Sep). Created on first use.
+// and reused by every run of it, never cleared by the harness: "as long as
+// each agent gets its own directory, and can keep reusing it, ie its not a
+// random directory every run, that would cause issues" (Stephen, 26 Sep);
+// "its ONE directory PER agent" (27 Sep). Created on first use.
 //
 // TODO: undecided. Where it lives. Outside the repo is what's built: nothing
 // Claude Code writes there can reach the repo unfiltered (with the shared
@@ -270,12 +270,14 @@ export function startRun(args: StartRunArgs): Run {
   const id = `${startedAt.replace(/[:.]/g, '')}-${name}`;
   const dir = join(RUNS_ROOT, id);
   const captureDir = join(dir, 'claude');
-  // TODO: undecided. Two runs under one name at once (the thinking scenarios
-  // have run three at a time) share this directory and write .claude.json
-  // together, and each run's copy can catch the other's half-written files.
-  // Built: allowed, no guard, the same as the working directory. Refusing a
-  // second live run of a name is safe but stops parallel runs of one proof;
-  // a lock serialises them at the cost of machinery.
+  // Shared by every run under this name, one after another or at the same
+  // time, with no lock and no per-run separation inside it: sharing is the
+  // point. Claude Code keeps its own state here (transcripts under projects/,
+  // sessions/<pid>.json per running process, .claude.json), and a proof tests
+  // Claude Code against that state as a real participant would meet it, such
+  // as an orphaned Claude Code meeting a newly started one on one session.
+  //
+  // TODO: undecided. A proof that needs a clean start has no way to get one.
   const configDir = join(CONFIG_DIRS_ROOT, name);
   const cwd = join(WORK_ROOT, name);
   mkdirSync(dir, { recursive: true });
