@@ -6,7 +6,7 @@
 // the prompt cache. This proof tries each documented way of keeping them out
 // and measures, per way, a seed conversation and its resume.
 //
-//   node proofs/connectors.mts <model> <way>
+//   node proofs/connectors.mts <model> <way> [preset]
 //   node proofs/connectors.mts --compare <run dir A> <run dir B>
 //   node proofs/connectors.mts --table <run dir> ...
 //
@@ -21,8 +21,9 @@
 //   allow-empty  settings {allowedMcpServers: []}
 //   safe-mode    env CLAUDE_CODE_SAFE_MODE=1
 //   toggle       at start, poll mcpServerStatus() until the claude.ai
-//                servers appear (up to TOGGLE_WAIT_MS), toggleMcpServer(name,
-//                false) for each, then send; the same again in the resume
+//                servers appear and none is still pending (up to
+//                TOGGLE_WAIT_MS), toggleMcpServer(name, false) for each, then
+//                send; the same again in the resume
 //
 // One invocation is a seed run and its resume, both under the same way:
 //   seed    three turns. Turn 1 carries a per-invocation nonce, so no
@@ -50,6 +51,9 @@
 //                       mcp_servers; the debug log's claude.ai lines
 //
 // TODO: undecided, each is the easiest thing that runs, for this proof only:
+//   - System prompt: the SDK's minimal default (no systemPrompt option, as
+//     proof 14), or with a trailing `preset` argument Claude Code's
+//     claude_code preset, to see what the connectors change in it.
 //   - Tools: none of Claude Code's own (tools: []), so each turn is one
 //     request and the only tools are whatever MCP servers attach. Thinking
 //     left unset (Claude Code's own default).
@@ -168,7 +172,10 @@ async function toggleOff(run: Run, events: Recorder): Promise<void> {
     const status = (await run.query.mcpServerStatus()) as unknown as { name: string; status: string; source?: string }[];
     found = status.filter((s) => s.source === 'claudeai' || s.name.startsWith('claude.ai '));
     events.write({ ts: stamp(), mcpServerStatus: status.map((s) => ({ name: s.name, status: s.status, source: s.source })) });
-    if (found.length >= SEEN_CONNECTORS.length || Date.now() >= deadline) {
+    // A toggle while a connector is still `pending` is undone when its
+    // connection completes (first toggle run, 26 Sep: disabled, then
+    // connected in the next init), so wait until none is pending.
+    if ((found.length >= SEEN_CONNECTORS.length && found.every((s) => s.status !== 'pending')) || Date.now() >= deadline) {
       break;
     }
     await new Promise((r) => setTimeout(r, 250));
@@ -228,7 +235,7 @@ async function drive(run: Run, prompts: string[], before: (() => Promise<void>) 
   }
 }
 
-async function oneRun(model: string, way: Way, role: 'seed' | 'resume', store: ProofStore, extra: Json, prompts: string[], resume?: string): Promise<Run> {
+async function oneRun(model: string, way: Way, preset: boolean, role: 'seed' | 'resume', store: ProofStore, extra: Json, prompts: string[], resume?: string): Promise<Run> {
   const bodies = join(STATE, `${stamp().replace(/[:.]/g, '')}-${way}-${role}`);
   mkdirSync(bodies, { recursive: true });
   const w = wayOptions(way);
@@ -239,6 +246,7 @@ async function oneRun(model: string, way: Way, role: 'seed' | 'resume', store: P
     sessionStore: store,
     sessionStoreFlush: 'eager',
     debugFile: join(bodies, 'debug.log'),
+    ...(preset ? { systemPrompt: { type: 'preset', preset: 'claude_code' } as const } : {}),
     ...w.options,
     ...(resume ? { resume } : {}),
     env: { ...process.env, ...w.env, OTEL_LOG_RAW_API_BODIES: `file:${bodies}` },
@@ -248,7 +256,7 @@ async function oneRun(model: string, way: Way, role: 'seed' | 'resume', store: P
   store.loads.attach(run.dir);
   const events = new Recorder('proof-events.jsonl');
   events.attach(run.dir);
-  writeFileSync(join(run.dir, 'proof.json'), `${JSON.stringify({ way, role, wayEnv: Object.keys(w.env), wayOptions: w.options, bodies, ...extra }, null, 2)}\n`);
+  writeFileSync(join(run.dir, 'proof.json'), `${JSON.stringify({ way, role, preset, wayEnv: Object.keys(w.env), wayOptions: w.options, bodies, ...extra }, null, 2)}\n`);
   log(`${role} run dir: ${run.dir}`);
   await drive(run, prompts, way === 'toggle' ? () => toggleOff(run, events) : undefined);
   try {
@@ -272,10 +280,10 @@ async function oneRun(model: string, way: Way, role: 'seed' | 'resume', store: P
   return run;
 }
 
-async function seedAndResume(model: string, way: Way): Promise<void> {
+async function seedAndResume(model: string, way: Way, preset: boolean): Promise<void> {
   const nonce = randomUUID();
   const seedStore = new ProofStore(null);
-  const seed = await oneRun(model, way, 'seed', seedStore, { nonce }, [
+  const seed = await oneRun(model, way, preset, 'seed', seedStore, { nonce }, [
     `Nonce ${nonce}. Ignore the nonce. Without using any tool: how many integers from 1 to 300 are divisible by 3 or by 5 but not by 7? Reply with the number only.`,
     `Ignore the reference lines below.\n\n${PADDING}\n\nWithout using any tool: how many from 1 to 600? Reply with the number only.`,
     'Without using any tool: how many from 1 to 900? Reply with the number only.',
@@ -286,7 +294,7 @@ async function seedAndResume(model: string, way: Way): Promise<void> {
   }
   log(`seed session ${sessionId}; ${seedStore.main.length} main-thread entries`);
   const resumeStore = new ProofStore(seedStore.main);
-  await oneRun(model, way, 'resume', resumeStore, { nonce, sessionId, seedRun: seed.dir }, ['Reply with the word OK only.'], sessionId);
+  await oneRun(model, way, preset, 'resume', resumeStore, { nonce, sessionId, seedRun: seed.dir }, ['Reply with the word OK only.'], sessionId);
 }
 
 // ---------------------------------------------------------------------------
@@ -382,7 +390,7 @@ function summarise(runDir: string): string {
   const debug = join(runDir, 'debug.log');
   if (existsSync(debug)) {
     const text = readFileSync(debug, 'utf8').split('\n');
-    const hits = text.map((l, i) => [i + 1, l] as const).filter(([, l]) => /claudeai-mcp|claude\.ai|claudeai|connector/i.test(l));
+    const hits = text.map((l, i) => [i + 1, l] as const).filter(([, l]) => /\[claudeai-mcp\]|"claude\.ai |claude\.ai connectors|claudeai-proxy|ClaudeAi/i.test(l));
     lines.push(`debug.log claude.ai lines: ${hits.length}`);
     for (const [n, l] of hits.slice(0, 25)) {
       lines.push(`  ${n}: ${l.slice(0, 220)}`);
@@ -468,17 +476,17 @@ function table(dirs: string[]): string {
   const rows: string[] = [];
   for (const d of dirs) {
     const proof = JSON.parse(readFileSync(join(d, 'proof.json'), 'utf8')) as Json;
-    const init = readJsonl(join(d, 'sdk-messages.jsonl'))
+    const inits = readJsonl(join(d, 'sdk-messages.jsonl'))
       .map((e) => e.message as Json)
-      .find((m) => m.type === 'system' && m.subtype === 'init');
-    const claudeai = ((init?.mcp_servers as Json[] | undefined) ?? []).filter((s) => s.source === 'claudeai').map((s) => `${String(s.name)}:${String(s.status)}`);
+      .filter((m) => m.type === 'system' && m.subtype === 'init');
+    const claudeai = inits.map((m) => ((m.mcp_servers as Json[] | undefined) ?? []).filter((s) => s.source === 'claudeai').map((s) => `${String(s.name).replace('claude.ai ', '')}:${String(s.status)}`).join('+') || '-');
     const debug = existsSync(join(d, 'debug.log')) ? readFileSync(join(d, 'debug.log'), 'utf8') : '';
     const fetched = /\[claudeai-mcp\] Fetching/.test(debug);
     const reqs = mainReqs(d).map((r) => {
       const u = usage(r);
       return `tools=${toolNames(r).length} r${String(u.cache_read)}/w${String(u.cache_write)}/i${String(u.input)}`;
     });
-    rows.push(`${String(proof.way).padEnd(11)} ${String(proof.role).padEnd(6)} fetch=${fetched ? 'yes' : 'no '} init.claudeai=${JSON.stringify(claudeai)} ${reqs.join('  ')}  ${d.split('/').pop()}`);
+    rows.push(`${String(proof.way).padEnd(11)} ${proof.preset ? 'preset ' : 'minimal'} ${String(proof.role).padEnd(6)} fetch=${fetched ? 'yes' : 'no '} inits.claudeai=[${claudeai.join(' ')}] ${reqs.join('  ')}  ${d.split('/').pop()}`);
   }
   return `${rows.join('\n')}\n`;
 }
@@ -492,9 +500,9 @@ if (first === '--compare' && rest.length === 2) {
   process.stdout.write(table(rest));
 } else if (first === '--summarise' && rest.length === 1) {
   process.stdout.write(summarise(rest[0]));
-} else if (first && WAYS.includes(rest[0] as Way)) {
-  await seedAndResume(first, rest[0] as Way);
+} else if (first && WAYS.includes(rest[0] as Way) && (rest[1] === undefined || rest[1] === 'preset')) {
+  await seedAndResume(first, rest[0] as Way, rest[1] === 'preset');
 } else {
-  process.stderr.write(`usage:\n  node proofs/connectors.mts <model> <${WAYS.join('|')}>\n  node proofs/connectors.mts --compare <run dir A> <run dir B>\n  node proofs/connectors.mts --table <run dir> ...\n  node proofs/connectors.mts --summarise <run dir>\n`);
+  process.stderr.write(`usage:\n  node proofs/connectors.mts <model> <${WAYS.join('|')}> [preset]\n  node proofs/connectors.mts --compare <run dir A> <run dir B>\n  node proofs/connectors.mts --table <run dir> ...\n  node proofs/connectors.mts --summarise <run dir>\n`);
   process.exit(2);
 }
