@@ -252,3 +252,33 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 17b: two Claude Codes on one session, one config directory
+
+`proofs/recovery.mts` is proof 17's (from branch `proof-17-recovery`), run on
+this harness's one config directory per agent. Only its kill-orphan case is
+run here: the participant is SIGKILLed mid-turn, its Claude Codes carry on as
+orphans, and the conversation is served again at once while they run, then
+once more after they exit. Every Claude Code runs under the one agent name
+`recovery-17b`; each case starts with `resetConfigDir('recovery-17b')`, so
+cases run one after another. The check is proof 17's, unchanged.
+
+Variants: `fresh` and `resumed` give the participant a session store, so a
+resume goes through the store (the SDK writes it into a
+`/tmp/claude-resume-*` directory and gives Claude Code that as its
+`CLAUDE_CONFIG_DIR`); `dir-fresh` and `dir-resumed` give it none, so a resume
+is by id, straight from `config-dirs/recovery-17b/`.
+
+```sh
+sh proofs/shared-dir-all.sh <model> <tag> dir-fresh dir-resumed fresh resumed
+```
+
+Each variant runs under `strace -f -tt -y -s 0` (no written data recorded;
+lengths, open flags, offsets, renames, unlinks and locks are) into
+`runs/17b-<variant>-<tag>.strace`, then `proofs/shared-dir-analysis.mts`
+writes `<case dir>/shared-dir-analysis.json` and
+`runs/17b-<variant>-<tag>.analysis.txt`: the `CLAUDE_CONFIG_DIR` each Claude
+Code was given, who opened and wrote each transcript and pid file, the
+transcript's lines attributed to their writers by length, its branches, and
+tool_use ids with two results. The store is
+`~/.local/state/tower-claude-code-harness/stores/proof-17b-shared-dir/`.
