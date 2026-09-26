@@ -169,3 +169,20 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 15: messages Claude Code writes itself
+
+`proofs/machine-messages.mts <model> <scenario>` runs the kinds of
+Claude-Code-written message that the earlier proofs' runs don't show, or show
+without request bodies. The request body log is copied into `api-bodies/`, as
+in proof 1.
+
+| Scenario | What it does | What Claude Code writes |
+| --- | --- | --- |
+| `interrupt-tool` | a Bash call (`sleep 25`) interrupted with `query.interrupt()` while it runs, then one more prompt | `[Request interrupted by user for tool use]` |
+| `compact` | one prompt, `/compact`, one more prompt | the compaction summary, its boundary, the `/compact` command record |
+| `skill` | the smoke plugin's skill invoked as a slash command, then one more prompt | `<command-message>` and the skill's `Base directory for this skill` entry |
+| `stop-hook` | a Stop hook (SDK callback) that blocks the first stop with a reason | `Stop hook feedback:` and a `hook_blocking_error` attachment |
+
+The run directory also gets `proof-notes.jsonl`, with each send, the interrupt
+and each Stop hook call.
