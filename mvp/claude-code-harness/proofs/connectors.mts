@@ -20,6 +20,10 @@
 //                seen in the baseline]}
 //   allow-empty  settings {allowedMcpServers: []}
 //   safe-mode    env CLAUDE_CODE_SAFE_MODE=1
+//   managed-control  not a way: managedSettings holding only an inert
+//                deniedMcpServers entry (a name no server has), to tell what
+//                the managed way changes because managedSettings is present
+//                from what it changes by keeping connectors out
 //   toggle       at start, poll mcpServerStatus() until the claude.ai
 //                servers appear and none is still pending (up to
 //                TOGGLE_WAIT_MS), toggleMcpServer(name, false) for each, then
@@ -83,7 +87,7 @@ const TOGGLE_WAIT_MS = 20000;
 // way baseline, sdk-messages.jsonl, init.mcp_servers; also proof 14's runs).
 const SEEN_CONNECTORS = ['claude.ai Claude Docs', 'claude.ai Google Drive'];
 
-const WAYS = ['baseline', 'env', 'setting', 'managed', 'strict', 'deny', 'allow-empty', 'safe-mode', 'toggle'] as const;
+const WAYS = ['baseline', 'env', 'setting', 'managed', 'strict', 'deny', 'allow-empty', 'safe-mode', 'toggle', 'managed-control'] as const;
 type Way = (typeof WAYS)[number];
 
 // About 4k tokens.
@@ -100,6 +104,8 @@ function wayOptions(way: Way): { options: Partial<HarnessOptions>; env: Record<s
       return { options: { settings: { disableClaudeAiConnectors: true } as HarnessOptions['settings'] }, env: {} };
     case 'managed':
       return { options: { managedSettings: { disableClaudeAiConnectors: true } as HarnessOptions['managedSettings'] }, env: {} };
+    case 'managed-control':
+      return { options: { managedSettings: { deniedMcpServers: [{ serverName: 'tower-proof-18-no-such-server' }] } as HarnessOptions['managedSettings'] }, env: {} };
     case 'strict':
       return { options: { strictMcpConfig: true }, env: {} };
     case 'deny':
