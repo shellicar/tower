@@ -240,13 +240,26 @@ turn (not the model's reply) shows the CLI rewrote both prompts to the same
 `<command-name>/plugin:proof12-plugin-skill-a</command-name>` before Claude
 ever saw them.
 
+Doc-only, not tried: both plugin routes load more than skills from the same
+root. `code.claude.com/docs/en/agent-sdk/plugins`: "A plugin can include:
+Skills... Agents... Hooks: event handlers... MCP servers." `SdkPluginConfig`
+has a `skipMcpDiscovery` field to opt a plugin's `.mcp.json` out, and no
+equivalent for hooks; the settings-declared marketplace route showed no
+such option at all in this proof's own runs. A directory declared only to
+supply skills, through either route, also supplies whatever hooks, agents,
+commands and MCP servers happen to sit next to those skills in the same
+root, and hooks run commands.
+
 **An `Options.plugins` entry's own path is fixed once the process starts;
 nothing in the SDK re-points it to a different directory, but content
 inside that fixed path can be rescanned on an explicit call, and a
 filesystem-level indirection (the path's `skills/` entry as a symlink) turns
 that rescan into a genuine re-point.** (A second finding below, on the
-settings-declared marketplace route, found the same thing true there too,
-by a different test.) `Query` has no method that takes a plugin path: `reloadPlugins()` takes only
+settings-declared marketplace route, also found that re-pointing an
+already-adopted directory in place did not work there, by a different
+test; that route can still add a plugin that was not there at all when the
+process started, which `Options.plugins` cannot, and the symlink
+indirection tried here was not tried on that route.) `Query` has no method that takes a plugin path: `reloadPlugins()` takes only
 an optional `holdOnCacheImpact`, and `grep -o 'subtype:"[a-z_]*"'
 node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs | sort -u` lists exactly
 one plugin-related request subtype the runtime ever constructs,
@@ -370,23 +383,37 @@ own result (registering a marketplace and plugin that were not there
 before) is adding new content mid-session, not changing existing content's
 source, and only the first was shown to work.
 
-Cost, relative to `Options.plugins`: a plugin root with a `skills/`
-subdirectory is enough for that option; this route additionally needs a
-marketplace root, `.claude-plugin/marketplace.json` inside it naming the
-plugin by a relative path, and the settings/`enabledPlugins` declaration
-itself, two directory levels deeper than `Options.plugins`' bare plugin
-root.
+Cost, relative to `Options.plugins`: that option's skill sits at
+`<plugin-root>/skills/<name>/SKILL.md`; this route's sits one level deeper,
+at `<marketplace-root>/<plugin-dir>/skills/<name>/SKILL.md`, plus
+`.claude-plugin/marketplace.json` beside the plugin directory naming it by
+a relative path, plus the settings/`enabledPlugins` declaration itself.
+Doc-only, not tried: the marketplace-reference page's plugin-source table
+says a relative-path entry of `"."` on its own means the marketplace root
+itself, which would make the marketplace root and the plugin root the same
+directory and remove that one extra level, leaving only the manifest file
+as the added cost.
 
 Safety check before relying on either result: `grep -rl proof12
 ~/.claude/plugins ~/.claude/settings.json ~/.claude.json` and `find
 ~/.claude -iname '*proof12*'`, run against Stephen's own, real `~/.claude`
-(the harness's shared-login credential store, not either run's own
-`CLAUDE_CONFIG_DIR`), found nothing from either run: registering the
-marketplace and enabling the plugin did not write into Stephen's own
-Claude Code configuration, and neither run's own copied `config-dir` held
-a trace of the marketplace or plugin name either, so the flag-settings
-layer used here appears to be in-memory for the session, not persisted to
-any settings file on disk.
+(the harness's shared-login credential store; every run's settings and
+plugin state go into its own `CLAUDE_CONFIG_DIR` instead, per the harness's
+own isolation design above), found nothing from either run: registering the
+marketplace and enabling the plugin did not write into Stephen's own Claude
+Code configuration. Inside each run's own copied `config-dir`, the two
+delivery mechanisms differ: `settings-plugin`'s mid-session
+`applyFlagSettings()` left no `plugins/` directory, no marketplace file, and
+no mention in `.claude.json`, so that layer appears to be in-memory for the
+session only. `settings-plugin-live`'s launch-time `options.settings` did
+persist state there: `config-dir/plugins/known_marketplaces.json` records
+`{"proof12-live-marketplace": {"source": {"source": "directory", "path":
+".../marketplace-a"}, "installLocation": ".../marketplace-a", ...}}`, and
+`.claude.json` gained a `pluginUsage` key,
+`proof12-live-plugin@proof12-live-marketplace`. Both are confined to that
+run's own `CLAUDE_CONFIG_DIR`, both name the pre-re-point directory
+(`marketplace-a`) even after the re-point attempt, matching the live
+result above, and neither reaches `~/.claude`.
 
 **`additionalDirectories` (`--add-dir`) does not load skills from
 `<dir>/.claude/skills/` under `settingSources: []`, and `reloadSkills()`
@@ -453,6 +480,17 @@ source has nothing to filter.
   the cost of the process restarting; that is a different shape from any of
   the live-changed-directory results above, all of which kept one process
   running throughout.
+- The `canUseTool`-approval path to `register_repo_root`'s `addDirectories`
+  `PermissionUpdate`: a different, more roundabout shape than "declare a
+  directory in config" (see the choices below).
+- A swap, rather than a re-point, on the settings-declared marketplace
+  route: register directory B under a new marketplace name (same plugin
+  entry `name` as A's), set A's plugin to `false` in `enabledPlugins`, call
+  `reloadPlugins()`, and check by timestamp whether A's skill is gone and
+  B's is present under the same namespace prefix. This is the untested
+  variant that could still show the directory changing after the process
+  starts, on this route, without keeping the same marketplace name; left
+  untested for time, not because it looked unlikely to work.
 
 ### Choices this proof made that the brief did not
 
