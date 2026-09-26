@@ -1369,7 +1369,8 @@ async function serveAgain(ctx: Ctx, label: string, windows: Window[]): Promise<{
       priorEntries: priorRows.length,
       priorNotCarried: priorRows.filter((r) => r.carried === false),
       priorUntested: priorRows.filter((r) => r.carried === null).length,
-      windows: windows.map((w) => ({ name: w.name, rows: truth.filter((e) => isMessage(e) && inWindow(e, w, tag)).sort(byTime).map((e) => turnRow(e, req)) })),
+      // Each window ends, at the latest, where this serve's message was sent.
+      windows: windows.map((w) => ({ name: w.name, rows: prior.filter((e) => inWindow(e, w, tag)).map((e) => turnRow(e, req)) })),
       branches: { storeAfterCheck: branchesOf(storeAfterCheck), storeNow: branchesOf(storeNow), transcripts: branchesOf(truth) },
       invented: { transcripts: invented(truth), store: invented(storeNow) },
       requestFound: req !== undefined,
