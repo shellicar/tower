@@ -46,7 +46,7 @@ import type { HarnessOptions } from '../src/harness.mts';
 import { startRun } from '../src/harness.mts';
 import { stamp } from '../src/record.mts';
 
-const MODES = ['default', 'acceptEdits', 'bypassPermissions', 'bypassPermissions-block', 'plan', 'dontAsk', 'auto', 'auto-live'] as const;
+const MODES = ['default', 'acceptEdits', 'bypassPermissions', 'bypassPermissions-block', 'plan', 'dontAsk', 'auto', 'auto-live', 'auto-dialog'] as const;
 type Mode = (typeof MODES)[number];
 const mode = process.argv[2] as Mode;
 if (!MODES.includes(mode)) {
@@ -88,17 +88,43 @@ const canUseTool: CanUseTool = async (toolName, input, opts) => {
   return { behavior: 'deny', message: 'proof10: perm-mode observes only, always denies' };
 };
 
-const model = mode === 'auto' || mode === 'auto-live' ? 'claude-sonnet-4-6' : 'claude-haiku-4-5';
+const model = mode === 'auto' || mode === 'auto-live' || mode === 'auto-dialog' ? 'claude-sonnet-4-6' : 'claude-haiku-4-5';
 const tools = mode === 'acceptEdits' ? ['Read', 'Write', 'Edit'] : ['Read'];
+
+// The dialog kind for the doc-mentioned "one-time auto-mode prompt for a
+// read outside the working directories" is undocumented in sdk.d.ts (its
+// own comment only ever names 'refusal_fallback_prompt' as an example); it
+// was found by `strings` on the real Claude Code binary named in this run's
+// own run.json (grep -n "auto_mode_outside_reads" against that strings
+// dump): the constant sits right next to the literal prompt text ("Allow
+// reads outside the working directories?", "Yes, keep allowing...", "No,
+// block... from now on", "No, ask again next time"). 'auto'/'auto-live'
+// above declare neither onUserDialog nor supportedDialogKinds, so per
+// sdk.d.ts (around 1764-1777) the CLI never emits this dialog to them at
+// all; 'auto-dialog' declares support for exactly this one kind, to see
+// whether it is reachable in a streaming-input SDK session at all. The
+// answer given (`cancelled`) is deliberately the always-valid one rather
+// than a guess at the real completed-result shape (undocumented): the
+// question being tested is reachability, not the right answer to give.
+const AUTO_MODE_OUTSIDE_READS = 'auto_mode_outside_reads';
 
 const options: HarnessOptions = {
   model,
   tools,
-  permissionMode: mode === 'auto' ? 'auto' : mode === 'auto-live' ? 'default' : (mode.startsWith('bypassPermissions') ? 'bypassPermissions' : mode) as HarnessOptions['permissionMode'],
+  permissionMode: mode === 'auto' || mode === 'auto-dialog' ? 'auto' : mode === 'auto-live' ? 'default' : (mode.startsWith('bypassPermissions') ? 'bypassPermissions' : mode) as HarnessOptions['permissionMode'],
   canUseTool,
   hooks,
   ...(mode.startsWith('bypassPermissions') ? { allowDangerouslySkipPermissions: true } : {}),
   ...(mode === 'bypassPermissions-block' ? { settings: { permissions: { blockReadsOutsideWorkingDirectories: true } } } : {}),
+  ...(mode === 'auto-dialog'
+    ? {
+        supportedDialogKinds: [AUTO_MODE_OUTSIDE_READS],
+        onUserDialog: async (request) => {
+          note('onUserDialog', { ts: stamp(), dialogKind: request.dialogKind, payload: request.payload, toolUseID: request.toolUseID });
+          return { behavior: 'cancelled' };
+        },
+      }
+    : {}),
 };
 
 const run = startRun({ name, options });
@@ -204,6 +230,9 @@ async function main(): Promise<void> {
         { ...readInside('read inside, mode auto (live)'), before: async () => { await run.query.setPermissionMode('auto'); } },
         readOutside('read outside, mode auto (live)'),
       ]);
+      return;
+    case 'auto-dialog':
+      await drive([readInside('read inside'), readOutside('read outside, dialog kind declared')]);
       return;
   }
 }
