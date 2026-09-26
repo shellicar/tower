@@ -23,8 +23,12 @@ Isolation is the harness's baseline, not the proof's choice. Every run gets:
 
 - `settingSources: []`: no user, project or local settings files, and no
   CLAUDE.md. A proof can't pass `settingSources`; the harness's value wins.
-- `CLAUDE_CONFIG_DIR`: a fresh, empty directory per run, under
-  `~/.local/state/tower-claude-code-harness/config-dirs/<run id>`.
+- `CLAUDE_CONFIG_DIR`: the agent's own directory,
+  `~/.local/state/tower-claude-code-harness/config-dirs/<name>/`, named after
+  the proof (`startRun`'s `name`), created the first time and reused by every
+  run of that proof. Never cleared. "its ONE directory PER agent" (Stephen,
+  27 Sep). A proof can't pass it: `options.env`'s `CLAUDE_CONFIG_DIR` is
+  overridden.
 - `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`: the login (below).
 - It strips a parent Claude Code session's variables from the environment
   (from `options.env` too): `CLAUDECODE`, `CLAUDE_PID`, `CLAUDE_EFFORT`,
@@ -50,14 +54,14 @@ tools, plugins, skills, ...). The harness has no defaults of its own.
 
 ## The login
 
-Settings and config live in the run's own `CLAUDE_CONFIG_DIR`; the login is
+Settings and config live in the agent's own `CLAUDE_CONFIG_DIR`; the login is
 Stephen's own. With `CLAUDE_SECURESTORAGE_CONFIG_DIR` set to the empty string,
 Claude Code 2.1.282 keeps its credential file, its refresh lock and (macOS)
 its Keychain item where a default install does: `~/.claude/.credentials.json`
 on Linux, the `Claude Code-credentials` Keychain item on macOS. So a run and
 Stephen's own Claude Code share one login, and a token refresh by either one
 goes through the same lock and is seen by the other. No credential file is
-written into the run's config directory.
+written into the agent's config directory.
 
 Things to know:
 
@@ -81,7 +85,7 @@ Things to know:
 | `claude/<n>/argv.json` | argv of the real binary, cwd, env names (not values) |
 | `claude/<n>/stdin.txt`, `stdout.txt`, `stderr.txt` | every line, as `<timestamp> <raw line>` |
 | `claude/<n>/exit.json` | exit code or signal, signals forwarded |
-| `config-dir/` | copy of the run's config directory after the run |
+| `config-dir/` | copy of the agent's config directory after the run: everything the agent has accumulated, earlier runs' files included |
 | `config-dir-manifest.json` | what was copied, skipped or redacted |
 
 Timestamps are wall-clock ISO 8601 with microseconds. `<n>` counts the times
@@ -91,7 +95,12 @@ No credential is written under the repo: `.credentials.json` is never
 copied, and anything matching `sk-ant-...` (Anthropic keys and Claude.ai
 tokens) is replaced with `sk-ant-[REDACTED]` in every file the harness
 writes. The copied `.claude.json` does hold account details (name, email,
-organisation). The live config directories outside the repo are kept.
+organisation). The live config directories outside the repo are kept and
+reused.
+
+Two runs under one name at the same time share one config directory and
+write its `.claude.json` together. Nothing guards against it (undecided; see
+the TODO in `src/harness.mts`).
 
 ## The smoke run
 
@@ -113,7 +122,9 @@ negative test:
   account show up too; the dummies are told apart by name.
 
 It prints the init message's skills and plugins, Claude's answer, and whether
-each dummy was named in each.
+each dummy was named in each. Before the run it prints the config directory
+and the session transcripts already in it, so a second smoke run shows the
+first run's transcript there.
 
 From the repo root, once:
 
@@ -128,6 +139,10 @@ mkdir -p runs
 timeout 300 strace -f -s 4096 -e trace=%file,%process -o runs/smoke.strace node proofs/smoke.mts claude-haiku-4-5
 mv runs/smoke.strace runs/<run dir it printed>/
 ```
+
+Run it twice to check the config directory is reused: both runs' `run.json`
+name the same `configDir`, and the second run's `config-dir/projects/`
+holds the first run's session transcript as well as its own.
 
 `%process` puts every fork and exec in the trace, so each file access can be
 attributed to the process that made it: the proof's node, the capture

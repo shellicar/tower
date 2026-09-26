@@ -11,13 +11,17 @@
 //   context. Skills that come with the account show up too; the two dummies
 //   are told apart by name.
 //
+// It also prints the agent's config directory and the session transcripts
+// already in it: run twice, the second run shows the first run's transcript,
+// since every run named smoke reuses one config directory.
+//
 // The dummy in ~/.claude/skills is removed afterwards, whatever happens. The
 // run refuses to start if that path already exists, so it never touches
 // anything it didn't create.
 //
 //   node proofs/smoke.mts <model>
 
-import { mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,7 +65,12 @@ skill, the run is reading ~/.claude/skills. It has no task; don't use it.
   );
 
   const run = startRun({ name: 'smoke', options: { model, plugins: [{ type: 'local', path: PLUGIN_DIR }] } });
-  process.stdout.write(`run dir: ${run.dir}\ncwd: ${run.cwd}\n`);
+  process.stdout.write(`run dir: ${run.dir}\ncwd: ${run.cwd}\nconfig dir: ${run.configDir}\n`);
+  // Listed in the same tick startRun returned in, before anything is sent:
+  // Claude Code writes this run's transcript only once it has a message.
+  const projects = join(run.configDir, 'projects');
+  const before = existsSync(projects) ? readdirSync(projects, { recursive: true, encoding: 'utf8' }).filter((p) => p.endsWith('.jsonl')) : [];
+  process.stdout.write(`transcripts already in config dir: ${JSON.stringify(before)}\n`);
 
   run.send({ type: 'user', message: { role: 'user', content: QUESTION }, parent_tool_use_id: null });
 

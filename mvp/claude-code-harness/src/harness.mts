@@ -3,12 +3,15 @@
 //
 // Isolation is the harness's baseline, not the proof's choice (Stephen,
 // 26 Sep: "the whole point is this is the BASELINE"). Every run gets:
-// settingSources [] (no user, project or local settings, no CLAUDE.md), a
-// fresh CLAUDE_CONFIG_DIR, the shared login (CLAUDE_SECURESTORAGE_CONFIG_DIR
-// empty), and an environment stripped of a parent Claude Code session's
-// variables. It also sets the working directory (the proof's own, reused
-// across its runs) and pathToClaudeCodeExecutable (the capture wrapper, which
-// runs the SDK's own bundled binary).
+// settingSources [] (no user, project or local settings, no CLAUDE.md), the
+// agent's own CLAUDE_CONFIG_DIR (one per proof name, reused by every run of
+// it), the shared login (CLAUDE_SECURESTORAGE_CONFIG_DIR empty), and an
+// environment stripped of a parent Claude Code session's variables. It also
+// sets the working directory (the proof's own, reused across its runs) and
+// pathToClaudeCodeExecutable (the capture wrapper, which runs the SDK's own
+// bundled binary). Each run's directory gets a filtered copy of the config
+// directory as it stands after the run, which holds everything the agent has
+// accumulated, not only that run's files.
 //
 // Everything else comes from the proof: "let each do its own settings". The
 // harness has no defaults of its own.
@@ -26,21 +29,24 @@ const PACKAGE_ROOT = join(HERE, '..');
 const RUNS_ROOT = join(PACKAGE_ROOT, 'runs');
 const WRAPPER = join(PACKAGE_ROOT, 'bin', 'claude-capture');
 
-// TODO: undecided. Where the live config directory lives, and whether it is
-// kept. Outside the repo, kept, is what's built: nothing Claude Code writes
-// there can reach the repo unfiltered (with the shared login no credential
-// file should be written there, but that rests on the login staying shared),
-// and the run directory gets a filtered copy. Alternatives: under runs/
-// (everything in one place, but anything Claude Code writes lands in the repo
-// unfiltered), or deleted after the copy (nothing lingers, but a later proof
-// can't inspect or resume it).
 const STATE_ROOT = join(homedir(), '.local', 'state', 'tower-claude-code-harness');
+
+// Each agent's CLAUDE_CONFIG_DIR, config-dirs/<name>/, named after the proof
+// and reused by every run of it, never cleared: "as long as each agent gets
+// its own directory, and can keep reusing it, ie its not a random directory
+// every run, that would cause issues" (Stephen, 26 Sep); "its ONE directory
+// PER agent" (27 Sep). Created on first use.
+//
+// TODO: undecided. Where it lives. Outside the repo is what's built: nothing
+// Claude Code writes there can reach the repo unfiltered (with the shared
+// login no credential file should be written there, but that rests on the
+// login staying shared), and the run directory gets a filtered copy. The
+// alternative, under runs/, keeps everything in one place, but anything
+// Claude Code writes lands in the repo unfiltered.
 const CONFIG_DIRS_ROOT = join(STATE_ROOT, 'config-dirs');
 
 // Each proof's working directory, named after the proof and reused by every
-// run of it (Stephen, 26 Sep: "each agent gets its own directory, and can keep
-// reusing it, ie its not a random directory every run"). Created the first
-// time, never cleared.
+// run of it. Created the first time, never cleared.
 const WORK_ROOT = join(STATE_ROOT, 'work');
 
 // What a parent Claude Code session passes down to the processes it starts.
@@ -75,13 +81,16 @@ const NEVER_COPY = new Set(['.credentials.json']);
 
 // What the harness sets is not the proof's to pass: settingSources (the
 // isolation baseline), cwd (the proof's own directory) and the executable.
-// CLAUDE_CONFIG_DIR and CLAUDE_SECURESTORAGE_CONFIG_DIR in options.env are
-// overridden the same way.
+// CLAUDE_CONFIG_DIR (the agent's own) and CLAUDE_SECURESTORAGE_CONFIG_DIR in
+// options.env are overridden the same way.
 export type HarnessOptions = Omit<Options, 'pathToClaudeCodeExecutable' | 'settingSources' | 'cwd'> & { model: string };
 
 export interface StartRunArgs {
-  // The proof's name. Names the run directory (runs/<timestamp>-<name>/) and
-  // the working directory (~/.local/state/tower-claude-code-harness/work/<name>/).
+  // The proof's name: the agent. Names the run directory
+  // (runs/<timestamp>-<name>/), the working directory
+  // (~/.local/state/tower-claude-code-harness/work/<name>/) and the config
+  // directory (~/.local/state/tower-claude-code-harness/config-dirs/<name>/).
+  // Every run under one name shares the last two.
   name: string;
   options: HarnessOptions;
 }
@@ -261,7 +270,13 @@ export function startRun(args: StartRunArgs): Run {
   const id = `${startedAt.replace(/[:.]/g, '')}-${name}`;
   const dir = join(RUNS_ROOT, id);
   const captureDir = join(dir, 'claude');
-  const configDir = join(CONFIG_DIRS_ROOT, id);
+  // TODO: undecided. Two runs under one name at once (the thinking scenarios
+  // have run three at a time) share this directory and write .claude.json
+  // together, and each run's copy can catch the other's half-written files.
+  // Built: allowed, no guard, the same as the working directory. Refusing a
+  // second live run of a name is safe but stops parallel runs of one proof;
+  // a lock serialises them at the cost of machinery.
+  const configDir = join(CONFIG_DIRS_ROOT, name);
   const cwd = join(WORK_ROOT, name);
   mkdirSync(dir, { recursive: true });
   mkdirSync(configDir, { recursive: true });
@@ -278,14 +293,14 @@ export function startRun(args: StartRunArgs): Run {
     delete base[name];
   }
 
-  // The login (Stephen, 26 Sep, way 1): settings and config in the run's own
-  // CLAUDE_CONFIG_DIR, the login in the default store. An empty
+  // The login (Stephen, 26 Sep, way 1): settings and config in the agent's
+  // own CLAUDE_CONFIG_DIR, the login in the default store. An empty
   // CLAUDE_SECURESTORAGE_CONFIG_DIR makes Claude Code use ~/.claude for the
   // credential file, its refresh lock and (macOS) the default Keychain item,
   // so this run and Stephen's own Claude Code share one login and one
   // refresh lock. Undocumented in 2.1.282; see README.
   //
-  // CLAUDE_CONFIG_DIR is always the run's own, even if options.env names one.
+  // CLAUDE_CONFIG_DIR is always the agent's own, even if options.env names one.
   const env: Record<string, string | undefined> = {
     ...base,
     CLAUDE_CONFIG_DIR: configDir,
