@@ -169,3 +169,26 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 8: where a resumable conversation can live
+
+`proofs/resume-store.mts` resumes one conversation through a `sessionStore`
+kept three ways: a file, NATS (tower's test broker, 127.0.0.1:31416, stream
+`PROOF8`), and a hybrid (user and assistant entries on NATS, every other
+entry in a local file). It also resumes from reduced sets of entries to find
+what resume actually needs. Modes (`seed`, `resume`, `ablate`,
+`--summarise`) and the store layouts are described at the top of the file;
+every layout is marked undecided there.
+
+The stores keep their data under
+`~/.local/state/tower-claude-code-harness/proof-8/` (and on the broker), kept.
+Beyond the harness's own files, a run directory holds:
+
+| Path | What |
+| --- | --- |
+| `store-load.jsonl` | what `load()` returned: count, and each entry's type, uuid, parentUuid, message id and block types |
+| `store-appends.jsonl` | every `append()` call with its entries |
+| `loaded-entries.jsonl` | ablation runs: the exact entries `load()` returned |
+| `resume.json`, `seed.json` | what the run resumed, and from which seed |
+| `api-bodies/` | request and response bodies (`OTEL_LOG_RAW_API_BODIES`, as proof 1), redacted |
+| `summary.txt` | load, answers with their `sdk-messages.jsonl` lines, where the new entries hang, and the first request after resume message by message against the context the seed's model had |
