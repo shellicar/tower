@@ -179,7 +179,7 @@ each request's `thinking` and `betas`.
 user message is read from the request body Claude Code writes under
 `OTEL_LOG_RAW_API_BODIES`. It then resumes the conversation through the
 session store from Claude Code's full record (`full`) and from tower
-(`tower`, `tower-typed`, `tower-typed-min`), and compares the resumed first
+(`tower`, `tower-typed`, `tower-typed-min`, `tower-payload-min`), and compares the resumed first
 requests message by message with their cache reads. Modes, sources and
 environment knobs are at the top of the file. Every raw entry also goes onto
 tower as `changes.x-cc-entry`, a side channel for finding out what tower would

@@ -38,6 +38,9 @@
 //                       from changes.x-cc-entry; their text is stripped from
 //                       the as-seen user message for Claude Code to fold in
 //                       again
+//         tower-payload-min  as tower-typed-min, but each typed entry is
+//                       rebuilt from its `attachment` object alone plus
+//                       tower's id, ts and text
 //         tower-typed-all  tower-typed plus the entries the model never sees
 //                       (prompt_snapshot, credential_org, ...), also from
 //                       changes.x-cc-entry
@@ -1031,8 +1034,8 @@ async function seed(model: string): Promise<void> {
   await tower.nc.drain();
 }
 
-type Source = 'full' | 'tower' | 'tower-typed' | 'tower-typed-min' | 'tower-typed-all' | 'tower-record';
-const SOURCES: Source[] = ['full', 'tower', 'tower-typed', 'tower-typed-min', 'tower-typed-all', 'tower-record'];
+type Source = 'full' | 'tower' | 'tower-typed' | 'tower-typed-min' | 'tower-payload-min' | 'tower-typed-all' | 'tower-record';
+const SOURCES: Source[] = ['full', 'tower', 'tower-typed', 'tower-typed-min', 'tower-payload-min', 'tower-typed-all', 'tower-record'];
 
 // tower-typed-min: only these attachment types come back typed (their
 // absence changed the resumed tail in the tower run); every other user and
@@ -1041,25 +1044,42 @@ const SOURCES: Source[] = ['full', 'tower', 'tower-typed', 'tower-typed-min', 't
 // entries, for Claude Code to fold in again.
 const MIN_TYPED = new Set(['session_context', 'remote_session_change', 'environment', 'model', 'date', 'mcp_instructions_delta']);
 
-function typedMin(messages: Json[], raw: Json[], rebuilt: Json[]): Json[] {
+// payloadOnly (tower-payload-min): a typed entry is rebuilt from the raw
+// entry's `attachment` object alone, with tower's own id, ts and text (the
+// system message's content, or the block stripped from the user message),
+// and none of the raw entry's other fields (cwd, version, gitBranch, ...).
+function typedMin(messages: Json[], raw: Json[], rebuilt: Json[], payloadOnly: boolean): Json[] {
   const rawById = new Map(raw.filter((e) => typeof e.uuid === 'string').map((e) => [String(e.uuid), e]));
   const typed = (id: string): Json | undefined => {
     const e = rawById.get(id);
     return e?.type === 'attachment' && MIN_TYPED.has(String((e.attachment as Json).type)) ? e : undefined;
   };
+  const fromPayload = (e: Json, ts: unknown, texts: string[], common: Json): Json =>
+    payloadOnly ? { ...common, uuid: e.uuid, timestamp: ts, type: 'attachment', attachment: e.attachment, rendered: texts.map((t) => ({ content: t })) } : { ...e };
   const out: Json[] = [];
   for (const e of rebuilt) {
     const m = messages.find((x) => x.id === e.uuid);
+    const common: Json = { isSidechain: e.isSidechain, sessionId: e.sessionId, cwd: e.cwd };
     if (m?.role === 'system') {
-      out.push({ ...(typed(String(m.id)) ?? e) });
+      const t = typed(String(m.id));
+      out.push(t ? fromPayload(t, m.ts, blocksOf(m.content).map((b) => String(b.text)), common) : e);
       continue;
     }
     if (m?.role === 'user' && Array.isArray(m.foldedEntries)) {
       const folded = (m.foldedEntries as string[]).map(typed).filter((x): x is Json => x !== undefined);
-      const strip = new Set(folded.flatMap((f) => (renderedTexts(f) ?? []).map((t) => t.trim())));
-      const content = blocksOf((e.message as Json).content).filter((b) => !(b.type === 'text' && strip.has(String(b.text).trim())));
+      const blocks = blocksOf((e.message as Json).content);
+      const own = new Map<Json, string[]>();
+      for (const f of folded) {
+        const wanted = (renderedTexts(f) ?? []).map((t) => t.trim());
+        own.set(
+          f,
+          blocks.filter((b) => b.type === 'text' && wanted.includes(String(b.text).trim())).map((b) => String(b.text).trim()),
+        );
+      }
+      const strip = new Set([...own.values()].flat());
+      const content = blocks.filter((b) => !(b.type === 'text' && strip.has(String(b.text).trim())));
       out.push({ ...e, message: { ...(e.message as Json), content } });
-      out.push(...folded.map((f) => ({ ...f })));
+      out.push(...folded.map((f) => fromPayload(f, m.ts, own.get(f) ?? [], common)));
       continue;
     }
     out.push(e);
@@ -1103,8 +1123,8 @@ async function resume(model: string, source: Source, sessionId: string): Promise
       const rawOrder = raw.map((e) => String(e.uuid ?? ''));
       const rawById = source === 'tower-typed' || source === 'tower-typed-all' ? new Map(raw.filter((e) => typeof e.uuid === 'string').map((e) => [String(e.uuid), e])) : undefined;
       let entries = rebuild(messages, await usageModels(t, key.sessionId, seedRec.upto), rawById, rawOrder, DIR_B, key.sessionId);
-      if (source === 'tower-typed-min') {
-        entries = typedMin(messages, raw, entries);
+      if (source === 'tower-typed-min' || source === 'tower-payload-min') {
+        entries = typedMin(messages, raw, entries, source === 'tower-payload-min');
       }
       if (source === 'tower-typed-all') {
         // The entries the model never sees, put back where they were in the
