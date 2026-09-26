@@ -275,3 +275,33 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 21: stopping an orphaned Claude Code
+
+`proofs/orphans.mts` builds on proof 17b's recovery proof (`proofs/recovery.mts`,
+brought in from `proof-17b-shared-dir`; its check is copied unchanged). Agent
+name `orphans-21`, file store under `stores/proof-21-orphans/`, store resume
+only.
+
+- Layer 2, before each serve: find a live Claude Code on the session
+  (`sessions/<pid>.json` in the agent's config dir or any
+  `/tmp/claude-resume-*`, pid alive, `procStart` matching), SIGINT it, poll
+  `/proc` until it has exited, run proof 17's check, then serve.
+- Layer 1: each Claude Code is spawned as
+  `setpriv --pdeathsig SIGINT -- <claude> <args>` from `spawnClaudeCodeProcess`.
+- Cases `stop`, `kill`, `crash` (no layer 1) and `pd-stop`, `pd-kill`,
+  `pd-crash` (layer 1), each `fresh` or `resumed`; the header of the file says
+  what each does and what is undecided (TODOs).
+
+From `mvp/claude-code-harness/`, each case under a signal-only trace
+(`strace -e trace=none -s 0`: signals delivered, with sender, and exits), then
+the summary:
+
+```sh
+sh proofs/orphans-all.sh claude-sonnet-5 r1 stop:fresh pd-kill:resumed ...
+node proofs/orphans-summary.mts runs/21-*-r1.log > runs/21-summary.txt
+```
+
+A layer 2 signal goes only to a pid on the list of Claude Codes the case
+started, with the start time it recorded; that list is a safety gate for the
+proof, not how the participant finds an orphan.
