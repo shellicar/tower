@@ -15,6 +15,7 @@ mkdir "$scratch/upper" "$scratch/work"
 unshare --user --map-root-user --mount sh -c '
   set -eu
   mount -t overlay overlay -o "lowerdir=/etc,upperdir=$1/upper,workdir=$1/work" /etc
-  shift
-  exec unshare --user --map-user="$1" --map-group="$2" env P19_PRIVATE_ETC=1 "$@"
+  uid=$2 gid=$3
+  shift 3
+  exec unshare --user --map-user="$uid" --map-group="$gid" env P19_PRIVATE_ETC=1 "$@"
 ' sh "$scratch" "$uid" "$gid" "$@"
