@@ -791,12 +791,14 @@ async function runOne(plan: RunPlan): Promise<RunOut> {
   const bodiesWatch = new BodiesWatch(bodies, ev);
   bodiesWatch.onRequest = (r) => {
     // first-byte: the main request that carries the step's prompt. Main: on
-    // the model, with thinking and a thread (the title request has neither).
+    // the model, with thinking, and a thread or tools (the session title
+    // request has neither; Fable's main requests carry no thread, only
+    // tools and the full history).
     if (!trigger || trigger.fired || trigger.ending !== 'first-byte' || step !== plan.trigger?.step) {
       return;
     }
     const b = r.body;
-    if (!String(b.model).startsWith(plan.model) || b.thinking === undefined || b.thread === undefined) {
+    if (!String(b.model).startsWith(plan.model) || b.thinking === undefined || (b.thread === undefined && !(Array.isArray(b.tools) && b.tools.length > 0))) {
       return;
     }
     if (!JSON.stringify(b.messages).includes(plan.steps[plan.trigger.step]?.slice(0, 30) ?? '\u0000')) {

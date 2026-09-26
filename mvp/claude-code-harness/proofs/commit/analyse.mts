@@ -11,8 +11,9 @@
 //     the kept piece's line reached Claude Code's transcript file (seen by a
 //     5 ms poll). The absolute timeline is printed too, so any other
 //     reference can be read off it.
-//   - A request is main when it is on the cell's model and carries both
-//     `thinking` and `thread` (the session title request carries neither).
+//   - A request is main when it is on the cell's model and carries
+//     `thinking` and either `thread` or a non-empty tool list (the session
+//     title request has neither; Fable's carry no `thread`).
 //
 //   node proofs/commit/analyse.mts <index.json> [...]   (writes next to it)
 
@@ -262,18 +263,18 @@ function groundTruth(r: RunData, afterMs: number, probe: string, model: string, 
       continue;
     }
     const body = JSON.parse(readFileSync(path, 'utf8')) as Json;
-    if (!String(body.model).startsWith(model) || body.thinking === undefined || body.thread === undefined) {
+    if (!String(body.model).startsWith(model) || body.thinking === undefined || (body.thread === undefined && !(Array.isArray(body.tools) && body.tools.length > 0))) {
       continue;
     }
     const msgs = body.messages as Json[];
     if (!JSON.stringify(msgs).includes(probe)) {
       continue;
     }
-    const thread = String((body.thread as Json).type);
+    const thread = body.thread === undefined ? 'no thread (full history)' : String((body.thread as Json).type);
     const key = promptText.slice(0, 40);
     let start = msgs.findIndex((m) => JSON.stringify(m.content).includes(key));
     const lines: string[] = [];
-    const k: Kept = { previous: (body.thread as Json).previous_message_id as string | undefined, run: r.dir, file: String(q.file), seenMs: q.ms, thread, lines, prompt: 'absent', thinkingSigs: [], textChars: 0, toolUses: [], toolResults: [], markers: [] };
+    const k: Kept = { previous: (body.thread as Json | undefined)?.previous_message_id as string | undefined, run: r.dir, file: String(q.file), seenMs: q.ms, thread, lines, prompt: 'absent', thinkingSigs: [], textChars: 0, toolUses: [], toolResults: [], markers: [] };
     if (start < 0) {
       k.prompt = thread === 'continue' ? `not in body (continue from ${String((body.thread as Json).previous_message_id)})` : 'absent';
       start = Math.max(0, msgs.length - 3);
@@ -323,7 +324,7 @@ function signals(r: RunData, step: number, promptText: string, model: string): R
   const first = (pred: (e: Ev) => boolean): number | undefined => inStep.find(pred)?.ms;
   const promptLine = (e: Ev): boolean => e.src === 'transcript' && e.kind === 'line' && (e.entry as Json).type === 'user' && JSON.stringify((e.entry as Json).content).includes(key);
   const promptAppend = (e: Ev): boolean => e.src === 'store' && e.kind === 'append' && (e.entries as Json[]).some((x) => x.type === 'user' && JSON.stringify(x.content).includes(key));
-  const mainReq = inStep.find((e) => e.src === 'bodies' && e.kind === 'request' && String(e.model).startsWith(model) && e.hasThinking === true && e.thread !== null);
+  const mainReq = inStep.find((e) => e.src === 'bodies' && e.kind === 'request' && String(e.model).startsWith(model) && e.hasThinking === true && (e.thread !== null || Number(e.tools) > 0));
   const assistantLine = (e: Ev): boolean => e.src === 'transcript' && e.kind === 'line' && (e.entry as Json).type === 'assistant';
   const assistantAppend = (e: Ev): boolean => e.src === 'store' && e.kind === 'append' && (e.entries as Json[]).some((x) => x.type === 'assistant');
   return {
