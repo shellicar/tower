@@ -51,7 +51,7 @@
 //
 //   node proofs/skills-dir.mts <model> <scenario>
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startRun } from '../src/harness.mts';
@@ -73,7 +73,9 @@ don't use it.
 
 const [model, scenario] = process.argv.slice(2);
 if (!model || !scenario) {
-  process.stderr.write('usage: node proofs/skills-dir.mts <model> <plugin-no-manifest|add-dir-only|add-dir-reload|project-config-root>\n');
+  process.stderr.write(
+    'usage: node proofs/skills-dir.mts <model> <plugin-no-manifest|add-dir-only|add-dir-reload|project-config-root|plugin-flat-layout|plugin-symlink-repoint|plugin-edit-existing|register-repo-root-raw>\n',
+  );
   process.exit(2);
 }
 
@@ -96,9 +98,9 @@ function sleep(ms: number): Promise<void> {
 // content, skillCount, isInitial, names: [...]}}; a listing is attached only
 // when it changes (or on the first turn), not on every turn, so its absence
 // after a turn means "unchanged from the previous listing", not "no skills".
-function skillListings(runDir: string): { names: string[]; skillCount: number }[] {
+function skillListings(runDir: string): { names: string[]; skillCount: number; content: string }[] {
   const projectsDir = join(runDir, 'config-dir', 'projects');
-  const listings: { names: string[]; skillCount: number }[] = [];
+  const listings: { names: string[]; skillCount: number; content: string }[] = [];
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
@@ -108,9 +110,9 @@ function skillListings(runDir: string): { names: string[]; skillCount: number }[
         for (const line of readFileSync(path, 'utf8').split('\n')) {
           if (!line.trim()) continue;
           try {
-            const rec = JSON.parse(line) as { attachment?: { type?: string; names?: string[]; skillCount?: number } };
+            const rec = JSON.parse(line) as { attachment?: { type?: string; names?: string[]; skillCount?: number; content?: string } };
             if (rec.attachment?.type === 'skill_listing') {
-              listings.push({ names: rec.attachment.names ?? [], skillCount: rec.attachment.skillCount ?? -1 });
+              listings.push({ names: rec.attachment.names ?? [], skillCount: rec.attachment.skillCount ?? -1, content: rec.attachment.content ?? '' });
             }
           } catch {
             // not every line is JSON we care about; skip
@@ -248,6 +250,133 @@ try {
     process.stdout.write(`run dir: ${run.dir}\nprojectConfigRoot: ${CONFIG_ROOT}\n`);
 
     await runTurn(run, 'turn 1: projectConfigRoot set, settingSources forced to []', QUESTION);
+
+    run.end();
+    await run.done;
+    reportListings(run.dir);
+    process.stdout.write('done\n');
+  } else if (scenario === 'plugin-flat-layout') {
+    // No skills/ level at all: the plugin path's own immediate children are
+    // skill directories, the shape a plain "point this at a skills folder"
+    // config entry would have. plugins.md's structure reference shows
+    // skills/ as a required level ("skills/ Agent Skills... skills/my-skill/
+    // SKILL.md"); this checks whether that is enforced or just the
+    // documented convention.
+    const FLAT_DIR = join(root, 'flat-plugin');
+    const SKILL_E = 'proof12-flat-skill-e';
+    writeSkill(join(FLAT_DIR, SKILL_E), SKILL_E, 'Plugin path points straight at this, no skills/ level.');
+
+    const run = startRun({ name: 'skills-dir-plugin-flat-layout', options: { model, plugins: [{ type: 'local', path: FLAT_DIR }] } });
+    process.stdout.write(`run dir: ${run.dir}\nflat plugin dir: ${FLAT_DIR}\n`);
+
+    await runTurn(run, 'turn 1: skill directly under the plugin root, no skills/ level', QUESTION);
+
+    run.end();
+    await run.done;
+    reportListings(run.dir);
+    process.stdout.write('done\n');
+  } else if (scenario === 'plugin-symlink-repoint') {
+    // Re-pointing, not rescanning: the plugin's skills/ entry is a symlink,
+    // swapped to a different target directory mid-run, rather than new
+    // files added under the same fixed path. This is the closest an
+    // Options.plugins entry can get to bridge's "point the skills directory
+    // somewhere else, live" (mvp/CLAUDE.md); Options.plugins itself has no
+    // path-changing control call, so this tests the filesystem-level
+    // workaround, not an SDK feature.
+    const WRAPPER_DIR = join(root, 'symlink-plugin');
+    const TARGET_A = join(root, 'symlink-target-a');
+    const TARGET_B = join(root, 'symlink-target-b');
+    const SKILL_F = 'proof12-symlink-skill-f';
+    const SKILL_G = 'proof12-symlink-skill-g';
+    writeSkill(join(TARGET_A, SKILL_F), SKILL_F, 'Behind the symlink before the swap.');
+    writeSkill(join(TARGET_B, SKILL_G), SKILL_G, 'Behind the symlink after the swap.');
+    mkdirSync(WRAPPER_DIR, { recursive: true });
+    symlinkSync(TARGET_A, join(WRAPPER_DIR, 'skills'));
+
+    const run = startRun({ name: 'skills-dir-plugin-symlink-repoint', options: { model, plugins: [{ type: 'local', path: WRAPPER_DIR }] } });
+    process.stdout.write(`run dir: ${run.dir}\nwrapper dir: ${WRAPPER_DIR}\ntarget A: ${TARGET_A}\ntarget B: ${TARGET_B}\n`);
+
+    await runTurn(run, 'turn 1: skills/ symlinked to target A', QUESTION);
+
+    unlinkSync(join(WRAPPER_DIR, 'skills'));
+    symlinkSync(TARGET_B, join(WRAPPER_DIR, 'skills'));
+    await sleep(1000);
+    const reloadSkillsResult = await run.query.reloadSkills();
+    process.stdout.write(`reloadSkills() result after re-pointing the symlink: ${JSON.stringify(reloadSkillsResult)}\n`);
+    await runTurn(run, 'turn 2: skills/ re-pointed to target B, after reloadSkills()', QUESTION);
+
+    run.end();
+    await run.done;
+    reportListings(run.dir);
+    process.stdout.write('done\n');
+  } else if (scenario === 'plugin-edit-existing') {
+    // Live change detection is documented ("Edit a skill during a session")
+    // for the personal/project/add-dir locations; skills.md never says
+    // whether an EXISTING file's content inside an already-loaded plugin's
+    // skills/ dir gets the same watch (only that a plugin's hooks/.mcp.json/
+    // agents/output-styles need /reload-plugins). This edits SKILL.md's own
+    // description text (not a new file, not a new directory) and checks the
+    // transcript's skill_listing content for which marker is in it.
+    const PLUGIN_DIR = join(root, 'edit-plugin');
+    const SKILL_H = 'proof12-edit-skill-h';
+    const markerFile = (marker: string): string => `---
+name: ${SKILL_H}
+description: Dummy skill for tower proof 12 (skills-dir). MARKER=${marker}
+---
+
+Dummy skill for the tower Claude Code harness proof 12 run. It has no task,
+don't use it.
+`;
+    mkdirSync(join(PLUGIN_DIR, 'skills', SKILL_H), { recursive: true });
+    writeFileSync(join(PLUGIN_DIR, 'skills', SKILL_H, 'SKILL.md'), markerFile('V1'));
+
+    const run = startRun({ name: 'skills-dir-plugin-edit-existing', options: { model, plugins: [{ type: 'local', path: PLUGIN_DIR }] } });
+    process.stdout.write(`run dir: ${run.dir}\nplugin dir: ${PLUGIN_DIR}\n`);
+
+    await runTurn(run, 'turn 1: MARKER=V1', QUESTION);
+
+    writeFileSync(join(PLUGIN_DIR, 'skills', SKILL_H, 'SKILL.md'), markerFile('V2'));
+    await sleep(3000);
+    await runTurn(run, 'turn 2: MARKER=V2 written, no reload call, 3s settle', QUESTION);
+
+    const reloadSkillsResult = await run.query.reloadSkills();
+    process.stdout.write(`reloadSkills() result: ${JSON.stringify(reloadSkillsResult)}\n`);
+    await runTurn(run, 'turn 3: after reloadSkills()', QUESTION);
+
+    run.end();
+    await run.done;
+    const listings = skillListings(run.dir);
+    process.stdout.write(`\nskill_listing attachments recorded this run (${listings.length}):\n`);
+    listings.forEach((l, i) => {
+      process.stdout.write(`  #${i}: skillCount=${l.skillCount} hasV1=${l.content.includes('MARKER=V1')} hasV2=${l.content.includes('MARKER=V2')}\n`);
+    });
+    process.stdout.write('done\n');
+  } else if (scenario === 'register-repo-root-raw') {
+    // register_repo_root (sdk.d.ts: SDKControlRegisterRepoRootRequest) has
+    // no method on the typed Query interface, unlike reloadSkills/
+    // reloadPlugins. sdk.mjs's own reloadSkills/reloadPlugins go through a
+    // generic `this.request({subtype: ...})`; this calls that same generic
+    // method directly, past the public TypeScript surface, to check whether
+    // the request is reachable at all from the Agent SDK, not just typed.
+    const SUBDIR = join('added-root');
+    const SKILL_I = 'proof12-registerrepo-skill-i';
+
+    const run = startRun({ name: 'skills-dir-register-repo-root-raw', options: { model } });
+    process.stdout.write(`run dir: ${run.dir}\ncwd: ${run.cwd}\n`);
+    const absSubdir = join(run.cwd, SUBDIR);
+    writeSkill(join(absSubdir, '.claude', 'skills', SKILL_I), SKILL_I, 'Lives under a subdirectory of cwd, registered live via register_repo_root.');
+
+    await runTurn(run, 'turn 1: before register_repo_root', QUESTION);
+
+    type RawQuery = { request(req: Record<string, unknown>): Promise<unknown> };
+    const rawQuery = run.query as unknown as RawQuery;
+    try {
+      const result = await rawQuery.request({ subtype: 'register_repo_root', directory: absSubdir, reload_skills: true });
+      process.stdout.write(`register_repo_root raw request() result: ${JSON.stringify(result)}\n`);
+    } catch (err) {
+      process.stdout.write(`register_repo_root raw request() threw: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+    await runTurn(run, 'turn 2: after register_repo_root attempt', QUESTION);
 
     run.end();
     await run.done;
