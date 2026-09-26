@@ -134,11 +134,15 @@ const PROMPTS: Record<Ending, string> = {
 // P23_RETRY_ENV (JSON) overrides it.
 const RETRY_ENV = JSON.parse(process.env.P23_RETRY_ENV ?? '{"API_TIMEOUT_MS":"800","CLAUDE_CODE_MAX_RETRIES":"2"}') as Record<string, string>;
 
+// The limit cell's CLAUDE_CODE_MAX_OUTPUT_TOKENS: 256 (proof 20's) did not
+// cut Opus's or Fable's short thinking; P23_LIMIT_TOKENS tries a lower one.
+const LIMIT_TOKENS = process.env.P23_LIMIT_TOKENS ?? '256';
+
 function cells(): Cell[] {
   const out: Cell[] = [
     { id: 'normal', prompt: `What is 17 times 23? Work it out, then reply with the number only. ${NO_TOOLS}` },
     { id: 'thinking-only', prompt: `Think carefully about whether 391 is prime. Then end your turn with an empty reply: write no text at all, not even a single word or punctuation mark. ${NO_TOOLS}` },
-    { id: 'thinking-only-limit', prompt: `${HARD} Reply with the number only. ${NO_TOOLS}`, env: { CLAUDE_CODE_MAX_OUTPUT_TOKENS: '256' } },
+    { id: 'thinking-only-limit', prompt: `${HARD} Reply with the number only. ${NO_TOOLS}`, env: { CLAUDE_CODE_MAX_OUTPUT_TOKENS: LIMIT_TOKENS } },
     { id: 'retry', prompt: `What is 17 times 23? Work it out, then reply with the number only. ${NO_TOOLS}`, env: RETRY_ENV },
   ];
   for (const ending of ENDINGS) {
