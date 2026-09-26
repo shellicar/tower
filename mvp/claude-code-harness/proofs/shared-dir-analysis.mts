@@ -1,6 +1,6 @@
 // Proof 17b: what two Claude Codes did to one session's files.
 //
-//   node proofs/shared-dir-analysis.mts <case dir> <strace file>
+//   node proofs/shared-dir-analysis.mts <case dir> <strace file> [<from>=<to>]
 //
 // Reads the strace of a whole case (strace -f -tt -y, any -s) and the case's
 // records, and writes <case dir>/shared-dir-analysis.json plus a text summary
@@ -20,7 +20,11 @@ import { basename, join } from 'node:path';
 
 type Json = Record<string, unknown>;
 
-const [caseDir, straceFile] = process.argv.slice(2);
+// Optional third argument <from>=<to>: read a transcript from where a later
+// resetConfigDir moved it (the strace names the path it had at the time).
+const [caseDir, straceFile, remap] = process.argv.slice(2);
+const [remapFrom, remapTo] = remap?.split('=') ?? [];
+const onDisk = (path: string): string => (remapFrom && remapTo && path.startsWith(remapFrom) ? remapTo + path.slice(remapFrom.length) : path);
 if (!caseDir || !straceFile) {
   process.stderr.write('usage: shared-dir-analysis.mts <case dir> <strace file>\n');
   process.exit(2);
@@ -214,10 +218,10 @@ for (const c of calls) {
 
 // Transcripts: align writes to lines by byte length; graph.
 for (const f of files.values()) {
-  if (!f.path.endsWith('.jsonl') || !existsSync(f.path)) {
+  if (!f.path.endsWith('.jsonl') || !existsSync(onDisk(f.path))) {
     continue;
   }
-  const raw = readFileSync(f.path, 'utf8');
+  const raw = readFileSync(onDisk(f.path), 'utf8');
   const lines = raw.split('\n');
   if (lines.at(-1) === '') {
     lines.pop();
