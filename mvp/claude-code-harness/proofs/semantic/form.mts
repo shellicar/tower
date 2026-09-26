@@ -147,7 +147,7 @@ export interface TowerMessage extends Json {
   ccEntries?: CcEntry[];
 }
 
-export function rebuild(messages: TowerMessage[], modelByTurn: Map<string, string>, cwd: string, sessionId: string): Json[] {
+export function rebuild(messages: TowerMessage[], modelByTurn: Map<string, string>, cwd: string, sessionId: string, withSilent = false): Json[] {
   const out: Json[] = [];
   for (const m of messages) {
     const common: Json = { timestamp: m.ts, isSidechain: false, sessionId, cwd };
@@ -160,7 +160,8 @@ export function rebuild(messages: TowerMessage[], modelByTurn: Map<string, strin
       out.push({ ...common, uuid: m.id, type: 'assistant', message });
       continue;
     }
-    const entries = m.ccEntries ?? [];
+    // Strict: only the entries that produced something the model saw.
+    const entries = (m.ccEntries ?? []).filter((c) => withSilent || c.spans.length > 0);
     if (entries.length === 0) {
       // A message with nothing behind it: put back as tower has it.
       out.push({ ...common, uuid: m.id, type: 'user', isMeta: m.role === 'system' ? true : undefined, message: { role: 'user', content: m.content } });
@@ -169,7 +170,7 @@ export function rebuild(messages: TowerMessage[], modelByTurn: Map<string, strin
     for (const c of entries) {
       const texts = c.spans.map((s) => (s.unwrapped ? `<system-reminder>\n${spanText(m.content, s)}\n</system-reminder>` : spanText(m.content, s)));
       if (c.type === 'attachment') {
-        out.push({ ...common, uuid: c.uuid, type: 'attachment', attachment: c.attachment, rendered: texts.map((t) => ({ content: t })) });
+        out.push({ ...common, uuid: c.uuid, type: 'attachment', attachment: c.attachment, ...(texts.length > 0 ? { rendered: texts.map((t) => ({ content: t })) } : {}) });
       } else {
         const blocks = c.spans.map((s) => (s.start === undefined ? (m.content[s.block] as Block) : { type: 'text', text: spanText(m.content, s) }));
         out.push({ ...common, uuid: c.uuid, type: 'user', ...(c.isMeta ? { isMeta: true } : {}), message: { role: 'user', content: blocks } });

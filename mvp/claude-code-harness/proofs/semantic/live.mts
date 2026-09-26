@@ -45,12 +45,16 @@ interface Scenario {
 
 const work = (name: string): string => join(HARNESS_STATE, 'work', name);
 
-const probeServer = () =>
-  createSdkMcpServer({
+const probeServer = () => {
+  const cfg = createSdkMcpServer({
     name: 'probe',
     version: '1.0.0',
     tools: [tool('probe_echo', 'Returns the word PROBE.', {}, async () => ({ content: [{ type: 'text', text: 'PROBE' }] }))],
   });
+  // The harness records options as JSON; the server instance is circular.
+  Object.defineProperty(cfg.instance, 'toJSON', { value: () => '[McpServer instance]' });
+  return cfg;
+};
 
 const SCENARIOS: Record<string, Scenario> = {
   // Proof 14's seed: thinking and a Bash round; set_cwd; a slow Bash round
@@ -496,7 +500,7 @@ export async function seed(model: string, scenarioName: string): Promise<void> {
 
 // ---------------------------------------------------------------------------
 
-export const SOURCES = ['full', 'full-fold-true', 'full-no-snapshot', 'A', 'B'] as const;
+export const SOURCES = ['full', 'full-fold-true', 'full-no-snapshot', 'A', 'B', 'A-silent', 'B-silent'] as const;
 export type Source = (typeof SOURCES)[number];
 
 function seedEntries(seedRun: string): Json[] {
@@ -528,7 +532,8 @@ export async function resume(model: string, source: Source, sessionId: string): 
   } else {
     const t = await openTower();
     tower = t;
-    const convId = source === 'A' ? seedRec.convA : seedRec.convB;
+    const convId = source.startsWith('A') ? seedRec.convA : seedRec.convB;
+    const withSilent = source.endsWith('-silent');
     load = async (key) => {
       if (key.subpath) {
         return { entries: null, detail: { source, note: 'subagent transcript: nothing on tower for it' } };
@@ -537,8 +542,8 @@ export async function resume(model: string, source: Source, sessionId: string): 
       if (messages.length === 0) {
         return { entries: null, detail: { source, convId, messages: 0 } };
       }
-      const entries = rebuild(messages, await modelsByTurn(t, convId, seedRec.upto), cwd, key.sessionId);
-      return { entries, detail: { source, convId, upto: seedRec.upto, messages: messages.length } };
+      const entries = rebuild(messages, await modelsByTurn(t, convId, seedRec.upto), cwd, key.sessionId, withSilent);
+      return { entries, detail: { source, convId, withSilent, upto: seedRec.upto, messages: messages.length } };
     };
   }
   const firstDelayMs = Number(process.env.PROOF16_FIRST_DELAY_MS ?? 0);

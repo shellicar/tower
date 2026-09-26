@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { redact, stamp } from '../../src/record.mts';
-import { type FormMessage, isCarrier, isToolResults, type Json, messageId } from './form.mts';
+import { type CcEntry, type FormMessage, isCarrier, isToolResults, type Json, messageId } from './form.mts';
 import { checkMessage, type Tower, tsNow } from './tower.mts';
 
 const SERVICE = 'anthropic.messages';
@@ -68,6 +68,12 @@ export class Publisher {
   lastModel: string | undefined;
   queryId = randomUUID();
   published = 0;
+  // Attachment entries that produce nothing in a request (no `rendered`),
+  // written since the last request was resolved, and every entry's place in
+  // the record.
+  silent: Json[] = [];
+  readonly recordIndex = new Map<string, number>();
+  appendCount = 0;
   chain: Promise<void> = Promise.resolve();
 
   constructor(tower: Tower, convId: string, label: string) {
@@ -104,6 +110,13 @@ export class Publisher {
     this.noteAppended(entries);
     return this.serial(async () => {
       for (const e of entries) {
+        if (typeof e.uuid === 'string') {
+          this.recordIndex.set(e.uuid, this.appendCount);
+        }
+        this.appendCount += 1;
+        if (e.isSidechain !== true && e.type === 'attachment' && !isCarrier(e)) {
+          this.silent.push(e);
+        }
         let kind: Item['kind'] = 'other';
         if (e.isSidechain === true) {
           kind = 'other';
@@ -129,8 +142,20 @@ export class Publisher {
   // Entries in `release` stop blocking without being published (recorded).
   resolve(forms: FormMessage[], turnId: string, signal: string, signalAt: string, signalMs: number, release: Json[] = [], note?: Json): Promise<void> {
     return this.serial(async () => {
+      // TODO: undecided. Attachment entries that produced no block (no
+      // `rendered`: prompt_snapshot, credential_org, a session_context with
+      // an empty context, ...) ride on the request's first message with no
+      // spans, in record order, so a load() that wants them has them. A
+      // strict load() skips them.
+      const first = forms[0];
+      if (first && this.silent.length > 0) {
+        const extra: CcEntry[] = this.silent.map((e) => ({ uuid: String(e.uuid), type: 'attachment', attachment: e.attachment as Json, spans: [] }));
+        this.silent = [];
+        const at = (u: string): number => this.recordIndex.get(u) ?? Number.MAX_SAFE_INTEGER;
+        first.ccEntries = [...first.ccEntries, ...extra].sort((x, y) => at(x.uuid) - at(y.uuid));
+      }
       for (const form of forms) {
-        const ids = new Set(form.ccEntries.map((c) => c.uuid));
+        const ids = new Set(form.ccEntries.filter((c) => c.spans.length > 0).map((c) => c.uuid));
         const items = this.outbox.filter((i) => i.kind === 'carrier' && ids.has(String(i.entry.uuid)));
         for (const i of items) {
           i.state = 'resolved';
