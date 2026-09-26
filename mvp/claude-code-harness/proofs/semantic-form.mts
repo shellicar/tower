@@ -33,6 +33,7 @@
 import { compare, liveReport } from './semantic/compare.mts';
 import { checkRun, report } from './semantic/check.mts';
 import { republish, resume, SOURCES, type Source, seed } from './semantic/live.mts';
+import { selectReport, selectRun } from './semantic/select-check.mts';
 
 const [mode, ...rest] = process.argv.slice(2);
 const usage = `usage:
@@ -42,7 +43,9 @@ const usage = `usage:
   node proofs/semantic-form.mts --corpus <run dir>...
   node proofs/semantic-form.mts --live <seed run dir>`;
 
-if (mode === '--corpus') {
+if (mode === '--select') {
+  process.stdout.write(selectReport(rest.flatMap((d) => selectRun(d))));
+} else if (mode === '--corpus') {
   for (const dir of rest) {
     process.stdout.write(report(checkRun(dir)));
   }

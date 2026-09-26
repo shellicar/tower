@@ -56,10 +56,17 @@ function userText(e: Json): string | undefined {
 const SEPARATOR = /^\s*$/;
 
 export function attribute(body: { messages: ApiMessage[] }, pending: Json[]): Attribution {
+  return attributeMessages(newMessages(body), pending);
+}
+
+// The same over messages already cut to what a request adds (proof 20: a
+// request can re-send the previous request's added messages when the
+// response between them is dropped from the history; select.mts cuts those).
+export function attributeMessages(added: { role: string; content: Block[] }[], pending: Json[]): Attribution {
   const used = new Set<Json>();
   const out: Attribution = { messages: [], uncovered: [], unplaced: [], notes: [] };
   const candidates = pending.filter(isCarrier);
-  newMessages(body).forEach((msg, mi) => {
+  added.forEach((msg, mi) => {
     const parts = new Map<Json, Span[]>();
     const add = (e: Json, s: Span): void => {
       used.add(e);
@@ -177,7 +184,7 @@ export function attribute(body: { messages: ApiMessage[] }, pending: Json[]): At
   out.unplaced = candidates.filter((c) => !used.has(c));
   // Not attributable at block grain: a reminder Claude Code folded into a
   // tool_result's own content (models without system turns).
-  const inside = newMessages(body).flatMap((m) => m.content.filter((b) => b.type === 'tool_result').map((b) => (typeof b.content === 'string' ? b.content : blocksOf(b.content).map(textOf).join('\n'))));
+  const inside = added.flatMap((m) => m.content.filter((b) => b.type === 'tool_result').map((b) => (typeof b.content === 'string' ? b.content : blocksOf(b.content).map(textOf).join('\n'))));
   for (const c of out.unplaced) {
     const texts = renderedTexts(c) ?? [];
     if (texts.length > 0 && texts.every((t) => inside.some((x) => x.includes(t)))) {
