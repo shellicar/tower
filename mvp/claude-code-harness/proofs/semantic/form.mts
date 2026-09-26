@@ -47,6 +47,12 @@ export interface Span {
   // The text went out without the <system-reminder> wrapper its entry has
   // (non-Sonnet-5 system messages); load() puts it back. TODO: undecided.
   unwrapped?: boolean;
+  // Proof 20: start/length index into the tool_result block's content (its
+  // string, or the text of content[part]), not the block's own text:
+  // reminders Claude Code folded into a tool_result, and the result's own
+  // (trimmed) content before them. TODO: undecided.
+  inResult?: boolean;
+  part?: number;
 }
 
 export interface CcEntry {
@@ -66,6 +72,9 @@ export interface FormMessage {
   role: 'user' | 'system';
   content: Block[];
   ccEntries: CcEntry[];
+  // Proof 20: a message no entry accounts for gets an id of its own.
+  // TODO: undecided (a fresh uuid here).
+  id?: string;
 }
 
 export function blocksOf(content: unknown): Block[] {
@@ -90,9 +99,20 @@ export function isToolResults(content: unknown): boolean {
   return blocksOf(content).some((b) => b.type === 'tool_result');
 }
 
+// Attachment types with no `rendered` whose text Claude Code sends from the
+// payload by a path of its own (proof 20): batching_reminder_sent is the
+// stored record of Fable's "First privately list..." system message (kept
+// delivery, `attachment.text`, re-sent from the record on every request).
+// load() must not give these a `rendered` field.
+export const PAYLOAD_TEXT_TYPES = new Set(['batching_reminder_sent']);
+
 // An attachment entry's `rendered` texts (claude 2.1.282 sends these
 // verbatim instead of re-rendering the attachment; proof 14).
 export function renderedTexts(e: Json): string[] | undefined {
+  const att = e.attachment as Json | undefined;
+  if (e.type === 'attachment' && att && PAYLOAD_TEXT_TYPES.has(String(att.type)) && typeof att.text === 'string') {
+    return [att.text];
+  }
   const r = e.rendered;
   if (!Array.isArray(r) || r.length === 0) {
     return undefined;
@@ -118,12 +138,24 @@ export function textOf(b: Block): string {
 }
 
 export function spanText(content: Block[], s: Span): string {
-  const t = textOf(content[s.block] as Block);
+  const b = content[s.block] as Block;
+  if (s.inResult) {
+    const c = b.content;
+    const t = typeof c === 'string' ? c : textOf(blocksOf(c)[s.part ?? 0] as Block);
+    return t.slice(s.start ?? 0, (s.start ?? 0) + (s.length ?? t.length));
+  }
+  if (b.type !== 'text') {
+    return '';
+  }
+  const t = textOf(b);
   return s.start === undefined ? t : t.slice(s.start, s.start + (s.length ?? 0));
 }
 
 // The id of a message built from several entries (TODO above).
 export function messageId(m: FormMessage): string {
+  if (m.id !== undefined) {
+    return m.id;
+  }
   const prompt = m.ccEntries.find((c) => c.type === 'user' && !c.isMeta && c.spans.some((s) => (m.content[s.block] as Block).type !== 'tool_result'));
   const tool = m.ccEntries.find((c) => c.type === 'user' && c.spans.some((s) => (m.content[s.block] as Block).type === 'tool_result'));
   return (prompt ?? tool ?? (m.ccEntries[0] as CcEntry)).uuid;
@@ -169,17 +201,41 @@ export function rebuild(messages: TowerMessage[], modelByTurn: Map<string, strin
     // Strict: only the entries that produced something the model saw.
     // Or only the no-block entries of the types named.
     const entries = (m.ccEntries ?? []).filter((c) => c.spans.length > 0 || withSilent === true || (withSilent instanceof Set && withSilent.has(String(c.attachment?.type))));
+    if (Array.isArray(m.ccEntries) && m.ccEntries.length === 0) {
+      // Proof 20: the participant published it as sent with no entry behind
+      // it (an empty ccEntries). Claude Code builds such a message itself
+      // when it sends a request, so it is not put back.
+      // TODO: undecided (skip, or put back as an isMeta user entry).
+      continue;
+    }
     if (entries.length === 0) {
       // A message with nothing behind it: put back as tower has it.
       out.push({ ...common, uuid: m.id, type: 'user', isMeta: m.role === 'system' ? true : undefined, message: { role: 'user', content: m.content } });
       continue;
     }
     for (const c of entries) {
-      const texts = c.spans.map((s) => (s.unwrapped ? `<system-reminder>\n${spanText(m.content, s)}\n</system-reminder>` : spanText(m.content, s)));
+      // Only text: a tool_addition block's entry is its deferred_tools_delta,
+      // which Claude Code turns back into the block itself.
+      const texts = c.spans.filter((s) => s.inResult || (m.content[s.block] as Block | undefined)?.type === 'text').map((s) => (s.unwrapped ? `<system-reminder>\n${spanText(m.content, s)}\n</system-reminder>` : spanText(m.content, s)));
       if (c.type === 'attachment') {
-        out.push({ ...common, uuid: c.uuid, type: 'attachment', attachment: c.attachment, ...(texts.length > 0 ? { rendered: texts.map((t) => ({ content: t })) } : {}) });
+        const payloadText = PAYLOAD_TEXT_TYPES.has(String(c.attachment?.type));
+        out.push({ ...common, uuid: c.uuid, type: 'attachment', attachment: c.attachment, ...(texts.length > 0 && !payloadText ? { rendered: texts.map((t) => ({ content: t })) } : {}) });
       } else {
-        const blocks = c.spans.map((s) => (s.start === undefined ? (m.content[s.block] as Block) : { type: 'text', text: spanText(m.content, s) }));
+        const blocks = c.spans.map((s) => {
+          const b = m.content[s.block] as Block;
+          if (s.inResult) {
+            // The tool_result's own content, without the reminders folded in.
+            // Claude Code trimmed it when it folded; that trim is not undone.
+            const own = spanText(m.content, s);
+            if (typeof b.content === 'string') {
+              return { ...b, content: own };
+            }
+            const parts = blocksOf(b.content).slice(0, (s.part ?? 0) + 1);
+            parts[s.part ?? 0] = { ...(parts[s.part ?? 0] as Block), text: own };
+            return { ...b, content: parts };
+          }
+          return s.start === undefined ? b : { type: 'text', text: spanText(m.content, s) };
+        });
         const content = c.contentString && blocks.length === 1 && blocks[0]?.type === 'text' ? textOf(blocks[0]) : blocks;
         out.push({ ...common, uuid: c.uuid, type: 'user', ...(c.isMeta ? { isMeta: true } : {}), message: { role: 'user', content } });
       }

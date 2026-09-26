@@ -28,6 +28,10 @@ export interface SelectRow {
   reason: string;
   prevIdSays: boolean | undefined;
   proof16Says: boolean;
+  // A's attribution of what a main request adds: text no entry accounts
+  // for, and notes (a trailing newline after the last entry's text, R12).
+  uncovered: string[];
+  notes: string[];
 }
 
 export function selectRun(runDirArg: string): SelectRow[] {
@@ -62,7 +66,7 @@ export function selectRun(runDirArg: string): SelectRow[] {
         }
       }
     }
-    rows.push({ run: runDir, file: f, model: body.model, source: src, truth: src === undefined ? undefined : src === 'sdk', incompleteRecord, history: v.main, retry: v.retry, resent: v.resent, reason: v.reason, prevIdSays: v.prevIdSays, proof16Says: v.proof16Says });
+    rows.push({ run: runDir, file: f, model: body.model, source: src, truth: src === undefined ? undefined : src === 'sdk', incompleteRecord, history: v.main, retry: v.retry, resent: v.resent, reason: v.reason, prevIdSays: v.prevIdSays, proof16Says: v.proof16Says, uncovered: (v.attribution?.uncovered ?? []).map((u) => u.text), notes: v.attribution?.notes ?? [] });
   }
   return rows;
 }
@@ -90,6 +94,19 @@ export function selectReport(rows: SelectRow[]): string {
     const skipped = all.filter((r) => r.incompleteRecord);
     out.push(`== ${m}: ${xs.length} request file(s) in ${new Set(xs.map((r) => r.run)).size} run(s); sources ${[...sources].map(([s, n]) => `${s} ${n}`).join(', ')}; not scored (record lacks the entries load() returned): ${skipped.length} file(s) in ${new Set(skipped.map((r) => r.run)).size} run(s)`);
     out.push(`   history match:           ${tally(xs, (r) => r.history)}; of the main ones, retries ${xs.filter((r) => r.truth && r.retry).length}, with re-sent blocks cut ${xs.filter((r) => r.truth && r.resent > 0 && !r.retry).length}`);
+    const mains = xs.filter((r) => r.truth && r.history && !r.retry);
+    const clean = mains.filter((r) => r.uncovered.length === 0);
+    out.push(`   A: ${clean.length}/${mains.length} main requests (not retries) fully matched: every block of what they add tied to an entry; ${mains.filter((r) => r.uncovered.length === 0 && r.notes.length > 0).length} of those with only a trailing newline noted`);
+    const kinds = new Map<string, number>();
+    for (const r of mains) {
+      for (const u of r.uncovered) {
+        const k = u.replace(/\s+/g, ' ').slice(0, 70);
+        kinds.set(k, (kinds.get(k) ?? 0) + 1);
+      }
+    }
+    for (const [k, n] of [...kinds].sort((a, b) => b[1] - a[1]).slice(0, 15)) {
+      out.push(`      unmatched x${n}: ${JSON.stringify(k)}`);
+    }
     out.push(`   previous_message_id:     ${tally(xs, (r) => r.prevIdSays)}`);
     out.push(`   proof 16 (model+thread): ${tally(xs, (r) => r.proof16Says)}`);
     for (const r of xs.filter((x) => x.truth !== undefined && x.truth !== x.history)) {

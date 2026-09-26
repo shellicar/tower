@@ -14,7 +14,7 @@
 // entry accounts for is reported, not attributed.
 
 import { unwrap } from './by-fold.mts';
-import { type ApiMessage, type Block, blocksOf, type CcEntry, type FormMessage, isCarrier, type Json, normalise, renderedTexts, type Span, textOf } from './form.mts';
+import { type ApiMessage, type Block, blocksOf, type CcEntry, type FormMessage, isCarrier, type Json, normalise, renderedTexts, type Span, stripCacheControl, textOf } from './form.mts';
 
 export interface Uncovered {
   message: number;
@@ -75,10 +75,55 @@ export function attributeMessages(added: { role: string; content: Block[] }[], p
     msg.content.forEach((b, bi) => {
       if (b.type === 'tool_result') {
         const e = candidates.find((c) => !used.has(c) && c.type === 'user' && blocksOf((c.message as Json).content).some((x) => x.type === 'tool_result' && x.tool_use_id === b.tool_use_id));
+        if (!e) {
+          out.uncovered.push({ message: mi, block: bi, text: `tool_result ${String(b.tool_use_id)}` });
+          return;
+        }
+        const own = blocksOf((e.message as Json).content).find((x) => x.type === 'tool_result' && x.tool_use_id === b.tool_use_id) as Block;
+        if (JSON.stringify(stripCacheControl(own)) === JSON.stringify(b)) {
+          add(e, { block: bi });
+          return;
+        }
+        // Proof 20, problem 4: reminders Claude Code folded into the
+        // tool_result's content (models without system turns; code vUe): the
+        // entry's own content trimmed, then each reminder trimmed, joined by
+        // a blank line. String content, or the last text part of an array.
+        const sent = b.content;
+        const part = typeof sent === 'string' ? undefined : blocksOf(sent).map((x, i) => ({ x, i })).filter(({ x }) => x.type === 'text').at(-1)?.i;
+        const inText = typeof sent === 'string' ? sent : part === undefined ? undefined : textOf(blocksOf(sent)[part] as Block);
+        const ownText = typeof own.content === 'string' || own.content === undefined ? String(own.content ?? '').trim() : blocksOf(own.content).filter((x) => x.type === 'text').map(textOf).at(-1)?.trim();
+        if (inText === undefined || ownText === undefined || !inText.startsWith(ownText)) {
+          add(e, { block: bi });
+          out.uncovered.push({ message: mi, block: bi, text: `tool_result ${String(b.tool_use_id)}: content differs from its entry's` });
+          return;
+        }
+        add(e, { block: bi, inResult: true, ...(part === undefined ? {} : { part }), start: 0, length: ownText.length });
+        const found = findInside(inText, ownText.length, candidates, (c) => used.has(c) || c === e, true);
+        let cursor = ownText.length;
+        for (const f of found) {
+          const gap = inText.slice(cursor, f.start);
+          if (!SEPARATOR.test(gap)) {
+            out.uncovered.push({ message: mi, block: bi, text: `inside tool_result: ${gap}` });
+          }
+          add(f.e, { block: bi, inResult: true, ...(part === undefined ? {} : { part }), start: f.start, length: f.length });
+          cursor = f.start + f.length;
+        }
+        const rest = inText.slice(cursor);
+        if (rest.trim() !== '') {
+          out.uncovered.push({ message: mi, block: bi, text: `inside tool_result: ${rest}` });
+        }
+        return;
+      }
+      if (b.type === 'tool_addition' || b.type === 'tool_removal') {
+        // Built from a deferred_tools_delta entry's surfacedNames (code Pw,
+        // omo; research note in proof 20).
+        const name = String(((b.tool as Json | undefined)?.name ?? '') as string);
+        const field = b.type === 'tool_addition' ? ['surfacedNames', 'replacedNames'] : ['removedNames'];
+        const e = candidates.find((c) => c.type === 'attachment' && (c.attachment as Json).type === 'deferred_tools_delta' && field.some((f) => Array.isArray((c.attachment as Json)[f]) && ((c.attachment as Json)[f] as unknown[]).includes(name)));
         if (e) {
           add(e, { block: bi });
         } else {
-          out.uncovered.push({ message: mi, block: bi, text: `tool_result ${String(b.tool_use_id)}` });
+          out.uncovered.push({ message: mi, block: bi, text: `${b.type} block ${name}` });
         }
         return;
       }
@@ -113,39 +158,7 @@ export function attributeMessages(added: { role: string; content: Block[] }[], p
         return;
       }
       // Reminders inside the block, in the order they appear.
-      let pos = 0;
-      const spans: { e: Json; start: number; length: number; unwrapped?: boolean }[] = [];
-      for (;;) {
-        let best: { e: Json; start: number; length: number; unwrapped?: boolean } | undefined;
-        for (const c of candidates) {
-          if (used.has(c) || spans.some((s) => s.e === c)) {
-            continue;
-          }
-          const texts = c.type === 'attachment' ? (renderedTexts(c) ?? []) : [userText(c) ?? ''];
-          for (const t of texts) {
-            if (t === '') {
-              continue;
-            }
-            const at = text.indexOf(t, pos);
-            if (at >= 0 && (best === undefined || at < best.start)) {
-              best = { e: c, start: at, length: t.length };
-            }
-            // Sent without its <system-reminder> wrapper (other models'
-            // system messages, a human-turn queued_command): found only by
-            // knowing Claude Code strips it.
-            const bare = unwrap(t);
-            const atBare = bare !== t ? text.indexOf(bare, pos) : -1;
-            if (atBare >= 0 && (best === undefined || atBare < best.start)) {
-              best = { e: c, start: atBare, length: bare.length, unwrapped: true };
-            }
-          }
-        }
-        if (!best) {
-          break;
-        }
-        spans.push(best);
-        pos = best.start + best.length;
-      }
+      const spans = findInside(text, 0, candidates, (c) => used.has(c), false);
       let cursor = 0;
       for (const s of spans) {
         const gap = text.slice(cursor, s.start);
@@ -192,4 +205,45 @@ export function attributeMessages(added: { role: string; content: Block[] }[], p
     }
   }
   return out;
+}
+
+// Entries' texts found in `text` from `pos` on, in the order they appear,
+// each entry once. `trimmed`: look for each text trimmed (a fold into a
+// tool_result trims every reminder).
+function findInside(text: string, pos0: number, candidates: Json[], skip: (c: Json) => boolean, trimmed: boolean): { e: Json; start: number; length: number; unwrapped?: boolean }[] {
+  let pos = pos0;
+  const spans: { e: Json; start: number; length: number; unwrapped?: boolean }[] = [];
+  for (;;) {
+    let best: { e: Json; start: number; length: number; unwrapped?: boolean } | undefined;
+    for (const c of candidates) {
+      if (skip(c) || spans.some((s) => s.e === c)) {
+        continue;
+      }
+      const raw = c.type === 'attachment' ? (renderedTexts(c) ?? []) : [userText(c) ?? ''];
+      for (const t0 of raw) {
+        const t = trimmed ? t0.trim() : t0;
+        if (t === '') {
+          continue;
+        }
+        const at = text.indexOf(t, pos);
+        if (at >= 0 && (best === undefined || at < best.start)) {
+          best = { e: c, start: at, length: t.length };
+        }
+        // Sent without its <system-reminder> wrapper (other models'
+        // system messages, a human-turn queued_command): found only by
+        // knowing Claude Code strips it.
+        const bare = unwrap(t);
+        const atBare = bare !== t ? text.indexOf(bare, pos) : -1;
+        if (atBare >= 0 && (best === undefined || atBare < best.start)) {
+          best = { e: c, start: atBare, length: bare.length, unwrapped: true };
+        }
+      }
+    }
+    if (!best) {
+      break;
+    }
+    spans.push(best);
+    pos = best.start + best.length;
+  }
+  return spans;
 }
