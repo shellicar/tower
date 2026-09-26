@@ -169,3 +169,28 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 6: max tokens
+
+`proofs/max-tokens.mts <model> <scenario>` compares the `max_tokens` each API
+request actually carried (the request body log, as proof 1) with what the SDK
+reported (`modelUsage[model].maxOutputTokens` on each result). Every scenario
+but `hit` runs three turns: a three-file Read chain (four requests), then two
+one-word replies. The scenarios differ in `CLAUDE_CODE_MAX_OUTPUT_TOKENS`:
+
+| Scenario | `CLAUDE_CODE_MAX_OUTPUT_TOKENS` |
+| --- | --- |
+| `unset` | not set |
+| `delayed` | not set; the first message waits for the debug log's `[Bootstrap] Fetch ok` |
+| `env` | 4096 at start-up |
+| `env-over` | 1000000 at start-up |
+| `live` | not set, then 4096 and 1000000 through `applyFlagSettings({env})` before turns 2 and 3 |
+| `hit` | 256 at start-up; one turn that runs past it |
+
+The run directory gets `api-bodies/`, `debug.log`, `proof-notes.jsonl` (each
+send and control call) and `summary.txt`: every request's `max_tokens` by
+`index.jsonl` line, every result's `modelUsage` by `sdk-messages.jsonl` line,
+and the debug log's dispatch, `[Bootstrap]` and
+`CLAUDE_CODE_MAX_OUTPUT_TOKENS` lines. `--summarise <run dir>` reprints it.
+`index.jsonl` lists only requests that completed: a request that failed and
+was retried leaves a `*.request.json` with no index line.
