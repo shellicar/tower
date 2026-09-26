@@ -16,10 +16,10 @@
 // Everything else comes from the proof: "let each do its own settings". The
 // harness has no defaults of its own.
 
-import { createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Options, type Query, query, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { redact, stamp } from './record.mts';
@@ -35,8 +35,8 @@ const STATE_ROOT = join(homedir(), '.local', 'state', 'tower-claude-code-harness
 // and reused by every run of it: "as long as each agent gets its own
 // directory, and can keep reusing it, ie its not a random directory every
 // run, that would cause issues" (Stephen, 26 Sep); "its ONE directory PER
-// agent" (27 Sep). Created on first use. The harness never deletes it; only
-// resetConfigDir moves it aside, whole, for a clean start.
+// agent" (27 Sep). Created on first use. Only resetConfigDir deletes it, for a
+// clean start; agents reset it through the package script, never by hand.
 //
 // TODO: undecided. Where it lives. Outside the repo is what's built: nothing
 // Claude Code writes there can reach the repo unfiltered (with the shared
@@ -46,15 +46,16 @@ const STATE_ROOT = join(homedir(), '.local', 'state', 'tower-claude-code-harness
 // Claude Code writes lands in the repo unfiltered.
 const CONFIG_DIRS_ROOT = join(STATE_ROOT, 'config-dirs');
 
-// Where resetConfigDir moves an agent's config directory aside:
-// config-dirs/.reset/<name>-<timestamp>/.
+// Where an earlier resetConfigDir moved config directories aside
+// (config-dirs/.reset/<name>-<timestamp>/), before a reset deleted instead.
+// Kept as it is; resetConfigDir refuses the name `.reset` so a reset can
+// never delete it.
 //
-// TODO: undecided. A proof named `.reset` passes the name check, so its
-// startRun would use this folder as its live CLAUDE_CONFIG_DIR. Its reset
-// fails on its own (rename(2) refuses to move a directory into itself,
-// EINVAL), but nothing stops the startRun. Refusing the name keeps the
-// archive out of reach of any run; leaving it keeps the name check as it is.
-const RESET_ROOT = join(CONFIG_DIRS_ROOT, '.reset');
+// TODO: undecided. A proof named `.reset` passes startRun's name check, so
+// its startRun would use this folder as its live CLAUDE_CONFIG_DIR. Refusing
+// the name there too keeps the folder out of reach of any run; leaving it
+// keeps startRun's name check as it is.
+const RESET_ROOT_NAME = '.reset';
 
 // Each proof's working directory, named after the proof and reused by every
 // run of it. Created the first time, never cleared. resetConfigDir does not
@@ -302,7 +303,10 @@ export interface LiveClaudeCode {
 // - A Claude Code that has started but not yet written its pid file, and a
 //   run whose Claude Code has exited but whose harness is still copying the
 //   config directory into the run directory, have no pid file.
-// - A run can start between this check and the move.
+// - A run can start between this check and the delete.
+// With a delete these matter more than they did with a move: a reset that
+// slips through deletes files a running Claude Code is using, and a reset
+// during a run's final copy leaves that run's config-dir/ record partial.
 export function liveClaudeCodes(configDir: string): LiveClaudeCode[] {
   const sessions = join(configDir, 'sessions');
   let names: string[] = [];
@@ -331,48 +335,59 @@ export function liveClaudeCodes(configDir: string): LiveClaudeCode[] {
 
 export interface ResetResult {
   configDir: string;
-  // Where the old directory now is, whole; null when there was none.
-  movedTo: string | null;
+  // Whether an old directory was there and was deleted.
+  deleted: boolean;
 }
 
-// A clean start for one agent (Stephen, 27 Sep: "a way for an agent to
-// 'reset' their directory for a clean start / ie safely, without using rm").
-// Call it before startRun. Nothing is deleted: the agent's config directory
-// is moved aside, whole, to config-dirs/.reset/<name>-<timestamp>/, and a new
-// empty config-dirs/<name>/ takes its place. The working directory is left
-// as it is.
+// A clean start for one agent. Agents run it through the package script
+// (src/reset-config-dir.mts, `pnpm reset-config-dir <name>`), never rm by
+// hand: "deleting is fine / what i meant is, we shouldnt make the agents use
+// rm / ie they use a script to do it 'safely'" (Stephen, 27 Sep). Deletes
+// config-dirs/<name>/, whole, and makes a new empty one in its place. Each
+// run's runs/<id>/config-dir/ copy is the record of what was there. The
+// working directory is left as it is.
 //
 // Refuses when any Claude Code is still running with that directory (see
-// liveClaudeCodes), and for the names `.` and `..`, which would point at
-// config-dirs/ itself or the state folder above it.
+// liveClaudeCodes); for the names `.` and `..`, which would point at
+// config-dirs/ itself or the state folder above it; and for `.reset`, the
+// folder an earlier move-aside reset filled, which is kept. It only ever
+// deletes config-dirs/<name>/: rmSync removes a symlink itself, never what
+// it points at, and never follows links inside the directory.
+//
+// TODO: undecided. The per-run config directories from before one-per-agent,
+// config-dirs/<timestamp>-<name>/, pass the name check, so a reset under one
+// of those names deletes a directory the README says is kept. Refusing names
+// of that shape keeps those old records safe; leaving it keeps the name check
+// as simple as startRun's.
 export function resetConfigDir(name: string): ResetResult {
   checkName(name);
   if (name === '.' || name === '..') {
     throw new Error(`harness: cannot reset ${JSON.stringify(name)}: it names config-dirs/ itself or the folder above it, not an agent's config directory`);
   }
+  if (name === RESET_ROOT_NAME) {
+    throw new Error(`harness: cannot reset ${JSON.stringify(name)}: it is the folder an earlier reset moved config directories into, which is kept`);
+  }
   const configDir = join(CONFIG_DIRS_ROOT, name);
+  // The one directory a reset may delete: a direct child of config-dirs/
+  // named exactly `name`.
+  if (dirname(configDir) !== CONFIG_DIRS_ROOT || basename(configDir) !== name) {
+    throw new Error(`harness: cannot reset ${JSON.stringify(name)}: ${configDir} is not directly inside ${CONFIG_DIRS_ROOT}`);
+  }
   // TODO: undecided. A name with no config directory yet (never run) gets a
-  // new empty one and nothing is moved. The alternative is to refuse, which
+  // new empty one and nothing is deleted. The alternative is to refuse, which
   // would catch a misspelt name.
   if (!existsSync(configDir)) {
     mkdirSync(configDir, { recursive: true });
-    return { configDir, movedTo: null };
+    return { configDir, deleted: false };
   }
   const live = liveClaudeCodes(configDir);
   if (live.length > 0) {
     const which = live.map((l) => `pid ${l.pid} (${l.file}, procStart ${l.procStart}, /proc starttime ${l.starttimeNow})`).join('; ');
     throw new Error(`harness: cannot reset ${JSON.stringify(name)}: Claude Code is still running with ${configDir}: ${which}`);
   }
-  mkdirSync(RESET_ROOT, { recursive: true });
-  const movedTo = join(RESET_ROOT, `${name}-${stamp().replace(/[:.]/g, '')}`);
-  // rename(2) onto an existing empty directory replaces it, which would
-  // delete it, so an existing target is refused rather than overwritten.
-  if (existsSync(movedTo)) {
-    throw new Error(`harness: cannot reset ${JSON.stringify(name)}: ${movedTo} already exists`);
-  }
-  renameSync(configDir, movedTo);
+  rmSync(configDir, { recursive: true });
   mkdirSync(configDir);
-  return { configDir, movedTo };
+  return { configDir, deleted: true };
 }
 
 function checkName(name: string): void {
@@ -403,7 +418,7 @@ export function startRun(args: StartRunArgs): Run {
   // sessions/<pid>.json per running process, .claude.json), and a proof tests
   // Claude Code against that state as a real participant would meet it, such
   // as an orphaned Claude Code meeting a newly started one on one session.
-  // A proof that needs a clean start calls resetConfigDir(name) first.
+  // A clean start is a reset first: `pnpm reset-config-dir <name>`.
   const configDir = join(CONFIG_DIRS_ROOT, name);
   const cwd = join(WORK_ROOT, name);
   mkdirSync(dir, { recursive: true });
