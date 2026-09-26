@@ -169,9 +169,14 @@ What to check, in the run directory:
 
 - The skills the model was actually shown are in the transcript's
   `skill_listing` attachment, in
-  `config-dir/projects/<project>/<session>.jsonl`. The init message's
-  `skills` in `sdk-messages.jsonl` is a different list (the skills that are
-  also slash commands).
+  `config-dir/projects/<project>/<session>.jsonl`. The copy holds every
+  session the agent has had; the run's own is the one named by its init
+  message's `session_id` in `sdk-messages.jsonl`. The init message's `skills`
+  is a different list (the skills that are also slash commands).
+- Run 2 resumes run 1's session, so it keeps run 1's session id and appends
+  to the same transcript, and Claude Code writes no new `skill_listing` for
+  it. The listing in that transcript is run 1's; for run 2, the init
+  message's `skills` is the evidence.
 - Nothing Claude Code loaded as instructions: the transcript has no CLAUDE.md
   attachment, and the trace has no access to `~/.claude/CLAUDE.md`.
 - `grep -o "\"$HOME/[^\"]*\"" smoke.strace | sort | uniq -c` lists every
