@@ -635,6 +635,28 @@ Sources in the 2.1.282 binary (minified names):
 Earlier runs of the same scenarios, from before the removed-skill and
 plugin-shaped checks were added, are kept alongside.
 
+### An undocumented route found and not tested: MCP `skills/list`
+
+The binary (2.1.282) has a whole path for an MCP server to supply skills
+directly, unrelated to any directory: an MCP client whose server declares
+`resources` plus a nonstandard initialize extension
+(`io.modelcontextprotocol/skills`) gets asked `skills/list`, and each result
+is fetched by `resources/read` and rendered as a skill (functions named
+`mcpSkillsListModule`, `listMcpSkillPage`, and the `j` class's
+`fetchForClient` in the binary). Skill names come straight from the
+resource's `SKILL.md` frontmatter, with no server-name prefix logic anywhere
+in this path (unlike plugin skills). That would make it a config-declared
+(`Options.mcpServers`), plain-named, only-a-skill route with no directory at
+all.
+
+It is gated behind a remote feature flag read at the top of that whole path,
+`x("tengu_mcp_skills", false)` — the same account/growthbook-style flag
+mechanism as the policy flags proof 12 found (`ad()`), not a local setting
+this proof found a way to turn on. Not tested for that reason: turning it on
+isn't something a config value or environment variable in this harness can
+do, so a live run would most likely exercise nothing. Named here as a route
+Stephen should know exists, not as a result.
+
 ### Documentation, by route
 
 - User skills directory, `synced`, `syncClaudeAiSkills`: `skills.md`,
@@ -693,6 +715,43 @@ plugin-shaped checks were added, are kept alongside.
   turns... Claude Code does not re-read the skill file on later turns").
 
 ### Findings
+
+**Skill-folder-as-plugin adoption is gated by workspace trust for the
+project scope, not the user scope.** The binary's `H5e` builds skills-dir
+plugin candidates for both `userSettings` (`<CLAUDE_CONFIG_DIR>/skills`) and
+`projectSettings` (`<projectConfigRoot or cwd>/.claude/skills`) the same way.
+The caller that consumes its result (`g0n`) then drops every candidate whose
+`scope` is `"project"` unless a trust check (`GGe()`) passes:
+`r.filter((ge) => ge.scope === "project" && !GGe() ? (skip) : (keep))`. No
+run in this proof ever accepted a workspace trust dialog (unattended, no
+interactive surface), so every project-scope route's plugin-shaped entry was
+skipped for that reason specifically, not because those routes can't adopt
+one at all: this matches `skills.md`'s own statement that a project skills
+directory's plugin "requires accepting the workspace trust dialog first."
+The user scope carries no such filter, which is why `user-open`'s
+plugin-shaped entry was adopted (`p19-pluginshaped@skills-dir`, confirmed by
+`system/init.plugins`'s `source` field, run
+`runs/2026-09-26T165916088957Z-skills-plain-watch-timing`) and every
+project-scope route's was not.
+
+**A body-only edit (description unchanged) is picked up by the watcher with
+no reload call, and injected into the next invocation.** `watch-timing`
+edited `p19-a1`'s body only, to `BODY-MARKER-V2`, waited 8 s, then invoked
+`/p19-a1` with no reload call; the transcript's request bodies carry
+`BODY-MARKER-V2`. Same run,
+`runs/2026-09-26T165916088957Z-skills-plain-watch-timing`.
+
+**The watcher's post-idle switch to a slower poll can delay a change by one
+turn, even though the switch itself forces a rescan.** The watcher polls
+every 2 s while "active", drops to 30 s after 60 s with no interaction, and
+switches back to 2 s (with a forced rescan, `<skill-watcher-idle-wake>`) the
+moment a new turn starts. `watch-timing` idled 65 s, edited a skill's
+description right at that boundary, and sent the next turn with no settle:
+the debug log shows the idle→active switch and the forced rescan resolving
+within about 4 s of the edit (`17:00:33.332Z` edit, `17:00:36.947Z`
+"Loaded... skills"), but the updated `skill_listing` (`markers=["V3"]`)
+reached the transcript only on the turn *after* that one, not the one sent
+immediately after the edit — a one-turn lag, not a missed change. Same run.
 
 **User skills directory (`<CLAUDE_CONFIG_DIR>/skills` as a symlink to the
 declared directory, `userSettings` opened).**
