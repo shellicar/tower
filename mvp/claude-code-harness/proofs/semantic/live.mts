@@ -41,6 +41,9 @@ interface Scenario {
   files: Record<string, Record<string, string>>;
   steps: Step[];
   options: (model: string) => Partial<HarnessOptions>;
+  // Stamp every message the proof sends with origin { kind: 'human' }, as the
+  // SDK says a host wrapping keyboard input must.
+  stampHuman?: boolean;
 }
 
 const work = (name: string): string => join(HARNESS_STATE, 'work', name);
@@ -129,6 +132,21 @@ const SCENARIOS: Record<string, Scenario> = {
     options: () => ({
       mcpServers: { badschema: { type: 'stdio', command: process.execPath, args: [join(dirname(fileURLToPath(import.meta.url)), 'bad-schema-mcp.mjs')] } },
     }),
+  },
+  // A mid-turn message stamped as the human's: Claude Code's human-turn
+  // queued_command route (humanTurn), which folds it into the user message.
+  human: {
+    seedName: 'semantic-human',
+    resumeName: 'semantic-human',
+    files: { [work('semantic-human')]: { 'note.txt': 'GINKGO 7777' } },
+    steps: [
+      {
+        prompt: 'Run this exact Bash command, once: `sleep 8; cat note.txt`. Reply with its output only.',
+        midTurn: ['One more thing: after the output, add the word PINEAPPLE on its own line.'],
+      },
+    ],
+    options: () => ({}),
+    stampHuman: true,
   },
 };
 
@@ -258,8 +276,9 @@ class ResumeStore implements SessionStore {
 // ---------------------------------------------------------------------------
 // Driving (proof 14's drive(), with several mid-turn messages and an MCP drop)
 
+let STAMP_HUMAN = false;
 function user(text: string): SDKUserMessage {
-  return { type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null };
+  return { type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null, ...(STAMP_HUMAN ? { origin: { kind: 'human' } } : {}) };
 }
 
 async function setCwd(run: Run, path: string): Promise<Json> {
@@ -440,6 +459,7 @@ export async function seed(model: string, scenarioName: string): Promise<void> {
     throw new Error(`no scenario ${scenarioName}`);
   }
   writeFiles(scenario);
+  STAMP_HUMAN = scenario.stampHuman === true;
   const tower = await openTower();
   const convB = randomUUID();
   // A's conversation id is the session id, known at the first append.
@@ -542,6 +562,7 @@ export async function resume(model: string, source: Source, sessionId: string): 
   const seedRec = JSON.parse(readFileSync(seedPath, 'utf8')) as SeedRecord;
   const scenario = SCENARIOS[seedRec.scenario] as Scenario;
   writeFiles(scenario);
+  STAMP_HUMAN = scenario.stampHuman === true;
   const cwd = work(scenario.resumeName);
   let tower: Tower | undefined;
   let load: ResumeStore['source'];

@@ -15,7 +15,7 @@ export const RULES: Record<string, string> = {
   R2: 'Main-thread user entries become a user message; consecutive user entries merge into one. (code: Pw case "user", SM merge into BD(Qt) when it is a user message; observed)',
   R3: 'In a user message, tool_result blocks come first. (code: i5t puts tool_result blocks ahead of the rest; observed)',
   R4: 'Attachment types session_context, instructions, remote_session_change, dir_sync_notice, unknown_command_fallback, coordinator_context, context_sections, fork_briefing, poll_events, cowork_memory_context, artifact_opening_prefetch fold into the user message; with system turns every other attachment with rendered text goes to the system buffer. (code: the type list in Pw case "attachment", guarded by w = iee(model))',
-  R5: 'A queued_command goes to the system buffer unless it is a human-turn prompt (humanTurn true, commandMode "prompt", not isMeta, not forwarded), which folds into the user message. (code: Pw `Ts` path and the queued_command exclusions; only the system case observed)',
+  R5: 'A queued_command goes to the system buffer unless it is a human-turn prompt (humanTurn true, commandMode "prompt", not isMeta, not forwarded), which joins the user message as plain text, its <system-reminder> wrapper stripped. humanTurn is set only when the host stamps origin {kind:"human"}. (code: Pw `Ts`/`To` path, owe, SM merge; mOe sets humanTurn; observed both routes: seed main, seed human)',
   R6: 'Folded attachment reminders sit ahead of every user entry\'s text in the user message; user entries\' texts (isMeta or not) keep record order. (observed: session_context and remote_session_change before the prompt although written after it; the cwd notice before the prompt and the skill body after the command message, both in record order; the code pass that moves them was not pinned down)',
   R7: 'The system buffer becomes one role "system" message after the user message, one text block, each reminder its `rendered` text, joined by a blank line. (observed; code: $o flush, SUe unwrap and join, per-reminder rewrap for claude-sonnet-5 via AWn)',
   R8: 'The system buffer is flushed before the next assistant message, so each request carries at most one system message after its user message. (code: $o called from case "assistant" and at the end)',
@@ -107,6 +107,7 @@ interface Piece {
   entry: Json;
   kind: 'tool' | 'reminder' | 'prompt';
   blocks: Block[];
+  unwrapped?: boolean;
 }
 
 export interface Prediction {
@@ -139,6 +140,12 @@ export function predict(pending: Json[], s: FoldSettings): Prediction {
     const att = e.attachment as Json;
     const texts = renderedTexts(e) ?? [];
     used.add('R11');
+    if (s.systemTurns && queuedFoldsIntoUser(att)) {
+      // R5: merged as the user's own text, wrapper stripped (owe).
+      used.add('R5');
+      pieces.push({ entry: e, kind: 'prompt', blocks: texts.map((t) => ({ type: 'text', text: unwrap(t) })), unwrapped: true });
+      continue;
+    }
     if (goesToSystem(att, s)) {
       used.add(att.type === 'queued_command' ? 'R5' : 'R4');
       system.push({ entry: e, texts });
@@ -195,7 +202,7 @@ export function predict(pending: Json[], s: FoldSettings): Prediction {
           }
         }
         content.push(b);
-        const span: Span = { block: content.length - 1 };
+        const span: Span = { block: content.length - 1, ...(p.unwrapped ? { unwrapped: true } : {}) };
         owner.push({ entry: p.entry, span });
         spans.set(p.entry, [...(spans.get(p.entry) ?? []), span]);
       });

@@ -124,9 +124,10 @@ export function attribute(body: { messages: ApiMessage[] }, pending: Json[]): At
               best = { e: c, start: at, length: t.length };
             }
             // Sent without its <system-reminder> wrapper (other models'
-            // system messages): found only by knowing Claude Code strips it.
+            // system messages, a human-turn queued_command): found only by
+            // knowing Claude Code strips it.
             const bare = unwrap(t);
-            const atBare = bare !== t && msg.role === 'system' ? text.indexOf(bare, pos) : -1;
+            const atBare = bare !== t ? text.indexOf(bare, pos) : -1;
             if (atBare >= 0 && (best === undefined || atBare < best.start)) {
               best = { e: c, start: atBare, length: bare.length, unwrapped: true };
             }
