@@ -231,7 +231,12 @@ node proofs/recovery.mts case <model> kill-orphan fresh
 Each `runs/<ts>-recovery-<case>-<variant>/` has `driver-log.txt`,
 `ending.json`, `keeper.jsonl`, `seen/`, `result.json` and one directory per
 participant (`spec.json`, `participant-log.txt`, `check-<tag>.json`, and for
-a serve that asks, `score.json` and `first-request-<tag>.json`). The store is
+a serve that asks, `score.json`, `first-request-<tag>.json` and
+`rescore.json`). Read `rescore.json` for whether the resume carried the
+last-written entries: it matches by content, while `score.json`'s
+`inRequest` is a substring test that a synthetic tool result or a prompt
+saying "reply DONE" passes. `node proofs/recovery.mts --rescore <case dir>`
+redoes it. The store is
 `~/.local/state/tower-claude-code-harness/stores/proof-17-recovery/`. The
 reboot cases delete only the resume dirs that hold their own sessions, not
 every `/tmp/claude-resume-*`, because other sessions on the machine use them.

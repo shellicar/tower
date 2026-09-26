@@ -38,7 +38,9 @@
 //       once, then this case's resume dirs deleted. reboot-later: the same
 //       after the orphans have finished on their own.
 //
-//   --analyse <case dir>
+//   --rescore <case dir> [...]
+//       Rescores each serve's last-written entries against its first request
+//       by content (rescore.json); also run at the end of every case.
 //
 // TODO: undecided. Where the store lives. Built: one JSONL file per session
 // key under STORE_DIR (a file store, as proof 7), the easiest that resumes.
@@ -1126,6 +1128,78 @@ function fingerprint(e: Json): string | null {
   return null;
 }
 
+// Whether an entry is carried by a request, by content: an assistant's last
+// text block must be one of the request's assistant text blocks; a
+// tool_result must match on tool_use_id AND content (the synthetic "[Tool
+// call interrupted...]" result carries the same id); a tool_use by id; a user
+// text by its text. The fingerprint column (fp/inRequest) in score.json is a
+// substring test that a synthetic result or a prompt saying "reply DONE"
+// passes, so rescore.json is the one to read.
+function flat(c: unknown): string {
+  if (typeof c === 'string') {
+    return c;
+  }
+  if (Array.isArray(c)) {
+    return c.map((b: Json) => (typeof b.text === 'string' ? b.text : '')).join('');
+  }
+  return JSON.stringify(c ?? null);
+}
+
+function carried(e: Json, req: Json): { what: string; carried: boolean | null } {
+  const msgs = (req.messages as Json[]) ?? [];
+  const blocks = (role: string): Json[] => msgs.filter((m) => m.role === role && Array.isArray(m.content)).flatMap((m) => m.content as Json[]);
+  const content = (e.message as Json | undefined)?.content;
+  if (e.type === 'assistant' && Array.isArray(content)) {
+    const texts = (content as Json[]).filter((b) => b.type === 'text' && String(b.text).trim() !== '');
+    if (texts.length > 0) {
+      const t = String(texts.at(-1)?.text);
+      return { what: `assistant text "${t.slice(0, 30).replace(/\n/g, ' ')}"`, carried: blocks('assistant').some((b) => b.type === 'text' && b.text === t) };
+    }
+    const use = (content as Json[]).find((b) => b.type === 'tool_use');
+    if (use) {
+      return { what: 'assistant tool_use', carried: blocks('assistant').some((b) => b.type === 'tool_use' && b.id === use.id) };
+    }
+    return { what: 'assistant thinking only', carried: null };
+  }
+  if (e.type === 'user' && Array.isArray(content) && (content as Json[]).some((b) => b.type === 'tool_result')) {
+    const r = (content as Json[]).find((b) => b.type === 'tool_result') as Json;
+    return { what: `tool_result "${flat(r.content).slice(0, 30)}"`, carried: blocks('user').some((b) => b.type === 'tool_result' && b.tool_use_id === r.tool_use_id && flat(b.content) === flat(r.content)) };
+  }
+  const t = flat(content);
+  return { what: `user "${t.slice(0, 30).replace(/\n/g, ' ')}"`, carried: JSON.stringify(req).includes(JSON.stringify(t).slice(1, -1)) };
+}
+
+// Rescore every serve in a case dir from its score.json, the kept transcript
+// copies and the saved first request. Writes <serve>/rescore.json.
+function rescore(caseDir: string): void {
+  const byUuid = new Map<string, Json>();
+  for (const n of readdirSync(join(caseDir, 'seen')).filter((x) => x.endsWith('.jsonl'))) {
+    for (const e of readJsonl(join(caseDir, 'seen', n))) {
+      if (typeof e.uuid === 'string') {
+        byUuid.set(e.uuid, e);
+      }
+    }
+  }
+  for (const serve of subdirs(caseDir)) {
+    const scoreFile = join(serve, 'score.json');
+    if (!existsSync(scoreFile)) {
+      continue;
+    }
+    const out: Json[] = [];
+    for (const row of JSON.parse(readFileSync(scoreFile, 'utf8')) as Json[]) {
+      const reqFile = join(serve, `first-request-${String(row.tag)}.json`);
+      const req = existsSync(reqFile) ? (JSON.parse(readFileSync(reqFile, 'utf8')) as Json) : undefined;
+      const lastWritten = (row.lastWritten as Json[]).map((f) => {
+        const e = byUuid.get(String(f.uuid));
+        return e && req ? { uuid: f.uuid, at: f.at, ...carried(e, req) } : { uuid: f.uuid, at: f.at, what: String(f.what), carried: null };
+      });
+      out.push({ tag: row.tag, lastWritten, answer: row.answer });
+      process.stdout.write(`${basename(caseDir)} ${basename(serve)} ${String(row.tag)}: ${lastWritten.map((l) => `${l.what}=${l.carried}`).join('; ')}\n`);
+    }
+    writeFileSync(join(serve, 'rescore.json'), `${JSON.stringify(out, null, 2)}\n`);
+  }
+}
+
 // The first main-loop request Claude Code sent (query_source "sdk"), as text.
 function firstRequest(bodies: string): string | null {
   if (!bodies || !existsSync(join(bodies, 'index.jsonl'))) {
@@ -1319,6 +1393,7 @@ async function runCase(model: string, name: CaseName, variant: 'fresh' | 'resume
   const rows = await serveAgain(caseDir, name === 'kill-orphan' ? '3-serve-after-orphan' : name === 'kill-twice' ? '3-serve' : '2-serve', model, { ...sids }, keeper, log);
   keeper.stop();
   writeFileSync(join(caseDir, 'result.json'), `${JSON.stringify({ ending, orphanServe, serve: rows }, null, 2)}\n`);
+  rescore(caseDir);
   log('case done');
 }
 
@@ -1326,7 +1401,11 @@ async function runCase(model: string, name: CaseName, variant: 'fresh' | 'resume
 
 const [mode, ...rest] = process.argv.slice(2);
 const CASES = ['press1', 'press2', 'press3', 'kill', 'kill-orphan', 'crash', 'claude-kill', 'abort', 'reboot', 'reboot-later', 'kill-twice'];
-if (mode === 'participant' && rest[0]) {
+if (mode === '--rescore') {
+  for (const d of rest) {
+    rescore(d);
+  }
+} else if (mode === 'participant' && rest[0]) {
   await participant(rest[0]);
 } else if (mode === 'case' && rest[0] && CASES.includes(rest[1] ?? '') && (rest[2] === 'fresh' || rest[2] === 'resumed')) {
   await runCase(rest[0], rest[1] as CaseName, rest[2]);
