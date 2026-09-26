@@ -39,7 +39,7 @@ import { startRun } from '../src/harness.mts';
 import { redact, stamp } from '../src/record.mts';
 
 const [model, scenario] = process.argv.slice(2);
-const SCENARIOS = ['user-closed', 'user-open', 'user-open-late', 'user-open-links', 'user-open-nosync', 'managed', 'project-adddir', 'project-config-root-open', 'canusetool-closed', 'canusetool-open', 'register-root-open', 'bare-adddir', 'bare-adddir-closed'];
+const SCENARIOS = ['user-closed', 'user-open', 'user-open-late', 'user-open-links', 'user-open-nosync', 'managed', 'project-adddir', 'project-config-root-open', 'watch-timing', 'canusetool-closed', 'canusetool-open', 'register-root-open', 'bare-adddir', 'bare-adddir-closed'];
 if (!model || !scenario || !SCENARIOS.includes(scenario)) {
   process.stderr.write(`usage: node proofs/skills-plain.mts <model> <${SCENARIOS.join('|')}>\n`);
   process.exit(2);
