@@ -169,3 +169,30 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 9: resuming from tower's NATS spec
+
+`proofs/resume-spec.mts` publishes what Claude Code commits onto tower's own
+subjects, shaped by `docs/spec/conversation.md` (`changes.message`,
+`changes.query`, `telemetry.usage`, each checked against a hand transcription
+of the spec's schemas before it is published), on the test broker
+(127.0.0.1:31416) into the streams `mvp/stream-init.sh` sets up. It then
+resumes through a `sessionStore` whose `load()` rebuilds the transcript from
+those subjects (NATS only) or from them plus a local file holding every other
+entry (hybrid). It publishes at two grains, one tower message per transcript
+entry or per API message, because which is right isn't decided. Modes,
+builds and the undecided choices are described at the top of the file.
+
+The local file and seed records live under
+`~/.local/state/tower-claude-code-harness/proof-9/`, kept. Beyond the
+harness's own files, a run directory holds:
+
+| Path | What |
+| --- | --- |
+| `published.jsonl` | every message published onto tower: stream sequence, subject, body |
+| `store-appends.jsonl` | every `append()` call with its entries |
+| `store-load.jsonl` | what `load()` read from tower and returned, entry by entry |
+| `loaded-entries.jsonl` | the exact entries `load()` returned |
+| `seed.json`, `resume.json` | what the run was |
+| `api-bodies/` | request and response bodies (`OTEL_LOG_RAW_API_BODIES`, as proof 1), redacted |
+| `summary.txt` | the published record, answers, and the first request after resume against the seed's context; for a seed, the published record against what the model saw |
