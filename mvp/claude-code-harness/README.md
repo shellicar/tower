@@ -145,3 +145,27 @@ What to check, in the run directory:
   attachment, and the trace has no access to `~/.claude/CLAUDE.md`.
 - `grep -o "\"$HOME/[^\"]*\"" smoke.strace | sort | uniq -c` lists every
   path under `$HOME` the run touched.
+
+## Proof 1: summarised thinking
+
+`proofs/thinking.mts <model> <scenario> [NAME=value ...]` runs one scenario
+on one model, streaming (`includePartialMessages`). The scenarios
+(`summarized`, `omitted`, `none`, `long`, `long-summarized`, `tools`,
+`setting`, `switch`) are described at the top of the file. Trailing
+`NAME=value` pairs are added to Claude Code's environment.
+
+What was requested of the API is not visible between the SDK and the binary,
+so the proof sets `OTEL_LOG_RAW_API_BODIES=file:<dir>`, Claude Code's own
+request/response body log (no proxy), and `debugFile`. Both are copied,
+redacted, into the run directory:
+
+| Path | What |
+| --- | --- |
+| `api-bodies/index.jsonl` | one line per API call: query source, model, request and response file names |
+| `api-bodies/*.request.json` | each request body as sent, including `thinking` and `betas`; earlier assistant thinking text replaced with `<REDACTED>` by Claude Code |
+| `api-bodies/*.response.json` | each response, assembled; thinking text replaced with `<REDACTED>` |
+| `debug.log` | Claude Code's debug log |
+
+The proof prints, per turn, the thinking stream events and assistant thinking
+blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
+each request's `thinking` and `betas`.
