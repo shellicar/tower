@@ -93,7 +93,9 @@ const SCENARIOS: Record<string, Scenario> = {
 
 const RESUME_STEPS: Step[] = [{ prompt: 'Reply with the word OK only.' }];
 
-export const SOURCES = ['full', 'A', 'A-silent', 'A-silent-sc'] as const;
+// A-types: only the no-block entries of the types in PROOF20_SILENT_TYPES
+// (comma-separated), to find which ones a resume needs.
+export const SOURCES = ['full', 'A', 'A-silent', 'A-silent-sc', 'A-types'] as const;
 export type Source = (typeof SOURCES)[number];
 
 const short = (model: string): string => model.replace(/^claude-/, '').replace(/[^A-Za-z0-9]/g, '');
@@ -562,7 +564,7 @@ export async function resume(model: string, source: Source, sessionId: string): 
     const t = await openTower();
     tower = t;
     // -silent: every no-block attachment; -silent-sc: only session_context.
-    const withSilent = source === 'A-silent' ? true : source === 'A-silent-sc' ? new Set(['session_context']) : false;
+    const withSilent = source === 'A-silent' ? true : source === 'A-silent-sc' ? new Set(['session_context']) : source === 'A-types' ? new Set((process.env.PROOF20_SILENT_TYPES ?? '').split(',').filter((t) => t !== '')) : false;
     load = async (key) => {
       if (key.subpath) {
         return { entries: null, detail: { source, note: 'subagent transcript: nothing on tower for it' } };
@@ -594,7 +596,7 @@ export async function resume(model: string, source: Source, sessionId: string): 
     r.attach(run.dir);
   }
   const log = makeLog(logRec);
-  writeFileSync(join(run.dir, 'resume.json'), `${JSON.stringify({ source: noFaultEnv ? `${source}-no-fault-env` : source, model, firstDelayMs, cwd: run.cwd, sessionId, seedRun: seedRec.seedRun, upto: seedRec.upto, reset, faultEnv: !noFaultEnv }, null, 2)}\n`);
+  writeFileSync(join(run.dir, 'resume.json'), `${JSON.stringify({ source: noFaultEnv ? `${source}-no-fault-env` : source === 'A-types' ? `A-types:${process.env.PROOF20_SILENT_TYPES ?? ''}` : source, model, firstDelayMs, cwd: run.cwd, sessionId, seedRun: seedRec.seedRun, upto: seedRec.upto, reset, faultEnv: !noFaultEnv }, null, 2)}\n`);
   log(`run dir: ${run.dir}; resume ${source}; session ${sessionId}; reset ${reset}`);
   const d: Drive = { armed: undefined, trigger: () => {} };
   await drive(run, RESUME_STEPS, log, events, d, () => {}, firstDelayMs);
