@@ -6,7 +6,7 @@
 // the prompt cache. This proof tries each documented way of keeping them out
 // and measures, per way, a seed conversation and its resume.
 //
-//   node proofs/connectors.mts <model> <way> [preset]
+//   node proofs/connectors.mts <model> <way> [preset] [all-tools] [dummy-mcp]
 //   node proofs/connectors.mts --compare <run dir A> <run dir B> [<i A> <i B>]
 //       (the i-th main-thread request of each, from 0; default the first)
 //   node proofs/connectors.mts --table <run dir> ...
@@ -60,7 +60,15 @@
 //     proof 14), or with a trailing `preset` argument Claude Code's
 //     claude_code preset, to see what the connectors change in it.
 //   - Tools: none of Claude Code's own (tools: []), so each turn is one
-//     request and the only tools are whatever MCP servers attach. Thinking
+//     request and the only tools are whatever MCP servers attach. With
+//     tools: [] there is no ToolSearch, so MCP tools join the tools array
+//     itself. `all-tools` leaves `tools` unset (Claude Code's default set,
+//     ToolSearch included), for the other shape: the MCP docs say that
+//     with tool search on, MCP tools are deferred and a server that
+//     connects later has its tool names listed on the next request.
+//   - `dummy-mcp` passes one stdio server of the proof's own
+//     (proofs/dummy-mcp.mjs) through mcpServers, to see which ways also keep
+//     a passed server out. Thinking
 //     left unset (Claude Code's own default).
 //   - The resume transport: an in-process session store, proof 14's `full`
 //     source without NATS.
@@ -242,18 +250,27 @@ async function drive(run: Run, prompts: string[], before: (() => Promise<void>) 
   }
 }
 
-async function oneRun(model: string, way: Way, preset: boolean, role: 'seed' | 'resume', store: ProofStore, extra: Json, prompts: string[], resume?: string): Promise<Run> {
+interface Flags {
+  preset: boolean;
+  allTools: boolean;
+  dummyMcp: boolean;
+}
+
+const HERE = new URL('.', import.meta.url).pathname;
+
+async function oneRun(model: string, way: Way, flags: Flags, role: 'seed' | 'resume', store: ProofStore, extra: Json, prompts: string[], resume?: string): Promise<Run> {
   const bodies = join(STATE, `${stamp().replace(/[:.]/g, '')}-${way}-${role}`);
   mkdirSync(bodies, { recursive: true });
   const w = wayOptions(way);
   const options: HarnessOptions = {
     model,
-    tools: [],
+    ...(flags.allTools ? {} : { tools: [] }),
+    ...(flags.dummyMcp ? { mcpServers: { tower_dummy: { type: 'stdio', command: process.execPath, args: [join(HERE, 'dummy-mcp.mjs')] } } } : {}),
     includePartialMessages: true,
     sessionStore: store,
     sessionStoreFlush: 'eager',
     debugFile: join(bodies, 'debug.log'),
-    ...(preset ? { systemPrompt: { type: 'preset', preset: 'claude_code' } as const } : {}),
+    ...(flags.preset ? { systemPrompt: { type: 'preset', preset: 'claude_code' } as const } : {}),
     ...w.options,
     ...(resume ? { resume } : {}),
     env: { ...process.env, ...w.env, OTEL_LOG_RAW_API_BODIES: `file:${bodies}` },
@@ -263,7 +280,7 @@ async function oneRun(model: string, way: Way, preset: boolean, role: 'seed' | '
   store.loads.attach(run.dir);
   const events = new Recorder('proof-events.jsonl');
   events.attach(run.dir);
-  writeFileSync(join(run.dir, 'proof.json'), `${JSON.stringify({ way, role, preset, wayEnv: Object.keys(w.env), wayOptions: w.options, bodies, ...extra }, null, 2)}\n`);
+  writeFileSync(join(run.dir, 'proof.json'), `${JSON.stringify({ way, role, ...flags, wayEnv: Object.keys(w.env), wayOptions: w.options, bodies, ...extra }, null, 2)}\n`);
   log(`${role} run dir: ${run.dir}`);
   await drive(run, prompts, way === 'toggle' ? () => toggleOff(run, events) : undefined);
   try {
@@ -287,10 +304,10 @@ async function oneRun(model: string, way: Way, preset: boolean, role: 'seed' | '
   return run;
 }
 
-async function seedAndResume(model: string, way: Way, preset: boolean): Promise<void> {
+async function seedAndResume(model: string, way: Way, flags: Flags): Promise<void> {
   const nonce = randomUUID();
   const seedStore = new ProofStore(null);
-  const seed = await oneRun(model, way, preset, 'seed', seedStore, { nonce }, [
+  const seed = await oneRun(model, way, flags, 'seed', seedStore, { nonce }, [
     `Nonce ${nonce}. Ignore the nonce. Without using any tool: how many integers from 1 to 300 are divisible by 3 or by 5 but not by 7? Reply with the number only.`,
     `Ignore the reference lines below.\n\n${PADDING}\n\nWithout using any tool: how many from 1 to 600? Reply with the number only.`,
     'Without using any tool: how many from 1 to 900? Reply with the number only.',
@@ -301,7 +318,7 @@ async function seedAndResume(model: string, way: Way, preset: boolean): Promise<
   }
   log(`seed session ${sessionId}; ${seedStore.main.length} main-thread entries`);
   const resumeStore = new ProofStore(seedStore.main);
-  await oneRun(model, way, preset, 'resume', resumeStore, { nonce, sessionId, seedRun: seed.dir }, ['Reply with the word OK only.'], sessionId);
+  await oneRun(model, way, flags, 'resume', resumeStore, { nonce, sessionId, seedRun: seed.dir }, ['Reply with the word OK only.'], sessionId);
 }
 
 // ---------------------------------------------------------------------------
@@ -493,7 +510,7 @@ function table(dirs: string[]): string {
       const u = usage(r);
       return `tools=${toolNames(r).length} r${String(u.cache_read)}/w${String(u.cache_write)}/i${String(u.input)}`;
     });
-    rows.push(`${String(proof.way).padEnd(11)} ${proof.preset ? 'preset ' : 'minimal'} ${String(proof.role).padEnd(6)} fetch=${fetched ? 'yes' : 'no '} inits.claudeai=[${claudeai.join(' ')}] ${reqs.join('  ')}  ${d.split('/').pop()}`);
+    rows.push(`${String(proof.way).padEnd(11)} ${proof.preset ? 'preset ' : 'minimal'}${proof.allTools ? '+all-tools' : ''}${proof.dummyMcp ? '+dummy' : ''} ${String(proof.role).padEnd(6)} fetch=${fetched ? 'yes' : 'no '} inits.claudeai=[${claudeai.join(' ')}] ${reqs.join('  ')}  ${d.split('/').pop()}`);
   }
   return `${rows.join('\n')}\n`;
 }
@@ -507,9 +524,9 @@ if (first === '--compare' && (rest.length === 2 || rest.length === 4)) {
   process.stdout.write(table(rest));
 } else if (first === '--summarise' && rest.length === 1) {
   process.stdout.write(summarise(rest[0]));
-} else if (first && WAYS.includes(rest[0] as Way) && (rest[1] === undefined || rest[1] === 'preset')) {
-  await seedAndResume(first, rest[0] as Way, rest[1] === 'preset');
+} else if (first && WAYS.includes(rest[0] as Way) && rest.slice(1).every((f) => ['preset', 'all-tools', 'dummy-mcp'].includes(f))) {
+  await seedAndResume(first, rest[0] as Way, { preset: rest.includes('preset'), allTools: rest.includes('all-tools'), dummyMcp: rest.includes('dummy-mcp') });
 } else {
-  process.stderr.write(`usage:\n  node proofs/connectors.mts <model> <${WAYS.join('|')}> [preset]\n  node proofs/connectors.mts --compare <run dir A> <run dir B> [<i A> <i B>]\n  node proofs/connectors.mts --table <run dir> ...\n  node proofs/connectors.mts --summarise <run dir>\n`);
+  process.stderr.write(`usage:\n  node proofs/connectors.mts <model> <${WAYS.join('|')}> [preset] [all-tools] [dummy-mcp]\n  node proofs/connectors.mts --compare <run dir A> <run dir B> [<i A> <i B>]\n  node proofs/connectors.mts --table <run dir> ...\n  node proofs/connectors.mts --summarise <run dir>\n`);
   process.exit(2);
 }
