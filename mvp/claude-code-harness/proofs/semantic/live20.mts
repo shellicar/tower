@@ -80,6 +80,19 @@ const SCENARIOS: Record<string, Scenario> = {
     ],
     options: { tools: ['Bash', 'Agent'], allowedTools: ['Bash', 'Agent'] },
   },
+  // Haiku, problem 4: a Read result (its content ends in whitespace, which
+  // the fold into the tool result trims) with a mid-turn message folded in.
+  read: {
+    files: { 'note.txt': 'BIRCH 2020' },
+    steps: [
+      {
+        prompt: 'Use the Read tool to read note.txt. Then run this exact Bash command, once: `sleep 6; echo done`. Reply with the file contents and the command output, nothing else.',
+        midTurn: ['One more thing: after the output, add the word PINEAPPLE on its own line.'],
+      },
+      { prompt: 'Reply with the word OK only.' },
+    ],
+    options: { tools: ['Read', 'Bash'], allowedTools: ['Read', 'Bash'] },
+  },
   // The output limit (proof 6's max-tokens-hit): Claude Code's "Output token
   // limit hit" meta messages, and thinking-only responses dropped from the
   // history.
