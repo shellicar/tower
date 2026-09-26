@@ -635,6 +635,63 @@ Sources in the 2.1.282 binary (minified names):
 Earlier runs of the same scenarios, from before the removed-skill and
 plugin-shaped checks were added, are kept alongside.
 
+### Documentation, by route
+
+- User skills directory, `synced`, `syncClaudeAiSkills`: `skills.md`,
+  "Choose where skills load" ("Reserved name `synced`: don't name a skill
+  folder `synced`... Claude Code uses `~/.claude/skills/synced/` for skills
+  downloaded from claude.ai") and "Where synced skills load"; the setting
+  itself in `settings-reference.md` ("Claude Code honors only `false`: `true`
+  is the same as unset").
+- Skill folder adopted as a plugin (`<name>@skills-dir`): `skills.md`,
+  "Choose where skills load" ("add a `.claude-plugin/plugin.json` to a skill
+  folder and it loads as a plugin"). Which locations qualify:
+  `plugins/loading.md`, "Find where a plugin came from" names only
+  `~/.claude/skills/` and the project's `.claude/skills/`; managed and
+  `--add-dir` are not named there or in `plugins/manifest-reference.md`,
+  matching this proof's own result (adopted under the user route, not under
+  managed, `--add-dir` or `register_repo_root`). Project-scope plugins from a
+  skills directory need the workspace trust dialog and don't search parent
+  directories, per the same page.
+- `register_repo_root`: documented only as a `DirectoryAdded` hook source
+  (`hooks.md`, "DirectoryAdded"; `agent-sdk/typescript.md`,
+  `DirectoryAddedHookInput.source`), not as a public SDK method, and no page
+  states whether it loads the registered directory's skills. This proof's
+  own run is the answer: it did (plain names, on the next turn).
+- `CLAUDE_CODE_DISABLE_CLAUDE_MDS`: `env-vars.md` ("prevent loading any
+  CLAUDE.md memory files into context"). It says nothing about skills; this
+  proof used it only to keep the CLAUDE.md ancestor walk off while
+  `projectSettings` was open, not to affect skill loading.
+- `--bare` and authentication: `headless.md`, "Start faster with bare mode"
+  ("bare mode doesn't use your subscription login... never reads OAuth
+  credentials or the system keychain... set `ANTHROPIC_API_KEY`... or supply
+  an `apiKeyHelper`"). The harness's shared login is exactly what bare mode
+  bypasses, which is why `bare-adddir` never got past "Not logged in".
+- `canUseTool`'s `addDirectories` (any destination, including `session`):
+  documented only as "Adds working directories" (`hooks.md`, "Permission
+  update entries"); no page connects it to skill loading. This proof's own
+  run is the answer: it did not load skills, matching the doc's silence.
+- `projectConfigRoot`: `agent-sdk/typescript.md`'s options table states
+  directly that skills (with commands, agents, workflows, output styles)
+  load from `<projectConfigRoot>/.claude/skills` instead of `cwd`, and that
+  CLAUDE.md is the one exception that still comes from `cwd` (why the
+  CLAUDE.md guard was still needed here). Requires Claude Code v2.1.275+.
+- Removal notice and delta vs. full listing: `skills.md`, "Edit a skill
+  during a session" and "Remove a skill" say a removed skill drops from
+  `/skills` and stops being invocable, not that the model is told it was
+  removed as such — undocumented either way. "Skill descriptions are cut
+  short" describes the listing as always carrying every skill's name, which
+  reads as a full list each time, not a diff; `reloadSkills()`'s own response
+  is explicitly the full post-reload set (`SDKControlReloadSkillsResponse`).
+  This proof's own transcripts show the live-reload listing as a delta (only
+  the changed names, `isInitial: false`) and `reloadSkills()`'s as a full
+  list (`isInitial: true`) — the SDK's own delta behaviour is this proof's
+  finding, not documented.
+- Skill content, once injected by an invocation, is not re-read or revoked:
+  `skills.md`, "Skill content lifecycle" ("the rendered SKILL.md content
+  enters the conversation as a single message and stays there across later
+  turns... Claude Code does not re-read the skill file on later turns").
+
 ### Findings
 
 **User skills directory (`<CLAUDE_CONFIG_DIR>/skills` as a symlink to the
