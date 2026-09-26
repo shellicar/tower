@@ -1052,6 +1052,17 @@ interface Tracked extends Known {
   addedAt: string;
   goneAt: string | null;
   goneT: number | null;
+  // Its thread ids, as last listed: strace -f names a signal by the thread
+  // it was delivered to, which for a process-directed signal can be any.
+  tids: number[];
+}
+
+function tidsOf(pid: number): number[] {
+  try {
+    return readdirSync(`/proc/${pid}/task`).map(Number);
+  } catch {
+    return [];
+  }
 }
 
 class ProcWatch {
@@ -1066,7 +1077,7 @@ class ProcWatch {
     if (!s || s.state === 'Z' || s.state === 'X') {
       return;
     }
-    this.tracked.set(pid, { pid, starttime: s.starttime, role, cmd: cmdline(pid).slice(0, 120), addedAt: stamp(), goneAt: null, goneT: null });
+    this.tracked.set(pid, { pid, starttime: s.starttime, role, cmd: cmdline(pid).slice(0, 120), addedAt: stamp(), goneAt: null, goneT: null, tids: tidsOf(pid) });
   }
   addTree(pid: number, role: string): void {
     for (const d of descendants(pid)) {
@@ -1083,6 +1094,9 @@ class ProcWatch {
     }
     if (this.ticks % 5 === 0) {
       for (const t of [...this.tracked.values()]) {
+        if (t.goneAt === null) {
+          t.tids = [...new Set([...t.tids, ...tidsOf(t.pid)])];
+        }
         if (t.goneAt === null && t.role.startsWith('claude') && !t.role.endsWith('descendant')) {
           this.addTree(t.pid, t.role);
         }
@@ -1556,7 +1570,7 @@ async function runCase(model: string, name: CaseName, variant: Variant): Promise
     started: existsSync(join(WORK, `wait-${toolLabel}-started.txt`)) ? readFileSync(join(WORK, `wait-${toolLabel}-started.txt`), 'utf8').trim() : null,
     finished: existsSync(join(WORK, `wait-${toolLabel}-finished.txt`)) ? readFileSync(join(WORK, `wait-${toolLabel}-finished.txt`), 'utf8').trim() : null,
   };
-  const timings = [...pw.tracked.values()].map((t) => ({ pid: t.pid, role: t.role, cmd: t.cmd, goneAt: t.goneAt, msAfterParticipantExit: t.goneT === null ? null : t.goneT - pex.t }));
+  const timings = [...pw.tracked.values()].map((t) => ({ pid: t.pid, role: t.role, cmd: t.cmd, goneAt: t.goneAt, msAfterParticipantExit: t.goneT === null ? null : t.goneT - pex.t, tids: t.tids }));
   ending.stillAliveAtEnd = pw.alive().map((t) => [t.pid, t.role, t.cmd.slice(0, 60)]);
   log(`timings after participant exit (ms): ${JSON.stringify(timings.map((t) => [t.pid, t.role, t.cmd.slice(0, 30), t.msAfterParticipantExit]))}; tool ${JSON.stringify(tool)}`);
   writeFileSync(join(caseDir, 'result.json'), `${JSON.stringify({ ending, timings, tool, heldSentAt, ours, serve2: serve2.rows, serve3: serve3.rows }, null, 2)}\n`);
