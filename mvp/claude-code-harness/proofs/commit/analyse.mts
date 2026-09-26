@@ -456,7 +456,7 @@ function analyseCell(row: Json, out: string[], summary: Json[]): void {
       out.push(`  continues the server-side thread from ${k.previous}: ${k.continues}`);
     }
     out.push(`  prompt: ${k.prompt}; thinking kept: ${k.thinkingSigs.length}; reply text kept: ${k.textChars}ch; tool_use kept: ${k.toolUses.length}; tool_results: ${k.toolResults.length}; markers: ${JSON.stringify(k.markers)}`);
-    keptSummary[label] = { continues: k.continues ?? null, prompt: k.prompt, thinking: k.thinkingSigs.length, textChars: k.textChars, toolUses: k.toolUses.length, toolResults: k.toolResults, markers: k.markers, thread: k.thread, file: `${k.run}/api-bodies/${k.file}` };
+    keptSummary[label] = { lines: k.lines, continues: k.continues ?? null, prompt: k.prompt, thinking: k.thinkingSigs.length, textChars: k.textChars, toolUses: k.toolUses.length, toolResults: k.toolResults, markers: k.markers, thread: k.thread, file: `${k.run}/api-bodies/${k.file}` };
   }
   // Written vs streamed, for the reply.
   const wroteThinking = w.lines.filter((l) => l.entry.type === 'assistant' && Array.isArray(l.entry.content) && (l.entry.content as Json[]).some((b) => b.type === 'thinking')).length;
@@ -477,7 +477,8 @@ function analyseCell(row: Json, out: string[], summary: Json[]): void {
     }
   }
   out.push('');
-  summary.push({ cell, model, main: main.dir, aimed: trig?.ending ?? null, method: trig?.method ?? null, actual: st.actual, streamedThinking, streamedText, wroteThinking, wroteText, missingFromStore: missing.length, kept: keptSummary, signals: Object.fromEntries(Object.entries(sig).map(([k, v]) => [k, v === undefined ? null : Math.round((v - stepFrom) * 10) / 10])), promptRef: promptRef === undefined ? null : Math.round((promptRef - stepFrom) * 10) / 10, replyRef: replyRef === undefined ? null : Math.round((replyRef - stepFrom) * 10) / 10 });
+  const wroteLines = w.lines.filter((l) => !NOISE.has(String(l.entry.type)) && l.entry.attachment === undefined).map((l) => entryLine(l.entry));
+  summary.push({ cell, model, main: main.dir, aimed: trig?.ending ?? null, method: trig?.method ?? null, actual: st.actual, streamedAfterStop: st.after, wrote: wroteLines, streamedThinking, streamedText, wroteThinking, wroteText, missingFromStore: missing.length, kept: keptSummary, signals: Object.fromEntries(Object.entries(sig).map(([k, v]) => [k, v === undefined ? null : Math.round((v - stepFrom) * 10) / 10])), promptRef: promptRef === undefined ? null : Math.round((promptRef - stepFrom) * 10) / 10, replyRef: replyRef === undefined ? null : Math.round((replyRef - stepFrom) * 10) / 10 });
 }
 
 function main(): void {
