@@ -7,7 +7,8 @@
 // and measures, per way, a seed conversation and its resume.
 //
 //   node proofs/connectors.mts <model> <way> [preset]
-//   node proofs/connectors.mts --compare <run dir A> <run dir B>
+//   node proofs/connectors.mts --compare <run dir A> <run dir B> [<i A> <i B>]
+//       (the i-th main-thread request of each, from 0; default the first)
 //   node proofs/connectors.mts --table <run dir> ...
 //
 // Ways (each goes in this proof's options, never in the harness):
@@ -410,9 +411,9 @@ function mainReqs(runDir: string): Req[] {
 }
 
 // The first main-thread requests of two runs, piece by piece.
-function compare(a: string, b: string): string {
-  const ra = mainReqs(a)[0];
-  const rb = mainReqs(b)[0];
+function compare(a: string, b: string, ia = 0, ib = 0): string {
+  const ra = mainReqs(a)[ia];
+  const rb = mainReqs(b)[ib];
   const out: string[] = [`A ${a}\n  first main request ${ra.file} ${JSON.stringify(usage(ra))}`, `B ${b}\n  first main request ${rb.file} ${JSON.stringify(usage(rb))}`];
   const ta = new Map((ra.body.tools ?? []).map((t) => [String(t.name), JSON.stringify(t)]));
   const tb = new Map((rb.body.tools ?? []).map((t) => [String(t.name), JSON.stringify(t)]));
@@ -500,8 +501,8 @@ function table(dirs: string[]): string {
 // ---------------------------------------------------------------------------
 
 const [first, ...rest] = process.argv.slice(2);
-if (first === '--compare' && rest.length === 2) {
-  process.stdout.write(compare(rest[0], rest[1]));
+if (first === '--compare' && (rest.length === 2 || rest.length === 4)) {
+  process.stdout.write(compare(rest[0], rest[1], Number(rest[2] ?? 0), Number(rest[3] ?? 0)));
 } else if (first === '--table') {
   process.stdout.write(table(rest));
 } else if (first === '--summarise' && rest.length === 1) {
@@ -509,6 +510,6 @@ if (first === '--compare' && rest.length === 2) {
 } else if (first && WAYS.includes(rest[0] as Way) && (rest[1] === undefined || rest[1] === 'preset')) {
   await seedAndResume(first, rest[0] as Way, rest[1] === 'preset');
 } else {
-  process.stderr.write(`usage:\n  node proofs/connectors.mts <model> <${WAYS.join('|')}> [preset]\n  node proofs/connectors.mts --compare <run dir A> <run dir B>\n  node proofs/connectors.mts --table <run dir> ...\n  node proofs/connectors.mts --summarise <run dir>\n`);
+  process.stderr.write(`usage:\n  node proofs/connectors.mts <model> <${WAYS.join('|')}> [preset]\n  node proofs/connectors.mts --compare <run dir A> <run dir B> [<i A> <i B>]\n  node proofs/connectors.mts --table <run dir> ...\n  node proofs/connectors.mts --summarise <run dir>\n`);
   process.exit(2);
 }

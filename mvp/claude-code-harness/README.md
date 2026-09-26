@@ -169,3 +169,29 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 18: keeping the claude.ai connectors out
+
+`proofs/connectors.mts <model> <way> [preset]` runs a seed conversation of
+three turns and then resumes it in a new run (a fresh config directory, as
+always) through the SDK's session store, both under one way of keeping the
+account's claude.ai connectors out. The ways, each in the proof's own
+options: `baseline` (nothing), `env` (`ENABLE_CLAUDEAI_MCP_SERVERS=false`),
+`setting` (`settings: {disableClaudeAiConnectors: true}`), `managed`
+(`managedSettings: {disableClaudeAiConnectors: true}`), `strict`
+(`strictMcpConfig: true`), `deny` (`settings.deniedMcpServers` by connector
+name), `allow-empty` (`settings: {allowedMcpServers: []}`), `safe-mode`
+(`CLAUDE_CODE_SAFE_MODE=1`) and `toggle` (`toggleMcpServer(name, false)` once
+the connectors are no longer pending). `managed-control` is not a way: a
+`managedSettings` holding only an inert deny entry. `preset` uses Claude
+Code's `claude_code` system prompt instead of the SDK's minimal one.
+
+Each run directory also holds `proof.json`, `store-appends.jsonl`,
+`store-load.jsonl`, `proof-events.jsonl`, `api-bodies/`, `debug.log` and
+`summary.txt`. The header of `proofs/connectors.mts` has the rest.
+
+```sh
+node proofs/connectors.mts claude-sonnet-5 env
+node proofs/connectors.mts --table runs/<run dir> ...
+node proofs/connectors.mts --compare <run dir A> <run dir B> [<i A> <i B>]
+```
