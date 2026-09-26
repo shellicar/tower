@@ -169,3 +169,31 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 14: a pure resume from tower
+
+`proofs/pure-resume.mts` seeds one conversation onto tower's test broker
+(127.0.0.1:31416) as decided on 26 Sep: each piece of a reply its own
+`changes.message` with Claude Code's id, `turnId` per API response, role
+`system` messages as sent, user messages as the model saw them. The as-seen
+user message is read from the request body Claude Code writes under
+`OTEL_LOG_RAW_API_BODIES`. It then resumes the conversation through the
+session store from Claude Code's full record (`full`) and from tower
+(`tower`, `tower-typed`, `tower-typed-min`), and compares the resumed first
+requests message by message with their cache reads. Modes, sources and
+environment knobs are at the top of the file. Every raw entry also goes onto
+tower as `changes.x-cc-entry`, a side channel for finding out what tower would
+have to carry; it is not a proposal.
+
+```sh
+node proofs/pure-resume.mts seed claude-sonnet-5
+node proofs/pure-resume.mts resume claude-sonnet-5 full <sessionId>
+node proofs/pure-resume.mts resume claude-sonnet-5 tower <sessionId>
+PROOF14_FIRST_DELAY_MS=20000 node proofs/pure-resume.mts resume claude-sonnet-5 tower-typed-min <sessionId>
+node proofs/pure-resume.mts --compare <run dir A> <run dir B>
+node proofs/pure-resume.mts --against-seed <resume run dir> <seed run dir>
+```
+
+Beyond proof 13's files, a seed run has `placements.jsonl` (where each user
+and attachment entry was found in the request that carried it). A resume run
+has `loaded-entries.jsonl` (what `load()` returned).
