@@ -150,21 +150,25 @@ export interface TowerMessage extends Json {
   ccEntries?: CcEntry[];
 }
 
-export function rebuild(messages: TowerMessage[], modelByTurn: Map<string, string>, cwd: string, sessionId: string, withSilent = false): Json[] {
+export function rebuild(messages: TowerMessage[], modelByTurn: Map<string, string>, cwd: string, sessionId: string, withSilent: boolean | Set<string> = false): Json[] {
   const out: Json[] = [];
   for (const m of messages) {
     const common: Json = { timestamp: m.ts, isSidechain: false, sessionId, cwd };
     if (m.role === 'assistant') {
-      const message: Json = { id: m.turnId, type: 'message', role: 'assistant', content: m.content };
+      // The API's own message id when tower has it (ccResponse, TODO in
+      // publish.mts), else the turnId, so the pieces of one response join.
+      const r = m.ccResponse as Json | undefined;
+      const message: Json = { id: typeof r?.messageId === 'string' ? r.messageId : m.turnId, type: 'message', role: 'assistant', content: m.content };
       const model = modelByTurn.get(m.turnId);
       if (model) {
         message.model = model;
       }
-      out.push({ ...common, uuid: m.id, type: 'assistant', message });
+      out.push({ ...common, uuid: m.id, type: 'assistant', ...(typeof r?.requestId === 'string' ? { requestId: r.requestId } : {}), message });
       continue;
     }
     // Strict: only the entries that produced something the model saw.
-    const entries = (m.ccEntries ?? []).filter((c) => withSilent || c.spans.length > 0);
+    // Or only the no-block entries of the types named.
+    const entries = (m.ccEntries ?? []).filter((c) => c.spans.length > 0 || withSilent === true || (withSilent instanceof Set && withSilent.has(String(c.attachment?.type))));
     if (entries.length === 0) {
       // A message with nothing behind it: put back as tower has it.
       out.push({ ...common, uuid: m.id, type: 'user', isMeta: m.role === 'system' ? true : undefined, message: { role: 'user', content: m.content } });

@@ -222,6 +222,10 @@ export class Publisher {
           role: 'assistant',
           from: { kind: 'agent' },
           content: msg.content,
+          // TODO: undecided. The API's message id and request id, which
+          // Claude Code reads back from the last assistant entry on resume
+          // (diagnostics.previous_message_id, billing header cc_prev_req).
+          ccResponse: { messageId: msgId, ...(typeof item.entry.requestId === 'string' ? { requestId: item.entry.requestId } : {}) },
         });
         this.timing.write({ at: stamp(), seq, role: 'assistant', id: item.entry.uuid, appendedAt: item.appendedAt, waitAfterAppendMs: Date.now() - item.appendedMs });
         await this.drainUsage(msgId);

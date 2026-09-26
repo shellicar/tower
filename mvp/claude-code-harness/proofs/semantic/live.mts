@@ -44,6 +44,8 @@ interface Scenario {
   // Stamp every message the proof sends with origin { kind: 'human' }, as the
   // SDK says a host wrapping keyboard input must.
   stampHuman?: boolean;
+  // Added to Claude Code's environment.
+  env?: Record<string, string>;
 }
 
 const work = (name: string): string => join(HARNESS_STATE, 'work', name);
@@ -147,6 +149,31 @@ const SCENARIOS: Record<string, Scenario> = {
     ],
     options: () => ({}),
     stampHuman: true,
+  },
+  // A setting the host's config reaches: the capability override takes system
+  // turns away from claude-sonnet-5 (tx checks CLAUDE_CODE_MODEL_CAPABILITIES
+  // before the catalog). B's model table does not know.
+  nosys: {
+    seedName: 'semantic-nosys',
+    resumeName: 'semantic-nosys',
+    files: { [work('semantic-nosys')]: { 'note.txt': 'HAZEL 8888' } },
+    steps: [{ prompt: 'Run this exact Bash command, once: `cat note.txt`. Reply with its output only.' }, { prompt: 'Reply with the word OK only.' }],
+    options: () => ({}),
+    env: { CLAUDE_CODE_MODEL_CAPABILITIES: 'claude-sonnet-5=-mid_conv_system' },
+  },
+  // An `instructions` attachment under settingSources []: an additional
+  // directory's CLAUDE.md, loaded because of
+  // CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD.
+  instr: {
+    seedName: 'semantic-instr',
+    resumeName: 'semantic-instr',
+    files: {
+      [work('semantic-instr')]: { 'note.txt': 'IRIS 9999' },
+      [work('semantic-instr-extra')]: { 'CLAUDE.md': 'Proof 16 probe instruction: this file exists only to be loaded as instructions.' },
+    },
+    steps: [{ prompt: 'Run this exact Bash command, once: `cat note.txt`. Reply with its output only.' }, { prompt: 'Reply with the word OK only.' }],
+    options: () => ({ additionalDirectories: [work('semantic-instr-extra')] }),
+    env: { CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1' },
   },
 };
 
@@ -407,7 +434,7 @@ function bodiesDirFor(tag: string): string {
   return dir;
 }
 
-function baseOptions(model: string, store: SessionStore, bodiesDir: string, approvals: Recorder, extra: Partial<HarnessOptions>): HarnessOptions {
+function baseOptions(model: string, store: SessionStore, bodiesDir: string, approvals: Recorder, extra: Partial<HarnessOptions>, env: Record<string, string> = {}): HarnessOptions {
   return {
     model,
     tools: ['Bash'],
@@ -418,7 +445,7 @@ function baseOptions(model: string, store: SessionStore, bodiesDir: string, appr
     sessionStore: store,
     sessionStoreFlush: 'eager',
     ...extra,
-    env: { ...process.env, OTEL_LOG_RAW_API_BODIES: `file:${bodiesDir}` },
+    env: { ...process.env, ...env, OTEL_LOG_RAW_API_BODIES: `file:${bodiesDir}` },
   };
 }
 
@@ -506,7 +533,7 @@ export async function seed(model: string, scenarioName: string): Promise<void> {
   };
   const logRec = new Recorder('proof-log.txt');
   const approvals = new Recorder('approvals.jsonl');
-  const run = startRun({ name: scenario.seedName, options: baseOptions(model, store, bodies, approvals, scenario.options(model)) });
+  const run = startRun({ name: scenario.seedName, options: baseOptions(model, store, bodies, approvals, scenario.options(model), scenario.env) });
   for (const r of [store.rec, pubA.rec, pubA.timing, pubB.rec, pubB.timing, signals, logRec, approvals]) {
     r.attach(run.dir);
   }
@@ -545,7 +572,7 @@ export async function seed(model: string, scenarioName: string): Promise<void> {
 
 // ---------------------------------------------------------------------------
 
-export const SOURCES = ['full', 'full-fold-true', 'full-no-snapshot', 'A', 'B', 'A-silent', 'B-silent'] as const;
+export const SOURCES = ['full', 'full-fold-true', 'full-no-snapshot', 'A', 'B', 'A-silent', 'B-silent', 'A-silent-sc', 'B-silent-sc'] as const;
 export type Source = (typeof SOURCES)[number];
 
 function seedEntries(seedRun: string): Json[] {
@@ -579,7 +606,8 @@ export async function resume(model: string, source: Source, sessionId: string): 
     const t = await openTower();
     tower = t;
     const convId = source.startsWith('A') ? seedRec.convA : seedRec.convB;
-    const withSilent = source.endsWith('-silent');
+    // -silent: every no-block attachment; -silent-sc: only session_context.
+    const withSilent = source.endsWith('-silent') ? true : source.endsWith('-silent-sc') ? new Set(['session_context']) : false;
     load = async (key) => {
       if (key.subpath) {
         return { entries: null, detail: { source, note: 'subagent transcript: nothing on tower for it' } };
@@ -597,7 +625,7 @@ export async function resume(model: string, source: Source, sessionId: string): 
   const bodies = bodiesDirFor(`resume-${seedRec.scenario}-${source}`);
   const logRec = new Recorder('proof-log.txt');
   const approvals = new Recorder('approvals.jsonl');
-  const run = startRun({ name: scenario.resumeName, options: { ...baseOptions(model, store, bodies, approvals, scenario.options(model)), resume: sessionId } });
+  const run = startRun({ name: scenario.resumeName, options: { ...baseOptions(model, store, bodies, approvals, scenario.options(model), scenario.env), resume: sessionId } });
   for (const r of [store.rec, store.loadRec, store.loadedRec, logRec, approvals]) {
     r.attach(run.dir);
   }
@@ -657,7 +685,7 @@ export async function republish(seedRun: string): Promise<void> {
         await pub.publish('changes.message', { ts: tsNow(), instanceId: pub.instanceId, id: messageId(m), queryId, turnId, role: m.role, ...(prompt ? { from: { kind: 'human' } } : {}), content: m.content, ccEntries: m.ccEntries });
       }
       for (const e of entries.filter((x) => x.type === 'assistant' && (x.message as Json).id === g.request.messageId)) {
-        await pub.publish('changes.message', { ts: tsNow(), instanceId: pub.instanceId, id: String(e.uuid), queryId, turnId, role: 'assistant', from: { kind: 'agent' }, content: (e.message as Json).content });
+        await pub.publish('changes.message', { ts: tsNow(), instanceId: pub.instanceId, id: String(e.uuid), queryId, turnId, role: 'assistant', from: { kind: 'agent' }, content: (e.message as Json).content, ccResponse: { messageId: String((e.message as Json).id), ...(typeof e.requestId === 'string' ? { requestId: e.requestId } : {}) } });
       }
       const u = (g.request.response?.usage as Json | undefined) ?? {};
       const num = (v: unknown): number => (typeof v === 'number' ? v : 0);

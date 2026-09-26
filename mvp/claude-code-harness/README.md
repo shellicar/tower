@@ -219,13 +219,15 @@ into Claude Code's entries. Resumes compare the first resumed request with a
 resume from Claude Code's full record.
 
 ```sh
-node proofs/semantic-form.mts seed claude-sonnet-5 main      # or dup, types
+node proofs/semantic-form.mts seed claude-sonnet-5 main      # or dup, types, types2, types3, human, nosys, instr
 PROOF16_FIRST_DELAY_MS=20000 node proofs/semantic-form.mts resume claude-sonnet-5 full <sessionId>
 PROOF16_FIRST_DELAY_MS=20000 node proofs/semantic-form.mts resume claude-sonnet-5 A <sessionId>   # B, A-silent, B-silent, full-fold-true, full-no-snapshot
 node proofs/semantic-form.mts --compare <full run dir> <other run dir>...
 node proofs/semantic-form.mts --live <seed run dir>
 node proofs/semantic-form.mts --corpus <any run dir with api-bodies>...
 node proofs/semantic-form.mts republish <seed run dir>
+proofs/semantic/batch.sh [--republish] <seed run dir>...   # resume each from full, A, B, A-silent, B-silent
+python3 proofs/semantic/summarise-batch.py <batch log>
 ```
 
 A seed run adds `signals.jsonl` (what each approach placed at its signal: A
