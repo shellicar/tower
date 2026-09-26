@@ -275,3 +275,96 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 22: plain-named skills through the user level, fresh and resumed
+
+`proofs/skills-user-level.mts <model> <scenario> [variant]` runs one scenario
+under its own agent name (`p22-<scenario>[-<variant>]`), reset first through
+`pnpm reset-config-dir`. `proofs/skills-user-level-trace.mts <file.strace>`
+lists every access to a path in the real `~/.claude` or `~/.claude.json` in a
+file-access trace, attributed to the Claude Code that made it (fresh, in the
+agent dir, or resumed, in a `/tmp/claude-resume-*` dir).
+
+The proof, not the harness, opens the `user` setting source, with
+`extraArgs: {'setting-sources': 'user'}` (proof 19's way; the last flag wins,
+`run.json` still records `[]`), except `pair-closed`. Every scenario sets
+`syncClaudeAiSkills: false` through `settings`, resumes through a session
+store (a file store, one JSONL per key, `sessionStoreFlush: 'eager'`), and
+puts sentinels in the agent dir: `CLAUDE.md`, `rules/`, `agents/`,
+`commands/`, `output-styles/`, and a `settings.json` with a permission rule
+and a `UserPromptSubmit` hook that logs the `CLAUDE_CONFIG_DIR` it ran under.
+
+Scenarios:
+
+- `pair-nohook`: a fresh serve, then a resume of it through the store. The
+  declared skills are linked into the agent dir's `skills/` by hand. A skill
+  added between the serves (`p22-late`) can only reach the resumed Claude
+  Code's transcript as a delta if it loaded it.
+- `pair-closed`: the same with the user source closed, the trace baseline.
+- `pair-hook`: the same pair with a `spawnClaudeCodeProcess` hook that links
+  the declared skills into whatever `CLAUDE_CONFIG_DIR` the SDK gives it, then
+  starts the SDK's command (the capture wrapper) unchanged.
+- `live per-dir|dir-link`: a seed serve, then one resumed and one fresh
+  Claude Code at once. Declared skills: none, set, a skill added, a skill
+  edited, a skill removed, repointed to another dir, then `reloadSkills()`.
+  `per-dir`: the proof applies each change to every config dir the hook
+  linked into. `dir-link`: the hook makes a resume dir's `skills/` one link to
+  the agent dir's `skills/`, and the proof changes the agent dir only.
+- `link-shape whole-dir|every-dir|skill-md`: a pair over a declared dir with a
+  plain skill, a plugin-shaped folder with no `SKILL.md` (`p22-shaped`) and a
+  skill folder that is also plugin-shaped (`p22-hybrid`: `SKILL.md` plus
+  `.claude-plugin/plugin.json`, hooks, `.mcp.json`, an agent, an inner skill).
+
+Which entries get linked and how links are kept in step with the config are
+undecided (TODOs in the file). Fixtures are kept, never deleted, under
+`~/.local/state/tower-claude-code-harness/p22/`. Each scenario's
+`runs/<stamp>-p22-<scenario>/` holds `proof-stdout.txt`, `summary.json`, the
+redacted debug logs and request bodies, the store, and the resumed
+transcripts copied from the resume dir before the SDK deletes it. The traces
+(`strace -f -s 0 -e trace=%file,%process`) are `runs/<stamp>-p22-*.strace`,
+read into `runs/<stamp>-p22-*.home-claude.txt`.
+
+```sh
+strace -f -s 0 -e trace=%file,%process -o runs/<stamp>-p22-pair-hook.strace \
+  node proofs/skills-user-level.mts claude-sonnet-5 pair-hook
+node proofs/skills-user-level-trace.mts runs/<stamp>-p22-pair-hook.strace
+```
+
+### What the runs showed (Claude Code 2.1.282, SDK 0.3.282, claude-sonnet-5)
+
+- Fresh, user source open: skills load from the agent dir's `skills/` by plain
+  name. Also loaded from the agent dir: `CLAUDE.md` and `rules/` (in the first
+  request), `agents/` (in `system/init.agents`), `commands/` (listed as a
+  skill), `settings.json` (its hook ran, its permission rule is listed).
+- Resumed through the store, no hook: the debug log loads skills from
+  `/tmp/claude-resume-*/skills` and finds 0. Both bare-name invocations fail
+  ("isn't installed"), and `reloadSkills()` names no declared skill. The
+  resume dir holds `settings.json` (the SDK copies it), so its hook and
+  permission rule still apply. `CLAUDE.md`, rules, agents and commands are not
+  loaded: their text in the resumed requests is only the seed serve's
+  replayed messages.
+- Resumed with the hook: the hook is given the resume dir, links into it
+  before Claude Code starts, and the resumed Claude Code loads the skills
+  (`p22-late` arrives as a delta listing, both invocations run). The same
+  hook is given the agent dir for a fresh serve. The SDK's deletion of the
+  resume dir removed the links, not the declared files (hashes unchanged).
+- Live, both variants, fresh and resumed alike: set, add and edit reach both
+  Claude Codes as delta listings on the next turn after an 8 s settle; a
+  removed or repointed-away skill stops dispatching ("isn't available") but is
+  never announced; `reloadSkills()` writes a full listing (`isInitial: true`)
+  with only the current skills. `dir-link` needed one change in the agent dir
+  to reach both.
+- Link shape: a whole-dir link and linking every directory both adopt
+  `p22-shaped` and `p22-hybrid` as `@skills-dir` plugins (hooks ran, agents
+  and prefixed inner skills listed, the hybrid's MCP server started and
+  failed). Linking only folders with a `SKILL.md` keeps `p22-shaped` out;
+  `p22-hybrid` is still adopted as a plugin, beside its own plain skill.
+- Real `~/.claude`: the credential file is opened read-only only (shared
+  login), in every run. With the user source closed, the only other access is
+  a read of `~/.claude/state/unattended-serving-consent.json` (absent). With
+  it open, both fresh and resumed Claude Codes also run the retention
+  cleanup, which uses hard-coded home paths: they list `~/.claude/bridge-spawn`
+  (the cleanup deletes entries older than 1 day there), open
+  `~/.claude/state/served-calls` (absent) and read and unlink
+  `~/.claude/state/settings-review.json` (absent). Nothing there was changed
+  in these runs.
