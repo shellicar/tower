@@ -152,7 +152,10 @@ class Events {
     this.raw = join(rawDir, 'commit-events.jsonl');
   }
   write(src: string, kind: string, detail: Json = {}): void {
-    const line = JSON.stringify({ ts: stamp(), ms: now(), src, kind, ...detail });
+    // ms is monotonic (timeOrigin + now()); wall is Date.now(), the clock
+    // file mtimes are on. WSL steps the wall clock (a 170 ms gap between
+    // the two was seen within one process), so compare mtimes with wall only.
+    const line = JSON.stringify({ ts: stamp(), ms: now(), wall: Date.now(), src, kind, ...detail });
     appendFileSync(this.raw, `${line}\n`);
     appendFileSync(this.path, `${clean(line)}\n`);
   }
