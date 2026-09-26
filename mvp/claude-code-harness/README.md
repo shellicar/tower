@@ -169,3 +169,30 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 4: what can change on a running Claude Code
+
+`proofs/live.mts <model> <scenario>` runs one scenario: a first turn, then
+for each later turn a control call on the running session (`setModel`,
+`applyFlagSettings`, `setPermissionMode`, `setMcpServers`, the reloads, the
+binary's `set_cwd`, ...) followed by the turn that should show its effect.
+The scenarios are listed at the top of the file. Request bodies are logged
+the same way as proof 1 (`OTEL_LOG_RAW_API_BODIES`).
+
+On top of proof 1's files, a run directory has:
+
+| Path | What |
+| --- | --- |
+| `proof-events.jsonl` | each send, control call and its result or error, approval callback, assistant text and tool call, and the files checked after the run |
+| `summary.txt` | per main-thread request: thread, model, max_tokens, thinking, effort, extra keys, beta and tool changes, system block changes, and the messages it adds |
+
+Claude Code 2.1.282 sends most requests as a continuation of a server-side
+thread (`thread: {type: "continue"}`): such a request carries only its new
+messages, and a field it leaves out (`tools`) is the thread's, unchanged.
+`summary.txt` compares each request against the thread's state, not against
+the request before it. `node proofs/live.mts --summarise <run dir>`
+re-prints it.
+
+Scratch files a scenario writes outside its working directory (plugins, the
+sandbox write target, the `set_cwd` target) go under
+`~/.local/state/tower-claude-code-harness/proof-4/<run id>/`, kept.
