@@ -10,37 +10,50 @@
 // and inspects the raw API request bodies (OTEL_LOG_RAW_API_BODIES, as in
 // proof 1) to see exactly where each one lands and how it's wrapped.
 //
-// Two scenarios:
+// Three scenarios:
 //
 //   baseline  settingSources: [] (the harness's own baseline, unchanged).
 //             One turn carries, together: a <system-reminder> block built
 //             into the first user message (bridge's own mechanism); a
-//             SessionStart hook's additionalContext; a systemPrompt append;
-//             an inline settings.claudeMd (docs say this is honoured only in
-//             managed/policy settings, never inline SDK settings -- checked
-//             directly); and a CLAUDE.md seeded into cwd before the binary
-//             starts, to see whether settingSources: [] really blocks the
-//             project-file route too (smoke.mts only checked the user-level
-//             ~/.claude/CLAUDE.md). A second turn adds a fresh
+//             SessionStart callback hook's additionalContext; a systemPrompt
+//             append; an inline settings.claudeMd (docs say this is honoured
+//             only in managed/policy settings, never inline SDK settings,
+//             checked directly); and a CLAUDE.md seeded into cwd before the
+//             binary starts, to see whether settingSources: [] really blocks
+//             the project-file route too (smoke.mts only checked the
+//             user-level ~/.claude/CLAUDE.md). A second turn adds a fresh
 //             UserPromptSubmit hook sentinel, to see whether a hook's
-//             additionalContext is a one-off ("once, like bridge's context
-//             line") or fires fresh every turn.
+//             additionalContext is a one-off (once, like bridge's context
+//             line) or fires fresh every turn.
 //
 //   scopes    settingSources: ['project', 'user'] (the harness's opt-in
-//             escape hatch, added for this proof -- see harness.mts). A
+//             escape hatch, added for this proof, see harness.mts). A
 //             CLAUDE.md seeded into cwd (settingSources: ['project']) and
 //             another seeded into CLAUDE_CONFIG_DIR (settingSources:
 //             ['user'], what ~/.claude/CLAUDE.md is under a real install)
 //             before the binary starts, so there's no race with the child
 //             process's own read (see harness.mts's seedConfigDir/seedCwd).
-//             Two turns, same question, no hooks: does the second turn's
-//             request still carry both files' content, and in what wrapper?
+//             Because the harness's own cwd sits under $HOME, 'project'
+//             here also walks up to the real ~/.claude/CLAUDE.md, if the
+//             account running the harness has one; that's a finding of this
+//             run, not something it sets out to test (see the README's risk
+//             note).
+//
+//   user      settingSources: ['user'] alone, no 'project': does the
+//             user-only file route avoid the ancestor-walk leak the scopes
+//             run found? A CLAUDE.md and a settings.json (a SessionStart
+//             *command* hook, not the SDK callback form, in case the
+//             baseline's callback hook simply never got invoked in this
+//             mode) are seeded into CLAUDE_CONFIG_DIR. Between turn 1 and
+//             turn 2, the seeded CLAUDE.md is rewritten with a new sentinel,
+//             to see whether a later turn's request picks up the edit or
+//             only what was read at session start.
 //
 // Every turn asks the model to name every sentinel string it can currently
-// see and where, which is corroborating evidence only -- the request bodies
+// see and where, which is corroborating evidence only; the request bodies
 // are the ground truth, inspected directly below.
 //
-//   node proofs/context.mts <model> <baseline|scopes>
+//   node proofs/context.mts <model> <baseline|scopes|user>
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -50,8 +63,8 @@ import { startRun } from '../src/harness.mts';
 import { redact, stamp } from '../src/record.mts';
 import type { HookInput, SDKMessage, SDKUserMessage, SyncHookJSONOutput } from '@anthropic-ai/claude-agent-sdk';
 
-type Scenario = 'baseline' | 'scopes';
-const SCENARIOS: Scenario[] = ['baseline', 'scopes'];
+type Scenario = 'baseline' | 'scopes' | 'user';
+const SCENARIOS: Scenario[] = ['baseline', 'scopes', 'user'];
 
 const [model, scenario] = process.argv.slice(2);
 if (!model || !SCENARIOS.includes(scenario as Scenario)) {
@@ -61,7 +74,7 @@ if (!model || !SCENARIOS.includes(scenario as Scenario)) {
 
 // One sentinel per mechanism, distinct per scenario so a leftover file from a
 // prior run of the same proof name (the work directory is reused, never
-// cleared -- README) can't be mistaken for this run's own.
+// cleared, README) can't be mistaken for this run's own.
 const S = {
   firstMessage: 'SENTINEL-FIRST-MESSAGE-7f3a1c',
   sessionStart: 'SENTINEL-SESSIONSTART-9c1d4e',
@@ -72,10 +85,13 @@ const S = {
   projectClaudeMdBaseline: 'SENTINEL-PROJECT-CLAUDEMD-baseline-6d4c33',
   projectClaudeMdScopes: 'SENTINEL-PROJECT-CLAUDEMD-scopes-3f2a55',
   userClaudeMdScopes: 'SENTINEL-USER-CLAUDEMD-scopes-8b7e21',
+  userOnlyClaudeMd: 'SENTINEL-USER-ONLY-CLAUDEMD-turn1-5e7c40',
+  userOnlyClaudeMdUpdated: 'SENTINEL-USER-ONLY-CLAUDEMD-turn2-5e7c41',
+  sessionStartSettingsHook: 'SENTINEL-SESSIONSTART-SETTINGSHOOK-2d8f19',
 };
 
 const ASK =
-  'Without using any tools, list every distinct string beginning with "SENTINEL-" that you can currently see anywhere in your context -- the system prompt, project/user instructions already given to you, or this conversation. Quote each one exactly and say where it appears (e.g. "in the system prompt", "in CLAUDE.md-style project context given at the start", "in this message").';
+  'Without using any tools, list every distinct string beginning with "SENTINEL-" that you can currently see anywhere in your context: the system prompt, project/user instructions already given to you, or this conversation. Quote each one exactly and say where it appears (for example: "in the system prompt", "in CLAUDE.md-style project context given at the start", "in this message").';
 
 const name = `context-${scenario}`;
 const bodiesDir = join(homedir(), '.local', 'state', 'tower-claude-code-harness', 'api-bodies', `${stamp().replace(/[:.]/g, '')}-${name}`);
@@ -119,6 +135,25 @@ const commonOptions = {
   },
 } satisfies Partial<HarnessOptions>;
 
+// A settings.json SessionStart *command* hook (shell, not the SDK callback
+// form), in case the baseline's registered-but-never-invoked callback
+// (see the run's report) is specific to the callback path and not to
+// SessionStart itself in a headless, streamed-prompt session.
+const settingsJsonWithSessionStartHook = JSON.stringify({
+  hooks: {
+    SessionStart: [
+      {
+        hooks: [
+          {
+            type: 'command',
+            command: `printf '%s' '${JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: S.sessionStartSettingsHook } })}'`,
+          },
+        ],
+      },
+    ],
+  },
+});
+
 const args: StartRunArgs =
   scenario === 'baseline'
     ? {
@@ -135,13 +170,23 @@ const args: StartRunArgs =
         // settingSources omitted: the harness's own baseline, [].
         seedCwd: { 'CLAUDE.md': `# Project instructions (baseline, settingSources: [])\n\n${S.projectClaudeMdBaseline}\n` },
       }
-    : {
-        name,
-        options: commonOptions,
-        settingSources: ['project', 'user'],
-        seedCwd: { 'CLAUDE.md': `# Project instructions\n\n${S.projectClaudeMdScopes}\n` },
-        seedConfigDir: { 'CLAUDE.md': `# User instructions (~/.claude/CLAUDE.md under a real install)\n\n${S.userClaudeMdScopes}\n` },
-      };
+    : scenario === 'scopes'
+      ? {
+          name,
+          options: commonOptions,
+          settingSources: ['project', 'user'],
+          seedCwd: { 'CLAUDE.md': `# Project instructions\n\n${S.projectClaudeMdScopes}\n` },
+          seedConfigDir: { 'CLAUDE.md': `# User instructions (~/.claude/CLAUDE.md under a real install)\n\n${S.userClaudeMdScopes}\n` },
+        }
+      : {
+          name,
+          options: commonOptions,
+          settingSources: ['user'],
+          seedConfigDir: {
+            'CLAUDE.md': `# User instructions\n\n${S.userOnlyClaudeMd}\n`,
+            'settings.json': settingsJsonWithSessionStartHook,
+          },
+        };
 
 const run = startRun(args);
 process.stdout.write(`run dir: ${run.dir}\nmodel: ${model}\nscenario: ${scenario}\ncwd: ${run.cwd}\nconfigDir: ${run.configDir}\n`);
@@ -156,8 +201,8 @@ const send = (content: SDKUserMessage['message']['content']): void => {
   run.send({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
 };
 
-// Turn 1: bridge's own mechanism -- a <system-reminder> block built into the
-// first user message -- carrying the ASK question too.
+// Turn 1: bridge's own mechanism, a <system-reminder> block built into the
+// first user message, carrying the ASK question too.
 send(`<system-reminder>\n${S.firstMessage}\n</system-reminder>\n\n${ASK}`);
 
 for await (const message of run.messages() as AsyncIterable<SDKMessage>) {
@@ -172,6 +217,12 @@ for await (const message of run.messages() as AsyncIterable<SDKMessage>) {
   if (message.type === 'result') {
     process.stdout.write(`result (turn ${turn}, line ${line}): ${message.subtype}${message.is_error ? ' (error)' : ''}\n`);
     if (turn < turnCount) {
+      if (scenario === 'user' && turn === 1) {
+        // Mid-conversation edit: does a later turn's request pick up the
+        // rewrite, or only what was read at session start?
+        writeFileSync(join(run.configDir, 'CLAUDE.md'), `# User instructions (rewritten after turn 1)\n\n${S.userOnlyClaudeMdUpdated}\n`);
+        process.stdout.write(`\nrewrote ${join(run.configDir, 'CLAUDE.md')} with the turn-2 sentinel\n`);
+      }
       send(ASK);
     } else {
       run.end();
@@ -223,8 +274,8 @@ if (existsSync(indexPath)) {
     process.stdout.write(`\nrequest ${i + 1} (${entry.request_file}) source=${entry.query_source} model=${entry.model}\n`);
     process.stdout.write(`  sentinels present: ${hits.map(([k]) => k).join(', ') || '(none)'}\n`);
     process.stdout.write(`  system block: ${JSON.stringify(req.system).slice(0, 2000)}\n`);
-    const firstUser = req.messages?.find((m) => m.role === 'user');
-    process.stdout.write(`  first user message content: ${JSON.stringify(firstUser?.content).slice(0, 4000)}\n`);
+    const lastUser = [...(req.messages ?? [])].reverse().find((m) => m.role === 'user');
+    process.stdout.write(`  last user message content: ${JSON.stringify(lastUser?.content).slice(0, 4000)}\n`);
   });
 } else {
   process.stdout.write('no index.jsonl: no request bodies were written\n');
