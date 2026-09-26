@@ -182,7 +182,8 @@ argued from the docs alone.
 `proofs/skills-dir.mts <model> <scenario>` runs one scenario, each its own
 process: `plugin-no-manifest`, `add-dir-only`, `add-dir-reload`,
 `project-config-root`, `plugin-flat-layout`, `plugin-symlink-repoint`,
-`plugin-edit-existing`, `register-repo-root-raw`. Ground truth for "did the
+`plugin-edit-existing`, `register-repo-root-raw`, `settings-plugin`. Ground
+truth for "did the
 model actually see this skill" is the transcript's `skill_listing`
 attachment (`config-dir/projects/<project>/<session>.jsonl`,
 `attachment.type === "skill_listing"`, carrying `names`, `skillCount` and the
@@ -196,11 +197,13 @@ transcript.
 
 Streaming input mode does not emit `system/init` until the first user
 message is sent. The proof's first draft looped on `run.messages()` waiting
-for `init` before any `send()`. Two of that draft's three runs hung until
-their `timeout` wrapper killed them (`exit 124`); the third had no `timeout`
-wrapper and was stopped by hand. The fix (send the first turn, then read
-`init` off that turn's stream) is why every scenario below sends before it
-ever inspects a message.
+for `init` before any `send()`, and hung on every run it started: one,
+piped through `tail` under a 180-second `timeout`, exited `143` when
+`timeout` killed the pipeline; two more, given their own `timeout` wrappers
+after that, exited `124`; a fourth had no `timeout` wrapper and was stopped
+by hand. The fix (send the first turn, then read `init` off that turn's
+stream) is why every scenario below sends before it ever inspects a
+message.
 
 ### Findings, each with its run
 
@@ -263,28 +266,38 @@ this for an edit to an *existing* file (changing a marker string in
 `SKILL.md`'s own description, not adding a file): by timestamp, the turn
 sent three seconds after the edit still carried the old marker's cached
 listing, and only the turn sent right after `query.reloadSkills()` carried
-the new one. Both results contradict the personal/project/`--add-dir`
-locations' behaviour (`code.claude.com/docs/en/skills`, "Edit a skill during
-a session": "Claude Code watches skill directories for file changes...
-Claude Code picks up the change within the current session, without a
-restart"); that watch does not reach a plugin's own `skills/` directory,
-for a new file or an edited one, at least on this SDK version.
+the new one. What these two runs show is only about a plugin's own
+`skills/` directory: with `settingSources: []`, Claude Code (2.1.282, Agent
+SDK 0.3.282) did not pick up either a new file or an edited one there
+without an explicit `reloadSkills()` call. That differs from the documented
+behaviour of the personal, project and `--add-dir` locations
+(`code.claude.com/docs/en/skills`, "Edit a skill during a session": "Claude
+Code watches skill directories for file changes... Claude Code picks up the
+change within the current session, without a restart"), but neither this
+run nor that doc says why: `settingSources: []` also means none of those
+three locations load at all in this harness, so there is no comparable
+watch running in the same process to contrast against, and nothing here
+traces the cause to the plugin path specifically (an `strace -e
+trace=%file` run watching for `inotify_add_watch` on the plugin's `skills/`
+directory, as the smoke run's own README section already does for a
+different path, would be needed for that).
 
 `runs/2026-09-26T120323557020Z-skills-dir-plugin-symlink-repoint` then
-tested re-pointing rather than rescanning: the plugin's path was a wrapper
-directory whose only entry, `skills`, was a symlink to a first target
-directory (one skill, `-f`). After the first turn, the symlink was swapped
-to a second, unrelated target directory (one skill, `-g`, no relation to
-`-f`), followed by `query.reloadSkills()`. The next turn's `skill_listing`
-carried only `symlink-plugin:proof12-symlink-skill-g`; `-f` was gone
-entirely, not merely superseded. The plugin's own name and path
-(`symlink-plugin`, the wrapper directory) never changed; only what the
-symlink pointed at did. This is the shape a config-declared, live-repointed
-skills directory would need to take through this SDK: a plugin whose
-`skills/` entry is a link a participant repoints and then calls
-`reloadSkills()` on, mirroring bridge's rescan-per-say `skills` control line
-(`mvp/CLAUDE.md`) rather than the SDK offering a "change this plugin's path"
-call directly, because there is no such call.
+tested changing the directory rather than rescanning it: the plugin's path
+was a wrapper directory whose only entry, `skills`, was a symlink to a first
+target directory (one skill, `-f`, itself a plain `<name>/SKILL.md`
+directory like the one `plugin-flat-layout` showed gets rejected as a
+plugin root on its own). After the first turn, the symlink was swapped to a
+second, unrelated target directory (one skill, `-g`, no relation to `-f`),
+followed by `query.reloadSkills()`. The next turn's `skill_listing` carried
+only `symlink-plugin:proof12-symlink-skill-g`; `-f` was gone entirely, not
+merely superseded. The plugin's own name and path (`symlink-plugin`, the
+wrapper directory) never changed; only what the symlink pointed at did.
+This is the only way this proof found to change which directory's content a
+plugin serves after the process has started: wrap it, symlink `skills/` to
+the real, plain-layout directory, and call `reloadSkills()` after
+re-pointing the symlink. `Query` has no method that takes a new path for an
+existing plugin.
 
 **A plugin's own root must already look like a plugin (a `skills/`,
 `agents/`, `hooks/`, `commands/`, or `.claude-plugin/` child); a directory
@@ -297,6 +310,36 @@ a plugin path whose only content was `<name>/SKILL.md` directly under it, no
 `skills/` level. `system/init.plugins` never listed it at all (only the two
 builtin plugins), and the `skill_listing` never carried the skill: this is
 enforced, not merely the documented convention.
+
+**A settings-declared, directory-sourced marketplace loads a plugin from a
+local path, mid-session, entirely through `settingSources: []`, with the
+same namespacing as the `plugins` option.** `extraKnownMarketplaces` accepts
+a marketplace whose own source is a local directory
+(`code.claude.com/docs/en/settings-reference`: `"directory": { "source":
+"directory", "path": "/opt/acme-corp/approved-marketplaces" }`, "path
+required, the absolute path to a directory containing
+`.claude-plugin/marketplace.json`"), and that marketplace's own plugin
+entries can use a relative-path source inside it
+(`code.claude.com/docs/en/plugins/marketplace-reference`, "Relative path
+plugin source": "A relative path resolves only when Claude Code has the
+marketplace's files, so check the marketplace source type: `github`, `git`,
+`file`, and `directory`: Claude Code has the marketplace's files"; a
+different sentence on the same page, "`settings`: relative paths are
+rejected outright", is about a marketplace whose own source is `settings`,
+the inline-plugin-list form, not about a `directory`-sourced one). None of
+this is filesystem settings, so `settingSources` does not gate it
+(`sdk.d.ts`: `settingSources` "control[s] which filesystem settings to
+load"; `query.applyFlagSettings()`/`options.settings` is a separate,
+always-on "flag settings" layer). Run:
+`runs/2026-09-26T123446908126Z-skills-dir-settings-plugin`. A marketplace
+directory held one plugin entry, `{"name": "proof12-mp-plugin", "source":
+"./the-plugin"}`, `the-plugin/skills/proof12-mp-skill-j/SKILL.md` inside it.
+`query.applyFlagSettings({extraKnownMarketplaces: {...}, enabledPlugins:
+{"proof12-mp-plugin@proof12-marketplace": true}})` followed by
+`query.reloadPlugins()` both returned successfully, and the very next turn's
+`skill_listing` (confirmed by timestamp against the immediately preceding
+prompt) carried `proof12-mp-plugin:proof12-mp-skill-j`, namespaced the same
+way a `plugins`-option skill is.
 
 **`additionalDirectories` (`--add-dir`) does not load skills from
 `<dir>/.claude/skills/` under `settingSources: []`, and `reloadSkills()`
@@ -351,24 +394,18 @@ source has nothing to filter.
 - The managed `/etc/claude-code/.claude/skills/` directory: writing it
   changes Stephen's own machine-wide Claude Code config, not just this
   harness.
-- A settings-declared marketplace/plugin (`extraKnownMarketplaces` plus
-  `enabledPlugins`, applied through `options.settings`/`applyFlagSettings`):
-  this is a genuinely different gate from the ones above.
-  `settingSources` only names which *filesystem settings files* load
-  (`sdk.d.ts`: "Control which filesystem settings to load... Pass `[]` to
-  disable filesystem settings"); `options.settings`/`applyFlagSettings` is a
-  separate, inline "flag settings" layer the same doc comment says sits
-  above it, so the harness's fixed `settingSources: []` would not obviously
-  block it. Left untested anyway: the `extraKnownMarketplaces` shapes in
-  `code.claude.com/docs/en/settings-reference` all name a `github`, `git`,
-  or inline `settings` source for the marketplace, and the inline
-  `settings`-sourced form's own plugin entries still need a `github` or
-  `git` source; no shape in that reference names a bare local directory,
-  so it may not fit "declare a local directory" at all, separately from
-  whichever gate would apply to it.
 - `$CLAUDE_CONFIG_DIR/skills/`: the user settings source, the same
   filesystem-settings gate `additionalDirectories` and `projectConfigRoot`
   showed above.
+- Restarting the process with `resume` to change the plugin list, rather
+  than anything tried live in this proof: `code.claude.com/docs/en/agent-sdk/sessions`,
+  "What a resumed session restores": "If the session depended on
+  `--mcp-config`, `--settings`, `--plugin-dir`, `--fallback-model`, or
+  directories added with `--add-dir`, pass them again when you resume." A
+  resumed session can be handed a new `plugins` list, at the cost of the
+  process restarting; that is a different shape from any of the
+  live-changed-directory results above, all of which kept one process
+  running throughout.
 
 ### Choices this proof made that the brief did not
 
@@ -384,9 +421,13 @@ source has nothing to filter.
   test the cheaper, no-manifest shape rather than repeat the smoke proof's
   manifest-bearing one.
 - Fixture directories live under `os.tmpdir()` via `mkdtempSync`, removed in
-  a `finally`, matching the "`/tmp` cleared at boot" rule; the `/tmp` log
-  files this session's own commands wrote were deleted once read, for the
-  same reason.
+  a `finally`, matching the "`/tmp` cleared at boot" rule, except the
+  `register-repo-root-raw` scenario's: `register_repo_root` requires a
+  subdirectory of `cwd`, so that fixture lives under the harness's own
+  persistent per-proof working directory instead and is removed in that
+  scenario's own `finally`, not the shared one. The `/tmp` log files this
+  session's own commands wrote were deleted once read, for the same
+  `/tmp`-cleared-at-boot reason.
 - The first plugin's directory is literally named `plugin`, which is why its
   fallback-namespaced skill reads `plugin:proof12-plugin-skill-a`; a
   differently-named directory would change the prefix's text, not whether
@@ -395,11 +436,14 @@ source has nothing to filter.
   against the transcript rather than trusting that a name's absence from a
   later turn's `skill_listing` means it was never attached, before
   concluding a directory is not watched.
-- Ran `register_repo_root` past its typed surface with `(query as any)`,
-  since the alternative (an approval flow through `canUseTool` that returns
-  an `addDirectories` `PermissionUpdate`) is a different, more roundabout
-  shape than "declare a directory in config", and this reached the same
-  question more directly.
-- Left the settings-declared marketplace/plugin route and the managed and
-  user-settings skills directories doc-only rather than live; see the
-  reasons given with each above.
+- Ran `register_repo_root` past its typed surface with
+  `(query as any).request(...)`, an internal method with no public type or
+  documentation, reached only because `reloadSkills`/`reloadPlugins` are
+  themselves thin wrappers over it in `sdk.mjs`; this call has no
+  compatibility guarantee and may stop working on any SDK update. The
+  alternative, an approval flow through `canUseTool` that returns an
+  `addDirectories` `PermissionUpdate`, is a different, more roundabout shape
+  than "declare a directory in config" and was not tried.
+- Left the managed and user-settings skills directories, and restarting
+  with `resume`, doc-only rather than live; see the reasons given with each
+  above.

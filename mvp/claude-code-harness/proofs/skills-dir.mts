@@ -74,7 +74,7 @@ don't use it.
 const [model, scenario] = process.argv.slice(2);
 if (!model || !scenario) {
   process.stderr.write(
-    'usage: node proofs/skills-dir.mts <model> <plugin-no-manifest|add-dir-only|add-dir-reload|project-config-root|plugin-flat-layout|plugin-symlink-repoint|plugin-edit-existing|register-repo-root-raw>\n',
+    'usage: node proofs/skills-dir.mts <model> <plugin-no-manifest|add-dir-only|add-dir-reload|project-config-root|plugin-flat-layout|plugin-symlink-repoint|plugin-edit-existing|register-repo-root-raw|settings-plugin>\n',
   );
   process.exit(2);
 }
@@ -361,22 +361,87 @@ don't use it.
     const SUBDIR = join('added-root');
     const SKILL_I = 'proof12-registerrepo-skill-i';
 
+    // register_repo_root requires "a strict subdirectory of cwd", so this
+    // fixture cannot live under the mkdtemp() root like every other
+    // scenario's; it goes under the harness's own persistent per-proof
+    // working directory (run.cwd) instead, and is removed in this
+    // scenario's own finally, not the top-level one.
     const run = startRun({ name: 'skills-dir-register-repo-root-raw', options: { model } });
     process.stdout.write(`run dir: ${run.dir}\ncwd: ${run.cwd}\n`);
     const absSubdir = join(run.cwd, SUBDIR);
-    writeSkill(join(absSubdir, '.claude', 'skills', SKILL_I), SKILL_I, 'Lives under a subdirectory of cwd, registered live via register_repo_root.');
-
-    await runTurn(run, 'turn 1: before register_repo_root', QUESTION);
-
-    type RawQuery = { request(req: Record<string, unknown>): Promise<unknown> };
-    const rawQuery = run.query as unknown as RawQuery;
     try {
-      const result = await rawQuery.request({ subtype: 'register_repo_root', directory: absSubdir, reload_skills: true });
-      process.stdout.write(`register_repo_root raw request() result: ${JSON.stringify(result)}\n`);
-    } catch (err) {
-      process.stdout.write(`register_repo_root raw request() threw: ${err instanceof Error ? err.message : String(err)}\n`);
+      writeSkill(join(absSubdir, '.claude', 'skills', SKILL_I), SKILL_I, 'Lives under a subdirectory of cwd, registered live via register_repo_root.');
+
+      await runTurn(run, 'turn 1: before register_repo_root', QUESTION);
+
+      type RawQuery = { request(req: Record<string, unknown>): Promise<unknown> };
+      const rawQuery = run.query as unknown as RawQuery;
+      try {
+        const result = await rawQuery.request({ subtype: 'register_repo_root', directory: absSubdir, reload_skills: true });
+        process.stdout.write(`register_repo_root raw request() result: ${JSON.stringify(result)}\n`);
+      } catch (err) {
+        process.stdout.write(`register_repo_root raw request() threw: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
+      await runTurn(run, 'turn 2: after register_repo_root attempt', QUESTION);
+
+      run.end();
+      await run.done;
+      reportListings(run.dir);
+      process.stdout.write('done\n');
+    } finally {
+      rmSync(absSubdir, { recursive: true, force: true });
     }
-    await runTurn(run, 'turn 2: after register_repo_root attempt', QUESTION);
+  } else if (scenario === 'settings-plugin') {
+    // A settings-declared marketplace, not the SDK's plugins option: an
+    // extraKnownMarketplaces entry whose OWN source is "directory" (a local
+    // path), naming a plugin whose OWN source is a relative path inside
+    // that directory (settings-reference.md: "directory": { "source":
+    // "directory", "path": "..." }, "path required, the absolute path to a
+    // directory containing .claude-plugin/marketplace.json"; the
+    // marketplace-reference page's "Relative path plugin source" section:
+    // "A relative path resolves only when Claude Code has the marketplace's
+    // files, so check the marketplace source type: github, git, file, and
+    // directory: Claude Code has the marketplace's files... settings:
+    // relative paths are rejected outright" (that rejection is for a
+    // marketplace whose OWN source is "settings", the inline-plugin-list
+    // form; this fixture's marketplace source is "directory", not
+    // "settings", so it is not the case that quote describes). Applied
+    // through query.applyFlagSettings(), the inline "flag settings" layer
+    // settingSources does not gate (sdk.d.ts: settingSources "control[s]
+    // which filesystem settings to load"; applyFlagSettings is a separate,
+    // always-on channel), then query.reloadPlugins() to apply it.
+    const MARKETPLACE_DIR = join(root, 'marketplace');
+    const SKILL_J = 'proof12-mp-skill-j';
+    const MARKETPLACE_NAME = 'proof12-marketplace';
+    const PLUGIN_NAME = 'proof12-mp-plugin';
+    writeSkill(join(MARKETPLACE_DIR, 'the-plugin', 'skills', SKILL_J), SKILL_J, 'Reached through a settings-declared, directory-sourced marketplace.');
+    mkdirSync(join(MARKETPLACE_DIR, '.claude-plugin'), { recursive: true });
+    writeFileSync(
+      join(MARKETPLACE_DIR, '.claude-plugin', 'marketplace.json'),
+      JSON.stringify({ name: MARKETPLACE_NAME, owner: { name: 'tower proof 12' }, plugins: [{ name: PLUGIN_NAME, source: './the-plugin' }] }, null, 2),
+    );
+
+    const run = startRun({ name: 'skills-dir-settings-plugin', options: { model } });
+    process.stdout.write(`run dir: ${run.dir}\nmarketplace dir: ${MARKETPLACE_DIR}\n`);
+
+    await runTurn(run, 'turn 1: before applyFlagSettings', QUESTION);
+
+    try {
+      await run.query.applyFlagSettings({
+        extraKnownMarketplaces: { [MARKETPLACE_NAME]: { source: { source: 'directory', path: MARKETPLACE_DIR } } },
+        enabledPlugins: { [`${PLUGIN_NAME}@${MARKETPLACE_NAME}`]: true },
+      });
+      process.stdout.write('applyFlagSettings() returned\n');
+    } catch (err) {
+      process.stdout.write(`applyFlagSettings() threw: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+    try {
+      const reloadPluginsResult = await run.query.reloadPlugins();
+      process.stdout.write(`reloadPlugins() result: ${JSON.stringify(reloadPluginsResult)}\n`);
+    } catch (err) {
+      process.stdout.write(`reloadPlugins() threw: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+    await runTurn(run, 'turn 2: after applyFlagSettings + reloadPlugins', QUESTION);
 
     run.end();
     await run.done;
