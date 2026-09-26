@@ -60,6 +60,20 @@
 // still running on the session it's asked to serve. Built: the easiest, which
 // is to log it and serve anyway.
 //
+// Proof 17b (27 Sep) reruns the kill-orphan case on the harness that gives
+// each agent ONE config directory, config-dirs/<name>/, reused by every run
+// under that name (RUN_NAME below), so the orphan and the Claude Code served
+// in its place share it. Variants: fresh and resumed are proof 17's (the
+// participant resumes through its store, into /tmp/claude-resume-*);
+// dir-fresh and dir-resumed give the participant no store, so every resume
+// is straight from the config directory (resume by id). Each case starts
+// with resetConfigDir(RUN_NAME). The check below is proof 17's, unchanged:
+// it still searches every directory under the config-dirs root although an
+// agent now has one.
+//
+// TODO: undecided. Whether a participant resumes through a store or straight
+// from its config directory. Built: both, as variants, to show each.
+//
 // TODO: undecided. Press handling (press 1 interrupt then drain, press 2
 // SIGTERM each Claude Code and stop waiting, press 3 process.exit) and abort
 // are carried over from proof 7 to show what each leaves behind; none of it is
@@ -73,7 +87,7 @@ import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { importSessionToStore, type SDKUserMessage, type SessionKey, type SessionStore, type SessionStoreEntry, type SpawnedProcess, type SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import type { HarnessOptions, Run } from '../src/harness.mts';
-import { startRun } from '../src/harness.mts';
+import { resetConfigDir, startRun } from '../src/harness.mts';
 import { LineRecorder, redact } from '../src/record.mts';
 
 // Wall clock, to the millisecond, in every process (proof 7: the harness's
@@ -88,9 +102,9 @@ const DEBUG_ROOT = join(STATE, 'debug');
 const BODIES_ROOT = join(STATE, 'api-bodies');
 
 // The participant's own config.
-const STORE_DIR = join(STATE, 'stores', 'proof-17-recovery');
+const STORE_DIR = join(STATE, 'stores', 'proof-17b-shared-dir');
 const CONFIG_DIRS_ROOT = join(STATE, 'config-dirs');
-const RUN_NAME = 'recovery';
+const RUN_NAME = 'recovery-17b';
 const WORK = join(STATE, 'work', RUN_NAME);
 
 const TOOL_SLEEP_S = 60;
@@ -584,8 +598,14 @@ interface ConvSpec {
   toolLabel?: string;
 }
 
+// store: resume through the session store (the SDK writes it into a
+// /tmp/claude-resume-* directory and points CLAUDE_CONFIG_DIR there). dir: no
+// store; resume by id straight from the agent's config directory.
+type Mode = 'store' | 'dir';
+
 interface ParticipantSpec {
   model: string;
+  mode: Mode;
   outDir: string;
   ending: 'answer' | 'hold';
   apiBodies?: boolean;
@@ -641,8 +661,7 @@ async function participant(specPath: string): Promise<void> {
       tools: ['Read', 'Bash'],
       allowedTools: ['Read', 'Bash'],
       thinking: { type: 'adaptive', display: 'summarized' },
-      sessionStore: store,
-      sessionStoreFlush: 'eager',
+      ...(spec.mode === 'store' ? { sessionStore: store, sessionStoreFlush: 'eager' as const } : {}),
       spawnClaudeCodeProcess: directSpawn,
       abortController: abort,
       ...(c.sessionId ? { resume: c.sessionId } : {}),
@@ -650,10 +669,8 @@ async function participant(specPath: string): Promise<void> {
     };
     const run = startRun({ name: RUN_NAME, options });
     run.done.catch(() => {});
-    if (c.toolLabel) {
-      rmSync(join(WORK, `wait-${c.toolLabel}-started.txt`), { force: true });
-      rmSync(join(WORK, `wait-${c.toolLabel}-finished.txt`), { force: true });
-    }
+    // (Proof 17 removed stale wait files here; 17b deletes nothing, and each
+    // label is unique per case, so there is none to remove.)
     let readyR: () => void = () => {};
     let resultR: (s: string) => void = () => {};
     let sidR: (s: string) => void = () => {};
@@ -728,7 +745,7 @@ async function participant(specPath: string): Promise<void> {
       writeState();
     });
     parts.push({ c, run, abort, ready, result, sessionId, done, bodies });
-    log(`${c.tag}: run ${run.dir}${c.sessionId ? `, resuming ${c.sessionId} through the store` : ', new conversation'}`);
+    log(`${c.tag}: run ${run.dir}${c.sessionId ? `, resuming ${c.sessionId} ${spec.mode === 'store' ? 'through the store' : 'straight from the config dir'}` : ', new conversation'}; mode ${spec.mode}`);
   }
   // A resume spawns Claude Code only after the SDK has written the resume
   // dir, so the pid is waited for rather than read once.
@@ -852,6 +869,7 @@ class Keeper {
   // own copy, so no line once seen is overwritten.
   readonly gens = new Map<string, number>();
   readonly pidSeen = new Map<string, string>();
+  readonly pidFiles = new Map<string, Json>();
   readonly extraRoots = new Set<string>();
   timer: NodeJS.Timeout | undefined;
   constructor(dir: string) {
@@ -880,6 +898,15 @@ class Keeper {
     return `${basename(root)}${gen > 0 ? `.gen${gen}` : ''}__${basename(file)}`;
   }
   scan(): void {
+    // 17b: a watched session's pid file that disappears (removed by its own
+    // Claude Code on exit, or by anything else) is logged, so a Claude Code
+    // removing the other's is visible.
+    for (const [f, d] of this.pidFiles) {
+      if (!existsSync(f)) {
+        this.pidFiles.delete(f);
+        this.rec.write({ ts: stamp(), event: 'pidfile-gone', file: f, pid: d.pid, sessionId: d.sessionId, pidAlive: alive(Number(d.pid)) });
+      }
+    }
     for (const [file, size] of this.sizes) {
       if (size !== -1 && !existsSync(file)) {
         this.sizes.set(file, -1);
@@ -929,6 +956,7 @@ class Keeper {
         try {
           const d = JSON.parse(readFileSync(f, 'utf8')) as Json;
           if (this.sids.has(String(d.sessionId))) {
+            this.pidFiles.set(f, d);
             const v = `${String(d.status)}`;
             if (this.pidSeen.get(key) !== v) {
               this.pidSeen.set(key, v);
@@ -1022,14 +1050,14 @@ async function waitGone(pids: number[], timeoutMs: number): Promise<boolean> {
   return false;
 }
 
-async function serveAgain(caseDir: string, label: string, model: string, sids: Record<string, string>, keeper: Keeper, log: (s: string) => void): Promise<Json[]> {
+async function serveAgain(caseDir: string, label: string, model: string, mode: Mode, sids: Record<string, string>, keeper: Keeper, log: (s: string) => void): Promise<Json[]> {
   // Truth as of now: every line of these sessions the driver has seen.
   keeper.scan();
   const truths: Record<string, Map<string, { entry: Json; copy: string }>> = {};
   for (const [tag, sid] of Object.entries(sids)) {
     truths[tag] = keeper.truth(sid);
   }
-  const h = startParticipant(caseDir, label, { model, ending: 'answer', apiBodies: true, convs: Object.entries(sids).map(([tag, sid]) => ({ tag, sessionId: sid, say: QUESTIONS[tag] as string, trigger: 'none' as const })) }, log);
+  const h = startParticipant(caseDir, label, { model, mode, ending: 'answer', apiBodies: true, convs: Object.entries(sids).map(([tag, sid]) => ({ tag, sessionId: sid, say: QUESTIONS[tag] as string, trigger: 'none' as const })) }, log);
   const ex = await Promise.race([h.exited, later(400_000).then(() => undefined)]);
   log(`${label}: participant exited ${JSON.stringify(ex)}`);
   const st = pstate(h);
@@ -1217,11 +1245,19 @@ type CaseName = 'press1' | 'press2' | 'press3' | 'kill' | 'kill-orphan' | 'crash
 
 const WORDS: Record<string, string> = { R: 'PERIWINKLE', T: 'MARIGOLD' };
 
-async function runCase(model: string, name: CaseName, variant: 'fresh' | 'resumed'): Promise<void> {
+type Variant = 'fresh' | 'resumed' | 'dir-fresh' | 'dir-resumed';
+
+async function runCase(model: string, name: CaseName, variant: Variant): Promise<void> {
   const caseDir = join(RUNS, `${stamp().replace(/[:.]/g, '')}-recovery-${name}-${variant}`);
   mkdirSync(caseDir, { recursive: true });
   const log = makeLog(new Recorder(join(caseDir, 'driver-log.txt')), 'driver: ');
-  log(`case ${name} ${variant}; dir ${caseDir}`);
+  const mode: Mode = variant.startsWith('dir-') ? 'dir' : 'store';
+  log(`case ${name} ${variant}; mode ${mode}; dir ${caseDir}`);
+  // 17b: a clean start for the agent (moves its config dir aside; refuses
+  // while a Claude Code is still running with it).
+  const reset = resetConfigDir(RUN_NAME);
+  writeFileSync(join(caseDir, 'reset.json'), `${JSON.stringify(reset, null, 2)}\n`);
+  log(`reset ${RUN_NAME}: ${JSON.stringify(reset)}`);
   const keeper = new Keeper(caseDir);
   keeper.start();
   const tagId = `${name}-${variant}-${Date.now()}`;
@@ -1237,8 +1273,8 @@ async function runCase(model: string, name: CaseName, variant: 'fresh' | 'resume
   };
 
   // Seed: a clean one-turn serve, so the case's serve is a resume.
-  if (variant === 'resumed') {
-    const h = startParticipant(caseDir, '0-seed', { model, ending: 'answer', convs: ['R', 'T'].map((tag) => ({ tag, say: PROMPTS.seed(WORDS[tag] as string), trigger: 'none' as const })) }, log);
+  if (variant === 'resumed' || variant === 'dir-resumed') {
+    const h = startParticipant(caseDir, '0-seed', { model, mode, ending: 'answer', convs: ['R', 'T'].map((tag) => ({ tag, say: PROMPTS.seed(WORDS[tag] as string), trigger: 'none' as const })) }, log);
     const ex = await h.exited;
     note(h);
     log(`seed exited ${JSON.stringify(ex)}; sessions ${JSON.stringify(sids)}`);
@@ -1249,7 +1285,7 @@ async function runCase(model: string, name: CaseName, variant: 'fresh' | 'resume
       { tag: 'R', say: story, trigger: 'reply', ...(sids.R ? { sessionId: sids.R } : {}) },
       { tag: 'T', say: PROMPTS.tool(tool), trigger: 'tool', toolLabel: tool, ...(sids.T ? { sessionId: sids.T } : {}) },
     ];
-    const h = startParticipant(caseDir, label, { model, ending: 'hold', convs }, log);
+    const h = startParticipant(caseDir, label, { model, mode, ending: 'hold', convs }, log);
     const ok = await Promise.race([h.ready, later(240_000).then(() => false)]);
     note(h);
     if (!ok) {
@@ -1330,7 +1366,7 @@ async function runCase(model: string, name: CaseName, variant: 'fresh' | 'resume
     // Served again at once, while the orphans run (T is inside a 60 s tool).
     ending.orphansAliveAtServe = claudes.filter(alive);
     log(`kill-orphan: serving again while ${JSON.stringify(ending.orphansAliveAtServe)} still run`);
-    orphanServe = await serveAgain(caseDir, '2-serve-while-orphan', model, { ...sids }, keeper, log);
+    orphanServe = await serveAgain(caseDir, '2-serve-while-orphan', model, mode, { ...sids }, keeper, log);
     ending.orphansAliveAfterOrphanServe = claudes.filter(alive);
   }
   if (name === 'reboot') {
@@ -1390,7 +1426,7 @@ async function runCase(model: string, name: CaseName, variant: 'fresh' | 'resume
   }
   writeFileSync(join(caseDir, 'ending.json'), `${JSON.stringify(ending, null, 2)}\n`);
 
-  const rows = await serveAgain(caseDir, name === 'kill-orphan' ? '3-serve-after-orphan' : name === 'kill-twice' ? '3-serve' : '2-serve', model, { ...sids }, keeper, log);
+  const rows = await serveAgain(caseDir, name === 'kill-orphan' ? '3-serve-after-orphan' : name === 'kill-twice' ? '3-serve' : '2-serve', model, mode, { ...sids }, keeper, log);
   keeper.stop();
   writeFileSync(join(caseDir, 'result.json'), `${JSON.stringify({ ending, orphanServe, serve: rows }, null, 2)}\n`);
   rescore(caseDir);
@@ -1407,9 +1443,9 @@ if (mode === '--rescore') {
   }
 } else if (mode === 'participant' && rest[0]) {
   await participant(rest[0]);
-} else if (mode === 'case' && rest[0] && CASES.includes(rest[1] ?? '') && (rest[2] === 'fresh' || rest[2] === 'resumed')) {
-  await runCase(rest[0], rest[1] as CaseName, rest[2]);
+} else if (mode === 'case' && rest[0] && CASES.includes(rest[1] ?? '') && ['fresh', 'resumed', 'dir-fresh', 'dir-resumed'].includes(rest[2] ?? '')) {
+  await runCase(rest[0], rest[1] as CaseName, rest[2] as Variant);
 } else {
-  process.stderr.write(`usage:\n  case <model> <${CASES.join('|')}> <fresh|resumed>\n  participant <spec.json>\n`);
+  process.stderr.write(`usage:\n  case <model> <${CASES.join('|')}> <fresh|resumed|dir-fresh|dir-resumed>\n  participant <spec.json>\n`);
   process.exit(2);
 }
