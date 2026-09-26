@@ -1,0 +1,5 @@
+{
+  "name": "tower-harness-smoke",
+  "description": "The smoke run's own plugin: carries the positive-test skill.",
+  "version": "0.0.0"
+}
