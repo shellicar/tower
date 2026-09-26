@@ -183,8 +183,11 @@ options: `baseline` (nothing), `env` (`ENABLE_CLAUDEAI_MCP_SERVERS=false`),
 name), `allow-empty` (`settings: {allowedMcpServers: []}`), `safe-mode`
 (`CLAUDE_CODE_SAFE_MODE=1`) and `toggle` (`toggleMcpServer(name, false)` once
 the connectors are no longer pending). `managed-control` is not a way: a
-`managedSettings` holding only an inert deny entry. `preset` uses Claude
-Code's `claude_code` system prompt instead of the SDK's minimal one.
+`managedSettings` holding only an inert deny entry. Trailing flags: `preset`
+uses Claude Code's `claude_code` system prompt instead of the SDK's minimal
+one; `all-tools` leaves `tools` unset (Claude Code's default set, with tool
+search) instead of `tools: []`; `dummy-mcp` also passes a stdio server of the
+proof's own (`proofs/dummy-mcp.mjs`) through `mcpServers`.
 
 Each run directory also holds `proof.json`, `store-appends.jsonl`,
 `store-load.jsonl`, `proof-events.jsonl`, `api-bodies/`, `debug.log` and
