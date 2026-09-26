@@ -62,7 +62,7 @@
 // directory under runs/.
 
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -189,12 +189,14 @@ type Filter = 'skill-md' | 'every-dir';
 function desiredLinks(declared: string[], filter: Filter): Map<string, string> {
   const want = new Map<string, string>();
   for (const d of declared) {
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      if (!e.isDirectory()) continue;
-      if (filter === 'skill-md' && !existsSync(join(d, e.name, 'SKILL.md'))) continue;
+    for (const name of readdirSync(d)) {
+      // statSync follows links, so a declared entry that is itself a link
+      // to a skill folder counts as a directory.
+      if (!statSync(join(d, name)).isDirectory()) continue;
+      if (filter === 'skill-md' && !existsSync(join(d, name, 'SKILL.md'))) continue;
       // TODO: undecided. Two declared dirs with the same skill name: the
       // first declared wins here.
-      if (!want.has(e.name)) want.set(e.name, join(d, e.name));
+      if (!want.has(name)) want.set(name, join(d, name));
     }
   }
   return want;
