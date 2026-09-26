@@ -180,13 +180,21 @@ Three scripts, one working directory in the file, no broker needed.
 `addDirectories` on the natural first ask; `flag`: `options.settings` at
 start; `flaglive`: `applyFlagSettings` called live) and tries to remove it
 with `removeDirectories`, matching and mismatched `PermissionUpdateDestination`
-values, restoring the grant live before each attempt so every destination is
-tested against a directory that is actually still there, plus the
-shallow-merge-replace hazard in `applyFlagSettings`, plus (`race`) a batched
-pair of tool calls racing a mid-turn removal. `cliarg`'s optional second
-argument overrides which destination its first removal tries (default
-`cliArg`); `race`'s overrides the trigger's `canUseTool` delay in ms
-(default 3000; 0 tests the opposite ordering). Every `HOOK_EVENTS` member
+values, plus the shallow-merge-replace hazard in `applyFlagSettings`, plus
+(`race`) a batched pair of tool calls racing a mid-turn removal. For
+`cliarg`, `session`, `flag` and `flaglive` the optional second argument is
+the destination the first removal tries (default `cliArg` for `cliarg`,
+`session` otherwise), and names the run `proof10-dir-remove-<route>-<dest>`
+so each gets its own working directory. Only that first removal is always
+against a grant a snapshot shows present: the later ones in `flag`/`flaglive`
+follow a re-apply of the identical `applyFlagSettings` value, which the
+snapshots show does not re-add a removed directory, so one run per
+destination is how each is covered. For `race` the second argument is the
+trigger's `canUseTool` delay in ms (default 3000; 0 tests the opposite
+ordering). `summary.txt` also lists, before and after, the three settings
+files a persistent destination can write: the run's `CLAUDE_CONFIG_DIR/
+settings.json` and the working directory's `.claude/settings.json` and
+`.claude/settings.local.json`. Every `HOOK_EVENTS` member
 gets a logging hook. `canUseTool` always allows a Read against a separate,
 never-granted trigger directory (the only way to deliver `updatedPermissions`,
 since it only exists on the `allow` branch) and piggybacks whatever update
