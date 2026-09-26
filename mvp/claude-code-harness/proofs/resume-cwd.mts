@@ -51,6 +51,9 @@
 //                    directory alone
 //
 //   --summarise <run dir>
+//   --cache <resume run dir> <seed run dir>
+//       What the resume's requests read from and wrote to the prompt cache,
+//       and where its first request first differs from the seed's context.
 //
 // TODO: undecided. The store layouts (file keyed by projectKey/sessionId;
 // tower subjects keyed by session id), the api grain, the derived build and
@@ -1148,16 +1151,127 @@ function summarise(runDir: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Cache: what a resume costs against the seed (Stephen, 26 Sep: "are they
+// cache concerns, ie if you sent the conversation without them, is it a
+// different cache prefix?"). Per main-thread request: thread, message count,
+// and the response's usage. Then the seed's context as the model had it by
+// its last reply (a thread `create` carries every message, a `continue` only
+// the new ones, each response appended) against the resume's first request,
+// message by message, to the first difference.
+
+interface MainReq {
+  line: number;
+  file: string;
+  ts: string;
+  body: Json & { messages: ApiMessage[]; thread?: Json; system?: Block[] };
+  usage: Json | undefined;
+  content: Block[] | undefined;
+}
+
+function mainReqs(runDir: string): MainReq[] {
+  const dir = join(runDir, 'api-bodies');
+  return readJsonl(join(dir, 'index.jsonl')).flatMap((e, i) => {
+    if (e.query_source !== 'sdk') {
+      return [];
+    }
+    const resp = join(dir, String(e.response_file));
+    const r = existsSync(resp) ? (JSON.parse(readFileSync(resp, 'utf8')) as Json) : undefined;
+    return [
+      {
+        line: i + 1,
+        file: String(e.request_file),
+        ts: String(e.timestamp),
+        body: JSON.parse(readFileSync(join(dir, String(e.request_file)), 'utf8')) as MainReq['body'],
+        usage: r?.usage as Json | undefined,
+        content: r?.content as Block[] | undefined,
+      },
+    ];
+  });
+}
+
+// For comparing: string content is one text block; cache_control and a
+// response's tool_use `caller` are not content; thinking text is redacted in
+// the logged bodies, so thinking compares by its signature.
+function norm(content: string | Block[]): string {
+  const blocks = typeof content === 'string' ? [{ type: 'text', text: content }] : content;
+  return JSON.stringify(
+    blocks.map((b) => {
+      if (b.type === 'thinking') {
+        return { type: b.type, signature: b.signature };
+      }
+      const { cache_control: _c, caller: _k, ...kept } = b;
+      return kept;
+    }),
+  );
+}
+
+function cacheReport(resumeDir: string, seedDir: string): string {
+  const out: string[] = [];
+  const say = (s: string): void => {
+    out.push(s);
+  };
+  const table = (label: string, dir: string, reqs: MainReq[]): void => {
+    say(`-- ${label}: ${dir}`);
+    for (const r of reqs) {
+      const u = r.usage ?? {};
+      const cc = (u.cache_creation as Json | undefined) ?? {};
+      say(
+        `  api-bodies/index.jsonl line ${r.line} (${r.ts}) ${r.file}: thread=${JSON.stringify(r.body.thread ?? null)} messages=${r.body.messages.length} tools=${Array.isArray(r.body.tools) ? (r.body.tools as Json[]).length : 'absent'} system[0] ${String(r.body.system?.[0]?.text ?? '').length} chars | input ${String(u.input_tokens)} cache_read ${String(u.cache_read_input_tokens)} cache_write ${String(u.cache_creation_input_tokens)} (1h ${String(cc.ephemeral_1h_input_tokens)}, 5m ${String(cc.ephemeral_5m_input_tokens)}) prefix total ${Number(u.input_tokens ?? 0) + Number(u.cache_read_input_tokens ?? 0) + Number(u.cache_creation_input_tokens ?? 0)}`,
+      );
+    }
+  };
+  const seedReqs = mainReqs(seedDir);
+  const resReqs = mainReqs(resumeDir);
+  table('seed', seedDir, seedReqs);
+  table('resume', resumeDir, resReqs);
+  let ctx: ApiMessage[] = [];
+  for (const r of seedReqs) {
+    ctx = (r.body.thread as Json | undefined)?.type === 'continue' ? [...ctx, ...r.body.messages] : [...r.body.messages];
+    if (r.content) {
+      ctx = [...ctx, { role: 'assistant', content: r.content }];
+    }
+  }
+  const first = resReqs[0];
+  if (!first) {
+    return `${out.join('\n')}\n`;
+  }
+  say(`\n-- the seed's context by its last reply (${ctx.length} messages) against the resume's first request (index.jsonl line ${first.line}, ${first.body.messages.length} messages)`);
+  const n = Math.max(ctx.length, first.body.messages.length);
+  let differs = -1;
+  for (let i = 0; i < n; i += 1) {
+    const s = ctx[i];
+    const r = first.body.messages[i];
+    const same = s !== undefined && r !== undefined && s.role === r.role && norm(s.content) === norm(r.content);
+    if (!same && differs < 0) {
+      differs = i;
+    }
+    say(`  [${i}] ${same ? 'same' : 'DIFF'}`);
+    say(`      seed:   ${s ? `${s.role}: ${describe(s.content)}` : '(none)'}`);
+    if (!same) {
+      say(`      resume: ${r ? `${r.role}: ${describe(r.content)}` : '(none)'}`);
+    }
+  }
+  say(differs < 0 ? '  no difference' : `  first difference at messages[${differs}]`);
+  const sys = (reqs: MainReq[]): string => JSON.stringify((reqs[0]?.body.system ?? []).slice(1));
+  const tools = (reqs: MainReq[]): string => JSON.stringify(reqs[0]?.body.tools ?? null);
+  say(`  system blocks after the first: ${sys(seedReqs) === sys(resReqs) ? 'same' : 'DIFFER'} as the seed's first request; tools: ${tools(seedReqs) === tools(resReqs) ? 'same' : 'DIFFER'}`);
+  return `${out.join('\n')}\n`;
+}
+
+// ---------------------------------------------------------------------------
 
 const [mode, ...rest] = process.argv.slice(2);
 const usage = `usage:
   node proofs/resume-cwd.mts seed <model>
   node proofs/resume-cwd.mts control <model>
   node proofs/resume-cwd.mts resume <model> <file|tower|whole|tower-env|tower-cwd> <a|b> <sessionId>
-  node proofs/resume-cwd.mts --summarise <run dir>`;
+  node proofs/resume-cwd.mts --summarise <run dir>
+  node proofs/resume-cwd.mts --cache <resume run dir> <seed run dir>`;
 
 if (mode === '--summarise' && rest[0]) {
   process.stdout.write(summarise(rest[0]));
+} else if (mode === '--cache' && rest[0] && rest[1]) {
+  process.stdout.write(cacheReport(rest[0], rest[1]));
 } else if ((mode === 'seed' || mode === 'control') && rest[0]) {
   await seed(rest[0], mode === 'control');
 } else if (mode === 'resume' && rest.length === 4 && SOURCES.includes(rest[1] as Source) && (rest[2] === 'a' || rest[2] === 'b')) {

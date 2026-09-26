@@ -195,3 +195,9 @@ harness's own files, a run directory holds:
 | `seed.json`, `resume.json` | what the run was |
 | `api-bodies/` | request and response bodies (`OTEL_LOG_RAW_API_BODIES`, as proof 1), redacted |
 | `summary.txt` | the keys appends arrived under, which entries speak of the directory, and each main-thread request's directory text and new messages |
+
+`node proofs/resume-cwd.mts --cache <resume run dir> <seed run dir>` prints,
+per main-thread request of both runs, the thread, message and tool counts and
+the response's cache read and write, then the seed's context by its last reply
+against the resume's first request, message by message, to the first
+difference.
