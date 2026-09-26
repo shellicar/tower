@@ -117,6 +117,7 @@ const AGENT_A13: &str = fixture!("agent/scenario-a13.jsonl");
 const AGENT_A14: &str = fixture!("agent/scenario-a14.jsonl");
 const AGENT_A15: &str = fixture!("agent/scenario-a15.jsonl");
 const AGENT_A16: &str = fixture!("agent/scenario-a16.jsonl");
+const AGENT_A17: &str = fixture!("agent/scenario-a17.jsonl");
 
 fn assert_all_known(events: &[Event]) {
     for e in events {
@@ -607,4 +608,27 @@ fn agent_a16_rejection_vocabulary() {
     // carries a cause; `reason` stays the machine token.
     assert!(replies[1]["detail"].is_string());
     assert!(replies[2]["detail"].is_string());
+}
+
+#[test]
+fn conv_attachment_a17_chdir_while_a_query_runs_is_busy_then_accepted() {
+    // Both chdir lines are requests (filtered). The first lands mid-query
+    // and is answered `busy`; the same chdir after the query closes is
+    // accepted, and `moved` follows at the new cwd.
+    let evs = events(AGENT_A17);
+    assert_all_known(&evs);
+    let attachment: Vec<&str> = evs
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EventKind::Attachment(a) => Some(a.type_name()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(attachment, ["attached", "moved"]);
+    let replies = replies(AGENT_A17);
+    let outcomes: Vec<&str> = replies
+        .iter()
+        .map(|r| r["reason"].as_str().unwrap_or("accepted"))
+        .collect();
+    assert_eq!(outcomes, ["accepted", "busy", "accepted"]);
 }

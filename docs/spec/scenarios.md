@@ -300,6 +300,7 @@ presence, not on literal timestamps — silence is represented the way approval
 | a14 — service spawns fresh | `fixtures/agent/scenario-a14.jsonl` |
 | a15 — service adopts a record | `fixtures/agent/scenario-a15.jsonl` |
 | a16 — the rejection vocabulary | `fixtures/agent/scenario-a16.jsonl` |
+| a17 — chdir while a query runs | `fixtures/agent/scenario-a17.jsonl` |
 
 The concern spans two trees, though a single scenario need not. `ready` and
 `pulse` are the world's own telemetry; `service` and `drain` address the
@@ -311,7 +312,8 @@ request. a5's world lines are two `service` requests, which no stream
 captures, and the holder's `pulse`, so replaying it yields the claim and
 that pulse. a6 to a11 carry conversation lines only. a12 to a15 mix both
 trees, the claim beside the liveness the premise reads; a16 is requests
-alone, so it replays as nothing.
+alone, so it replays as nothing. a17 carries conversation lines only: the
+claim, one query's traffic, and the move.
 
 ### a1 — world up, fresh conversation
 
@@ -502,3 +504,17 @@ would leave a reader unable to tell which is the contract.
 - Exercises: four requests, four rejections; no event traffic at all.
 - Asserts: `reason` is the token a caller branches on; `detail` is optional
   human-facing diagnostics, present on `invalid_cwd` and `failed`.
+
+### a17 — chdir while a query runs
+
+A `chdir` arrives while the holder is in the middle of a query, from a
+servicer that can't move now: it answers `busy` (conversation.md, Requests),
+and nothing moves. The query ends, the sender sends the same `chdir` again,
+and this time it is accepted and the move lands.
+
+- Exercises: `attached` at one `cwd`; a `say` accepted and its turn started;
+  `chdir` rejected `busy`; the query closing `completed`; the same `chdir`
+  accepted; the `moved` that follows at the new `cwd`.
+- Asserts: a `busy` rejection leaves the attachment's `cwd` where it was —
+  no `moved` until a `chdir` is accepted; `busy` is a rejection for now, not
+  `unsupported`, so the same request can succeed once the query has ended.

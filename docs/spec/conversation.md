@@ -352,7 +352,7 @@ standing from where the message came from.
 |---|---|---|---|
 | `say` | `from`, `text`, `precondition` | `accepted` + `id` \| `rejected` + `reason` | start a new query against a known state; `from` is the sender identity — locally-typed input carries `{ kind: human }` the same way, so no speaker is ever anonymous; the reply acknowledges acceptance only — the answer appears on the change stream like any other turn |
 | `cancel` | `id` | `accepted` \| `rejected` + `reason` | revoke an accepted piece of state by its id — in v1, a running query; whatever kinds acceptance creates later. Its target *is* its premise: never "cancel whatever happens to be running". Rejection reasons are honest: `not_found`, `already_complete`, `unsupported` |
-| `chdir` | `cwd` | `accepted` \| `rejected` + `reason` | this conversation is served at this directory from now on. The request states that effect and never a mechanism: a servicer may move a process, or hold `cwd` as a value per conversation, and both conform. Accept confirms the premise (this servicer holds this conversation), never the outcome — the move is observed on `attachment.moved` when it lands, and one that never lands shows as an unchanged `cwd`, an observed outcome like any other. The servicer reconciles the directory and may decline to move. A harness with no directory notion answers `unsupported`. Known reasons today: `unsupported` |
+| `chdir` | `cwd` | `accepted` \| `rejected` + `reason` | this conversation is served at this directory from now on. The request states that effect and never a mechanism: a servicer may move a process, or hold `cwd` as a value per conversation, and both conform. Accept confirms the premise (this servicer holds this conversation), never the outcome — the move is observed on `attachment.moved` when it lands, and one that never lands shows as an unchanged `cwd`, an observed outcome like any other. The servicer reconciles the directory and may decline to move. A harness with no directory notion answers `unsupported`. A servicer that is in the middle of a query and can't move now answers `busy`; the sender can send it again when the query ends. Known reasons today: `unsupported`, `busy` |
 
 **Why `chdir` addresses the conversation.** It changes one conversation's
 state, so it goes to the conversation (core.md, "Work is addressed to the
@@ -664,7 +664,7 @@ export const conversationRequest = {
 };
 
 // Replies (transport truth, never outcome). Known reasons today:
-// stale, not_found, already_complete, unsupported.
+// stale, not_found, already_complete, unsupported, busy.
 export const requestReply = z.union([
   z.looseObject({ accepted: z.literal(true), id: z.string().optional() }),
   z.looseObject({ rejected: z.literal(true), reason: z.string() }),
