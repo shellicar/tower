@@ -16,7 +16,7 @@ export const RULES: Record<string, string> = {
   R3: 'In a user message, tool_result blocks come first. (code: i5t puts tool_result blocks ahead of the rest; observed)',
   R4: 'Attachment types session_context, instructions, remote_session_change, dir_sync_notice, unknown_command_fallback, coordinator_context, context_sections, fork_briefing, poll_events, cowork_memory_context, artifact_opening_prefetch fold into the user message; with system turns every other attachment with rendered text goes to the system buffer. (code: the type list in Pw case "attachment", guarded by w = iee(model))',
   R5: 'A queued_command goes to the system buffer unless it is a human-turn prompt (humanTurn true, commandMode "prompt", not isMeta, not forwarded), which folds into the user message. (code: Pw `Ts` path and the queued_command exclusions; only the system case observed)',
-  R6: 'Folded reminders and isMeta user text sit ahead of the prompt text in the user message. (observed: session_context, remote_session_change and the cwd notice; the code pass that moves them was not pinned down)',
+  R6: 'Folded attachment reminders sit ahead of every user entry\'s text in the user message; user entries\' texts (isMeta or not) keep record order. (observed: session_context and remote_session_change before the prompt although written after it; the cwd notice before the prompt and the skill body after the command message, both in record order; the code pass that moves them was not pinned down)',
   R7: 'The system buffer becomes one role "system" message after the user message, one text block, each reminder its `rendered` text, joined by a blank line. (observed; code: $o flush, SUe unwrap and join, per-reminder rewrap for claude-sonnet-5 via AWn)',
   R8: 'The system buffer is flushed before the next assistant message, so each request carries at most one system message after its user message. (code: $o called from case "assistant" and at the end)',
   R9: 'A system message with no user message before it becomes an isMeta user message. (code: o7o; not observed)',
@@ -24,6 +24,7 @@ export const RULES: Record<string, string> = {
   R11: 'An attachment is sent as its `rendered` text verbatim; one without `rendered` is not sent. (observed, proof 15; code: Xle/r8 use rendered when present)',
   R13: 'Which models take system turns: claude-sonnet-5, claude-opus-5-5, claude-fable-5-1 yes; claude-haiku-4-5 no. (observed per model in the runs on disk; code: iee(model) reads a capability `midConversationSystem`)',
   R14: 'In a system message claude-sonnet-5 keeps each reminder wrapped; other models get the wrapper stripped. (code: AWn(model) is model === "claude-sonnet-5", SUe/owe unwrap; observed on opus-5-5 and fable-5-1)',
+  R15: 'Without system turns, reminders written after tool results (no prompt) go inside the last tool_result: its string content trimmed, then each reminder, joined by a blank line. (code: a5t/vUe fold text into a tool_result; the separator is from the runs, the code joins with one newline and was not fully traced)',
   R12: 'When a user entry\'s own text (a prompt, or an unflagged marker such as "[Request interrupted by user for tool use]") joins a user message after a text block, that block gets a trailing newline. (observed: remote_session_change, the isMeta cwd notice and the interrupt marker blocks end with an extra "\\n"; code not pinned down)',
 };
 
@@ -118,6 +119,7 @@ export interface Prediction {
 export function predict(pending: Json[], s: FoldSettings): Prediction {
   const used = new Set<string>();
   const pieces: Piece[] = [];
+  const folded: Json[] = [];
   const system: { entry: Json; texts: string[] }[] = [];
   for (const e of pending.filter(isCarrier)) {
     if (e.type === 'user') {
@@ -130,7 +132,7 @@ export function predict(pending: Json[], s: FoldSettings): Prediction {
         pieces.push({ entry: e, kind: 'tool', blocks: tools });
       }
       if (rest.length > 0) {
-        pieces.push({ entry: e, kind: e.isMeta === true ? 'reminder' : 'prompt', blocks: rest });
+        pieces.push({ entry: e, kind: 'prompt', blocks: rest });
       }
       continue;
     }
@@ -146,6 +148,28 @@ export function predict(pending: Json[], s: FoldSettings): Prediction {
     }
   }
   const messages: FormMessage[] = [];
+  // R15: without system turns, reminders after tool results (and no prompt)
+  // go inside the last tool_result's string content.
+  const tools = pieces.filter((p) => p.kind === 'tool');
+  const lastTool = tools.at(-1);
+  const lastResult = lastTool?.blocks.at(-1);
+  if (!s.systemTurns && lastTool && lastResult && !pieces.some((p) => p.kind === 'prompt') && typeof lastResult.content === 'string') {
+    const reminders = pieces.filter((p) => p.kind === 'reminder');
+    if (reminders.length > 0) {
+      used.add('R15');
+      const texts = reminders.flatMap((p) => p.blocks.map(textOf));
+      const merged = { ...lastResult, content: [String(lastResult.content).trim(), ...texts.map((t) => t.trim())].filter((t) => t !== '').join('\n\n') };
+      lastTool.blocks = [...lastTool.blocks.slice(0, -1), merged];
+      for (const r of reminders) {
+        pieces.splice(pieces.indexOf(r), 1);
+      }
+      // Spans inside a tool_result's content: not expressible at block grain
+      // (the reminders' entries are listed with no spans).
+      for (const r of reminders) {
+        folded.push(r.entry);
+      }
+    }
+  }
   if (pieces.length > 0) {
     // R3, R6
     const ordered = [...pieces.filter((p) => p.kind === 'tool'), ...pieces.filter((p) => p.kind === 'reminder'), ...pieces.filter((p) => p.kind === 'prompt')];
@@ -175,6 +199,9 @@ export function predict(pending: Json[], s: FoldSettings): Prediction {
         owner.push({ entry: p.entry, span });
         spans.set(p.entry, [...(spans.get(p.entry) ?? []), span]);
       });
+    }
+    for (const e of folded) {
+      spans.set(e, []);
     }
     messages.push({ role: 'user', content, ccEntries: toCc(pending, spans) });
   }

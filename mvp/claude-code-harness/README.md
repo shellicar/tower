@@ -197,3 +197,38 @@ node proofs/pure-resume.mts --against-seed <resume run dir> <seed run dir>
 Beyond proof 13's files, a seed run has `placements.jsonl` (where each user
 and attachment entry was found in the request that carried it). A resume run
 has `loaded-entries.jsonl` (what `load()` returned).
+
+## Proof 16: the conversation as the model received it
+
+`proofs/semantic-form.mts` publishes a conversation on tower's test broker
+(127.0.0.1:31416) one `changes.message` per API message, as the request
+carried it, with Claude Code's typed `attachment` objects on the message they
+belong to (`ccEntries`: each entry the message holds, in record order, with
+the blocks or character spans it produced). It gets there two ways, both
+live on the same run, each onto its own tower conversation:
+
+- A (`proofs/semantic/by-body.mts`): from the request body Claude Code logs
+  under `OTEL_LOG_RAW_API_BODIES=file:<dir>`, tying each block back to the
+  entry whose `rendered` text (or tool_result, or prompt) it is.
+- B (`proofs/semantic/by-fold.mts`): from the entries alone, by
+  reimplementing Claude Code's fold; its rules are listed in `RULES` with
+  where each came from. It never reads a body.
+
+`load()` (`proofs/semantic/form.mts` `rebuild`) turns either conversation back
+into Claude Code's entries. Resumes compare the first resumed request with a
+resume from Claude Code's full record.
+
+```sh
+node proofs/semantic-form.mts seed claude-sonnet-5 main      # or dup, types
+PROOF16_FIRST_DELAY_MS=20000 node proofs/semantic-form.mts resume claude-sonnet-5 full <sessionId>
+PROOF16_FIRST_DELAY_MS=20000 node proofs/semantic-form.mts resume claude-sonnet-5 A <sessionId>   # B, A-silent, B-silent, full-fold-true, full-no-snapshot
+node proofs/semantic-form.mts --compare <full run dir> <other run dir>...
+node proofs/semantic-form.mts --live <seed run dir>
+node proofs/semantic-form.mts --corpus <any run dir with api-bodies>...
+node proofs/semantic-form.mts republish <seed run dir>
+```
+
+A seed run adds `signals.jsonl` (what each approach placed at its signal: A
+the request file, B the response's `message_start`), `published-A.jsonl`,
+`published-B.jsonl`, `timing-A.jsonl` and `timing-B.jsonl`. Seed records
+live in `~/.local/state/tower-claude-code-harness/proof-16/seeds/`.

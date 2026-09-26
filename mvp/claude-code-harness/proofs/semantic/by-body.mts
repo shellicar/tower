@@ -92,6 +92,19 @@ export function attribute(body: { messages: ApiMessage[] }, pending: Json[]): At
         add(whole, { block: bi });
         return;
       }
+      // One of several text blocks of a user entry (a prompt sent as blocks).
+      const part = candidates.find((c) => {
+        if (c.type !== 'user' || (used.has(c) && !parts.has(c))) {
+          return false;
+        }
+        const own = blocksOf((c.message as Json).content).filter((x) => x.type === 'text').map(textOf);
+        const taken = (parts.get(c) ?? []).length;
+        return own.length > 1 && own[taken] === text;
+      });
+      if (part) {
+        add(part, { block: bi });
+        return;
+      }
       // Reminders inside the block, in the order they appear.
       let pos = 0;
       const spans: { e: Json; start: number; length: number; unwrapped?: boolean }[] = [];

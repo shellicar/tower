@@ -17,10 +17,10 @@ import { startRun } from '../../src/harness.mts';
 import { redact, stamp } from '../../src/record.mts';
 import { attribute } from './by-body.mts';
 import { predict, settingsForModel } from './by-fold.mts';
-import { readJsonl } from './corpus.mts';
-import { type ApiMessage, type Block, type Json, rebuild } from './form.mts';
+import { groups, mainRequests, readJsonl } from './corpus.mts';
+import { type ApiMessage, type Block, isCarrier, isToolResults, type Json, messageId, rebuild } from './form.mts';
 import { Publisher, Recorder } from './publish.mts';
-import { lastSeq, modelsByTurn, openTower, type Tower, towerMessages } from './tower.mts';
+import { lastSeq, modelsByTurn, openTower, type Tower, towerMessages, tsNow } from './tower.mts';
 
 const HARNESS_STATE = join(homedir(), '.local', 'state', 'tower-claude-code-harness');
 const STATE = join(HARNESS_STATE, 'proof-16');
@@ -568,4 +568,61 @@ export async function resume(model: string, source: Source, sessionId: string): 
   copyBodies(bodies, run.dir);
   log('done');
   await tower?.nc.drain();
+}
+
+// ---------------------------------------------------------------------------
+// Republish a recorded seed offline: the same forms each approach builds
+// (A from the logged bodies, B from the entries), onto fresh tower
+// conversations, so a load() variant can be tried on a seed that was
+// published before it existed. No timing: the run is over.
+
+export async function republish(seedRun: string): Promise<void> {
+  const seedRecPath = join(seedRun, 'seed.json');
+  const old = JSON.parse(readFileSync(seedRecPath, 'utf8')) as SeedRecord;
+  const entries = seedEntries(seedRun);
+  const requests = mainRequests(seedRun);
+  const tower = await openTower();
+  const out: Json = {};
+  for (const label of ['A', 'B'] as const) {
+    const convId = randomUUID();
+    const pub = new Publisher(tower, convId, `${label}-republished`);
+    pub.rec.attach(seedRun);
+    const settings = settingsForModel(old.model);
+    let carry: Json[] = [];
+    for (const g of groups(entries, requests)) {
+      const turnId = randomUUID();
+      const forms = label === 'A' ? attribute(g.request.body, [...carry, ...g.pending.filter((e) => !carry.includes(e))]) : undefined;
+      carry = forms?.unplaced ?? [];
+      const messages = forms ? forms.messages : predict(g.pending, settings).messages;
+      const silent = g.pending.filter((e) => e.type === 'attachment' && !isCarrier(e));
+      if (messages[0] && silent.length > 0) {
+        const order = new Map(entries.map((e, i) => [String(e.uuid), i]));
+        const at = (u: string): number => order.get(u) ?? Number.MAX_SAFE_INTEGER;
+        messages[0].ccEntries = [...messages[0].ccEntries, ...silent.map((e) => ({ uuid: String(e.uuid), type: 'attachment' as const, attachment: e.attachment as Json, spans: [] }))].sort((x, y) => at(x.uuid) - at(y.uuid));
+      }
+      const byUuid = new Map(g.pending.map((e) => [String(e.uuid), e]));
+      let queryId = pub.queryId;
+      for (const m of messages) {
+        const prompt = m.ccEntries.find((c) => c.type === 'user' && !c.isMeta && !isToolResults((byUuid.get(c.uuid)?.message as Json | undefined)?.content));
+        if (prompt) {
+          queryId = randomUUID();
+          pub.queryId = queryId;
+        }
+        await pub.publish('changes.message', { ts: tsNow(), instanceId: pub.instanceId, id: messageId(m), queryId, turnId, role: m.role, ...(prompt ? { from: { kind: 'human' } } : {}), content: m.content, ccEntries: m.ccEntries });
+      }
+      for (const e of entries.filter((x) => x.type === 'assistant' && (x.message as Json).id === g.request.messageId)) {
+        await pub.publish('changes.message', { ts: tsNow(), instanceId: pub.instanceId, id: String(e.uuid), queryId, turnId, role: 'assistant', from: { kind: 'agent' }, content: (e.message as Json).content });
+      }
+      const u = (g.request.response?.usage as Json | undefined) ?? {};
+      const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
+      await pub.publish('telemetry.usage', { ts: tsNow(), queryId, turnId, service: 'anthropic.messages', model: g.request.model, inputTokens: num(u.input_tokens), cacheCreationTokens: num(u.cache_creation_input_tokens), cacheReadTokens: num(u.cache_read_input_tokens), outputTokens: num(u.output_tokens) });
+    }
+    out[label === 'A' ? 'convA' : 'convB'] = convId;
+  }
+  const upto = await lastSeq(tower);
+  const rec: SeedRecord = { ...old, convA: String(out.convA), convB: String(out.convB), upto };
+  writeFileSync(join(SEEDS, `${old.sessionId}.json`), `${JSON.stringify(rec, null, 2)}\n`);
+  writeFileSync(join(seedRun, 'seed-republished.json'), `${JSON.stringify({ ...rec, was: old }, null, 2)}\n`);
+  process.stdout.write(`republished ${old.sessionId}: A on ${String(out.convA)}, B on ${String(out.convB)}; last seq ${upto}\n`);
+  await tower.nc.drain();
 }

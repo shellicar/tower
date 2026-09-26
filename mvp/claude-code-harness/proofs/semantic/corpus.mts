@@ -88,24 +88,27 @@ export interface Group {
 export function groups(entries: Json[], requests: Request[]): Group[] {
   const main = entries.filter((e) => e.isSidechain !== true);
   const out: Group[] = [];
+  // Everything written after the previous response started (a tool_result
+  // can land between two pieces of one response: parallel tool calls) and
+  // before this response's first piece.
   let from = 0;
   for (const r of requests) {
     const at = main.findIndex((e, i) => i >= from && e.type === 'assistant' && (e.message as Json | undefined)?.id === r.messageId);
     if (at < 0) {
       continue;
     }
-    let start = at - 1;
-    while (start >= from && main[start]?.type !== 'assistant') {
-      start -= 1;
+    let start = from;
+    if (out.length === 0) {
+      // The first request of a resumed run: its history came from load().
+      for (let i = at - 1; i >= 0; i -= 1) {
+        if (main[i]?.type === 'assistant') {
+          start = i + 1;
+          break;
+        }
+      }
     }
-    out.push({ request: r, pending: main.slice(start + 1, at), at });
-    let end = at;
-    while (end + 1 < main.length && main[end + 1]?.type === 'assistant' && (main[end + 1]?.message as Json | undefined)?.id === r.messageId) {
-      end += 1;
-    }
-    // Entries between this response's pieces (a tool_result can't be, but a
-    // stray attachment could) stay with the next request.
-    from = end + 1;
+    out.push({ request: r, pending: main.slice(start, at).filter((e) => e.type !== 'assistant'), at });
+    from = at + 1;
   }
   return out;
 }

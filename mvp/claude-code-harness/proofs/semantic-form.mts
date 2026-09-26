@@ -22,13 +22,17 @@
 //       first run's, with cache numbers.
 //   --corpus <run dir>...
 //       Offline: A and B against every logged request of each run.
+//   republish <seed run dir>
+//       Build both approaches' forms again from the recorded run (A from the
+//       logged bodies, B from the entries), with the no-block attachments,
+//       onto fresh tower conversations; the seed record then points there.
 //   --live <seed run dir>
 //       What each approach published in a seed run against the bodies, and
 //       the timing.
 
 import { compare, liveReport } from './semantic/compare.mts';
 import { checkRun, report } from './semantic/check.mts';
-import { resume, SOURCES, type Source, seed } from './semantic/live.mts';
+import { republish, resume, SOURCES, type Source, seed } from './semantic/live.mts';
 
 const [mode, ...rest] = process.argv.slice(2);
 const usage = `usage:
@@ -46,6 +50,8 @@ if (mode === '--corpus') {
   process.stdout.write(compare(rest));
 } else if (mode === '--live' && rest[0]) {
   process.stdout.write(liveReport(rest[0]));
+} else if (mode === 'republish' && rest[0]) {
+  await republish(rest[0]);
 } else if (mode === 'seed' && rest.length === 2) {
   await seed(rest[0] as string, rest[1] as string);
 } else if (mode === 'resume' && rest.length === 3 && (SOURCES as readonly string[]).includes(rest[1] as string)) {
