@@ -370,3 +370,30 @@ node proofs/skills-user-level-trace.mts runs/<stamp>-p22-pair-hook.strace
   `~/.claude/state/served-calls` (absent) and read and unlink
   `~/.claude/state/settings-review.json` (absent). Nothing there was changed
   in these runs.
+- What else opening the user source does, from the runs: the account's
+  claude.ai plugin sync writes `plugins/synced/<org>_<account>/` into the
+  agent dir and each resume dir (absent with the source closed; nothing was
+  installed); the retention cleanup, skipped under `[]`, runs with the
+  default 30 days over the agent dir's own files (nothing was old enough to
+  be deleted here); `output-styles/` is read (the sentinel style is loaded,
+  not selected). The trace shows the fresh Claude Code opening every
+  sentinel in the agent dir, and the resumed one opening none of them, only
+  looking for `CLAUDE.md`, `rules`, `commands` and `output-styles` in its
+  resume dir (absent). No `unlinkat`, `renameat` or `rmdir` relative to a
+  directory fd touched `~/.claude` in any trace.
+- From the binary only (2.1.282, not run): the user source also gates
+  user-scope MCP servers in `<config dir>/.claude.json`, `workflows/`,
+  `processWrapper`, the user `sandbox` block, `env`, hooks, `statusLine`,
+  `apiKeyHelper`, `enabledPlugins` and the other merged-settings keys, the
+  claude.ai skills sync into `skills/synced/` (off with
+  `syncClaudeAiSkills: false`), and writes to `<config dir>/settings.json`
+  (sandbox exclusions, `blockReadsOutsideWorkingDirectories`, `effortLevel`,
+  clearing `model` for an org default). Not gated by it: `keybindings.json`,
+  `themes/`, `loop.md`, the `.claude.json` `env`, startup migrations of
+  `settings.json`, and a set of bare reads of `settings.json`. The real-home
+  paths in the binary (`~/.claude/bridge-spawn`, `~/.claude/state/...`,
+  `~/.claude/ide` when `CLAUDE_CONFIG_DIR` is set, `~/.claude/.device-keys.json`)
+  are not gated by the user source; the cleanup that reaches the first two is.
+- `get_hooks_listing` labels the agent dir's hook "User settings
+  (~/.claude/settings.json)"; the hook log shows it ran from the agent dir
+  and the resume dir, never from `~/.claude`.
