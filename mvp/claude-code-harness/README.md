@@ -169,3 +169,29 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 13: resuming after a working-directory change
+
+`proofs/resume-cwd.mts` runs a seed conversation that uses Bash with relative
+paths in folder A, moves it to folder B with the binary's `set_cwd` (proof 4),
+and uses relative paths again. It then resumes that conversation with the
+SDK's `cwd` set to A and to B, from proof 8's file store and from tower's
+`conv.v2` subjects (proof 9's publisher and NATS-only load), plus variants
+that add back what tower doesn't carry. Modes and variants are described at
+the top of the file.
+
+A and B are the harness's own working directories for the names
+`resume-cwd-a` and `resume-cwd-b`. Both hold `note.txt` with different
+contents, rewritten before every run. The file stores and seed records live
+under `~/.local/state/tower-claude-code-harness/proof-13/`, kept. Beyond the
+harness's own files, a run directory holds:
+
+| Path | What |
+| --- | --- |
+| `store-appends.jsonl` | every `append()` call with its `SessionKey` and entries |
+| `published.jsonl`, `not-published.jsonl` | seed: what went onto tower, and each entry that didn't |
+| `store-load.jsonl`, `loaded-entries.jsonl` | resume: the key `load()` was asked for and what it returned |
+| `proof-events.jsonl` | each send, `set_cwd` result, init `cwd`, tool call, tool result and reply, with its `sdk-messages.jsonl` line |
+| `seed.json`, `resume.json` | what the run was |
+| `api-bodies/` | request and response bodies (`OTEL_LOG_RAW_API_BODIES`, as proof 1), redacted |
+| `summary.txt` | the keys appends arrived under, which entries speak of the directory, and each main-thread request's directory text and new messages |
