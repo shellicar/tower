@@ -105,6 +105,31 @@ const SCENARIOS: Record<string, Scenario> = {
       mcpServers: { probe: probeServer() },
     }),
   },
+  // The same without a tool list: Claude Code's default tools (ToolSearch,
+  // deferred tools, the Skill tool), so skill_listing and deferred_tools_delta
+  // can appear.
+  types2: {
+    seedName: 'semantic-types2',
+    resumeName: 'semantic-types2',
+    files: { [work('semantic-types2')]: { 'note.txt': 'ELM 5555' } },
+    steps: [{ prompt: 'Run this exact Bash command, once: `cat note.txt`. Reply with its output only.' }, { dropMcp: true }, { prompt: 'Reply with the word OK only.' }],
+    options: () => ({
+      tools: undefined,
+      allowedTools: ['Bash'],
+      plugins: [{ type: 'local', path: PLUGIN_DIR }],
+      mcpServers: { probe: probeServer() },
+    }),
+  },
+  // A stdio MCP server with a tool whose schema the API would reject.
+  types3: {
+    seedName: 'semantic-types3',
+    resumeName: 'semantic-types3',
+    files: { [work('semantic-types3')]: { 'note.txt': 'FIR 6666' } },
+    steps: [{ prompt: 'Run this exact Bash command, once: `cat note.txt`. Reply with its output only.' }, { prompt: 'Reply with the word OK only.' }],
+    options: () => ({
+      mcpServers: { badschema: { type: 'stdio', command: process.execPath, args: [join(dirname(fileURLToPath(import.meta.url)), 'bad-schema-mcp.mjs')] } },
+    }),
+  },
 };
 
 const RESUME_STEPS: Step[] = [{ prompt: 'Reply with the word OK only.' }];

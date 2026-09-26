@@ -168,6 +168,7 @@ export function attribute(body: { messages: ApiMessage[] }, pending: Json[]): At
         type: c.type === 'attachment' ? 'attachment' : 'user',
         ...(c.type === 'attachment' ? { attachment: c.attachment as Json } : {}),
         ...(c.isMeta === true ? { isMeta: true } : {}),
+      ...(c.type === 'user' && typeof (c.message as Json).content === 'string' ? { contentString: true } : {}),
         spans: parts.get(c) as Span[],
       }));
     out.messages.push({ role: msg.role === 'system' ? 'system' : 'user', content: msg.content, ccEntries });

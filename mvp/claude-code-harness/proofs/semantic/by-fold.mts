@@ -242,6 +242,7 @@ function toCc(pending: Json[], spans: Map<Json, Span[]>): CcEntry[] {
       type: e.type === 'attachment' ? 'attachment' : 'user',
       ...(e.type === 'attachment' ? { attachment: e.attachment as Json } : {}),
       ...(e.isMeta === true ? { isMeta: true } : {}),
+      ...(e.type === 'user' && typeof (e.message as Json).content === 'string' ? { contentString: true } : {}),
       spans: spans.get(e) as Span[],
     }));
 }

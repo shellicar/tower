@@ -56,6 +56,9 @@ export interface CcEntry {
   attachment?: Json;
   // user entries: the flags that decide how Claude Code folds them.
   isMeta?: boolean;
+  // The entry's content was a string, not blocks: Claude Code sends such an
+  // entry, when it stands alone, as a string. TODO: undecided.
+  contentString?: boolean;
   spans: Span[];
 }
 
@@ -173,7 +176,8 @@ export function rebuild(messages: TowerMessage[], modelByTurn: Map<string, strin
         out.push({ ...common, uuid: c.uuid, type: 'attachment', attachment: c.attachment, ...(texts.length > 0 ? { rendered: texts.map((t) => ({ content: t })) } : {}) });
       } else {
         const blocks = c.spans.map((s) => (s.start === undefined ? (m.content[s.block] as Block) : { type: 'text', text: spanText(m.content, s) }));
-        out.push({ ...common, uuid: c.uuid, type: 'user', ...(c.isMeta ? { isMeta: true } : {}), message: { role: 'user', content: blocks } });
+        const content = c.contentString && blocks.length === 1 && blocks[0]?.type === 'text' ? textOf(blocks[0]) : blocks;
+        out.push({ ...common, uuid: c.uuid, type: 'user', ...(c.isMeta ? { isMeta: true } : {}), message: { role: 'user', content } });
       }
     }
   }
