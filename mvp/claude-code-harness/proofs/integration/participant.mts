@@ -1,0 +1,728 @@
+// Integration proof: the participant, as one OS process (so it can be
+// SIGKILLed and restarted like a real one). One participant = one agent name
+// = one config dir (the harness's config-dirs/<agent>), serving any number
+// of conversations, one query() each (streaming input).
+//
+//   node proofs/integration/participant.mts <spec.json>
+//
+// Driven by JSON lines on stdin; reports JSON lines on stdout, each
+// {"ev": ...}. Everything else goes to stderr and the run dir.
+//
+// Commands:
+//   {"cmd":"serve","conv":<label>,"id"?:<uuid>,"from"?:"auto"|"local"|"tower",
+//    "dry"?:true,"asOfMs"?:n,"asOfSeq"?:n,"resumeSessionAt"?:<uuid>,"name"?:s}
+//   {"cmd":"say","conv":<label>,"text":s,"ending"?:<ending>,"step"?:n}
+//   {"cmd":"interrupt","conv":<label>}
+//   {"cmd":"end","conv":<label>}                 close its input, wait, drain
+//   {"cmd":"skills","declared":[dir...]}         live change of skill dirs
+//   {"cmd":"shutdown"}                           the first Ctrl-C
+// SIGINT, SIGTERM, SIGHUP and stdin closing start the first-Ctrl-C shutdown;
+// a second one tears down (SIGTERM to its Claude Codes, NATS closed without
+// draining); a third exits.
+//
+// What it implements (design.md, Settled), with pointers:
+//   isolation: spawn.mts (private HOME, login, shell prefix, tag, setpriv,
+//     direct spawn with capture); connectors off, the `user` source open.
+//   declared config: model, max tokens, thinking, effort, system prompt,
+//     permission mode, all from the spec, nothing defaulted here.
+//   the leftover stop: stop.mts, on every serve.
+//   blind recovery: recover.mts, through the committer, never past tower.
+//   the hybrid resume: local record (load() null) or tower (load() = tower's
+//     entries), resumeSessionAt in both.
+//   skills: skills.mts, linked before start and from the spawn hook.
+//   the live committer: committer.mts over lineage.mts.
+//
+// Test-only (design.md, allowed): the safety gate (spec.ours); "as of"
+// overrides and dry serves for the checks; the endings' triggers (a say's
+// `ending` interrupts at that point, as proofs/reconcile/run.mts does).
+
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createInterface } from 'node:readline';
+import type { EffortLevel, HookCallbackMatcher, HookEvent, PermissionMode, SDKMessage, SDKUserMessage, SessionKey, SessionStore, SessionStoreEntry } from '@anthropic-ai/claude-agent-sdk';
+import type { HarnessOptions, Run } from '../../src/harness.mts';
+import { startRun } from '../../src/harness.mts';
+import { load, type TowerBody } from '../reconcile/load.mts';
+import type { Rec } from '../reconcile/holding.mts';
+import { lastSeq, openTower, type Tower, towerMessages } from '../semantic/tower.mts';
+import { Committer, type PublishedLine } from './committer.mts';
+import { appendJsonl, clean, CONFIG_DIRS_ROOT, fileStamp, INTEGRATION_STATE, iso, type Json, type Known, Log2, procStat, signalChecked } from './lib.mts';
+import { convRoot, currentLineage, entryId, Lineage, setCurrent } from './lineage.mts';
+import { instantOf, recordedResumeDirs, transcripts, union } from './recover.mts';
+import { Skills } from './skills.mts';
+import { type SpawnRecord, spawnHook, SETPRIV } from './spawn.mts';
+import { stopLeftovers } from './stop.mts';
+
+export type Ending = 'first-byte' | 'thinking' | 'mid-text' | 'tool-input' | 'tool-exec';
+
+export interface Spec {
+  agent: string;
+  runDir: string;
+  // Declared config (design.md, Configuration): every one required.
+  model: string;
+  maxTokens: number;
+  thinking: { type: 'adaptive'; display: 'summarized' | 'omitted' };
+  effort: EffortLevel;
+  systemPrompt: HarnessOptions['systemPrompt'];
+  permissionMode: PermissionMode;
+  // Declared skill dirs (each child folder holding SKILL.md is a skill).
+  skills: string[];
+  // The proof's safety gate: Claude Codes this proof started.
+  ours: Known[];
+  // Test-only env for this process's Claude Codes (a cell's trigger, e.g.
+  // the API-error cell's API_TIMEOUT_MS).
+  extraEnv?: Record<string, string>;
+  stateRoot?: string;
+}
+
+const specPath = process.argv[2];
+if (!specPath) {
+  process.stderr.write('usage: node proofs/integration/participant.mts <spec.json>\n');
+  process.exit(2);
+}
+const spec = JSON.parse(readFileSync(specPath, 'utf8')) as Spec;
+for (const k of ['agent', 'runDir', 'model', 'maxTokens', 'thinking', 'effort', 'systemPrompt', 'permissionMode'] as const) {
+  if (spec[k] === undefined) {
+    process.stderr.write(`participant: spec.${k} is required (declared config)\n`);
+    process.exit(2);
+  }
+}
+const AGENT = spec.agent;
+const STATE_ROOT = spec.stateRoot ?? INTEGRATION_STATE;
+const AGENT_STATE = join(STATE_ROOT, AGENT);
+const AGENT_DIR = join(CONFIG_DIRS_ROOT, AGENT);
+const RUN = spec.runDir;
+mkdirSync(RUN, { recursive: true });
+mkdirSync(AGENT_STATE, { recursive: true });
+const instanceId = randomUUID();
+const me = procStat(process.pid);
+
+// TODO: undecided. The private HOME's place and lifetime: one fresh dir per
+// participant process in the system temp dir (Stephen: "one per *process*
+// is fine"; "can it be in a tmp directory? then we dont need to worry about
+// cleanup"), never removed by the participant (v0: no cleanup).
+const privateHome = mkdtempSync(join(tmpdir(), `tower-${AGENT}-home-`));
+
+const logFile = new Log2(undefined, join(RUN, 'participant.log.jsonl'));
+function log(s: string): void {
+  const line = `${iso()} [${AGENT} ${process.pid}] ${s}`;
+  process.stderr.write(`${clean(line)}\n`);
+  logFile.write({ ts: iso(), s });
+}
+const eventsOut = new Log2(undefined, join(RUN, 'events.jsonl'));
+function emit(ev: string, detail: Json = {}): void {
+  const line = { ev, ts: iso(), ms: Date.now(), agent: AGENT, pid: process.pid, ...detail };
+  process.stdout.write(`${JSON.stringify(line)}\n`);
+  eventsOut.write(line);
+}
+
+// ---------------------------------------------------------------------------
+
+const skills = new Skills(spec.skills ?? [], log);
+const spawned: SpawnRecord[] = [];
+const ownPids = (): Set<number> => new Set(spawned.map((s) => s.pid));
+
+let tower: Tower;
+
+interface Conv {
+  label: string;
+  id: string;
+  dry: boolean;
+  decision: string;
+  lin: Lineage;
+  committer: Committer;
+  run: Run;
+  busy: boolean;
+  queryId: string;
+  interruptedByUs: boolean;
+  ending?: Ending;
+  step?: number;
+  fired: boolean;
+  resultSeen: boolean;
+  stream: { thinkingOpen: boolean; textChars: number; inputChars: number };
+  firstByteTimer?: NodeJS.Timeout;
+  loop: Promise<void>;
+  exited: boolean;
+}
+const convs = new Map<string, Conv>();
+
+const user = (text: string): SDKUserMessage => ({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null });
+
+// The last non-system entry of what's loaded (proof 24): resumeSessionAt.
+function lastChain(entries: Json[]): string | undefined {
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const e = entries[i] as Json;
+    if (typeof e.uuid === 'string' && e.type !== 'system' && e.type !== 'progress') {
+      return e.uuid;
+    }
+  }
+  return undefined;
+}
+
+// Tower's messages as the entries load() rebuilds, each with its seq.
+function fromTower(bodies: TowerBody[]): { entries: Json[]; lastChain: string | undefined; seqd: { seq: number; entry: Json }[] } {
+  const unshown: Rec[] = [];
+  for (const b of bodies) {
+    for (const u of ((b as Json).ccUnshown as { seq: number; entry: Json }[] | undefined) ?? []) {
+      unshown.push({ seq: u.seq, ms: 0, entry: u.entry });
+    }
+  }
+  const l = load(bodies, unshown);
+  const seqOf = new Map<string, number>();
+  for (const b of bodies) {
+    for (const c of b.ccEntries ?? []) {
+      seqOf.set(`uuid:${c.uuid}`, c.seq);
+    }
+  }
+  for (const u of unshown) {
+    seqOf.set(entryId(u.entry), u.seq);
+  }
+  const seqd = l.entries.map((e, i) => ({ seq: seqOf.get(entryId(e)) ?? 1_000_000 + i, entry: e }));
+  return { entries: l.entries, lastChain: l.lastChain, seqd };
+}
+
+function hooks(conv: () => Conv | undefined): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
+  return {
+    PreToolUse: [
+      {
+        hooks: [
+          async (input) => {
+            const c = conv();
+            const i = input as Json;
+            if (c) {
+              emit('tool-started', { conv: c.label, tool: i.tool_name });
+              if (c.ending === 'tool-exec' && i.tool_name === 'Bash') {
+                setTimeout(() => fire(c, '2 s after PreToolUse for Bash'), 2000);
+              }
+            }
+            return { continue: true };
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function fire(c: Conv, how: string): void {
+  if (c.fired || c.resultSeen || !c.ending) {
+    return;
+  }
+  c.fired = true;
+  c.interruptedByUs = true;
+  emit('trigger', { conv: c.label, how, ending: c.ending });
+  c.lin.event('trigger', { how, ending: c.ending });
+  void c.run.interrupt().then(
+    () => {},
+    (err: unknown) => log(`interrupt ${c.label}: ${String(err)}`),
+  );
+}
+
+async function serve(cmd: Json): Promise<void> {
+  const label = String(cmd.conv);
+  if (convs.has(label)) {
+    throw new Error(`conv ${label} is already served`);
+  }
+  const dry = cmd.dry === true;
+  const id = typeof cmd.id === 'string' ? cmd.id : randomUUID();
+  const root = convRoot(AGENT, id, STATE_ROOT);
+
+  // 1. Leftovers of earlier runs, before anything else.
+  const stop = await stopLeftovers(AGENT, ownPids(), spec.ours ?? [], log);
+  writeFileSync(join(RUN, `stop-${label}.json`), `${JSON.stringify(stop, null, 2)}\n`);
+  emit('stopped', { conv: label, outcome: stop.outcome, ms: stop.ms, signals: stop.rounds.flatMap((r) => r.signals) });
+
+  // 2. Tower, and this machine's records.
+  const upto = typeof cmd.asOfSeq === 'number' ? cmd.asOfSeq : await lastSeq(tower);
+  let towerBodies = (await towerMessages(tower, id, upto)) as unknown as TowerBody[];
+  const towerCc = new Set(towerBodies.flatMap((b) => (b.ccEntries ?? []).map((c) => String(c.uuid))));
+  const resumeDirs = recordedResumeDirs(AGENT_STATE).filter((d) => existsSync(d));
+  const ts = transcripts([AGENT_DIR, ...resumeDirs], id);
+  const local = union(ts);
+  const localUuids = new Set(local.map((e) => e.uuid).filter((u): u is string => typeof u === 'string'));
+  const inAgentDir = ts.some((t) => t.root === AGENT_DIR);
+  const movedOn = local.length > 0 && [...towerCc].some((u) => !localUuids.has(u));
+
+  // 3. Local record or tower.
+  //
+  // TODO: undecided. The rule: local when this agent's config dir holds the
+  // conversation's transcript and every entry tower holds for it is in this
+  // machine's records (agent dir and recorded resume dirs); tower otherwise
+  // (moved on, or no transcript in the agent dir: a conversation first
+  // resumed from tower here lives in /tmp/claude-resume-*, join 3). Fresh
+  // when neither tower nor this machine has it.
+  const from = typeof cmd.from === 'string' ? cmd.from : 'auto';
+  let decision: 'fresh' | 'local' | 'tower' | 'record';
+  if (from === 'tower') {
+    decision = 'tower';
+  } else if (from === 'record') {
+    // TODO: undecided. A variant, not the settled rule: load() returns this
+    // machine's own recording (the store's appends) instead of tower, a way
+    // through for a conversation whose local record was a
+    // /tmp/claude-resume-* dir the SDK deleted (join 3).
+    decision = 'record';
+  } else if (from === 'local') {
+    decision = 'local';
+  } else if (towerBodies.length === 0 && local.length === 0) {
+    decision = 'fresh';
+  } else if (inAgentDir && !movedOn) {
+    decision = 'local';
+  } else {
+    decision = 'tower';
+  }
+  if (decision === 'tower' && towerBodies.length === 0) {
+    throw new Error(`conv ${label} (${id}): tower holds nothing and the agent dir has no transcript`);
+  }
+  if (decision === 'record' && !currentLineage(root)) {
+    throw new Error(`conv ${label} (${id}): no recording on this machine`);
+  }
+  if (decision === 'local' && !inAgentDir) {
+    throw new Error(`conv ${label} (${id}): no transcript in ${AGENT_DIR}`);
+  }
+
+  // 4. Recovery, blind, into this machine's lineage, through its committer,
+  // and never when tower has moved on (join 2). Skipped for a dry check
+  // resume "as of" an earlier instant (test-only).
+  let cur = currentLineage(root);
+  let recovery: Json = { skipped: dry ? 'dry check' : 'no lineage and no local record' };
+  if (!dry && movedOn) {
+    const stale = cur ? local.filter((e) => !Lineage.open(cur as string).has(e)).length : local.length;
+    recovery = { skipped: 'tower has moved on past this machine\'s record', staleLocalEntries: stale };
+    log(`serve ${label}: tower moved on; ${stale} local entries not recovered (stale)`);
+  } else if (!dry && local.length > 0) {
+    if (!cur) {
+      // TODO: undecided. A local record with no recording (state lost): a
+      // new lineage, every local entry recovered into it; the committer
+      // skips what tower already holds.
+      const dir = join(root, `L${fileStamp()}-local`);
+      Lineage.create(dir, { convId: id, name: label, origin: 'local', createdAt: iso(), model: spec.model });
+      setCurrent(root, dir);
+      cur = dir;
+    }
+    const lin = Lineage.open(cur);
+    const committer = new Committer(lin, { convId: id, instanceId, dry: false, tower, log, onPublish: (p) => emit('published', { conv: label, ...pubSummary(p) }) });
+    committer.seedPublished(towerBodies.filter((b) => !committer.published.has(String(b.id))) as unknown as Json[]);
+    const missing = local.filter((e) => !lin.has(e));
+    let prev = Date.now();
+    for (const e of missing) {
+      prev = instantOf(e, prev);
+      lin.append({ sessionId: id, recovered: true }, [e], 'recovered', prev);
+    }
+    await committer.drain();
+    recovery = { roots: ts.map((t) => ({ root: t.root, lines: t.lines, unparseable: t.unparseable })), union: local.length, added: missing.length, addedTypes: missing.map((e) => String(e.type)), published: committer.order.length };
+    log(`serve ${label}: recovery added ${missing.length} of ${local.length} local entries`);
+    if (missing.length > 0) {
+      towerBodies = (await towerMessages(tower, id, await lastSeq(tower))) as unknown as TowerBody[];
+    }
+  }
+
+  // 5. The lineage this serve records into.
+  let lin: Lineage;
+  let loaded: ReturnType<typeof fromTower> | undefined;
+  if (decision === 'tower') {
+    loaded = fromTower(towerBodies);
+  }
+  if (dry) {
+    const dir = join(root, `D${fileStamp()}-${typeof cmd.name === 'string' ? cmd.name : label}`);
+    if (decision === 'local' || decision === 'record') {
+      if (!cur) {
+        throw new Error(`conv ${label}: a dry local check needs this machine's lineage`);
+      }
+      lin = Lineage.open(cur).copyAsOf(dir, typeof cmd.asOfMs === 'number' ? cmd.asOfMs : Number.POSITIVE_INFINITY, label);
+    } else {
+      lin = Lineage.create(dir, { convId: id, name: label, origin: 'dry', createdAt: iso(), model: spec.model, seededFromTower: { upto, messages: towerBodies.length, entries: loaded?.entries.length ?? 0 } });
+    }
+  } else if (decision === 'fresh') {
+    const dir = join(root, `L${fileStamp()}-fresh`);
+    lin = Lineage.create(dir, { convId: id, name: label, origin: 'fresh', createdAt: iso(), model: spec.model });
+    setCurrent(root, dir);
+  } else if (decision === 'local' || decision === 'record') {
+    lin = Lineage.open(cur as string);
+  } else {
+    const dir = join(root, `L${fileStamp()}-tower`);
+    lin = Lineage.create(dir, { convId: id, name: label, origin: 'tower', createdAt: iso(), model: spec.model, seededFromTower: { upto, messages: towerBodies.length, entries: loaded?.entries.length ?? 0 } });
+    setCurrent(root, dir);
+  }
+  if (loaded && lin.rec.entries.length === 0) {
+    lin.seed({ sessionId: id, seed: 'tower' }, loaded.seqd, Date.now() - 1);
+  }
+  const committer = new Committer(lin, { convId: id, instanceId, dry, tower, log, onPublish: (p) => emit(dry ? 'would-publish' : 'published', { conv: label, ...pubSummary(p) }) });
+  if (decision === 'tower' || towerBodies.length > 0) {
+    committer.seedPublished(towerBodies.filter((b) => !committer.published.has(String(b.id))) as unknown as Json[]);
+  }
+
+  // 6. resumeSessionAt: the last non-system entry of what's loaded, from the
+  // recording (the local record's mirror) or tower's entries; or the
+  // driver's "as of" override.
+  const recordEntries = decision === 'record' ? lin.rec.entries.map((r) => r.entry) : undefined;
+  const resumeAt = typeof cmd.resumeSessionAt === 'string' ? cmd.resumeSessionAt : decision === 'local' || decision === 'record' ? lastChain(lin.rec.entries.map((r) => r.entry)) : decision === 'tower' ? loaded?.lastChain : undefined;
+
+  const store: SessionStore = {
+    async append(key: SessionKey, entries: SessionStoreEntry[]): Promise<void> {
+      lin.append(key as unknown as Json, entries as Json[], 'live');
+      committer.poke();
+    },
+    // Keyed on the session id alone: another agent's cwd gives another
+    // projectKey for the same conversation.
+    async load(key: SessionKey): Promise<SessionStoreEntry[] | null> {
+      if (!key.subpath && recordEntries) {
+        lin.event('store-load', { returned: recordEntries.length, from: 'record' });
+        return recordEntries as SessionStoreEntry[];
+      }
+      if (key.subpath || decision !== 'tower' || !loaded) {
+        lin.event('store-load', { subpath: key.subpath ?? null, returned: null });
+        return null;
+      }
+      lin.event('store-load', { returned: loaded.entries.length });
+      return loaded.entries as SessionStoreEntry[];
+    },
+  };
+
+  let conv: Conv | undefined;
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    HOME: privateHome,
+    CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(spec.maxTokens),
+    OTEL_LOG_RAW_API_BODIES: `file:${lin.bodies}`,
+    ...(spec.extraEnv ?? {}),
+  };
+  const options: HarnessOptions = {
+    model: spec.model,
+    thinking: spec.thinking,
+    effort: spec.effort,
+    systemPrompt: spec.systemPrompt,
+    permissionMode: spec.permissionMode,
+    // For the endings' triggers (test-only); changes nothing sent.
+    includePartialMessages: true,
+    // TODO: undecided. syncClaudeAiSkills false (proofs 19, 22 set it: the
+    // account's claude.ai skills are not copied into the config dir).
+    settings: { disableClaudeAiConnectors: true, syncClaudeAiSkills: false } as HarnessOptions['settings'],
+    extraArgs: { 'setting-sources': 'user' },
+    sessionStore: store,
+    sessionStoreFlush: 'eager',
+    spawnClaudeCodeProcess: spawnHook(
+      {
+        agent: AGENT,
+        privateHome,
+        skills,
+        log,
+        onSpawn: (r) => {
+          spawned.push(r);
+          appendJsonl(join(RUN, 'spawns.jsonl'), r);
+          if (!r.agentDir) {
+            appendJsonl(join(AGENT_STATE, 'resume-dirs.jsonl'), { at: r.at, dir: r.configDir, conv: id, pid: r.pid });
+          }
+          emit('spawn', { conv: label, id, pid: r.pid, starttime: r.starttime, configDir: r.configDir, agentDir: r.agentDir, launcher: r.launcher, envNames: r.envNames });
+        },
+        onExit: (r) => {
+          appendJsonl(join(RUN, 'spawns.jsonl'), { exit: r.pid, ...r.exited });
+          emit('claude-exit', { conv: label, pid: r.pid, ...r.exited });
+        },
+      },
+      label,
+    ),
+    hooks: hooks(() => conv),
+    env,
+    ...(decision === 'fresh' ? { sessionId: id } : { resume: id, ...(resumeAt ? { resumeSessionAt: resumeAt } : {}) }),
+  };
+  // TODO: undecided. A fresh conversation's id: minted here and passed as
+  // the SDK's sessionId (so the lineage and its body log exist before
+  // Claude Code starts); the alternative is to read it from init.
+  const run = startRun({ name: AGENT, options });
+  conv = {
+    label,
+    id,
+    dry,
+    decision,
+    lin,
+    committer,
+    run,
+    busy: false,
+    queryId: '',
+    interruptedByUs: false,
+    fired: false,
+    resultSeen: false,
+    stream: { thinkingOpen: false, textChars: 0, inputChars: 0 },
+    loop: Promise.resolve(),
+    exited: false,
+  };
+  convs.set(label, conv);
+  const c = conv;
+  lin.event('serve', { instanceId, runDir: run.dir, decision, from, dry, movedOn, upto, resumeSessionAt: resumeAt ?? null, recovery, towerMessages: towerBodies.length, localEntries: local.length, inAgentDir });
+  c.loop = messagesLoop(c);
+  committer.poke();
+  emit('served', { conv: label, id, decision, dry, movedOn, lineage: lin.dir, harnessRun: run.dir, resumeSessionAt: resumeAt ?? null, towerUpto: upto, towerMessages: towerBodies.length, localEntries: local.length, inAgentDir, recovery });
+}
+
+function pubSummary(p: PublishedLine): Json {
+  return { kind: p.kind, seq: p.seq, id: p.id, commitMs: p.commitMs, queryId: p.queryId, index: p.index ?? null };
+}
+
+const USAGE_LIMIT = /usage limit|rate[_ ]limit|429/i;
+
+async function messagesLoop(c: Conv): Promise<void> {
+  try {
+    for await (const message of c.run.messages()) {
+      const m = message as SDKMessage & Json;
+      if (m.type === 'system' && m.subtype === 'init') {
+        c.lin.event('init', { session_id: m.session_id, model: m.model, permissionMode: m.permissionMode, apiKeySource: m.apiKeySource, cwd: m.cwd, skills: m.skills, tools: Array.isArray(m.tools) ? (m.tools as unknown[]).length : null, mcp: m.mcp_servers });
+        emit('init', { conv: c.label, sessionId: m.session_id, apiKeySource: m.apiKeySource, skills: m.skills, permissionMode: m.permissionMode });
+        if (m.session_id !== c.id) {
+          log(`conv ${c.label}: init session ${String(m.session_id)} is not ${c.id}`);
+        }
+      }
+      if (m.type === 'system' && m.subtype === 'api_retry') {
+        c.lin.event('api-retry', { attempt: m.attempt, status: m.error_status, error: m.error });
+        if (m.error_status === 429) {
+          emit('usage-limit', { conv: c.label, status: 429, error: m.error });
+        }
+      }
+      if (m.type === 'stream_event' && (m.parent_tool_use_id ?? null) === null && c.busy && c.ending) {
+        const e = m.event as unknown as Json;
+        const block = e.content_block as Json | undefined;
+        const delta = e.delta as Json | undefined;
+        if (e.type === 'content_block_start' && block?.type === 'thinking') {
+          c.stream.thinkingOpen = true;
+          if (c.ending === 'thinking') {
+            setTimeout(() => (c.stream.thinkingOpen ? fire(c, '700 ms into an open thinking block') : c.lin.event('trigger-missed')), 700);
+          }
+        }
+        if (e.type === 'content_block_stop') {
+          c.stream.thinkingOpen = false;
+        }
+        if (e.type === 'content_block_delta' && delta?.type === 'text_delta') {
+          c.stream.textChars += String(delta.text ?? '').length;
+          if (c.ending === 'mid-text' && c.stream.textChars >= 60) {
+            fire(c, `${c.stream.textChars} text characters streamed`);
+          }
+        }
+        if (e.type === 'content_block_delta' && delta?.type === 'input_json_delta') {
+          c.stream.inputChars += String(delta.partial_json ?? '').length;
+          if (c.ending === 'tool-input' && c.stream.inputChars >= 100) {
+            fire(c, `${c.stream.inputChars} tool input characters streamed`);
+          }
+        }
+      }
+      if (m.type === 'result') {
+        const ms = Date.now();
+        c.resultSeen = true;
+        c.busy = false;
+        clearInterval(c.firstByteTimer);
+        const subtype = String(m.subtype);
+        const reason = c.interruptedByUs ? 'cancelled' : subtype === 'success' ? 'completed' : 'aborted';
+        const text = typeof m.result === 'string' ? m.result : JSON.stringify(m.errors ?? null);
+        c.lin.addResult({ ms, queryId: c.queryId, subtype, reason }, { isError: m.is_error, step: c.step ?? null, stopReason: m.stop_reason ?? null, permissionDenials: m.permission_denials ?? null, usage: m.usage ?? null, text: String(text).slice(0, 400) });
+        c.committer.poke();
+        emit('result', { conv: c.label, queryId: c.queryId, step: c.step ?? null, subtype, reason, isError: m.is_error, text: String(text).slice(0, 300), permissionDenials: m.permission_denials ?? null, stopReason: m.stop_reason ?? null });
+        if (m.is_error === true && USAGE_LIMIT.test(String(text))) {
+          emit('usage-limit', { conv: c.label, text: String(text).slice(0, 300) });
+        }
+      }
+    }
+  } catch (err) {
+    log(`conv ${c.label}: messages: ${String(err)}`);
+    c.lin.event('messages-error', { error: String(err) });
+  }
+  try {
+    await c.run.done;
+  } catch (err) {
+    c.lin.event('run-done-error', { error: String(err) });
+    log(`conv ${c.label}: run.done: ${String(err)}`);
+  }
+  c.exited = true;
+  await c.committer.drain();
+  clearInterval(c.firstByteTimer);
+  emit('query-ended', { conv: c.label, id: c.id });
+}
+
+function say(cmd: Json): void {
+  const c = convs.get(String(cmd.conv));
+  if (!c || c.exited) {
+    throw new Error(`conv ${String(cmd.conv)} is not served`);
+  }
+  // A say while a query runs is rejected (design.md, The protocol).
+  if (c.busy) {
+    emit('say-rejected', { conv: c.label, reason: 'busy' });
+    return;
+  }
+  const text = String(cmd.text);
+  c.queryId = randomUUID();
+  c.busy = true;
+  c.interruptedByUs = false;
+  c.fired = false;
+  c.resultSeen = false;
+  c.ending = typeof cmd.ending === 'string' ? (cmd.ending as Ending) : undefined;
+  c.step = typeof cmd.step === 'number' ? cmd.step : undefined;
+  c.stream = { thinkingOpen: false, textChars: 0, inputChars: 0 };
+  const ms = Date.now();
+  c.lin.addSay({ ms, queryId: c.queryId, text }, { step: c.step ?? null, ending: c.ending ?? null });
+  if (c.ending === 'first-byte') {
+    // The request file carrying the prompt: interrupt before any reply byte.
+    const seen = new Set<string>();
+    const want = text.slice(0, 30);
+    c.firstByteTimer = setInterval(() => {
+      let names: string[] = [];
+      try {
+        names = readdirSync(c.lin.bodies);
+      } catch {
+        return;
+      }
+      for (const f of names) {
+        if (seen.has(f) || !f.endsWith('.request.json')) {
+          continue;
+        }
+        let body: Json;
+        try {
+          body = JSON.parse(readFileSync(join(c.lin.bodies, f), 'utf8')) as Json;
+        } catch {
+          continue;
+        }
+        seen.add(f);
+        if (String(body.model).startsWith(spec.model) && body.thinking !== undefined && JSON.stringify(body.messages ?? []).includes(want)) {
+          fire(c, `request file ${f}`);
+        }
+      }
+    }, 5);
+  }
+  c.run.send(user(text));
+  emit('sent', { conv: c.label, queryId: c.queryId, step: c.step ?? null, ending: c.ending ?? null });
+}
+
+async function end(label: string): Promise<void> {
+  const c = convs.get(label);
+  if (!c) {
+    return;
+  }
+  if (!c.exited) {
+    c.run.end();
+  }
+  await c.loop;
+  emit('ended', { conv: label, id: c.id, published: c.committer.order.length, failed: c.committer.failed ? String(c.committer.failed) : null });
+}
+
+// ---------------------------------------------------------------------------
+// Shutdown (design.md, Shutdown).
+
+let presses = 0;
+let shuttingDown: Promise<void> | undefined;
+
+async function graceful(why: string): Promise<void> {
+  log(`shutdown (first press: ${why}): interrupt, then drain`);
+  emit('shutdown-started', { why });
+  for (const c of convs.values()) {
+    if (c.busy && !c.exited) {
+      c.interruptedByUs = true;
+      try {
+        await c.run.interrupt();
+      } catch (err) {
+        log(`interrupt ${c.label}: ${String(err)}`);
+      }
+    }
+  }
+  // Wait for each query's result, then close its input, then its exit and
+  // the commits.
+  for (const c of convs.values()) {
+    const t0 = Date.now();
+    while (c.busy && !c.exited && Date.now() - t0 < 60_000) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await end(c.label);
+  }
+  await tower.nc.drain();
+  emit('shutdown-done', { published: Object.fromEntries([...convs.values()].map((c) => [c.label, c.committer.order.length])) });
+  process.exit(0);
+}
+
+function teardown(): void {
+  log('shutdown (second press): tear down');
+  for (const s of spawned) {
+    if (!s.exited) {
+      signalChecked({ pid: s.pid, starttime: s.starttime }, 'SIGTERM', log);
+    }
+  }
+  void tower.nc.close();
+  setTimeout(() => process.exit(1), 2000).unref();
+}
+
+function press(why: string): void {
+  presses += 1;
+  if (presses === 1) {
+    shuttingDown = graceful(why);
+  } else if (presses === 2) {
+    teardown();
+  } else {
+    process.exit(1);
+  }
+}
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+  process.on(sig, () => press(sig));
+}
+
+// ---------------------------------------------------------------------------
+
+tower = await openTower();
+writeFileSync(join(RUN, 'spec.json'), `${clean(JSON.stringify({ ...spec, instanceId, privateHome, setpriv: SETPRIV, pid: process.pid, starttime: me?.starttime }, null, 2))}\n`);
+emit('ready', { starttime: me?.starttime, instanceId, privateHome, setpriv: SETPRIV, runDir: RUN });
+
+let queue: Promise<void> = Promise.resolve();
+const rl = createInterface({ input: process.stdin });
+rl.on('line', (line) => {
+  if (line.trim() === '') {
+    return;
+  }
+  let cmd: Json;
+  try {
+    cmd = JSON.parse(line) as Json;
+  } catch {
+    emit('error', { message: `not JSON: ${line.slice(0, 80)}` });
+    return;
+  }
+  const run = async (): Promise<void> => {
+    try {
+      switch (cmd.cmd) {
+        case 'serve':
+          await serve(cmd);
+          break;
+        case 'say':
+          say(cmd);
+          break;
+        case 'interrupt': {
+          const c = convs.get(String(cmd.conv));
+          if (c && c.busy) {
+            c.interruptedByUs = true;
+            await c.run.interrupt();
+          }
+          emit('interrupted', { conv: cmd.conv });
+          break;
+        }
+        case 'end':
+          await end(String(cmd.conv));
+          break;
+        case 'skills':
+          skills.set((cmd.declared as string[]) ?? [], 'live');
+          emit('skills', { declared: skills.declared, linked: [...skills.linked] });
+          break;
+        case 'shutdown':
+          press('shutdown command');
+          break;
+        default:
+          emit('error', { message: `unknown command ${String(cmd.cmd)}` });
+      }
+    } catch (err) {
+      log(`command ${String(cmd.cmd)}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+      emit('error', { cmd: cmd.cmd, conv: cmd.conv ?? null, message: err instanceof Error ? err.message : String(err) });
+    }
+  };
+  // serve, end and skills in order; say and interrupt at once.
+  if (cmd.cmd === 'say' || cmd.cmd === 'interrupt' || cmd.cmd === 'shutdown') {
+    void run();
+  } else {
+    queue = queue.then(run);
+  }
+});
+rl.on('close', () => {
+  if (!shuttingDown) {
+    press('stdin closed');
+  }
+});

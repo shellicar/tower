@@ -163,6 +163,17 @@ export function assistantCommits(rec: Recording): Map<string, number> {
     const s = sibling.get(msgId(r.entry));
     if (s !== undefined) {
       out.set(String(r.entry.uuid), Math.max(s, r.ms));
+      continue;
+    }
+    // Added for the integration proof (.claude/tasks/code-read-trailing-
+    // thinking.md): Claude Code keeps a thinking-only reply when the next
+    // reply continues it, marked resumedFromIncompleteThinking. Committed
+    // with that next reply. Behind a GrowthBook flag that is off by default,
+    // so no reconcile recording holds the marker and nothing there changes.
+    const at = rec.entries.indexOf(r);
+    const next = rec.entries.slice(at + 1).find((x) => kindOf(x.entry) === 'assistant' && msgId(x.entry) !== msgId(r.entry));
+    if (next && next.entry.resumedFromIncompleteThinking === true) {
+      out.set(String(r.entry.uuid), next.ms);
     }
   }
   return out;
