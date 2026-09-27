@@ -107,12 +107,14 @@ function cells(model: string): Cell[] {
     { id: 'thinking', prompt: `${HARD} Reply with the number only. ${NO_TOOLS}`, ending: 'thinking' },
     { id: 'mid-text', prompt: `Write the numbers one to sixty in words, one per line, nothing else. ${NO_TOOLS}`, ending: 'mid-text' },
     { id: 'tool-input', prompt: 'Use the Write tool to create story.txt containing a 300-word story about a lighthouse keeper. Call the Write tool straight away, with no text before it.', ending: 'tool-input' },
-    { id: 'tool-exec', prompt: 'Run this exact Bash command, once: `sleep 20; echo DONE`. Then reply with its output only.', ending: 'tool-exec' },
+    // Opus ran proof 23's prompt in the background in round 1 and finished
+    // before the stop; "in the foreground" added from round 2.
+    { id: 'tool-exec', prompt: 'Run this exact Bash command in the foreground (not in the background), once: `sleep 20; echo DONE`. Then reply with its output only.', ending: 'tool-exec' },
   ];
 }
 
 const short = (model: string): string => model.replace(/^claude-/, '').replace(/[^A-Za-z0-9]/g, '');
-const agentName = (model: string): string => `p24-${short(model)}`;
+const agentName = (model: string): string => `p24-${short(model)}${process.env.P24_RECORDER === '1' ? '-rec' : ''}`;
 
 // ---------------------------------------------------------------------------
 // Recording
@@ -364,7 +366,7 @@ async function runMain(model: string, cell: Cell, contextUsage: boolean): Promis
   let step = 0;
   let stopped: string | null = null;
   const fire = (how: string): void => {
-    if (stopped || !run || step !== 1) {
+    if (stopped || !run || step !== 1 || waysDone !== undefined) {
       return;
     }
     stopped = how;

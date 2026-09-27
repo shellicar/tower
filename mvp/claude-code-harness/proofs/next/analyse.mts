@@ -67,7 +67,9 @@ function probeRequest(bodies: string, model: string): ReqInfo | undefined {
   const withTime = files.map((f) => ({ f, t: statSync(join(bodies, f)).mtimeMs })).sort((a, b) => a.t - b.t);
   for (const { f } of withTime) {
     const body = JSON.parse(readFileSync(join(bodies, f), 'utf8')) as Json;
-    if (!String(body.model).startsWith(model) || body.thinking === undefined || !Array.isArray(body.messages)) {
+    // Main requests: the served model, thinking, and a thread or tools (the
+    // session title request has neither).
+    if (!String(body.model).startsWith(model) || body.thinking === undefined || !Array.isArray(body.messages) || (body.thread === undefined && !(Array.isArray(body.tools) && body.tools.length > 0))) {
       continue;
     }
     if (JSON.stringify(body.messages).includes(PROBE)) {
@@ -86,7 +88,10 @@ function norm(v: unknown): unknown {
   if (v && typeof v === 'object') {
     const o: Json = {};
     for (const [k, x] of Object.entries(v as Json)) {
-      if (k === 'cache_control') {
+      // cache_control moves with the last message. `caller` is on tool_use
+      // blocks in the API's responses (so in a server-side thread) but not
+      // in Claude Code's entries; reported separately (callerOnly).
+      if (k === 'cache_control' || k === 'caller') {
         continue;
       }
       o[k] = k === 'content' && typeof x === 'string' ? [{ type: 'text', text: x }] : norm(x);
@@ -109,7 +114,10 @@ function comparable(r: ReqInfo): Json {
   }
   const system = norm(r.root.system);
   // Noise floor (proof 16): cc_prompt_id in the billing header.
-  const sysText = JSON.stringify(system).replace(/cc_prompt_id=[0-9a-f-]*/g, 'cc_prompt_id=*');
+  // cc_prev_req (the previous request's id) is masked too: a fresh process
+  // has no previous request until it reads one from the entries (proof 16);
+  // reported separately (prevReq).
+  const sysText = JSON.stringify(system).replace(/cc_prompt_id=[0-9a-f-]*/g, 'cc_prompt_id=*').replace(/ cc_prev_req=[A-Za-z0-9_]*;/g, '');
   return {
     model: b.model,
     system: JSON.parse(sysText),
@@ -159,12 +167,37 @@ function diffPaths(a: unknown, b: unknown, path = '', out: string[] = [], limit 
   return out;
 }
 
+const prevReq = (r: ReqInfo): string | null => /cc_prev_req=([A-Za-z0-9_]*)/.exec(JSON.stringify(r.root.system))?.[1] ?? null;
+
+// What a resumed request adds or changes that no commit rule controls.
+function classify(T: ReqInfo): string[] {
+  const out: string[] = [];
+  const s = JSON.stringify(T.messages);
+  if (s.includes('"No response requested."')) {
+    out.push('resume inserted "No response requested."');
+  }
+  if (s.includes('re-read when this session started')) {
+    out.push('resume re-announced the session context');
+  }
+  if (s.includes('SYSTEM NOTIFICATION')) {
+    out.push('a background task notification');
+  }
+  return out;
+}
+
 const u = (x: Json | null): string => (x ? `read ${String(x.cache_read_input_tokens)} write ${String(x.cache_creation_input_tokens)} in ${String(x.input_tokens)}` : 'no usage');
 const total = (x: Json | null): number | null => (x ? Number(x.cache_read_input_tokens) + Number(x.cache_creation_input_tokens) + Number(x.input_tokens) : null);
 
 function actualEnding(events: Json[]): string {
   const stop = events.find((e) => e.src === 'proof' && e.kind === 'stop');
-  return stop ? String(stop.how) : 'no stop';
+  const result = events.find((e) => e.src === 'proof' && e.kind === 'step1-result');
+  if (!stop) {
+    return 'no stop';
+  }
+  if (result && Number(stop.ms) > Number(result.ms)) {
+    return `finished before the stop (${String(stop.how)})`;
+  }
+  return String(stop.how);
 }
 
 export function analyseRow(row: Json): Json {
@@ -173,7 +206,13 @@ export function analyseRow(row: Json): Json {
   const events = lines(join(rawDir, 'next-events.jsonl'));
   const holdings = JSON.parse(readFileSync(join(rawDir, 'holdings.json'), 'utf8')) as { way: string; atMs: number; entries: Json[]; note?: string }[];
   const L = probeRequest(join(rawDir, 'api-bodies'), model);
-  const out: Json = { model, cell: row.cell, main: row.main, stopped: actualEnding(events), L: L ? { file: L.file, chain: L.chain, usage: L.usage, diagnostics: L.diagnostics } : null, ways: [] };
+  // Store appends after the result and before the probe: what a commit at
+  // the result would have missed.
+  const resultEv = events.find((e) => e.src === 'proof' && e.kind === 'step1-result');
+  const probeEv = events.find((e) => e.src === 'proof' && e.kind === 'send' && e.step === 2);
+  const lateAppends = resultEv && probeEv ? events.filter((e) => e.src === 'store' && e.kind === 'append' && Number(e.ms) > Number(resultEv.ms) && Number(e.ms) < Number(probeEv.ms)).map((e) => ({ afterMs: Number(e.ms) - Number(resultEv.ms), types: e.types })) : null;
+  const hooksInStep = resultEv ? events.filter((e) => e.src === 'hook' && (e.kind === 'Stop' || e.kind === 'StopFailure') && Number(e.ms) < Number(resultEv.ms) && Number(e.ms) > Number(events.find((x) => x.src === 'proof' && x.kind === 'send' && x.step === 1)?.ms ?? 0)).map((e) => ({ hook: e.kind, beforeResultMs: Number(resultEv.ms) - Number(e.ms) })) : null;
+  const out: Json = { model, cell: row.cell, main: row.main, stopped: actualEnding(events), lateAppends, hooksInStep, L: L ? { file: L.file, chain: L.chain, usage: L.usage, diagnostics: L.diagnostics } : null, ways: [] };
   const truth = L ? nextQueryBlocks(L.messages as never, PROBE) : undefined;
   out.truthBefore = truth?.before.map((b) => b.show) ?? null;
   const resumes = row.resumes as Record<string, Json>;
@@ -204,6 +243,8 @@ export function analyseRow(row: Json): Json {
           cache: `L ${u(L.usage)} | T ${u(T.usage)}`,
           totalsEqual: total(L.usage) === total(T.usage),
           tMissReason: (T.diagnostics as Json | null)?.cache_miss_reason ?? null,
+          resumeAdds: classify(T),
+          prevReq: { L: prevReq(L), T: prevReq(T) },
           vsStoreResume: C && C.file !== T.file ? diffPaths(comparable(C), comparable(T)) : 'is the store resume',
         });
       } else if (T) {
