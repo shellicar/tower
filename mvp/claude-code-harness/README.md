@@ -275,3 +275,30 @@ redacted, into the run directory:
 The proof prints, per turn, the thinking stream events and assistant thinking
 blocks with their line numbers in `sdk-messages.jsonl`, the result usage, and
 each request's `thinking` and `betas`.
+
+## Proof 24: what Claude Code builds its next query on
+
+`proofs/next/` scores ways a participant could commit, when a query ends,
+what Claude Code builds its next query on.
+
+- `offline.mts <proof-23 runs dir> [out.jsonl]`: each way against proof 23's
+  recorded runs (raw copies under `~/.local/state/.../proof-23/`), history
+  only.
+- `run.mts <model> <cell|all> [...]`: live. Per cell a warm-up, the cell's
+  prompt (ended by `interrupt()` at an ending, or left to end), each way's
+  holding taken at the step's `result`, the probe sent into the same Claude
+  Code (the ground truth), then one resume per distinct holding through a
+  session store, with the same probe. Env: `P24_LIMIT` (the limit cell's
+  output tokens), `P24_RECORDER=1` (Claude Code's undocumented request
+  recorder, `CLAUDE_CODE_ELEGANT_MEADOW`), `P24_CONTEXT_USAGE=1`,
+  `P24_NO_RESET=1`, `P24_NO_PRIME=1`. Its choices are listed at the top of
+  the file, marked undecided.
+- `analyse.mts <p24-index.json> [...]`: history and request/cache comparison
+  per way; `table.mts <analysis.jsonl> [...]`: scenario by way.
+- `setmodel-probe.mts <name> [...]`: which model names `setModel()` accepts.
+
+Raw bodies and store appends stay under
+`~/.local/state/tower-claude-code-harness/proof-24/`; run directories get
+redacted copies. The harness's own `claude/<n>/stdout.txt` and, for
+resumes, `run.json` (the store object's loaded entries) are not redacted
+for email.

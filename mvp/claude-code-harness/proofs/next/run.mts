@@ -97,7 +97,8 @@ const NO_TOOLS = 'Answer in your reply itself; do not use any tools.';
 const errorEnv = (model: string): Record<string, string> => ({ API_TIMEOUT_MS: /haiku/.test(model) ? '100' : '800', CLAUDE_CODE_MAX_RETRIES: '2' });
 
 function cells(model: string): Cell[] {
-  const limit = /opus|fable/.test(model) ? '64' : '256';
+  // P24_LIMIT overrides (Sonnet at 256 never hit the limit in rounds 1 and 2).
+  const limit = process.env.P24_LIMIT ?? (/opus|fable/.test(model) ? '64' : '256');
   return [
     { id: 'normal', prompt: `What is 17 times 23? Work it out, then reply with the number only. ${NO_TOOLS}` },
     { id: 'thinking-only', prompt: `Think carefully about whether 391 is prime. Then end your turn with an empty reply: write no text at all, not even a single word or punctuation mark. ${NO_TOOLS}` },
