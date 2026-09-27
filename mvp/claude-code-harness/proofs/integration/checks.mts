@@ -8,7 +8,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { build, type BuildOpts, kindOf, type Option, type Recording, type TMsg } from '../reconcile/holding.mts';
+import { build, type BuildOpts, holdingAt, kindOf, type Option, type Recording, type TMsg } from '../reconcile/holding.mts';
 import { compareUnits, describeEntry, probeCut, requestUnits, towerBeforeProbeReply, towerUnits, type Verdict, without } from '../reconcile/compare.mts';
 import { fullHistory, readIndex } from '../next/history.mts';
 import { coreHash, NO_RESPONSE, type PublishedLine } from './committer.mts';
@@ -341,6 +341,52 @@ export function variantsDiffer(rec: Recording): { differ: boolean; diffs: string
     }
   }
   return { differ: diffs.length > 0, diffs };
+}
+
+// The continuous oracle (design.md's R1/R2; the central check this proof
+// exists to run, not just once but after every say/interrupt/kill/result):
+// for every main request whose reply actually landed (R2 governs what
+// Claude Code's NEXT query builds on; a request whose reply was discarded
+// by an interrupt is superseded by its own retry, so judging tower against
+// a discarded attempt would flag expected reformation noise, not a real
+// divergence), tower's holding just before that request must be an exact
+// PREFIX of the request's own history: same order, same content, for every
+// entry both sides carry. Tower being behind (missing items) is expected:
+// the request's own new turn hasn't been committed by a kept reply yet.
+// Tower being ahead of, differently ordered from, or different in content
+// to the request (extra/placement/bytes) is a real divergence under R1/R2.
+// Callers tag each finding with model/ending/variant/pickup/step
+// themselves (this function only knows the recording); commitIndex is the
+// finding's own position in the returned array.
+export interface OracleFinding {
+  requestFile: string;
+  ms: number;
+  bad: boolean;
+  kinds: string[];
+  detail: string;
+}
+export function continuousOracle(rec: Recording, bodiesDir: string, option: Option, built = build(rec, option)): OracleFinding[] {
+  const describe = describeEntry(rec);
+  const kept = new Set(built.mains.filter((m) => m.firstReplyMs !== undefined).map((m) => m.req.file));
+  const out: OracleFinding[] = [];
+  for (const r of rec.requests) {
+    if (!kept.has(r.file)) {
+      continue;
+    }
+    let messages: unknown[];
+    try {
+      messages = fullHistory(bodiesDir, r.file).messages as unknown[];
+    } catch {
+      continue;
+    }
+    const holding = holdingAt(rec, option, r.ms - 1, built);
+    const tUnits = towerUnits(holding.messages);
+    const reqU = requestUnits(rec, messages as never);
+    const v = compareUnits(reqU.units, tUnits, describe);
+    const bad = v.placement.length > 0 || v.bytes.length > 0 || v.extra.length > 0;
+    out.push({ requestFile: r.file, ms: r.ms, bad, kinds: v.kinds, detail: bad ? `placement=${JSON.stringify(v.placement)} extra=${JSON.stringify(v.extra)} bytes=${JSON.stringify(v.bytes)}` : 'ok' });
+  }
+  return out;
 }
 
 // Join 7: "No response requested." never reaches tower.

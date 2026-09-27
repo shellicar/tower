@@ -38,7 +38,7 @@ import { lastSeq, openTower, type Tower, towerHeld, towerMessages } from '../sem
 import { scanTag } from '../tag-scan.mts';
 import { type PublishedLine } from './committer.mts';
 import { type Cell, cells, type CheckRow, Evidence, printRow, PROBE, resetAgent, short, specFor, WARM } from './common.mts';
-import { chainGaps, forks, heldOnTower, liveVsOffline, lostFromTower, messagesVs, noResponseOnTower, probeRequest, resumeVerdict, towerVsRequest, unclosedAsOf } from './checks.mts';
+import { chainGaps, continuousOracle, forks, heldOnTower, liveVsOffline, lostFromTower, messagesVs, noResponseOnTower, probeRequest, resumeVerdict, towerVsRequest, unclosedAsOf } from './checks.mts';
 import { Participant } from './driver.mts';
 import { CONFIG_DIRS_ROOT, clean, gone, HARNESS_STATE, HERE, INTEGRATION_STATE, iso, type Json, PACKAGE_ROOT, procStat, readJsonl, sleep } from './lib.mts';
 import { entryId, Lineage } from './lineage.mts';
@@ -55,10 +55,16 @@ interface Args {
   // Part B's ways through (each TODO: undecided), passed to every
   // participant this run starts.
   variants: string[];
+  // The paired same-recording methodology (design.md's Open, run+last vs
+  // run+entry): when set, every participant this run starts also gets a
+  // second, always-dry committer over the SAME Lineage, running this build
+  // option, so the two variants are compared from one live model session
+  // rather than two (nondeterminism would otherwise read as divergence).
+  pairedVariant: string | undefined;
 }
 
 function parse(argv: string[]): Args {
-  const a: Args = { scenario: argv[0] ?? '', model: 'claude-haiku-4-5', agent: undefined, cells: undefined, strace: false, reset: true, prime: true, variants: [] };
+  const a: Args = { scenario: argv[0] ?? '', model: 'claude-haiku-4-5', agent: undefined, cells: undefined, strace: false, reset: true, prime: true, variants: [], pairedVariant: undefined };
   for (let i = 1; i < argv.length; i += 1) {
     const k = argv[i];
     if (k === '--model') a.model = String(argv[++i]);
@@ -68,6 +74,7 @@ function parse(argv: string[]): Args {
     else if (k === '--no-reset') a.reset = false;
     else if (k === '--no-prime') a.prime = false;
     else if (k === '--variant') a.variants = String(argv[++i]).split(',').filter(Boolean);
+    else if (k === '--paired-variant') a.pairedVariant = String(argv[++i]);
     else throw new Error(`unknown argument ${k}`);
   }
   return a;
@@ -95,6 +102,9 @@ function start(spec: ReturnType<typeof specFor>, a: Args): Participant {
   if (a.variants.length > 0 && !spec.variants) {
     spec.variants = a.variants;
   }
+  if (a.pairedVariant && !spec.pairedVariant) {
+    spec.pairedVariant = a.pairedVariant;
+  }
   const p = new Participant(spec, { strace: a.strace, log });
   started.push(p);
   return p;
@@ -115,6 +125,44 @@ async function towerNow(id: string, upto?: number): Promise<Json[]> {
 }
 
 const bodyOf = (m: TMsg): Json => toBodies([m])[0] as unknown as Json;
+
+// The continuous oracle (checks.mts's continuousOracle), run at the end of
+// a leg and tagged with everything the brief asks a divergence to carry:
+// model, ending, variant, pickup, step (the leg's own label doubles for
+// step here; a per-event call inside a leg is a further TODO, not reached),
+// commit index. Called for both the live lineage and, when a paired
+// variant ran alongside it, the shadow's prefixed files.
+function oracleRows(scenario: string, cell: string, pickup: string, lineage: string, a: Args, ev: string): CheckRow[] {
+  const rows: CheckRow[] = [];
+  const runFor = (variant: string, filePrefix: string): void => {
+    const optsFile = join(lineage, `${filePrefix}build-options.json`);
+    if (!existsSync(optsFile)) {
+      return;
+    }
+    const saved = JSON.parse(readFileSync(optsFile, 'utf8')) as Json;
+    const option = (saved.option as string) ?? 'run';
+    const lin = Lineage.open(lineage);
+    lin.pollBodies();
+    const findings = continuousOracle(lin.rec, lin.bodies, option as never);
+    const bad = findings.filter((f) => f.bad);
+    rows.push({
+      scenario,
+      cell,
+      check: `oracle (${variant}, ${pickup})`,
+      pass: bad.length === 0,
+      reason: bad.length === 0 ? `${findings.length} kept-reply requests checked, all a clean prefix` : `${bad.length}/${findings.length} diverged: ${bad.map((f, i) => `#${i} ${f.requestFile}: ${f.detail}`).slice(0, 3).join(' | ')}`,
+      evidence: ev,
+    });
+  };
+  runFor('primary', '');
+  if (a.pairedVariant) {
+    runFor(a.pairedVariant, `${a.pairedVariant}-`);
+  }
+  for (const r of rows) {
+    printRow(r);
+  }
+  return rows;
+}
 
 function published(lineage: string): PublishedLine[] {
   return readJsonl(join(lineage, 'published.jsonl')) as unknown as PublishedLine[];
@@ -727,6 +775,7 @@ async function origins(a: Args): Promise<CheckRow[]> {
     await p1.shutdown();
     const step1Ms = Number(r1.ms);
     const lineage = String(s1.lineage);
+    rows.push(...oracleRows('origins', cid, 'live', lineage, a, join(dir, 'p1-live')));
     const L = probeRequest(join(lineage, 'api-bodies'), a.model, PROBE, step1Ms);
     row('first serve from tower', s1.decision === 'tower', `decision ${String(s1.decision)}`, join(dir, 'p1-live'));
     if (!L) {
@@ -743,6 +792,7 @@ async function origins(a: Args): Promise<CheckRow[]> {
       await p.say(`r-${from}`, PROBE, { step: 2 });
       checkUsageLimit();
       await p.shutdown();
+      rows.push(...oracleRows('origins', cid, `restart-${from}`, String(s.lineage), a, join(dir, `p-${from}`)));
       const T = probeRequest(join(String(s.lineage), 'api-bodies'), a.model, PROBE);
       const v = T ? resumeVerdict(L, T) : { verdict: 'no T request' };
       writeFileSync(join(dir, `restart-${from}.json`), clean(JSON.stringify({ served: s, verdict: v }, null, 2)));
