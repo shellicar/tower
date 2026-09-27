@@ -84,6 +84,15 @@ export interface Recording {
   requests: Req[]; // every request body, in order of appearance
   index: IndexLine[];
   results: number[]; // instants of each query's `result`
+  // Integration proof addition: instants a crash recovery discovered the
+  // last run ended with no `result` (participant.mts's serve()). Drives the
+  // same run+last/run+entry tail commit as a clean query end, deliberately
+  // apart from rec.results: a result also closes `changes.query` on the wire
+  // (committer.mts's closures()), and this proof doesn't decide the closure
+  // `reason` for a crash (design.md, Spec changes owed: "a shutdown query
+  // reason ... let the agent who has to implement this decide"; kept open
+  // here too, see committer.mts and participant.mts TODOs).
+  tailTriggers?: number[];
 }
 
 export interface CcItem {
@@ -431,6 +440,10 @@ export interface Built {
   unshown: Rec[];
   mains: MainReq[];
   orderWarnings: string[];
+  // Parallel to orderWarnings: the commit instant each one fired at, so a
+  // caller (committer.mts's landed gate) can stall everything from that
+  // instant on, not just log it.
+  orderWarningPoints: number[];
   unanchored: Unanchored[];
 }
 
@@ -445,6 +458,7 @@ export function build(rec: Recording, option: Option, o: BuildOpts = {}): Built 
   const bySeq = seqOf(rec);
   const out: TMsg[] = [];
   const orderWarnings: string[] = [];
+  const orderWarningPoints: number[] = [];
   const committed = new Set<string>();
   const commit = (ms: TMsg[]): void => {
     for (const m of ms) {
@@ -477,6 +491,7 @@ export function build(rec: Recording, option: Option, o: BuildOpts = {}): Built 
           const own = mains.find((m) => m.replies.includes(String(r.entry.uuid)));
           if (own && own.form.some((f) => f.ccEntries.some((x) => !committed.has(x.uuid)))) {
             orderWarnings.push(`${String(r.entry.uuid).slice(0, 8)} committed before its run`);
+            orderWarningPoints.push(c);
           }
         }
         commit([assistantMsg(r, c)]);
@@ -544,7 +559,11 @@ export function build(rec: Recording, option: Option, o: BuildOpts = {}): Built 
     }
   }
   if (option === 'run+last' || option === 'run+entry') {
-    for (const q of rec.results) {
+    // A clean query end (rec.results) and a crash recovery's own trigger
+    // (rec.tailTriggers) both close the tail the same way: what's still open
+    // at that instant, as written or as the latest request left it.
+    const tailInstants = [...rec.results, ...(rec.tailTriggers ?? [])];
+    for (const q of tailInstants) {
       at(q, () => {
         flushBefore(q);
         const open = carriers.filter((r) => r.ms <= q && !committed.has(String(r.entry.uuid)));
@@ -591,7 +610,7 @@ export function build(rec: Recording, option: Option, o: BuildOpts = {}): Built 
     out.length = 0;
     out.push(...ordered);
   }
-  return { all: out, unshown, mains, orderWarnings, unanchored };
+  return { all: out, unshown, mains, orderWarnings, orderWarningPoints, unanchored };
 }
 
 // What the option holds at an instant.

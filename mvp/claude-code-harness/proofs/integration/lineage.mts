@@ -108,7 +108,7 @@ export class Lineage {
     this.bodies = join(dir, 'api-bodies');
     this.meta = meta;
     mkdirSync(this.bodies, { recursive: true });
-    this.rec = { model: meta.model, entries: [], requests: [], index: [], results: [] };
+    this.rec = { model: meta.model, entries: [], requests: [], index: [], results: [], tailTriggers: [] };
     for (const a of readJsonl(join(dir, 'store-appends.jsonl'))) {
       if ((a.key as Json | undefined)?.subpath) {
         continue;
@@ -132,6 +132,8 @@ export class Lineage {
         this.resultsFull.push({ ms: Number(e.ms), queryId: String(e.queryId), subtype: String(e.subtype), reason: String(e.reason) });
       } else if (e.src === 'participant' && (e.kind === 'say' || e.kind === 'turn')) {
         this.says.push({ ms: Number(e.ms), queryId: String(e.queryId), text: String(e.text) });
+      } else if (e.src === 'participant' && e.kind === 'tail-trigger') {
+        (this.rec.tailTriggers as number[]).push(Number(e.ms));
       }
     }
     this.rec.requests.sort((a, b) => a.ms - b.ms);
@@ -255,6 +257,17 @@ export class Lineage {
     appendJsonl(join(this.dir, 'next-events.jsonl'), { ts: iso(r.ms), ms: r.ms, src: 'sdk', kind: 'result', queryId: r.queryId, subtype: r.subtype, reason: r.reason, ...extra });
   }
 
+  // A crash recovery's own trigger (participant.mts's serve()): the last run
+  // ended with no `result`, so run+last/run+entry's tail commit, which
+  // otherwise only fires at a clean query end, would never fire at all.
+  // Deliberately not a Result: it never touches changes.query (the wire
+  // closure `reason` for this case is left open by design.md; see
+  // committer.mts and participant.mts).
+  addTailTrigger(ms: number, extra: Json = {}): void {
+    (this.rec.tailTriggers as number[]).push(ms);
+    appendJsonl(join(this.dir, 'next-events.jsonl'), { ts: iso(ms), ms, src: 'participant', kind: 'tail-trigger', ...extra });
+  }
+
   event(kind: string, detail: Json = {}): void {
     appendJsonl(join(this.dir, 'next-events.jsonl'), { ts: iso(), ms: Date.now(), src: 'participant', kind, ...detail });
   }
@@ -276,7 +289,7 @@ export class Lineage {
       }
     }
     for (const e of readJsonl(join(this.dir, 'next-events.jsonl'))) {
-      if (Number(e.ms) <= asOfMs && ['request', 'result', 'say', 'turn'].includes(String(e.kind))) {
+      if (Number(e.ms) <= asOfMs && ['request', 'result', 'say', 'turn', 'tail-trigger'].includes(String(e.kind))) {
         appendJsonl(join(dir, 'next-events.jsonl'), e);
         if (e.kind === 'request' && existsSync(join(this.bodies, String(e.file)))) {
           copyFileSync(join(this.bodies, String(e.file)), join(d.bodies, String(e.file)));
