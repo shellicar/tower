@@ -303,6 +303,15 @@ async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string
   row('tower = published', JSON.stringify(pubIds) === JSON.stringify(towerIds), `published ${pubIds.length}, tower ${towerIds.length}`, ev.path('tower.json'));
   const nrr = noResponseOnTower(tower);
   row('no "No response requested."', nrr.length === 0, nrr.length ? `on tower: ${nrr.join(',')}` : 'none on tower', ev.path('tower.json'));
+  if (cell.id === 'api-error' || cell.id === 'limit') {
+    // Claude Code's API-error notes (isApiErrorMessage, model <synthetic>)
+    // are kept hidden: carried on tower in the unshown record, never shown
+    // as a message.
+    const notes = lin.rec.entries.filter((r) => r.ms >= Number(say1?.ms ?? 0) && r.ms <= step1Ms && r.entry.isApiErrorMessage === true);
+    const unshownOn = new Set(tower.flatMap((b) => ((b.ccUnshown as Json[] | undefined) ?? []).map((u) => entryId(u.entry as Json))));
+    const asMessage = new Set(tower.flatMap((b) => ((b.ccEntries as Json[] | undefined) ?? []).map((c) => `uuid:${String(c.uuid)}`)));
+    row('error note carried hidden', notes.length > 0 && notes.every((r) => unshownOn.has(entryId(r.entry)) && !asMessage.has(entryId(r.entry))), `notes ${JSON.stringify(notes.map((r) => String(r.entry.uuid).slice(0, 8)))}; in the unshown record ${notes.filter((r) => unshownOn.has(entryId(r.entry))).length}; as a message ${notes.filter((r) => asMessage.has(entryId(r.entry))).length}; text ${JSON.stringify(notes.map((r) => JSON.stringify((r.entry.message as Json | undefined)?.content ?? '').slice(0, 80)))}`, ev.path('tower.json'));
+  }
   if (cell.id === 'thinking-only') {
     // What the design did with the thinking-only reply: dropped (never on
     // tower), and Claude Code's meta nudge committed as your side.
@@ -499,7 +508,10 @@ async function killed(a: Args): Promise<CheckRow[]> {
     const unclassified = foundAtStop.filter((f) => f.claudeCode !== true && p1.claudes.some((k) => k.pid === f.pid));
     row('leftover stopped before serving', /all exited|none found/.test(String(stop?.outcome)) && allWaited && unclassified.length === 0, `${String(stop?.outcome)}; found at the first scan ${JSON.stringify(foundAtStop.map((f) => [f.pid, f.claudeCode ? 'claude' : f.cmd]))}; signals ${JSON.stringify(stop?.signals)}; waited ${JSON.stringify(waited)}${unclassified.length ? `; P1's Claude Code not recognised: ${JSON.stringify(unclassified)}` : ''}`, join(dir, 'p2-served'));
     row('killed while the command ran', ranBeforeKill, ranBeforeKill ? 'the shell prefix ran the command before the kill' : 'no command ran (a permission ask?)', join(dir, 'p1-killed'));
-    row('decision', origin === 'fresh' ? s2.decision === 'local' : origin === 'tower' ? s2.decision === 'tower' : s2.decision === 'record', `decision ${String(s2.decision)}; recovery ${JSON.stringify(s2.recovery).slice(0, 300)}`, join(dir, 'served.json'));
+    // With the materialise variant a tower-origin conversation's record is
+    // in the agent dir, so its restart is local.
+    const wantDecision = origin === 'fresh' ? 'local' : origin === 'tower' ? (a.variants.includes('materialise') ? 'local' : 'tower') : 'record';
+    row('decision', s2.decision === wantDecision, `decision ${String(s2.decision)} (expected ${wantDecision}); first serve ${String(s1.decision)}${s1.materialised ? ` materialised ${JSON.stringify(s1.materialised)}` : ''}; recovery ${JSON.stringify(s2.recovery).slice(0, 300)}`, join(dir, 'served.json'));
     const f = forks(tower);
     row('nothing forks', f.length === 0, f.length ? JSON.stringify(f) : 'no two tower entries share a parent', join(dir, 'tower.json'));
     const lost = lostFromTower(local, tower);
