@@ -162,6 +162,11 @@ interface Conv {
   sayText: string;
   sayMs: number;
   lastResultMs: number;
+  // Claude Code's own command queue, as its queue-operation entries show it
+  // (contents enqueued and not yet dequeued), and the turn it is running.
+  queue: string[];
+  turn: { queryId: string; self: boolean } | undefined;
+  sayStarted: boolean;
   interruptedByUs: boolean;
   ending?: Ending;
   step?: number;
@@ -504,6 +509,9 @@ async function serve(cmd: Json): Promise<void> {
 
   const store: SessionStore = {
     async append(key: SessionKey, entries: SessionStoreEntry[]): Promise<void> {
+      if (!key.subpath && conv) {
+        onQueue(conv, entries as Json[]);
+      }
       lin.append(key as unknown as Json, entries as Json[], 'live');
       committer.poke();
     },
@@ -588,6 +596,9 @@ async function serve(cmd: Json): Promise<void> {
     sayText: '',
     sayMs: 0,
     lastResultMs: Date.now(),
+    queue: [],
+    turn: undefined,
+    sayStarted: false,
     interruptedByUs: false,
     fired: false,
     resultSeen: false,
@@ -655,32 +666,16 @@ async function messagesLoop(c: Conv): Promise<void> {
       }
       if (m.type === 'result') {
         const ms = Date.now();
-        // Turns Claude Code starts itself (a background task's notification,
-        // one queued by a killed run and replayed on resume): the participant
-        // mints their queryId (design record, 26 Sep). A result is the say's
-        // only if the say's prompt was taken into a turn by then: Claude Code
-        // writes a queue-operation `enqueue` with the prompt's text when it
-        // takes it, mirrored to the store before the turn's result.
-        //
-        // TODO: undecided. How a turn Claude Code started itself is told
-        // apart: built as "the pending say's enqueue isn't in the recording
-        // at the result" (no wait: the prompt's own enqueue lands right after
-        // a replayed turn's result). Pros: uses only what Claude Code writes;
-        // no change to what is sent. Cons: relies on the mirror reaching the
-        // store before the result is read; a say whose text Claude Code
-        // rewrites in the enqueue would never match. Alternatives: a uuid on
-        // each sent message and Claude Code's command_lifecycle frames
-        // (@internal in 2.1.282, not emitted to this SDK stream as seen), or
-        // --replay-user-messages.
-        const ours = c.busy && sayTaken(c);
-        const self = !ours;
-        const queryId = self ? randomUUID() : c.queryId;
+        // The turn this result closes: the one the queue entries opened
+        // (onQueue); with none seen, the pending say's if a say is pending,
+        // else a turn Claude Code started itself.
+        const turn = c.turn ?? (c.busy ? { queryId: c.queryId, self: false } : { queryId: randomUUID(), self: true });
+        c.turn = undefined;
+        const self = turn.self;
+        const queryId = turn.queryId;
         if (self) {
-          // Its entries (after the last boundary) take the minted id; the
-          // pending say's id resumes after this result.
-          const from = Math.max(c.lastResultMs, c.busy ? c.sayMs : 0) + 1;
-          c.lin.addTurn({ ms: from, queryId, text: '' }, { self: true, resultMs: ms });
           if (c.busy) {
+            // The pending say's id resumes after this result.
             c.lin.addTurn({ ms: ms + 1, queryId: c.queryId, text: c.sayText }, { resumes: 'pending say' });
           }
         } else {
@@ -716,11 +711,51 @@ async function messagesLoop(c: Conv): Promise<void> {
   emit('query-ended', { conv: c.label, id: c.id });
 }
 
-// Whether Claude Code has taken the pending say's prompt into a turn: its
-// queue-operation enqueue (the prompt's text) is in the recording, appended
-// at or after the say.
-function sayTaken(c: Conv): boolean {
-  return c.lin.rec.entries.some((r) => r.ms >= c.sayMs - 5 && r.entry.type === 'queue-operation' && r.entry.operation === 'enqueue' && r.entry.content === c.sayText);
+// Turns Claude Code starts itself (a background task's notification, or one
+// queued by a killed run and replayed on resume): the participant mints
+// their queryId (design record, 26 Sep), from the turn's start, so its reply
+// pieces (committed at their append, before the turn's result) carry it.
+//
+// TODO: undecided. How such a turn is told apart: built on Claude Code's own
+// queue entries (mirrored to the store in order): `enqueue` carries the
+// command's text, `dequeue` takes the oldest; the first dequeue after a
+// result starts a turn, the say's if it takes the pending say's text, else
+// one Claude Code started itself. Pros: only what Claude Code writes, no
+// change to what is sent, and ordered with the turn's own entries. Cons:
+// relies on queue-operation entries (bookkeeping Claude Code may change) and
+// on the say's text coming back unchanged; a say merged into a turn Claude
+// Code started gets no result of its own. Alternatives: a uuid on each sent
+// message with Claude Code's command_lifecycle frames (@internal in 2.1.282,
+// not seen on this SDK stream), or --replay-user-messages.
+function onQueue(c: Conv, entries: Json[]): void {
+  for (const e of entries) {
+    if (e.type !== 'queue-operation') {
+      continue;
+    }
+    if (e.operation === 'enqueue') {
+      c.queue.push(typeof e.content === 'string' ? e.content : JSON.stringify(e.content ?? null));
+      continue;
+    }
+    if (e.operation !== 'dequeue') {
+      continue;
+    }
+    const item = c.queue.shift();
+    const isSay = c.busy && !c.sayStarted && item === c.sayText;
+    if (isSay) {
+      c.sayStarted = true;
+    }
+    if (c.turn) {
+      continue; // merged into the running turn
+    }
+    if (isSay) {
+      c.turn = { queryId: c.queryId, self: false };
+    } else {
+      const queryId = randomUUID();
+      c.turn = { queryId, self: true };
+      c.lin.addTurn({ ms: Date.now(), queryId, text: '' }, { self: true, command: String(item ?? '').slice(0, 120) });
+      emit('self-turn', { conv: c.label, queryId, command: String(item ?? '').slice(0, 120) });
+    }
+  }
 }
 
 function say(cmd: Json): void {
@@ -736,6 +771,7 @@ function say(cmd: Json): void {
   const text = String(cmd.text);
   c.queryId = randomUUID();
   c.sayText = text;
+  c.sayStarted = false;
   c.busy = true;
   c.interruptedByUs = false;
   c.fired = false;

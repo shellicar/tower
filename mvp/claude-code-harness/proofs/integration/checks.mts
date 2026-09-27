@@ -194,11 +194,33 @@ export function tmsgsOf(bodies: Json[]): TMsg[] {
 
 // Tower against the messages L's request carried: every part a kept reply
 // has closed, message for message (reconcile's offline analyse, option run).
-export function towerVsRequest(rec: Recording, towerBodies: Json[], L: ReqInfo): Verdict {
+//
+// `rebuilt`: entries load() made for blocks tower holds with no entry behind
+// them (the load-unbacked variant): in the request they stand where tower
+// has the block alone, so they are compared as blocks, by text. `unbacked`
+// lists the blocks no entry backs on either side that the other side
+// doesn't carry with the same text.
+export function towerVsRequest(rec: Recording, towerBodies: Json[], L: ReqInfo, rebuilt: Set<string> = new Set()): Verdict & { unbacked: string[] } {
   const describe = describeEntry(rec);
-  const reqUnits = requestUnits(rec, L.messages as never);
+  const reqUnits = requestUnits(rec, L.messages as never).units.map((u) => ({ role: u.role, items: u.items.map((i) => (i.uuid !== null && rebuilt.has(i.uuid) ? { uuid: null, text: i.text } : i)) }));
   const msgs = towerBeforeProbeReply(tmsgsOf(towerBodies), L.mtimeMs, rec);
-  return compareUnits(reqUnits.units, without(towerUnits(msgs), probeCut(L.mtimeMs, rec)), describe);
+  const cut = probeCut(L.mtimeMs, rec);
+  const tUnits = without(towerUnits(msgs), cut);
+  const v = compareUnits(reqUnits, tUnits, describe);
+  const nulls = (us: { role: string; items: { uuid: string | null; text: string }[] }[]): string[] => us.flatMap((u) => u.items.filter((i) => i.uuid === null).map((i) => `${u.role}: ${i.text}`));
+  const rn = nulls(reqUnits);
+  const tn = nulls(tUnits);
+  const unbacked: string[] = [];
+  for (const x of rn) {
+    const at = tn.indexOf(x);
+    if (at >= 0) {
+      tn.splice(at, 1);
+    } else {
+      unbacked.push(`request only: ${x.slice(0, 120)}`);
+    }
+  }
+  unbacked.push(...tn.map((x) => `tower only: ${x.slice(0, 120)}`));
+  return { ...v, unbacked };
 }
 
 // T's messages against L's, cut to what was there at `asOfMs` (the probe's

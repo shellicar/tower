@@ -354,7 +354,12 @@ async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string
     row('tower alone', false, `no T request (decision ${String(s3.decision)}, result ${String(r3t.subtype)})`, ev.path('p3-tower-alone'));
   } else {
     const mv = messagesVs(lin.rec, L, Lineage.open(String(s3.lineage)).rec, T2, step1Ms);
-    const expected = unclosedAsOf(lin.rec, towerAsOf, step1Ms);
+    // With held-carrier the held user side is on tower (changes.held) as of
+    // step 1, so a resume from tower alone should carry it: only what the
+    // held record lacks is expected missing.
+    towerConn ??= await openTower();
+    const heldAsOf = a.variants.includes('held-carrier') ? new Set((((await towerHeld(towerConn, id, asOfSeq)).at(-1)?.body.entries as Json[] | undefined) ?? []).map((h) => String((h.entry as Json).uuid))) : new Set<string>();
+    const expected = unclosedAsOf(lin.rec, towerAsOf, step1Ms).filter((u) => !heldAsOf.has(u));
     const same = JSON.stringify([...new Set(mv.missing)].sort()) === JSON.stringify([...new Set(expected)].sort());
     // The harness fixes cwd per agent name (work/<name>): masked for the
     // request comparison, which is then messages and system only; cache
@@ -575,7 +580,30 @@ async function movedOnCell(a: Args, cell: string, agent: string, root0: Evidence
   const id = String((await p1.serve({ conv: 'c' })).id);
   await p1.say('c', WARM, { step: 0 });
   if (cell === 'kill') {
-    await killAtTool(p1, 'c');
+    // The state under test is tower ending on the tool_use (H committed it)
+    // with nothing after it: killed only once tower shows it (up to 20 s;
+    // the store mirror lags a tool_use by 1-2 s under auto mode), else
+    // killed anyway and reported as not reached.
+    const n0 = p1.events.length;
+    p1.send({ cmd: 'say', conv: 'c', text: KILL_PROMPT, step: 1 });
+    const t = await p1.waitFor((e) => (e.ev === 'tool-started' && e.conv === 'c') || (e.ev === 'result' && e.conv === 'c'), 180_000, 'the tool to start', n0);
+    if (t.ev === 'result') {
+      throw new Error(`the kill turn ended before any tool started: ${JSON.stringify(t).slice(0, 300)}`);
+    }
+    const endsOnToolUse = async (): Promise<boolean> => {
+      const last = (await towerNow(id)).at(-1);
+      return last?.role === 'assistant' && JSON.stringify(last.content).includes('"tool_use"');
+    };
+    const t0 = Date.now();
+    while (!(await endsOnToolUse()) && Date.now() - t0 < 20_000) {
+      await sleep(100);
+    }
+    await sleep(500);
+    const reached = await endsOnToolUse();
+    log(`SIGKILL participant ${p1.me?.pid} (${p1.spec.agent}) during ${String(t.tool)}; tower ends on the tool_use: ${reached}`);
+    p1.kill9();
+    await p1.exited;
+    row('tower ended on the tool_use at the kill', reached && existsSync(root.path('p1-machine1', 'prefix.log')), `tower's last message an assistant tool_use: ${reached}; command ran: ${existsSync(root.path('p1-machine1', 'prefix.log'))}`, root.path('p1-machine1'));
   } else {
     const r1 = await p1.say('c', KILL_PROMPT, { step: 1, ending: 'tool-exec' });
     row('machine 1 interrupted mid-tool', p1.events.some((e) => e.ev === 'trigger') && existsSync(root.path('p1-machine1', 'prefix.log')), `${String(r1.subtype)} ${String(r1.reason)}; command ran: ${existsSync(root.path('p1-machine1', 'prefix.log'))}`, root.path('p1-machine1'));
@@ -646,13 +674,14 @@ async function movedOnCell(a: Args, cell: string, agent: string, root0: Evidence
       row(`${label}'s request = tower`, false, 'no request found', lineage);
       continue;
     }
-    const tv = towerVsRequest(linX.rec, towerAt, R);
+    const served = label === 'machine 2' ? sB : s2;
+    const tv = towerVsRequest(linX.rec, towerAt, R, new Set((served.fabricated as string[] | undefined) ?? []));
     const name = `tower-vs-${label.replace(' ', '')}.json`;
     writeFileSync(root.path(name), clean(JSON.stringify(tv, null, 2)));
     const lo = liveVsOffline(lineage, bodyOf);
     const unanchored = (lo.committerNotes as Json[]).filter((n) => n.kind === 'unanchored');
     const unbacked = R.messages.flatMap((m) => (Array.isArray(m.content) ? (m.content as Json[]) : [])).filter((b) => b.type === 'tool_result' && /Tool result missing/.test(JSON.stringify(b.content)));
-    row(`${label}'s request = tower`, tv.kinds.every((k) => k === 'exact' || k === 'newline') && unanchored.length === 0, `${tv.kinds.join(',')} request ${tv.shape.request} tower ${tv.shape.tower}${tv.missing.length ? ` missing ${tv.missing.join('; ')}` : ''}${tv.extra.length ? ` extra ${tv.extra.join('; ')}` : ''}${tv.placement.length ? ` ${tv.placement.join('; ')}` : ''}; synthetic tool_results in its request ${unbacked.length}; committer: ${unanchored.length ? `unanchored ${JSON.stringify(unanchored)}` : 'every request anchored'}; live = offline ${String(lo.equal)}`, root.path(name));
+    row(`${label}'s request = tower`, tv.kinds.every((k) => k === 'exact' || k === 'newline') && tv.unbacked.length === 0 && unanchored.length === 0, `${tv.kinds.join(',')}${tv.unbacked.length ? ` unbacked blocks differ: ${tv.unbacked.join(' | ')}` : ''} request ${tv.shape.request} tower ${tv.shape.tower}${tv.missing.length ? ` missing ${tv.missing.join('; ')}` : ''}${tv.extra.length ? ` extra ${tv.extra.join('; ')}` : ''}${tv.placement.length ? ` ${tv.placement.join('; ')}` : ''}; synthetic tool_results in its request ${unbacked.length}; committer: ${unanchored.length ? `unanchored ${JSON.stringify(unanchored)}` : 'every request anchored'}; live = offline ${String(lo.equal)}`, root.path(name));
   }
   const nrr = noResponseOnTower(tower);
   row('no "No response requested."', nrr.length === 0, nrr.length ? nrr.join(',') : 'none on tower', root.path('tower.json'));
@@ -1043,8 +1072,57 @@ async function home(a: Args): Promise<CheckRow[]> {
 }
 
 // ---------------------------------------------------------------------------
+// a turn Claude Code starts itself
 
-const SCENARIOS: Record<string, (a: Args) => Promise<CheckRow[]>> = { smoke, matrix, killed, 'moved-on': movedOn, origins, skills, two, home };
+// A background command that finishes after the say's turn has ended makes
+// Claude Code start a turn of its own (its task notification). The
+// participant must mint that turn's queryId (design record, 26 Sep), and the
+// driver must not take its result for the next say's.
+async function selfturn(a: Args): Promise<CheckRow[]> {
+  const agent = a.agent ?? `int-${short(a.model)}-self`;
+  const root = new Evidence(`${short(a.model)}-selfturn`);
+  useLog(root);
+  if (a.reset) resetAgent(agent, log);
+  const rows: CheckRow[] = [];
+  const row = (check: string, pass: boolean, reason: string, evidence: string): void => {
+    const r = { scenario: 'selfturn', cell: 'idle', check, pass, reason, evidence };
+    rows.push(r);
+    printRow(r);
+  };
+  const p = start(specFor(agent, a.model, root.path('p1')), a);
+  await p.ready();
+  const s = await p.serve({ conv: 'c' });
+  const r1 = await p.say('c', 'Run this exact Bash command in the background (run_in_background: true), once: `sleep 8; echo BG-DONE`. Do not wait for it. Reply with the word STARTED only.', { step: 1 });
+  checkUsageLimit();
+  const n = p.events.length;
+  let self: Json | undefined;
+  try {
+    self = await p.waitFor((e) => e.ev === 'result' && e.selfStarted === true, 90_000, 'a turn Claude Code starts itself', n);
+  } catch {
+    self = undefined;
+  }
+  await sleep(2500);
+  const r2 = await p.say('c', PROBE, { step: 2 });
+  checkUsageLimit();
+  await p.shutdown();
+  const results = p.events.filter((e) => e.ev === 'result').map((e) => ({ queryId: e.queryId, step: e.step, selfStarted: e.selfStarted, numTurns: e.numTurns, text: String(e.text).slice(0, 40) }));
+  const says = p.events.filter((e) => e.ev === 'sent').map((e) => e.queryId);
+  writeFileSync(root.path('results.json'), clean(JSON.stringify({ results, says }, null, 2)));
+  row('a turn Claude Code started itself', self !== undefined, `step 1 ${String(r1.subtype)} ${JSON.stringify(String(r1.text).slice(0, 30))}; self-started result: ${JSON.stringify(self ? { queryId: self.queryId, numTurns: self.numTurns, text: String(self.text).slice(0, 60) } : null)}`, root.path('results.json'));
+  row('its queryId is minted, not a say\'s', self !== undefined && !says.includes(self.queryId), `says ${JSON.stringify(says)}; self ${String(self?.queryId)}`, root.path('results.json'));
+  row("the driver took the probe's own result", probeAnswered(r2) && says.includes(r2.queryId) && r2.selfStarted !== true, `probe result ${String(r2.subtype)} ${JSON.stringify(String(r2.text).slice(0, 30))} queryId ${String(r2.queryId)}`, root.path('results.json'));
+  // On tower: the self turn's reply pieces carry the minted queryId, and a
+  // changes.query closure names it.
+  const pub = published(String(s.lineage));
+  const withSelf = pub.filter((x) => self !== undefined && x.queryId === self.queryId);
+  row('tower carries the minted queryId', withSelf.some((x) => x.kind === 'message') && withSelf.some((x) => x.kind === 'query'), `published under it: ${JSON.stringify(withSelf.map((x) => [x.kind, x.id.slice(0, 8)]))}; queryIds on tower ${JSON.stringify([...new Set(pub.filter((x) => x.kind === 'message').map((x) => x.queryId.slice(0, 8)))])}`, root.path('results.json'));
+  writeTable(root, `selfturn ${a.model}`, rows);
+  return rows;
+}
+
+// ---------------------------------------------------------------------------
+
+const SCENARIOS: Record<string, (a: Args) => Promise<CheckRow[]>> = { smoke, matrix, killed, 'moved-on': movedOn, origins, skills, two, home, selfturn };
 
 async function main(): Promise<void> {
   const a = parse(process.argv.slice(2));
