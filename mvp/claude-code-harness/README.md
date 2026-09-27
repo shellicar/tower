@@ -211,6 +211,15 @@ ROUND-TRIP, UNCHECKED, FAIL, and a content verdict that sets shape-only
 divergences aside) and the check's own undecided assumptions are in the
 file's header.
 
+Every attempt-3 scenario takes `--commit run+last|run+entry` (required, no
+default): the committer publishes that variant to tower and computes the
+other as a shadow over the same recording, under the conversation id
+`<id>~shadow` on the same broker (its records `published.shadow.jsonl`,
+`committer.shadow.jsonl` beside the live ones). The check judges the shadow
+exactly as it judges tower, writes `<id>.shadow.md`, and prints whether the
+two differ. Alternate the live variant between runs; pickups only ever see
+the live one.
+
 ## What a run records
 
 `runs/<timestamp>-<name>/` (gitignored):
