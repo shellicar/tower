@@ -274,7 +274,7 @@ export function liveVsOffline(lineageDir: string, bodyOf: (m: TMsg) => Json): Js
   const optsFile = join(lineageDir, 'build-options.json');
   const saved = existsSync(optsFile) ? (JSON.parse(readFileSync(optsFile, 'utf8')) as Json) : {};
   const opts = (saved.opts as BuildOpts | undefined) ?? {};
-  const b = build(lin.rec, (saved.option as Option | undefined) ?? 'run', opts);
+  const b = build(lin.rec, (saved.option as Option | undefined) ?? 'run', { ...opts, alreadyCommitted: lin.seeded });
   const pub = (readJsonl(join(lineageDir, 'published.jsonl')) as unknown as PublishedLine[]).filter((p) => p.kind === 'message');
   const seeded = new Set((readJsonl(join(lineageDir, 'published.jsonl')) as unknown as PublishedLine[]).filter((p) => p.kind === 'seed').map((p) => p.id));
   const carriedBySeed = new Set((readJsonl(join(lineageDir, 'published.jsonl')) as unknown as PublishedLine[]).filter((p) => p.kind === 'seed').flatMap((p) => p.cc));

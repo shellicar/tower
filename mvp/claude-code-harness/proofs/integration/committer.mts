@@ -239,7 +239,7 @@ export class Committer {
       this.dirty = false;
       try {
         this.lin.pollBodies();
-        const b = build(this.lin.rec, this.option, this.opts);
+        const b = build(this.lin.rec, this.option, { ...this.opts, alreadyCommitted: this.lin.seeded });
         this.lastBuild = b;
         for (const w of b.orderWarnings) {
           this.note('order-warning', w, { warning: w });

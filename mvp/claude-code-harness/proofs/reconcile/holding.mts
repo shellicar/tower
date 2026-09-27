@@ -226,6 +226,10 @@ export interface BuildOpts {
   // assistant message), as any run is, at its kept reply. It stays reported
   // as unanchored (never silent).
   placeUnanchored?: boolean;
+  // Entries tower already holds before this recording's own commits (a
+  // lineage seeded from tower): committed from the start, never committed
+  // again in another form or under another message.
+  alreadyCommitted?: Set<string>;
 }
 
 export interface Unanchored {
@@ -490,7 +494,7 @@ export function build(rec: Recording, option: Option, o: BuildOpts = {}): Built 
   const bySeq = seqOf(rec);
   const out: TMsg[] = [];
   const orderWarnings: string[] = [];
-  const committed = new Set<string>();
+  const committed = new Set<string>(o.alreadyCommitted ?? []);
   const answers = new Map<string, string[]>();
   const heldReplies: { uuid: string; ms: number; why: string }[] = [];
   // gateReplies: replies waiting for their user side, released right after
@@ -541,6 +545,9 @@ export function build(rec: Recording, option: Option, o: BuildOpts = {}): Built 
           if (own && own.form.some((f) => f.ccEntries.some((x) => !committed.has(x.uuid)))) {
             orderWarnings.push(`${String(r.entry.uuid).slice(0, 8)} committed before its run`);
           }
+        }
+        if (committed.has(String(r.entry.uuid))) {
+          return;
         }
         if (o.gateReplies) {
           const own = mains.find((m) => m.replies.includes(String(r.entry.uuid)));

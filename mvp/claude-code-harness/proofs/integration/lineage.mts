@@ -101,6 +101,8 @@ export class Lineage {
   readonly says: Say[] = [];
   readonly resultsFull: Result[] = [];
   readonly seenRequests = new Set<string>();
+  // Uuids of the entries this lineage was seeded with from tower.
+  readonly seeded = new Set<string>();
   private nextSeq = 0;
 
   private constructor(dir: string, meta: LineageMeta) {
@@ -115,6 +117,9 @@ export class Lineage {
       }
       for (const e of a.entries as Json[]) {
         this.push(e, Number(a.ms), typeof a.seq === 'number' && (a.entries as Json[]).length === 1 ? a.seq : undefined);
+        if (a.how === 'seed' && typeof e.uuid === 'string') {
+          this.seeded.add(e.uuid);
+        }
       }
     }
     for (const e of readJsonl(join(dir, 'next-events.jsonl'))) {
@@ -194,6 +199,9 @@ export class Lineage {
   // Seeded entries keep the seq tower gave them (ccEntries' seq).
   seed(key: Json, entries: { seq: number; entry: Json }[], ms: number): void {
     for (const { seq, entry } of entries) {
+      if (typeof entry.uuid === 'string') {
+        this.seeded.add(entry.uuid);
+      }
       if (this.push(entry, ms, seq)) {
         appendJsonl(join(this.dir, 'store-appends.jsonl'), { ts: iso(ms), ms, key, entries: [entry], how: 'seed', seq });
       }
