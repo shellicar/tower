@@ -28,6 +28,15 @@
 // TODO: undecided. A request's instant: built as the body file's mtime
 // (reconcile used when a 5 ms poll first saw it; the mtime also serves a
 // file a crashed process never saw).
+//
+// TODO: undecided. Which request bodies the committer's recording takes:
+// built as those with a thread or tools (proof 24/reconcile's own test for a
+// main-loop request; the session-title request has neither). All are kept
+// on disk. Found on Haiku 4.5: its title request uses the served model's
+// dated id (claude-haiku-4-5-20251001, which build()'s startsWith counts as
+// served) and its body file can carry the same mtime as the main request's;
+// build()'s attribution window (entries before the next served request)
+// is then empty and the first run is never committed.
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -77,6 +86,8 @@ function canon(value: unknown): string {
 
 export const entryId = (e: Json): string => (typeof e.uuid === 'string' ? `uuid:${e.uuid}` : `content:${canon(e)}`);
 
+const mainLoop = (body: Json): boolean => body.thread !== undefined && body.thread !== null ? true : Array.isArray(body.tools) && body.tools.length > 0;
+
 export function convRoot(agent: string, convId: string, root: string): string {
   return join(root, agent, 'conv', convId);
 }
@@ -111,7 +122,10 @@ export class Lineage {
         const p = join(this.bodies, String(e.file));
         this.seenRequests.add(String(e.file));
         if (existsSync(p)) {
-          this.rec.requests.push({ file: String(e.file), ms: Number(e.ms), body: JSON.parse(readFileSync(p, 'utf8')) as Json });
+          const body = JSON.parse(readFileSync(p, 'utf8')) as Json;
+          if (mainLoop(body)) {
+            this.rec.requests.push({ file: String(e.file), ms: Number(e.ms), body });
+          }
         }
       } else if (e.src === 'sdk' && e.kind === 'result') {
         this.rec.results.push(Number(e.ms));
@@ -210,8 +224,10 @@ export class Lineage {
       }
       this.seenRequests.add(f);
       const req: Req = { file: f, ms: mtimeMs, body };
-      this.rec.requests.push(req);
-      this.rec.requests.sort((a, b) => a.ms - b.ms);
+      if (mainLoop(body)) {
+        this.rec.requests.push(req);
+        this.rec.requests.sort((a, b) => a.ms - b.ms);
+      }
       appendJsonl(join(this.dir, 'next-events.jsonl'), { ts: iso(mtimeMs), ms: mtimeMs, src: 'bodies', kind: 'request', file: f, seenMs: Date.now(), model: body.model, messages: Array.isArray(body.messages) ? body.messages.length : null });
       n += 1;
     }
