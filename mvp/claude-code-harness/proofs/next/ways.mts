@@ -32,13 +32,26 @@ function blocksOf(e: Json): Json[] {
   return Array.isArray(c) ? (c as Json[]) : [];
 }
 
+// Claude Code 2.1.282, read from the JS in its binary (byte offsets into
+// the extracted source; minified names):
+//   F1  LS()/Ij() at 134658400: an assistant entry with isApiErrorMessage
+//       and message.model "<synthetic>" is skipped by normalizeMessagesForAPI
+//       (Pw, 141481584). Every API error entry is built with that model
+//       (F6t, 141456723), the output-limit one included (139807046).
+//   F2  h5t at 141577105: an assistant entry whose blocks are all thinking is
+//       dropped unless another entry with the same message.id has a block
+//       that isn't thinking (N7o). Not applied to the last entry while
+//       Claude Code resumes incomplete thinking after an output-limit hit.
+// Both at send time: the entries stay in the transcript and in memory.
 export const FOLD_RULES: Record<string, string> = {
-  F1: 'An API error entry (isApiErrorMessage) is not sent.',
-  F2: 'An assistant API message (entries sharing message.id) whose blocks are only thinking is not sent.',
+  F1: 'An API error entry (isApiErrorMessage, model "<synthetic>") is not sent.',
+  F2: 'An assistant entry whose blocks are all thinking is not sent, unless another entry with the same message.id has a block that is not thinking.',
 };
 
-// TODO: undecided. The rules are this proof's reading of Claude Code's
-// behaviour, checked against the code by a research agent.
+// TODO: undecided. Only the two rules that proof 23's endings exercise;
+// Claude Code's normaliser has more (ensureToolResultPairing, trailing
+// thinking on a last assistant message, empty content, foreign-model
+// thinking), which no ending here reaches.
 export function fold(entries: Json[]): FoldResult {
   const dropped: { uuid: string; rule: string }[] = [];
   const byMsg = new Map<string, Json[]>();
@@ -52,7 +65,7 @@ export function fold(entries: Json[]): FoldResult {
   }
   const drop = new Set<string>();
   for (const e of entries) {
-    if (e.isApiErrorMessage === true) {
+    if (e.isApiErrorMessage === true && (e.message as Json | undefined)?.model === '<synthetic>') {
       drop.add(String(e.uuid));
       dropped.push({ uuid: String(e.uuid), rule: 'F1' });
     }
