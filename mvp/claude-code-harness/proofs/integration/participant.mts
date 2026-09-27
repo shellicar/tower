@@ -46,7 +46,7 @@ import type { EffortLevel, HookCallbackMatcher, HookEvent, PermissionMode, SDKMe
 import type { HarnessOptions, Run } from '../../src/harness.mts';
 import { startRun } from '../../src/harness.mts';
 import { load, type TowerBody } from '../reconcile/load.mts';
-import type { Rec } from '../reconcile/holding.mts';
+import type { Option, Rec } from '../reconcile/holding.mts';
 import { lastSeq, openTower, type Tower, towerHeld, towerMessages } from '../semantic/tower.mts';
 import { blocksOf } from '../semantic/form.mts';
 import { Committer, type PublishedLine } from './committer.mts';
@@ -93,6 +93,16 @@ export interface Spec {
   //                    agent dir's transcript and resumes from it (load()
   //                    null), so this machine's record lives in the agent dir
   variants?: string[];
+  // The leftover-capture question this proof exists to answer: which build
+  // option ('run', 'run+last' or 'run+entry') runs live, publishing to
+  // tower (the same option named in `variants`, defaulting to 'run'). When
+  // `pairedVariant` names a different option, a second Committer over the
+  // SAME Lineage runs alongside it, dry (never publishes), so both options
+  // are computed from the identical recorded entries/requests/results: the
+  // only way to compare them without model nondeterminism reading as
+  // variant divergence. Swap which one is live/paired across two runs of
+  // the same scenario to give both a genuine live resume leg.
+  pairedVariant?: string;
 }
 
 const specPath = process.argv[2];
@@ -156,6 +166,10 @@ interface Conv {
   decision: string;
   lin: Lineage;
   committer: Committer;
+  // The paired same-recording methodology (spec.pairedVariant): a dry
+  // committer over the same Lineage, a different build option, poked
+  // alongside the live one, never published.
+  shadow: Committer | undefined;
   run: Run;
   busy: boolean;
   queryId: string;
@@ -422,6 +436,23 @@ async function serve(cmd: Json): Promise<void> {
       prev = instantOf(e, prev);
       lin.append({ sessionId: id, recovered: true }, [e], 'recovered', prev);
     }
+    // Crash has no query end (design.md's Open, this proof's brief): a
+    // SIGKILL never produces a `result`, so run+last/run+entry's tail
+    // commit, which otherwise only fires at addResult(), would never fire.
+    // Detected here, blind like the rest of recovery: the last say/turn this
+    // lineage recorded has no matching result yet. TODO: undecided. Only a
+    // heuristic (a genuinely still-running query on another machine would
+    // look the same before it finishes; this machine only recovers a
+    // lineage it itself owns, so that case shouldn't reach here, but this is
+    // not proven). Deliberately not a closure event: see lineage.mts's
+    // addTailTrigger.
+    const lastSay = [...lin.says].sort((x, y) => x.ms - y.ms).at(-1);
+    if (lastSay && !lin.resultsFull.some((r) => r.queryId === lastSay.queryId)) {
+      const ms = Date.now();
+      lin.addTailTrigger(ms, { queryId: lastSay.queryId });
+      log(`serve ${label}: last run (query ${lastSay.queryId}) ended with no result; triggering the tail commit`);
+      committer.poke();
+    }
     await committer.drain();
     recovery = { roots: ts.map((t) => ({ root: t.root, lines: t.lines, unparseable: t.unparseable })), union: local.length, added: missing.length, addedTypes: missing.map((e) => String(e.type)), published: committer.order.length };
     log(`serve ${label}: recovery added ${missing.length} of ${local.length} local entries`);
@@ -463,16 +494,53 @@ async function serve(cmd: Json): Promise<void> {
     lin = Lineage.create(dir, { convId: id, name: label, origin: 'tower', createdAt: iso(), model: spec.model, seededFromTower: { upto, messages: towerBodies.length, entries: loaded?.entries.length ?? 0 } });
     setCurrent(root, dir);
   }
-  if (loaded && lin.rec.entries.length === 0) {
-    lin.seed({ sessionId: id, seed: 'tower' }, loaded.seqd, Date.now() - 1);
+  // Whether this call is what actually created (or is re-hydrating for the
+  // first time) this lineage from tower: the only instant tower's content
+  // is genuine prior history rather than this same lineage's own live
+  // committer having since published its variant's take on it.
+  const justSeededFromTower = loaded !== undefined && lin.rec.entries.length === 0;
+  if (justSeededFromTower) {
+    lin.seed({ sessionId: id, seed: 'tower' }, (loaded as NonNullable<typeof loaded>).seqd, Date.now() - 1);
   }
   const committer = new Committer(lin, { convId: id, instanceId, dry, tower, log, variants: [...VARIANTS], onPublish: (p) => emit(dry ? 'would-publish' : 'published', { conv: label, ...pubSummary(p) }) });
   if (decision === 'tower' || towerBodies.length > 0) {
+    // The live committer legitimately reseeds from tower on every serve():
+    // tower is real ground truth, and it must never republish what's
+    // already there, however it got there.
     committer.seedPublished(towerBodies.filter((b) => !committer.published.has(String(b.id))) as unknown as Json[]);
   }
   // load-unbacked's rebuilt entries stand for blocks tower already holds.
   for (const u of loaded?.fabricated ?? []) {
     committer.carriedCc.add(u);
+  }
+
+  // The paired same-recording methodology (spec.pairedVariant, design.md's
+  // Open, run+last vs run+entry): a second committer over the same Lineage,
+  // always dry, a different build option, so both options are computed from
+  // the identical recorded entries/requests/results rather than two live
+  // model sessions whose nondeterminism would be indistinguishable from
+  // variant divergence.
+  //
+  // The shadow's baseline is NOT `towerBodies` on every call the way the
+  // live committer's is: after the first serve, tower holds the LIVE
+  // committer's own publishes (this variant's take), and reseeding the
+  // shadow from that on every restart would make it treat the other
+  // variant's actual output as already landed, i.e. silently follow it
+  // instead of independently computing its own. The shadow is seeded from
+  // tower only once, at the same instant `lin.seed()` runs (this lineage's
+  // genuine prior history, before either committer wrote anything into it);
+  // every later run+last/run+entry difference then comes from the two
+  // options over the SAME recorded entries, not from one variant leaking
+  // into the other's carried set.
+  let shadow: Committer | undefined;
+  if (spec.pairedVariant) {
+    shadow = new Committer(lin, { convId: id, instanceId, dry: true, tower, log, option: spec.pairedVariant as Option, filePrefix: `${spec.pairedVariant}-`, onPublish: (p) => emit('would-publish', { conv: label, variant: spec.pairedVariant, ...pubSummary(p) }) });
+    if (justSeededFromTower) {
+      shadow.seedPublished(towerBodies.filter((b) => !(shadow as Committer).published.has(String(b.id))) as unknown as Json[]);
+    }
+    for (const u of loaded?.fabricated ?? []) {
+      shadow.carriedCc.add(u);
+    }
   }
 
   // 6. resumeSessionAt: the last non-system entry of what's loaded, from the
@@ -514,6 +582,7 @@ async function serve(cmd: Json): Promise<void> {
       }
       lin.append(key as unknown as Json, entries as Json[], 'live');
       committer.poke();
+      shadow?.poke();
     },
     // Keyed on the session id alone: another agent's cwd gives another
     // projectKey for the same conversation.
@@ -590,6 +659,7 @@ async function serve(cmd: Json): Promise<void> {
     decision,
     lin,
     committer,
+    shadow,
     run,
     busy: false,
     queryId: '',
@@ -612,6 +682,7 @@ async function serve(cmd: Json): Promise<void> {
   lin.event('serve', { instanceId, runDir: run.dir, decision, from, dry, movedOn, upto, resumeSessionAt: resumeAt ?? null, recovery, towerMessages: towerBodies.length, localEntries: local.length, inAgentDir, ...variantsInfo });
   c.loop = messagesLoop(c);
   committer.poke();
+  shadow?.poke();
   emit('served', { conv: label, id, decision, dry, movedOn, lineage: lin.dir, harnessRun: run.dir, resumeSessionAt: resumeAt ?? null, towerUpto: upto, towerMessages: towerBodies.length, localEntries: local.length, inAgentDir, recovery, ...variantsInfo });
 }
 
@@ -689,6 +760,7 @@ async function messagesLoop(c: Conv): Promise<void> {
         const text = typeof m.result === 'string' ? m.result : JSON.stringify(m.errors ?? null);
         c.lin.addResult({ ms, queryId, subtype, reason }, { isError: m.is_error, step: self ? null : (c.step ?? null), selfStarted: self, numTurns: m.num_turns ?? null, stopReason: m.stop_reason ?? null, permissionDenials: m.permission_denials ?? null, usage: m.usage ?? null, text: String(text).slice(0, 400) });
         c.committer.poke();
+        c.shadow?.poke();
         emit('result', { conv: c.label, queryId, step: self ? null : (c.step ?? null), selfStarted: self, subtype, reason, isError: m.is_error, numTurns: m.num_turns ?? null, text: String(text).slice(0, 300), permissionDenials: m.permission_denials ?? null, stopReason: m.stop_reason ?? null });
         if (m.is_error === true && USAGE_LIMIT.test(String(text))) {
           emit('usage-limit', { conv: c.label, text: String(text).slice(0, 300) });
@@ -707,6 +779,7 @@ async function messagesLoop(c: Conv): Promise<void> {
   }
   c.exited = true;
   await c.committer.drain();
+  await c.shadow?.drain();
   clearInterval(c.firstByteTimer);
   emit('query-ended', { conv: c.label, id: c.id });
 }

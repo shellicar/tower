@@ -8,7 +8,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { build, type BuildOpts, kindOf, type Recording, type TMsg } from '../reconcile/holding.mts';
+import { build, type BuildOpts, kindOf, type Option, type Recording, type TMsg } from '../reconcile/holding.mts';
 import { compareUnits, describeEntry, probeCut, requestUnits, towerBeforeProbeReply, towerUnits, type Verdict, without } from '../reconcile/compare.mts';
 import { fullHistory, readIndex } from '../next/history.mts';
 import { coreHash, NO_RESPONSE, type PublishedLine } from './committer.mts';
@@ -261,22 +261,43 @@ export function messagesVs(recL: Recording, L: ReqInfo, recT: Recording, T: ReqI
 }
 
 // The carriers (entries the model sees) at or before `asOfMs` that tower
-// didn't hold by then: what a resume from tower alone should miss.
+// didn't hold by then. This used to be documented as "what a resume from
+// tower alone should miss"; under the invariant (design.md, R1/R2) that
+// tolerance is exactly the gap this proof exists to close. With the
+// crash-tail trigger in place, this must return EMPTY at every checked
+// instant for run+last/run+entry, with one deliberate exception: a crash
+// followed by a tower-alone pickup on ANOTHER machine before this one has
+// recovered and committed its tail. There the tail is genuinely not there
+// yet; report that occurrence as the expected sub-case it is, not as a bug.
+// Any other non-empty result for run+last/run+entry is a real divergence.
 export function unclosedAsOf(rec: Recording, towerBodies: Json[], asOfMs: number): string[] {
   const held = new Set(towerBodies.flatMap((b) => ((b.ccEntries as Json[] | undefined) ?? []).map((c) => String(c.uuid))));
   return rec.entries.filter((r) => r.ms <= asOfMs && kindOf(r.entry) === 'carrier' && !held.has(String(r.entry.uuid))).map((r) => String(r.entry.uuid));
 }
 
-// Join 8: the live-published sequence against build(finalRecording, 'run').
-export function liveVsOffline(lineageDir: string, bodyOf: (m: TMsg) => Json): Json {
+// Join 8: the live-published sequence against build(finalRecording, option).
+// This is a self-consistency check on the committer's own code (does its
+// incremental publishing match a one-shot offline build of the same
+// recording), never evidence that the invariant holds against the real
+// world; the raw-body oracle (towerVsRequest/messagesVs, below) is that.
+//
+// `option`/`filePrefix` default to what build-options.json itself recorded
+// (committer.mts writes both), falling back to 'run'/'' for an older
+// recording that predates the leftover-capture variants, so this stays
+// usable against the first proof's recordings too.
+export function liveVsOffline(lineageDir: string, bodyOf: (m: TMsg) => Json, option?: Option, filePrefix?: string): Json {
   const lin = Lineage.open(lineageDir);
   lin.pollBodies();
-  const optsFile = join(lineageDir, 'build-options.json');
-  const opts = existsSync(optsFile) ? ((JSON.parse(readFileSync(optsFile, 'utf8')) as Json).opts as BuildOpts) : {};
-  const b = build(lin.rec, 'run', opts);
-  const pub = (readJsonl(join(lineageDir, 'published.jsonl')) as unknown as PublishedLine[]).filter((p) => p.kind === 'message');
-  const seeded = new Set((readJsonl(join(lineageDir, 'published.jsonl')) as unknown as PublishedLine[]).filter((p) => p.kind === 'seed').map((p) => p.id));
-  const carriedBySeed = new Set((readJsonl(join(lineageDir, 'published.jsonl')) as unknown as PublishedLine[]).filter((p) => p.kind === 'seed').flatMap((p) => p.cc));
+  const optsFile = join(lineageDir, `${filePrefix ?? ''}build-options.json`);
+  const saved = existsSync(optsFile) ? (JSON.parse(readFileSync(optsFile, 'utf8')) as Json) : {};
+  const opts = (saved.opts as BuildOpts | undefined) ?? {};
+  const opt = option ?? (saved.option as Option | undefined) ?? 'run';
+  const b = build(lin.rec, opt, opts);
+  const publishedFile = join(lineageDir, `${filePrefix ?? ''}published.jsonl`);
+  const allPub = readJsonl(publishedFile) as unknown as PublishedLine[];
+  const pub = allPub.filter((p) => p.kind === 'message');
+  const seeded = new Set(allPub.filter((p) => p.kind === 'seed').map((p) => p.id));
+  const carriedBySeed = new Set(allPub.filter((p) => p.kind === 'seed').flatMap((p) => p.cc));
   const offline = b.all.filter((m) => !seeded.has(m.id) && !(m.cc.length > 0 && m.cc.every((c) => carriedBySeed.has(c.uuid)))).map((m) => ({ id: m.id, hash: coreHash(bodyOf(m)), role: m.role }));
   const live = pub.map((p) => ({ id: p.id, hash: p.hash }));
   let first = -1;
@@ -286,9 +307,10 @@ export function liveVsOffline(lineageDir: string, bodyOf: (m: TMsg) => Json): Js
       break;
     }
   }
-  const committer = readJsonl(join(lineageDir, 'committer.jsonl'));
+  const committer = readJsonl(join(lineageDir, `${filePrefix ?? ''}committer.jsonl`));
   // Assistant pieces published before their own run's user side.
   return {
+    option: opt,
     equal: first < 0,
     firstDifference: first < 0 ? null : { index: first, live: live[first] ?? null, offline: offline[first] ?? null },
     live: live.length,
@@ -297,6 +319,28 @@ export function liveVsOffline(lineageDir: string, bodyOf: (m: TMsg) => Json): Js
     committerNotes: committer.map((c) => ({ kind: c.kind, id: c.id ?? null, warning: c.warning ?? null, error: c.error ?? null, ...(c.kind === 'unanchored' ? { file: c.file, reason: c.reason, fallback: c.fallback } : {}) })),
     unanchored: b.unanchored,
   };
+}
+
+// Both leftover-capture variants against each other, on the SAME recording
+// (the paired same-recording methodology, not two live sessions): whether
+// run+last and run+entry ever diverge, message for message. Never
+// downgraded to a warning (design.md's Open; the brief's central question).
+export function variantsDiffer(rec: Recording): { differ: boolean; diffs: string[] } {
+  const a = build(rec, 'run+last').all;
+  const b = build(rec, 'run+entry').all;
+  const diffs: string[] = [];
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    const x = a[i];
+    const y = b[i];
+    if (!x || !y) {
+      diffs.push(`index ${i}: ${x ? `run+last has ${x.id}` : 'run+last has nothing'} vs ${y ? `run+entry has ${y.id}` : 'run+entry has nothing'}`);
+      continue;
+    }
+    if (x.id !== y.id || x.role !== y.role || JSON.stringify(x.content) !== JSON.stringify(y.content)) {
+      diffs.push(`index ${i}: run+last ${x.id} (${x.role}, via ${x.via}) vs run+entry ${y.id} (${y.role}, via ${y.via})`);
+    }
+  }
+  return { differ: diffs.length > 0, diffs };
 }
 
 // Join 7: "No response requested." never reaches tower.

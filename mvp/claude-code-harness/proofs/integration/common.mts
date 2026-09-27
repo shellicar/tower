@@ -73,7 +73,7 @@ export function cells(model: string): Cell[] {
 
 export const short = (model: string): string => model.replace(/^claude-/, '').replace(/[^A-Za-z0-9]/g, '');
 
-export function specFor(agent: string, model: string, runDir: string, o: { maxTokens?: number; effort?: Spec['effort']; extraEnv?: Record<string, string>; skills?: string[]; ours?: Known[]; variants?: string[] } = {}): Spec {
+export function specFor(agent: string, model: string, runDir: string, o: { maxTokens?: number; effort?: Spec['effort']; extraEnv?: Record<string, string>; skills?: string[]; ours?: Known[]; variants?: string[]; pairedVariant?: string } = {}): Spec {
   return {
     agent,
     runDir,
@@ -87,6 +87,7 @@ export function specFor(agent: string, model: string, runDir: string, o: { maxTo
     ours: o.ours ?? [],
     ...(o.extraEnv ? { extraEnv: o.extraEnv } : {}),
     ...(o.variants?.length ? { variants: o.variants } : {}),
+    ...(o.pairedVariant ? { pairedVariant: o.pairedVariant } : {}),
   };
 }
 
