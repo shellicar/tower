@@ -662,7 +662,14 @@ async function runCell(model: string, cell: Cell, contextUsage: boolean): Promis
   if (!main.sessionId) {
     return row;
   }
+  // P24_ONLY_WAY: resume only from this way's holding, so it is the first
+  // and only resume after L (a real participant resumes once; each resume
+  // can read what an earlier resume wrote to the cache).
+  const only = process.env.P24_ONLY_WAY;
   for (const [k, ways] of byHash) {
+    if (only !== undefined && !ways.includes(only)) {
+      continue;
+    }
     const h = main.holdings.find((x) => hashOf(x) === k);
     if (!h) {
       continue;
