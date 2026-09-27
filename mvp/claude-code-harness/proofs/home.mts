@@ -103,6 +103,7 @@ const OPTIONS: Record<string, Opt> = {
   // cleanupPeriodDays 0 makes the settings-driven cutoff null (binary); the
   // docs say 0 fails validation. Passed as a flag setting.
   'real-open-cleanup0': { ...base, what: 'option 1, switch: real HOME, user source open, cleanupPeriodDays 0 as a flag setting (guarded read-only)', guards: GUARDS, settings: { cleanupPeriodDays: 0 } },
+  'real-open-all': { ...base, what: 'option 1, every switch found: real-open-env plus cleanupPeriodDays 0 (guarded read-only)', guards: GUARDS, env: { DISABLE_AUTOUPDATER: '1', XDG_CACHE_HOME: '{FIX}/xdg/cache', XDG_STATE_HOME: '{FIX}/xdg/state', XDG_DATA_HOME: '{FIX}/xdg/data', CLAUDE_CODE_TMPDIR: '{FIX}/xdg/tmp', XDG_RUNTIME_DIR: '{FIX}/xdg/runtime' }, settings: { cleanupPeriodDays: 0 } },
   'real-open-mask': { ...base, what: 'option 1, avoid: real HOME, user source open, private directories mounted (bwrap) over the housekeeping paths', guards: GUARDS, masks: MASKS },
   'private-bare': { ...base, what: 'option 2: private HOME, login by absolute CLAUDE_SECURESTORAGE_CONFIG_DIR, nothing put back for commands', privateHome: true, secure: 'absolute-real' },
   'private-empty-secure': { ...base, what: 'option 2 control: private HOME with the harness\'s empty CLAUDE_SECURESTORAGE_CONFIG_DIR (login expected to be missing)', privateHome: true },
