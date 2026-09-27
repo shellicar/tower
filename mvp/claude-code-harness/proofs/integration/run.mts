@@ -36,7 +36,7 @@ import { toBodies } from '../reconcile/load.mts';
 import { assistantCommits, kindOf, type TMsg } from '../reconcile/holding.mts';
 import { lastSeq, openTower, type Tower, towerHeld, towerMessages } from '../semantic/tower.mts';
 import { scanTag } from '../tag-scan.mts';
-import { type PublishedLine } from './committer.mts';
+import { COMMIT_OPTIONS, type CommitOption, type PublishedLine } from './committer.mts';
 import { type Cell, cells, type CheckRow, Evidence, printRow, PROBE, resetAgent, short, specFor, WARM } from './common.mts';
 import { chainGaps, forks, heldOnTower, liveVsOffline, lostFromTower, messagesVs, noResponseOnTower, probeRequest, resumeVerdict, towerVsRequest, unclosedAsOf } from './checks.mts';
 import { Participant } from './driver.mts';
@@ -55,10 +55,14 @@ interface Args {
   // Part B's ways through (each TODO: undecided), passed to every
   // participant this run starts.
   variants: string[];
+  // Attempt 3: the commit variant published live, and the other computed as
+  // a shadow. Required, no default (TODO: undecided whether the participant
+  // carries a choice at all).
+  commit: string;
 }
 
 function parse(argv: string[]): Args {
-  const a: Args = { scenario: argv[0] ?? '', model: 'claude-haiku-4-5', agent: undefined, cells: undefined, strace: false, reset: true, prime: true, variants: [] };
+  const a: Args = { scenario: argv[0] ?? '', model: 'claude-haiku-4-5', agent: undefined, cells: undefined, strace: false, reset: true, prime: true, variants: [], commit: '' };
   for (let i = 1; i < argv.length; i += 1) {
     const k = argv[i];
     if (k === '--model') a.model = String(argv[++i]);
@@ -68,7 +72,11 @@ function parse(argv: string[]): Args {
     else if (k === '--no-reset') a.reset = false;
     else if (k === '--no-prime') a.prime = false;
     else if (k === '--variant') a.variants = String(argv[++i]).split(',').filter(Boolean);
+    else if (k === '--commit') a.commit = String(argv[++i]);
     else throw new Error(`unknown argument ${k}`);
+  }
+  if (!COMMIT_OPTIONS.includes(a.commit as CommitOption)) {
+    throw new Error(`--commit is required: one of ${COMMIT_OPTIONS.join(', ')}`);
   }
   // Every agent name a run uses derives from --agent: refused unless it
   // carries this attempt's prefix (lib.mts AGENT_PREFIX).
@@ -100,7 +108,7 @@ function start(spec: ReturnType<typeof specFor>, a: Args): Participant {
   if (a.variants.length > 0 && !spec.variants) {
     spec.variants = a.variants;
   }
-  const p = new Participant(spec, { strace: a.strace, log });
+  const p = new Participant(spec, { strace: a.strace, log, commit: a.commit, shadow: COMMIT_OPTIONS.find((o) => o !== a.commit) });
   started.push(p);
   return p;
 }
@@ -1132,6 +1140,7 @@ const SCENARIOS: Record<string, (a: Args) => Promise<CheckRow[]>> = { smoke, mat
 async function main(): Promise<void> {
   const a = parse(process.argv.slice(2));
   const fn = SCENARIOS[a.scenario];
+  process.stdout.write(`${iso()} commit ${a.commit} live, ${COMMIT_OPTIONS.find((o) => o !== a.commit)} as the shadow\n`);
   if (!fn) {
     process.stderr.write(`usage: node proofs/integration/run.mts <${Object.keys(SCENARIOS).join('|')}> [--model m] [--agent name] [--cell c,..] [--strace] [--no-reset] [--no-prime]\n`);
     process.exit(2);

@@ -14,6 +14,9 @@ export interface StartOptions {
   // contents), writing <runDir>/trace.strace.
   strace?: boolean;
   log?: (s: string) => void;
+  // The commit variant and its shadow, sent on every serve (attempt 3).
+  commit?: string;
+  shadow?: string;
 }
 
 export class Participant {
@@ -24,6 +27,8 @@ export class Participant {
   readonly exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
   readonly tracePath: string | undefined;
   readonly log: (s: string) => void;
+  readonly commit: string | undefined;
+  readonly shadow: string | undefined;
   me: Known | undefined;
   claudes: Known[] = [];
   exitInfo: { code: number | null; signal: NodeJS.Signals | null } | undefined;
@@ -31,6 +36,8 @@ export class Participant {
   constructor(spec: Spec, o: StartOptions = {}) {
     this.spec = spec;
     this.log = o.log ?? ((s) => process.stdout.write(`${iso()} ${s}\n`));
+    this.commit = o.commit;
+    this.shadow = o.shadow;
     mkdirSync(spec.runDir, { recursive: true });
     const specPath = join(spec.runDir, 'spec.in.json');
     writeFileSync(specPath, `${JSON.stringify(spec, null, 2)}\n`);
@@ -125,7 +132,7 @@ export class Participant {
 
   async serve(cmd: Json, ms = 240_000): Promise<Json> {
     const n = this.events.length;
-    this.send({ cmd: 'serve', ...cmd });
+    this.send({ cmd: 'serve', commit: this.commit, shadow: this.shadow, ...cmd });
     return this.waitFor((e) => (e.ev === 'served' || e.ev === 'error') && e.conv === cmd.conv, ms, `served ${String(cmd.conv)}`, n).then((e) => {
       if (e.ev === 'error') {
         throw new Error(`serve ${String(cmd.conv)}: ${String(e.message)}`);

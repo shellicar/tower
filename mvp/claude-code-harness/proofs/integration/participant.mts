@@ -49,7 +49,7 @@ import { load, type TowerBody } from '../reconcile/load.mts';
 import type { Rec } from '../reconcile/holding.mts';
 import { lastSeq, openTower, type Tower, towerHeld, towerMessages } from '../semantic/tower.mts';
 import { blocksOf } from '../semantic/form.mts';
-import { Committer, type PublishedLine } from './committer.mts';
+import { COMMIT_OPTIONS, type CommitOption, Committer, type PublishedLine } from './committer.mts';
 import { appendJsonl, clean, CONFIG_DIRS_ROOT, fileStamp, HARNESS_STATE, INTEGRATION_STATE, iso, type Json, type Known, Log2, procStat, signalChecked } from './lib.mts';
 import { convRoot, currentLineage, entryId, Lineage, setCurrent } from './lineage.mts';
 import { instantOf, recordedResumeDirs, transcripts, union } from './recover.mts';
@@ -340,6 +340,29 @@ async function serve(cmd: Json): Promise<void> {
   const dry = cmd.dry === true;
   const id = typeof cmd.id === 'string' ? cmd.id : randomUUID();
   const root = convRoot(AGENT, id, STATE_ROOT);
+  // The commit variant, named on every serve (TODO: undecided whether the
+  // participant carries a choice at all, and whether it has a default: here
+  // none, a serve without one is refused), and the variant computed as a
+  // shadow beside it (TODO: undecided, attempt 3's test method: the other
+  // variant over the same recording, under <id>~shadow; never on a dry serve).
+  const option = cmd.commit as CommitOption;
+  if (!COMMIT_OPTIONS.includes(option)) {
+    throw new Error(`conv ${label}: serve needs commit, one of ${COMMIT_OPTIONS.join(', ')} (got ${String(cmd.commit)})`);
+  }
+  const shadowOption = cmd.shadow === undefined || cmd.shadow === null ? undefined : (cmd.shadow as CommitOption);
+  if (shadowOption !== undefined && (!COMMIT_OPTIONS.includes(shadowOption) || shadowOption === option)) {
+    throw new Error(`conv ${label}: shadow ${String(cmd.shadow)} must be the other commit option`);
+  }
+  // The shadow's own tower: what it published before, for its seed.
+  const shadowOf = async (live: Committer): Promise<void> => {
+    if (dry || !shadowOption) {
+      return;
+    }
+    const sh = new Committer(live.lin, { convId: id, instanceId, dry: false, tower, log, variants: [...VARIANTS], option: shadowOption, shadow: true, onPublish: (p) => emit('shadow-published', { conv: label, ...pubSummary(p) }) });
+    const bodies = (await towerMessages(tower, sh.subjectId, await lastSeq(tower))) as unknown as Json[];
+    sh.seedPublished(bodies.filter((b) => !sh.published.has(String(b.id))));
+    live.shadow = sh;
+  };
 
   // 1. Leftovers of earlier runs, before anything else.
   const stop = await stopLeftovers(AGENT, ownPids(), spec.ours ?? [], log);
@@ -414,8 +437,9 @@ async function serve(cmd: Json): Promise<void> {
       cur = dir;
     }
     const lin = Lineage.open(cur);
-    const committer = new Committer(lin, { convId: id, instanceId, dry: false, tower, log, variants: [...VARIANTS], onPublish: (p) => emit('published', { conv: label, ...pubSummary(p) }) });
+    const committer = new Committer(lin, { convId: id, instanceId, dry: false, tower, log, variants: [...VARIANTS], option, onPublish: (p) => emit('published', { conv: label, ...pubSummary(p) }) });
     committer.seedPublished(towerBodies.filter((b) => !committer.published.has(String(b.id))) as unknown as Json[]);
+    await shadowOf(committer);
     const missing = local.filter((e) => !lin.has(e));
     let prev = Date.now();
     for (const e of missing) {
@@ -466,10 +490,11 @@ async function serve(cmd: Json): Promise<void> {
   if (loaded && lin.rec.entries.length === 0) {
     lin.seed({ sessionId: id, seed: 'tower' }, loaded.seqd, Date.now() - 1);
   }
-  const committer = new Committer(lin, { convId: id, instanceId, dry, tower, log, variants: [...VARIANTS], onPublish: (p) => emit(dry ? 'would-publish' : 'published', { conv: label, ...pubSummary(p) }) });
+  const committer = new Committer(lin, { convId: id, instanceId, dry, tower, log, variants: [...VARIANTS], option, onPublish: (p) => emit(dry ? 'would-publish' : 'published', { conv: label, ...pubSummary(p) }) });
   if (decision === 'tower' || towerBodies.length > 0) {
     committer.seedPublished(towerBodies.filter((b) => !committer.published.has(String(b.id))) as unknown as Json[]);
   }
+  await shadowOf(committer);
   // load-unbacked's rebuilt entries stand for blocks tower already holds.
   for (const u of loaded?.fabricated ?? []) {
     committer.carriedCc.add(u);
@@ -609,10 +634,10 @@ async function serve(cmd: Json): Promise<void> {
   convs.set(label, conv);
   const c = conv;
   const variantsInfo: Json = { variants: [...VARIANTS], ...(held.length ? { held: held.map((h) => String(h.entry.uuid)) } : {}), ...(loaded?.fabricated.length ? { fabricated: loaded.fabricated } : {}), ...(cut ? { cut } : {}), ...(materialised ? { materialised } : {}) };
-  lin.event('serve', { instanceId, runDir: run.dir, decision, from, dry, movedOn, upto, resumeSessionAt: resumeAt ?? null, recovery, towerMessages: towerBodies.length, localEntries: local.length, inAgentDir, ...variantsInfo });
+  lin.event('serve', { instanceId, runDir: run.dir, decision, from, dry, movedOn, upto, commit: option, shadow: dry ? null : (shadowOption ?? null), resumeSessionAt: resumeAt ?? null, recovery, towerMessages: towerBodies.length, localEntries: local.length, inAgentDir, ...variantsInfo });
   c.loop = messagesLoop(c);
   committer.poke();
-  emit('served', { conv: label, id, decision, dry, movedOn, lineage: lin.dir, harnessRun: run.dir, resumeSessionAt: resumeAt ?? null, towerUpto: upto, towerMessages: towerBodies.length, localEntries: local.length, inAgentDir, recovery, ...variantsInfo });
+  emit('served', { conv: label, id, decision, dry, movedOn, commit: option, shadow: dry ? null : (shadowOption ?? null), lineage: lin.dir, harnessRun: run.dir, resumeSessionAt: resumeAt ?? null, towerUpto: upto, towerMessages: towerBodies.length, localEntries: local.length, inAgentDir, recovery, ...variantsInfo });
 }
 
 function pubSummary(p: PublishedLine): Json {

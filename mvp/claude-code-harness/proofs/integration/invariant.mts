@@ -50,9 +50,18 @@
 //                 tower ends with), unless a later request from the same
 //                 Claude Code no longer carries it (Claude Code rewrote it).
 //   admission     the committer's own notes that it couldn't place a request
-//                 or a held side (committer.jsonl: unanchored, order-warning,
+//                 or a held side (committer.jsonl: unanchored, reply-held, order-warning,
 //                 error, changed, late-insert): each a failure, never a pass.
 //   republish     a message id tower received twice.
+//
+// Attempt 3's shadow (TODO: undecided, a test method): each run publishes one
+// commit variant to tower and computes the other over the same recording,
+// published under the conversation id `<id>~shadow` with its own committer
+// notes (committer.shadow.jsonl). The check judges the shadow exactly as it
+// judges tower (every kind of point above), writes it beside it as
+// `<id>.shadow.md`, and compares the two message sequences. At a pickup the
+// shadow's round-trip labels are approximate: every Claude Code resumed from
+// tower was built from the live variant, not the shadow.
 //
 // Verdicts: PASS (checked against a truth independent of tower),
 // ROUND-TRIP (the only truth was a Claude Code resumed from tower at or past
@@ -178,6 +187,8 @@ interface Proc {
   dry: boolean;
   upto: number | null; // tower seq read at a pickup from tower
   asOfMs: number | null; // a dry local check's "as of"
+  commit: string | null; // attempt 3: the live commit variant this serve named
+  shadow: string | null;
 }
 
 interface Req {
@@ -248,6 +259,8 @@ export function gather(convId: string, root = INTEGRATION_STATE): Evidence {
       dry: s.dry === true,
       upto: s.decision === 'tower' && typeof s.upto === 'number' ? s.upto : null,
       asOfMs: typeof meta.asOfMs === 'number' ? meta.asOfMs : null,
+      commit: typeof s.commit === 'string' ? s.commit : null,
+      shadow: typeof s.shadow === 'string' ? s.shadow : null,
     }));
     lins.push({ dir, agent, meta, events, appends, index, procs });
   }
@@ -623,7 +636,7 @@ function overall(js: Judgment[]): Verdict {
   return 'UNCHECKED';
 }
 
-const procDesc = (p: Proc): string => `${p.key} (${p.dry ? 'dry, ' : ''}${p.decision === 'tower' ? `resumed from tower at seq ${p.upto}` : p.decision === 'fresh' ? 'fresh' : p.decision === 'local' ? `resumed from its own local record${p.asOfMs ? ` as of ${new Date(p.asOfMs).toISOString()}` : ''}` : p.decision})`;
+const procDesc = (p: Proc): string => `${p.key} (${p.commit ? `commit ${p.commit}${p.shadow ? `, shadow ${p.shadow}` : ''}; ` : ''}${p.dry ? 'dry, ' : ''}${p.decision === 'tower' ? `resumed from tower at seq ${p.upto}` : p.decision === 'fresh' ? 'fresh' : p.decision === 'local' ? `resumed from its own local record${p.asOfMs ? ` as of ${new Date(p.asOfMs).toISOString()}` : ''}` : p.decision})`;
 const reqName = (r: Req): string => `${r.proc.agent}/${basename(r.lineage)}/${r.file}`;
 
 // A request is a round trip for tower up to `seq` when its sender was resumed
@@ -729,6 +742,7 @@ function sortRemainder(lin: Lin, rem: Prefix['remainder'], pointMs: number, reqM
 
 export interface Report {
   convId: string;
+  which: string; // 'tower' or 'shadow (<id>~shadow)'
   evidence: string[]; // the runs/ dirs that named it, when given
   agents: string[];
   lineages: { dir: string; origin: unknown; procs: string[] }[];
@@ -739,7 +753,7 @@ export interface Report {
   contentCounts: Record<Verdict, number>; // with shape-only divergences set aside
 }
 
-export function judge(ev: Evidence, tower: TowerMsg[]): Report {
+export function judge(ev: Evidence, tower: TowerMsg[], suffix = ''): Report {
   const points: Point[] = [];
   const upTo = (n: number): Msg[] => towerApi(tower.slice(0, n));
   const liveReqs = ev.reqs.filter((r) => !r.proc.dry);
@@ -943,8 +957,8 @@ export function judge(ev: Evidence, tower: TowerMsg[]): Report {
 
   // The committer's own admissions.
   for (const lin of ev.lins) {
-    for (const n of readJsonl(join(lin.dir, 'committer.jsonl'))) {
-      if (['unanchored', 'order-warning', 'error', 'changed', 'late-insert'].includes(String(n.kind))) {
+    for (const n of readJsonl(join(lin.dir, `committer${suffix}.jsonl`))) {
+      if (['unanchored', 'order-warning', 'error', 'changed', 'late-insert', 'reply-held'].includes(String(n.kind))) {
         // A dry check resume's committer never publishes: its notes count
         // as failures all the same, labelled as dry.
         if (lin.meta.origin === 'dry' || lin.procs.every((p) => p.dry)) {
@@ -964,6 +978,7 @@ export function judge(ev: Evidence, tower: TowerMsg[]): Report {
   }
   return {
     convId: ev.convId,
+    which: suffix ? `shadow (${ev.convId}~shadow)` : 'tower',
     evidence: [],
     agents: [...new Set(ev.lins.map((l) => `${l.agent} (${String(l.meta.name)})`))],
     lineages: ev.lins.map((l) => ({ dir: l.dir, origin: l.meta.origin, procs: l.procs.map(procDesc) })),
@@ -1066,7 +1081,7 @@ function quietJudgments(ev: Evidence, T: Msg[], seq: number, pointMs: number, pr
 // Report.
 
 export function markdown(r: Report): string {
-  const L: string[] = [`# Invariant check: conversation ${r.convId}`, '', `Scenario evidence: ${r.evidence.join(', ') || '(named by id)'}. Agents (conversation label): ${r.agents.join(', ')}.`, ''];
+  const L: string[] = [`# Invariant check: conversation ${r.convId}, ${r.which}`, '', `Scenario evidence: ${r.evidence.join(', ') || '(named by id)'}. Agents (conversation label): ${r.agents.join(', ')}.`, ''];
   L.push(`Verdicts: PASS ${r.counts.PASS}, FAIL ${r.counts.FAIL}, ROUND-TRIP ${r.counts['ROUND-TRIP']}, UNCHECKED ${r.counts.UNCHECKED}.`, '', `With shape-only divergences set aside (content verdicts): PASS ${r.contentCounts.PASS}, FAIL ${r.contentCounts.FAIL}, ROUND-TRIP ${r.contentCounts['ROUND-TRIP']}, UNCHECKED ${r.contentCounts.UNCHECKED}.`, '');
   L.push(`Clock: broker timestamp minus the body's commit instant, min ${r.clock.minGapMs} ms, max ${r.clock.maxGapMs} ms, negative ${r.clock.negative}.`, '');
   L.push('## Lineages', '');
@@ -1096,6 +1111,21 @@ export function markdown(r: Report): string {
     L.push('');
   }
   return L.join('\n');
+}
+
+// The live tower against its shadow: message for message, id, role, turnId
+// and content.
+export function compareShadow(live: TowerMsg[], shadow: TowerMsg[]): { same: boolean; at: number | null; live: string | null; shadow: string | null } {
+  const k = (m: TowerMsg): string => canon({ id: m.id, role: m.role, turnId: m.turnId, content: m.content });
+  const show = (m: TowerMsg | undefined): string | null => (m ? `seq ${m.seq} ${m.role} ${m.id.slice(0, 8)} [${m.content.map((b) => blk(b).show).join(' | ')}]` : null);
+  for (let i = 0; i < Math.max(live.length, shadow.length); i += 1) {
+    const a = live[i];
+    const b = shadow[i];
+    if (!a || !b || k(a) !== k(b)) {
+      return { same: false, at: i, live: show(a), shadow: show(b) };
+    }
+  }
+  return { same: true, at: null, live: null, shadow: null };
 }
 
 function convIdsFromEvidence(dir: string): string[] {
@@ -1148,17 +1178,28 @@ async function main(): Promise<void> {
   let fails = 0;
   for (const id of [...new Set(ids)]) {
     const ev = gather(id);
-    const tower = await readTower(id);
-    const r = { ...judge(ev, tower), evidence: from.get(id) ?? [] };
-    writeFileSync(join(dir, `${id}.json`), clean(JSON.stringify(r, null, 2)));
-    writeFileSync(join(dir, `${id}.md`), clean(markdown(r)));
+    const live = await readTower(id);
+    const shadow = await readTower(`${id}~shadow`);
+    for (const [suffix, tower] of [['', live], ['.shadow', shadow]] as const) {
+    if (suffix && tower.length === 0) {
+      continue;
+    }
+    const r = { ...judge(ev, tower, suffix), evidence: from.get(id) ?? [] };
+    writeFileSync(join(dir, `${id}${suffix}.json`), clean(JSON.stringify(r, null, 2)));
+    writeFileSync(join(dir, `${id}${suffix}.md`), clean(markdown(r)));
     fails += r.counts.FAIL;
-    process.stdout.write(`${id} [${r.agents.join(', ')}]${r.evidence.length ? ` from ${r.evidence.map((e) => basename(e)).join(', ')}` : ''}: tower ${tower.length} messages, ${ev.lins.length} lineages, ${ev.reqs.length} main requests; PASS ${r.counts.PASS} FAIL ${r.counts.FAIL} (of which shape only ${r.counts.FAIL - r.contentCounts.FAIL}) ROUND-TRIP ${r.counts['ROUND-TRIP']} UNCHECKED ${r.counts.UNCHECKED}; content verdicts PASS ${r.contentCounts.PASS} FAIL ${r.contentCounts.FAIL} ROUND-TRIP ${r.contentCounts['ROUND-TRIP']} UNCHECKED ${r.contentCounts.UNCHECKED} -> ${join(dir, `${id}.md`)}\n`);
+    process.stdout.write(`${suffix ? 'SHADOW ' : ''}${id} [${r.agents.join(', ')}]${r.evidence.length ? ` from ${r.evidence.map((e) => basename(e)).join(', ')}` : ''}: tower ${tower.length} messages, ${ev.lins.length} lineages, ${ev.reqs.length} main requests; PASS ${r.counts.PASS} FAIL ${r.counts.FAIL} (of which shape only ${r.counts.FAIL - r.contentCounts.FAIL}) ROUND-TRIP ${r.counts['ROUND-TRIP']} UNCHECKED ${r.counts.UNCHECKED}; content verdicts PASS ${r.contentCounts.PASS} FAIL ${r.contentCounts.FAIL} ROUND-TRIP ${r.contentCounts['ROUND-TRIP']} UNCHECKED ${r.contentCounts.UNCHECKED} -> ${join(dir, `${id}${suffix}.md`)}\n`);
     for (const p of r.points.filter((x) => x.contentVerdict === 'FAIL')) {
       process.stdout.write(`  FAIL ${p.kind}: ${p.label}\n`);
       for (const j of p.judgments.filter((x) => x.contentVerdict === 'FAIL')) {
         process.stdout.write(`    ${j.truth}: ${j.why}${j.divergence?.contentAt ? ` [content at ${j.divergence.contentAt}: tower ${JSON.stringify(j.divergence.towerAtoms?.find((x) => x.startsWith('>')) ?? null)} vs Claude Code ${JSON.stringify(j.divergence.truthAtoms?.find((x) => x.startsWith('>')) ?? null)}]` : ''}${j.missing?.length ? ` missing: ${j.missing.join('; ')}` : ''}\n`);
       }
+    }
+    }
+    if (shadow.length > 0) {
+      const d = compareShadow(live, shadow);
+      writeFileSync(join(dir, `${id}.live-vs-shadow.json`), clean(JSON.stringify(d, null, 2)));
+      process.stdout.write(`  live vs shadow: ${d.same ? 'identical (same messages, ids, roles, turnIds and content, in order)' : `differ from message ${d.at}: live ${d.live ?? '(none)'} vs shadow ${d.shadow ?? '(none)'}`} (live ${live.length}, shadow ${shadow.length})\n`);
     }
   }
   process.exit(fails > 0 ? 1 : 0);

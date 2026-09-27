@@ -207,6 +207,25 @@ export interface BuildOpts {
   // anchor it on the body's last assistant message if that is one of the
   // main conversation's responses, and take what follows as its run.
   anchorFallback?: boolean;
+  // Integration attempt 3, the fix for bug 1 (a reply committed without the
+  // message it answers): a reply piece is committed only once the user side
+  // of the request that got it is committed, and never if that request has no
+  // place. The request that got a reply is Claude Code's own pairing, the
+  // body log's index.jsonl (the response's message_id -> request_file); a
+  // reply with no index line (a response that never completed) falls back to
+  // the latest main request before the piece's append.
+  gateReplies?: boolean;
+  // Integration attempt 3, the fix for bug 2 (a request's user side dropped
+  // when select() can't anchor it).
+  //
+  // TODO: undecided (the design record doesn't cover it; the simplest thing
+  // that keeps R1 and R2, not a decision Stephen made): the request is placed
+  // after the last main response in the store before the request file, its
+  // run is every carrier after that response, and that run is committed in
+  // the form the request sent it (the body's messages after its last
+  // assistant message), as any run is, at its kept reply. It stays reported
+  // as unanchored (never silent).
+  placeUnanchored?: boolean;
 }
 
 export interface Unanchored {
@@ -250,10 +269,27 @@ export function mainRequests(rec: Recording, commits: Map<string, number>, o: Bu
           }
         }
       }
+      let placedAfter: number | undefined;
+      if (served && !fallback && o.placeUnanchored) {
+        const recs = rec.entries.filter((x) => x.ms < nextMs && x.entry.isSidechain !== true);
+        const responses = mainResponses(main);
+        const before = responses.filter((x) => (recs[x.last]?.ms ?? Number.POSITIVE_INFINITY) <= r.ms);
+        const last = before[before.length - 1];
+        placedAfter = last ? last.last + 1 : 0;
+        v = { ...v, main: true, retry: false, anchor: last ? last.id : '', reason: `placed after the last main response before it (${last ? last.id : 'none'}); select(): ${v.reason}` };
+        fallback = `placed after ${last ? last.id : 'the start'}: its user side committed as sent`;
+      }
       if (served) {
         unanchored.push({ file: r.file, ms: r.ms, reason: String(v.reason), fallback });
       }
       if (!v.main) {
+        return;
+      }
+      if (placedAfter !== undefined) {
+        accepted.push({ anchor: v.anchor, tail: flatTail(r.body as never) });
+        const pending = main.slice(placedAfter).filter((e) => !isAssistant(e) && isCarrier(e));
+        const a = attributeMessages(newMessages(r.body as never), pending);
+        out.push({ req: r, anchor: v.anchor, retry: false, form: a.messages, uncovered: a.uncovered.length, replies: [], firstReplyMs: undefined });
         return;
       }
     }
@@ -271,7 +307,8 @@ export function mainRequests(rec: Recording, commits: Map<string, number>, o: Bu
   });
   // Pair kept replies with requests: by the index's message id, else the
   // latest main request before the reply's append (an interrupted request
-  // has no index line).
+  // has no index line). With gateReplies, a reply the index pairs with a
+  // request that has no place stays unpaired (it answers nothing on tower).
   const byFile = new Map(out.map((m) => [m.req.file, m]));
   for (const r of rec.entries) {
     const at = commits.get(String(r.entry.uuid));
@@ -280,6 +317,9 @@ export function mainRequests(rec: Recording, commits: Map<string, number>, o: Bu
     }
     const line = rec.index.find((l) => l.message_id === msgId(r.entry));
     let m = line?.request_file ? byFile.get(line.request_file) : undefined;
+    if (!m && o.gateReplies && line?.request_file) {
+      continue;
+    }
     if (!m) {
       m = [...out].reverse().find((x) => x.req.ms <= r.ms);
     }
@@ -432,6 +472,11 @@ export interface Built {
   mains: MainReq[];
   orderWarnings: string[];
   unanchored: Unanchored[];
+  // gateReplies: each committed reply piece's id -> the entries of the user
+  // side it answers (for the live committer's acked check), and the reply
+  // pieces never committed because what they answer has no place.
+  answers: Map<string, string[]>;
+  heldReplies: { uuid: string; ms: number; why: string }[];
 }
 
 // Claude Code's interrupt marker, as written after an interrupted tool
@@ -446,11 +491,29 @@ export function build(rec: Recording, option: Option, o: BuildOpts = {}): Built 
   const out: TMsg[] = [];
   const orderWarnings: string[] = [];
   const committed = new Set<string>();
+  const answers = new Map<string, string[]>();
+  const heldReplies: { uuid: string; ms: number; why: string }[] = [];
+  // gateReplies: replies waiting for their user side, released right after
+  // the commit that completes it.
+  const deferred: { own: MainReq; r: Rec; c: number }[] = [];
+  const runDone = (own: MainReq): boolean => own.form.every((f) => f.ccEntries.every((x) => committed.has(x.uuid)));
   const commit = (ms: TMsg[]): void => {
     for (const m of ms) {
       out.push(m);
       for (const c of m.cc) {
         committed.add(c.uuid);
+      }
+    }
+    const last = ms[ms.length - 1];
+    if (last && deferred.length > 0) {
+      for (const d of deferred.splice(0)) {
+        if (runDone(d.own)) {
+          answers.set(String(d.r.entry.uuid), d.own.form.flatMap((f) => f.ccEntries.map((x) => x.uuid)));
+          out.push(assistantMsg(d.r, Math.max(d.c, last.commitMs)));
+          committed.add(String(d.r.entry.uuid));
+        } else {
+          deferred.push(d);
+        }
       }
     }
   };
@@ -478,6 +541,18 @@ export function build(rec: Recording, option: Option, o: BuildOpts = {}): Built 
           if (own && own.form.some((f) => f.ccEntries.some((x) => !committed.has(x.uuid)))) {
             orderWarnings.push(`${String(r.entry.uuid).slice(0, 8)} committed before its run`);
           }
+        }
+        if (o.gateReplies) {
+          const own = mains.find((m) => m.replies.includes(String(r.entry.uuid)));
+          if (!own) {
+            heldReplies.push({ uuid: String(r.entry.uuid), ms: c, why: 'the request that got it has no place: what it answers is not committed' });
+            return;
+          }
+          if (!runDone(own)) {
+            deferred.push({ own, r, c });
+            return;
+          }
+          answers.set(String(r.entry.uuid), own.form.flatMap((f) => f.ccEntries.map((x) => x.uuid)));
         }
         commit([assistantMsg(r, c)]);
       });
@@ -570,6 +645,9 @@ export function build(rec: Recording, option: Option, o: BuildOpts = {}): Built 
     e.run();
   }
   flushBefore(Number.POSITIVE_INFINITY);
+  for (const d of deferred) {
+    heldReplies.push({ uuid: String(d.r.entry.uuid), ms: d.c, why: `its user side (${d.own.req.file}) is never committed` });
+  }
   // `next` commits assistant pieces with their run, not at append: each
   // run's messages, then its replies, at the run's instant.
   if (option === 'next') {
@@ -591,7 +669,7 @@ export function build(rec: Recording, option: Option, o: BuildOpts = {}): Built 
     out.length = 0;
     out.push(...ordered);
   }
-  return { all: out, unshown, mains, orderWarnings, unanchored };
+  return { all: out, unshown, mains, orderWarnings, unanchored, answers, heldReplies };
 }
 
 // What the option holds at an instant.

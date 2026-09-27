@@ -8,7 +8,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { build, type BuildOpts, kindOf, type Recording, type TMsg } from '../reconcile/holding.mts';
+import { build, type BuildOpts, kindOf, type Option, type Recording, type TMsg } from '../reconcile/holding.mts';
 import { compareUnits, describeEntry, probeCut, requestUnits, towerBeforeProbeReply, towerUnits, type Verdict, without } from '../reconcile/compare.mts';
 import { fullHistory, readIndex } from '../next/history.mts';
 import { coreHash, NO_RESPONSE, type PublishedLine } from './committer.mts';
@@ -272,8 +272,9 @@ export function liveVsOffline(lineageDir: string, bodyOf: (m: TMsg) => Json): Js
   const lin = Lineage.open(lineageDir);
   lin.pollBodies();
   const optsFile = join(lineageDir, 'build-options.json');
-  const opts = existsSync(optsFile) ? ((JSON.parse(readFileSync(optsFile, 'utf8')) as Json).opts as BuildOpts) : {};
-  const b = build(lin.rec, 'run', opts);
+  const saved = existsSync(optsFile) ? (JSON.parse(readFileSync(optsFile, 'utf8')) as Json) : {};
+  const opts = (saved.opts as BuildOpts | undefined) ?? {};
+  const b = build(lin.rec, (saved.option as Option | undefined) ?? 'run', opts);
   const pub = (readJsonl(join(lineageDir, 'published.jsonl')) as unknown as PublishedLine[]).filter((p) => p.kind === 'message');
   const seeded = new Set((readJsonl(join(lineageDir, 'published.jsonl')) as unknown as PublishedLine[]).filter((p) => p.kind === 'seed').map((p) => p.id));
   const carriedBySeed = new Set((readJsonl(join(lineageDir, 'published.jsonl')) as unknown as PublishedLine[]).filter((p) => p.kind === 'seed').flatMap((p) => p.cc));

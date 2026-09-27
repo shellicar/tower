@@ -13,6 +13,20 @@
 //   - your side (prompts, tool results, reminders, the interrupt marker) in
 //     the form the model received it, once the reply after it is kept
 //     (reconcile's "run").
+// Integration attempt 3: the commit option is a variant, run+last or
+// run+entry (build()'s options of those names: at each query's end the
+// unfinished tail is committed in the form its latest request sent it, or as
+// written), passed on every serve. Bugs 1 and 2 are fixed in build()
+// (BuildOpts gateReplies, placeUnanchored), always on here, and a reply piece
+// is published only once every entry of the user side it answers is on tower
+// (acked). A shadow committer (TODO: undecided, a test method, not the
+// participant's design) computes the other variant over the same recording
+// and publishes it under the conversation id `<id>~shadow`, with its own
+// records (published.shadow.jsonl, committer.shadow.jsonl).
+//
+// TODO: undecided. Whether the participant carries a variant choice at all,
+// and whether it has a default: here the serve must name one (no default).
+//
 // A commit is a fact: a message already published is never published again.
 // If a later build would give an already-published id a different body,
 // that is recorded (committer.jsonl, kind `changed`) and nothing is sent: it
@@ -77,9 +91,17 @@ export function coreHash(b: TowerBody | Json): string {
     .slice(0, 16);
 }
 
+export type CommitOption = 'run+last' | 'run+entry';
+export const COMMIT_OPTIONS: CommitOption[] = ['run+last', 'run+entry'];
+
 export class Committer {
   readonly lin: Lineage;
   readonly convId: string;
+  readonly option: CommitOption;
+  // '' for the live committer, '.shadow' for the shadow.
+  readonly suffix: string;
+  readonly subjectId: string;
+  shadow: Committer | undefined;
   readonly instanceId: string;
   readonly dry: boolean;
   readonly tower: Tower | undefined;
@@ -102,22 +124,33 @@ export class Committer {
   readonly heldCarrier: boolean;
   readonly heldAt = new Set<string>();
 
-  constructor(lin: Lineage, o: { convId: string; instanceId: string; dry: boolean; tower?: Tower; log: (s: string) => void; onPublish?: (p: PublishedLine) => void; variants?: string[] }) {
+  constructor(lin: Lineage, o: { convId: string; instanceId: string; dry: boolean; tower?: Tower; log: (s: string) => void; onPublish?: (p: PublishedLine) => void; variants?: string[]; option: CommitOption; shadow?: boolean }) {
     this.lin = lin;
     this.convId = o.convId;
+    if (!COMMIT_OPTIONS.includes(o.option)) {
+      throw new Error(`commit option ${String(o.option)}: must be one of ${COMMIT_OPTIONS.join(', ')}`);
+    }
+    this.option = o.option;
+    this.suffix = o.shadow ? '.shadow' : '';
+    this.subjectId = o.shadow ? `${o.convId}~shadow` : o.convId;
+    this.shadow = undefined;
     this.instanceId = o.instanceId;
     this.dry = o.dry;
     this.tower = o.tower;
     this.log = o.log;
     this.onPublish = o.onPublish ?? (() => {});
     const v = new Set(o.variants ?? []);
-    this.opts = { ...(v.has('commit-dangling') ? { commitDangling: true } : {}), ...(v.has('anchor-fallback') ? { anchorFallback: true } : {}) };
+    this.opts = { gateReplies: true, placeUnanchored: true, ...(v.has('commit-dangling') ? { commitDangling: true } : {}), ...(v.has('anchor-fallback') ? { anchorFallback: true } : {}) };
     this.heldCarrier = v.has('held-carrier');
     // The offline build (join 8) reads the same options.
-    writeFileSync(join(lin.dir, 'build-options.json'), `${JSON.stringify({ opts: this.opts, variants: [...v] })}\n`);
-    for (const p of readJsonl(join(lin.dir, 'published.jsonl')) as unknown as PublishedLine[]) {
+    writeFileSync(join(lin.dir, `build-options${this.suffix}.json`), `${JSON.stringify({ option: this.option, opts: this.opts, variants: [...v] })}\n`);
+    for (const p of readJsonl(this.file('published')) as unknown as PublishedLine[]) {
       this.mark(p);
     }
+  }
+
+  file(name: 'published' | 'committer'): string {
+    return join(this.lin.dir, `${name}${this.suffix}.jsonl`);
   }
 
   private mark(p: PublishedLine): void {
@@ -159,7 +192,7 @@ export class Committer {
         instanceId: String(b.instanceId ?? ''),
         dry: this.dry,
       };
-      appendJsonl(join(this.lin.dir, 'published.jsonl'), p);
+      appendJsonl(this.file('published'), p);
       this.mark(p);
     }
   }
@@ -169,11 +202,12 @@ export class Committer {
       return;
     }
     this.noted.add(`${kind}:${key}`);
-    appendJsonl(join(this.lin.dir, 'committer.jsonl'), { ts: iso(), ms: Date.now(), kind, ...detail });
-    this.log(`committer ${this.convId.slice(0, 8)}: ${kind} ${JSON.stringify(detail).slice(0, 300)}`);
+    appendJsonl(this.file('committer'), { ts: iso(), ms: Date.now(), kind, option: this.option, ...detail });
+    this.log(`committer${this.suffix} ${this.option} ${this.convId.slice(0, 8)}: ${kind} ${JSON.stringify(detail).slice(0, 300)}`);
   }
 
   poke(): void {
+    this.shadow?.poke();
     this.dirty = true;
     if (!this.running) {
       this.start();
@@ -197,6 +231,7 @@ export class Committer {
     while (this.running) {
       await this.running;
     }
+    await this.shadow?.drain();
   }
 
   private async loop(): Promise<void> {
@@ -204,13 +239,20 @@ export class Committer {
       this.dirty = false;
       try {
         this.lin.pollBodies();
-        const b = build(this.lin.rec, 'run', this.opts);
+        const b = build(this.lin.rec, this.option, this.opts);
         this.lastBuild = b;
         for (const w of b.orderWarnings) {
           this.note('order-warning', w, { warning: w });
         }
         for (const u of b.unanchored) {
           this.note('unanchored', u.file, { file: u.file, reason: u.reason, fallback: u.fallback });
+        }
+        // Reply pieces never committed because what they answer has no place
+        // (a piece tower already holds, seeded from it, isn't ours to hold).
+        for (const h of b.heldReplies) {
+          if (!this.carriedCc.has(h.uuid)) {
+            this.note('reply-held', h.uuid, { uuid: h.uuid, why: h.why });
+          }
         }
         await this.publishFrom(b);
         await this.closures(b);
@@ -240,7 +282,7 @@ export class Committer {
     if (this.dry || !this.tower) {
       return null;
     }
-    const ack = await this.tower.js.publish(`conv.v2.${this.convId}.${leaf}`, JSON.stringify(body));
+    const ack = await this.tower.js.publish(`conv.v2.${this.subjectId}.${leaf}`, JSON.stringify(body));
     return ack.seq;
   }
 
@@ -261,6 +303,14 @@ export class Committer {
         this.note('skip-held', m.id, { id: m.id, role: m.role, why: 'every entry already on tower' });
         continue;
       }
+      // Bug 1's fix, at publish: a reply piece goes out only once every entry
+      // of the user side it answers is on tower (acked). Build order puts
+      // that user side first; if it isn't on tower, nothing after it goes.
+      const answers = b.answers.get(m.id);
+      if (m.role === 'assistant' && answers && !answers.every((u) => this.carriedCc.has(u))) {
+        this.note('reply-waits', m.id, { id: m.id, missing: answers.filter((u) => !this.carriedCc.has(u)) });
+        break;
+      }
       const later = this.order.filter((id) => (pos.get(id) ?? -1) > i);
       if (later.length > 0) {
         this.note('late-insert', m.id, { id: m.id, role: m.role, before: later.slice(0, 5) });
@@ -276,7 +326,7 @@ export class Committer {
         ts: iso(),
         ms: Date.now(),
         seq,
-        subject: `conv.v2.${this.convId}.changes.message`,
+        subject: `conv.v2.${this.subjectId}.changes.message`,
         id: m.id,
         commitMs: m.commitMs,
         hash: h,
@@ -287,7 +337,7 @@ export class Committer {
         dry: this.dry,
         index: i,
       };
-      appendJsonl(join(this.lin.dir, 'published.jsonl'), p);
+      appendJsonl(this.file('published'), p);
       this.mark(p);
       this.onPublish(p);
     }
@@ -308,8 +358,8 @@ export class Committer {
     }
     const body = { ts: iso(ms), instanceId: this.instanceId, queryId, entries: held.map((r) => ({ seq: r.seq, entry: r.entry })) };
     const seq = await this.publish('changes.held', body);
-    const p: PublishedLine = { kind: 'held', ts: iso(), ms: Date.now(), seq, subject: `conv.v2.${this.convId}.changes.held`, id: `held@${ms}`, commitMs: ms, hash: '', cc: held.map((r) => String(r.entry.uuid)), unshown: [], queryId, instanceId: this.instanceId, dry: this.dry };
-    appendJsonl(join(this.lin.dir, 'published.jsonl'), p);
+    const p: PublishedLine = { kind: 'held', ts: iso(), ms: Date.now(), seq, subject: `conv.v2.${this.subjectId}.changes.held`, id: `held@${ms}`, commitMs: ms, hash: '', cc: held.map((r) => String(r.entry.uuid)), unshown: [], queryId, instanceId: this.instanceId, dry: this.dry };
+    appendJsonl(this.file('published'), p);
     this.mark(p);
     this.onPublish(p);
   }
@@ -331,8 +381,8 @@ export class Committer {
       }
       const body = { ts: iso(r.ms), instanceId: this.instanceId, queryId: r.queryId, reason: r.reason };
       const seq = await this.publish('changes.query', body);
-      const p: PublishedLine = { kind: 'query', ts: iso(), ms: Date.now(), seq, subject: `conv.v2.${this.convId}.changes.query`, id: r.queryId, commitMs: r.ms, hash: '', cc: [], unshown: [], queryId: r.queryId, instanceId: this.instanceId, dry: this.dry };
-      appendJsonl(join(this.lin.dir, 'published.jsonl'), p);
+      const p: PublishedLine = { kind: 'query', ts: iso(), ms: Date.now(), seq, subject: `conv.v2.${this.subjectId}.changes.query`, id: r.queryId, commitMs: r.ms, hash: '', cc: [], unshown: [], queryId: r.queryId, instanceId: this.instanceId, dry: this.dry };
+      appendJsonl(this.file('published'), p);
       this.mark(p);
       this.onPublish(p);
     }
