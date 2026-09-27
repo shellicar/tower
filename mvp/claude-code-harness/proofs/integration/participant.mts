@@ -15,6 +15,7 @@
 //   {"cmd":"interrupt","conv":<label>}
 //   {"cmd":"end","conv":<label>}                 close its input, wait, drain
 //   {"cmd":"skills","declared":[dir...]}         live change of skill dirs
+//   {"cmd":"ours","add":[{pid,starttime}...]}   test-only: extend the safety list
 //   {"cmd":"shutdown"}                           the first Ctrl-C
 // SIGINT, SIGTERM, SIGHUP and stdin closing start the first-Ctrl-C shutdown;
 // a second one tears down (SIGTERM to its Claude Codes, NATS closed without
@@ -703,6 +704,13 @@ rl.on('line', (line) => {
           skills.set((cmd.declared as string[]) ?? [], 'live');
           emit('skills', { declared: skills.declared, linked: [...skills.linked] });
           break;
+        case 'ours':
+          // Test-only: the driver extends the safety list (Claude Codes this
+          // proof started that were spawned after this process's spec was
+          // written).
+          spec.ours = [...(spec.ours ?? []), ...((cmd.add as Known[]) ?? [])];
+          emit('ours', { count: spec.ours.length });
+          break;
         case 'shutdown':
           press('shutdown command');
           break;
@@ -715,7 +723,7 @@ rl.on('line', (line) => {
     }
   };
   // serve, end and skills in order; say and interrupt at once.
-  if (cmd.cmd === 'say' || cmd.cmd === 'interrupt' || cmd.cmd === 'shutdown') {
+  if (cmd.cmd === 'say' || cmd.cmd === 'interrupt' || cmd.cmd === 'shutdown' || cmd.cmd === 'ours') {
     void run();
   } else {
     queue = queue.then(run);

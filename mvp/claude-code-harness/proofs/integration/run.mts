@@ -271,7 +271,7 @@ async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string
   const keptR = keepLineage(ev, 'restart-lineage', String(s2.lineage), T ? [T.file] : []);
   writeFileSync(ev.path('restart-vs-L.json'), clean(JSON.stringify({ served: s2, result: r2t, verdict: vRestart }, null, 2)));
   const okRestart = s2.decision === 'local' && (vRestart.verdict === 'OK' || (vRestart.verdict === 'REQ' && !L.usage));
-  row('restart = live', okRestart, `decision ${String(s2.decision)}, ${String(vRestart.verdict)}${(vRestart.diff as string[] | undefined)?.length ? ` ${(vRestart.diff as string[]).slice(0, 3).join(' | ')}` : ''} L ${JSON.stringify((vRestart.L as Json | undefined)?.usage ?? null)} T ${JSON.stringify((vRestart.T as Json | undefined)?.usage ?? null)}`, ev.path('restart-vs-L.json'), { keptR });
+  row('restart = live', okRestart, `decision ${String(s2.decision)}, ${String(vRestart.verdict)}${vRestart.onlyBetas ? ` (betas only: live has ${JSON.stringify((vRestart.betas as Json).onlyL)}, restart has ${JSON.stringify((vRestart.betas as Json).onlyT)})` : ''}${(vRestart.diff as string[] | undefined)?.length ? ` ${(vRestart.diff as string[]).slice(0, 3).join(' | ')}` : ''} L ${JSON.stringify((vRestart.L as Json | undefined)?.usage ?? null)} T ${JSON.stringify((vRestart.T as Json | undefined)?.usage ?? null)}`, ev.path('restart-vs-L.json'), { keptR });
 
   // A resume from tower alone, another agent name, as of step 1.
   const asOfSeq = seqAsOf(lineage, step1Ms);
@@ -296,7 +296,7 @@ async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string
     const workOf = (n: string): string => join(HARNESS_STATE, 'work', n);
     const full = resumeVerdict(L, T2, [[workOf(towerAgent), workOf(agent)], [`-work-${towerAgent}`, `-work-${agent}`]]);
     writeFileSync(ev.path('tower-alone-vs-L.json'), clean(JSON.stringify({ served: s3, asOfSeq, towerMessagesAsOf: towerAsOf.length, messages: mv, expectedMissing: expected, fullRequest: full }, null, 2)));
-    row('tower alone misses only the unclosed part', s3.decision === 'tower' && same && mv.extra.length === 0 && mv.placement.length === 0, `decision ${String(s3.decision)}; L-not-T ${JSON.stringify(mv.missing)} expected ${JSON.stringify(expected)}; extra ${JSON.stringify(mv.extra)}; ${mv.placement.join('; ')}; full request (cwd masked) ${String(full.verdict)} ${((full.diff as string[]) ?? []).slice(0, 2).join(' | ')}`, ev.path('tower-alone-vs-L.json'));
+    row('tower alone misses only the unclosed part', s3.decision === 'tower' && same && mv.extra.length === 0 && mv.placement.length === 0 && mv.content.length === 0, `decision ${String(s3.decision)}; L-not-T ${JSON.stringify(mv.missing)} expected ${JSON.stringify(expected)}; extra ${JSON.stringify(mv.extra)}; ${mv.placement.join('; ')}${mv.content.length ? `; carried with other text in T: ${mv.content.join(' | ')}` : ''}; full request (cwd masked) ${String(full.verdict)} ${((full.diff as string[]) ?? []).slice(0, 2).join(' | ')}`, ev.path('tower-alone-vs-L.json'));
   }
   return { rows, reached: end.reached === true };
 }
@@ -398,7 +398,7 @@ async function killed(a: Args): Promise<CheckRow[]> {
     };
     const dir = root.path(origin);
     let id: string | undefined;
-    if (origin === 'tower') {
+    if (origin !== 'fresh') {
       const p0 = start(specFor(creator, a.model, join(dir, 'p0-creator')), a);
       await p0.ready();
       id = String((await p0.serve({ conv: 'c' })).id);
@@ -413,13 +413,19 @@ async function killed(a: Args): Promise<CheckRow[]> {
       await p1.say('c', WARM, { step: 0 });
     }
     checkUsageLimit();
-    await killAtTool(p1, 'c');
-    // Served straight away: a new participant, its safety list P1's Claude
-    // Codes, started the moment P1 is gone.
+    // Served straight away: the next participant is started and loaded
+    // before the kill (proof 25's -now cases), its safety list P1's Claude
+    // Codes, and told to serve the moment P1 is gone.
     const p2 = start(specFor(agent, a.model, join(dir, 'p2-served'), { ours: p1.claudes }), a);
     await p2.ready();
-    const s2 = await p2.serve({ conv: 'c', id });
+    await killAtTool(p1, 'c');
+    p2.send({ cmd: 'ours', add: p1.claudes });
+    // tower-record: the variant way through for a tower-origin conversation
+    // (TODO: undecided): load() returns this machine's own recording.
+    const s2 = await p2.serve({ conv: 'c', id, ...(origin === 'tower-record' ? { from: 'record' } : {}) });
     const stop = p2.events.find((e) => e.ev === 'stopped');
+    const stopReport = JSON.parse(readFileSync(join(dir, 'p2-served', 'stop-c.json'), 'utf8')) as Json;
+    const foundAtStop = ((stopReport.rounds as Json[])[0]?.found as Json[] | undefined) ?? [];
     const r = await p2.say('c', PROBE, { step: 2 });
     checkUsageLimit();
     await p2.shutdown();
@@ -427,8 +433,12 @@ async function killed(a: Args): Promise<CheckRow[]> {
     writeFileSync(join(dir, 'tower.json'), clean(JSON.stringify(tower, null, 2)));
     const local = localUnion(agent, id);
     writeFileSync(join(dir, 'served.json'), clean(JSON.stringify({ s1, s2, stop }, null, 2)));
-    row('leftover stopped before serving', /all exited|none found/.test(String(stop?.outcome)) && p1.claudes.length > 0, `${String(stop?.outcome)}; signals ${JSON.stringify(stop?.signals)}`, join(dir, 'p2-served'));
-    row('decision', origin === 'fresh' ? s2.decision === 'local' : s2.decision === 'tower', `decision ${String(s2.decision)}; recovery ${JSON.stringify(s2.recovery).slice(0, 300)}`, join(dir, 'served.json'));
+    const waited = ((stopReport.rounds as Json[]).flatMap((r) => (r.waited as Json[]) ?? []));
+    const leftClaudes = foundAtStop.filter((f) => f.claudeCode === true);
+    const allWaited = leftClaudes.every((f) => waited.some((w) => w.pid === f.pid && w.goneAt !== null));
+    const unclassified = foundAtStop.filter((f) => f.claudeCode !== true && p1.claudes.some((k) => k.pid === f.pid));
+    row('leftover stopped before serving', /all exited|none found/.test(String(stop?.outcome)) && allWaited && unclassified.length === 0, `${String(stop?.outcome)}; found at the first scan ${JSON.stringify(foundAtStop.map((f) => [f.pid, f.claudeCode ? 'claude' : f.cmd]))}; signals ${JSON.stringify(stop?.signals)}; waited ${JSON.stringify(waited)}${unclassified.length ? `; P1's Claude Code not recognised: ${JSON.stringify(unclassified)}` : ''}`, join(dir, 'p2-served'));
+    row('decision', origin === 'fresh' ? s2.decision === 'local' : origin === 'tower' ? s2.decision === 'tower' : s2.decision === 'record', `decision ${String(s2.decision)}; recovery ${JSON.stringify(s2.recovery).slice(0, 300)}`, join(dir, 'served.json'));
     const f = forks(tower);
     row('nothing forks', f.length === 0, f.length ? JSON.stringify(f) : 'no two tower entries share a parent', join(dir, 'tower.json'));
     const lost = lostFromTower(local, tower);
@@ -567,7 +577,7 @@ async function origins(a: Args): Promise<CheckRow[]> {
       const T = probeRequest(join(String(s.lineage), 'api-bodies'), a.model, PROBE);
       const v = T ? resumeVerdict(L, T) : { verdict: 'no T request' };
       writeFileSync(join(dir, `restart-${from}.json`), clean(JSON.stringify({ served: s, verdict: v }, null, 2)));
-      row(label, v.verdict === 'OK', `decision ${String(s.decision)}; ${String(v.verdict)} ${((v.diff as string[]) ?? []).slice(0, 2).join(' | ')}`, join(dir, `restart-${from}.json`));
+      row(label, v.verdict === 'OK', `decision ${String(s.decision)}; ${String(v.verdict)}${v.onlyBetas ? ` (betas only: ${JSON.stringify(v.betas)})` : ''} ${((v.diff as string[]) ?? []).slice(0, 2).join(' | ')}`, join(dir, `restart-${from}.json`));
     }
   }
   writeTable(root, `origins ${a.model}`, rows);

@@ -21,7 +21,8 @@ export const WAITS = { SIGINT: 30_000, SIGTERM: 10_000, SIGKILL: 5_000 } as cons
 const ROUNDS = 5;
 
 // A Claude Code, as opposed to one of its commands: its command line starts
-// with the bundled binary (setpriv execs it in place).
+// with the bundled binary (setpriv execs it in place). Read in full: the
+// scan's own copy is cut at 100 characters, shorter than the binary's path.
 //
 // TODO: undecided. How a Claude Code is told from its commands: built by the
 // command line's first word ending in /claude. The alternative is the live
@@ -49,7 +50,7 @@ export async function stopLeftovers(agent: string, own: Set<number>, ours: Known
   const report: StopReport = { agent, startedAt: iso(), endedAt: '', ms: 0, rounds: [], outcome: '' };
   for (let round = 1; round <= ROUNDS; round += 1) {
     const scan = scanTag(agent, own);
-    const found = scan.found.map((p: TaggedProc) => ({ pid: p.pid, starttime: p.starttime, claudeCode: isClaudeCode({ cmd: p.cmd || cmdline(p.pid) }), pidFileLive: p.pidFileLive, cmd: p.cmd.slice(0, 80) }));
+    const found = scan.found.map((p: TaggedProc) => ({ pid: p.pid, starttime: p.starttime, claudeCode: isClaudeCode({ cmd: cmdline(p.pid) || p.cmd }), pidFileLive: p.pidFileLive, cmd: p.cmd.slice(0, 80) }));
     const r: StopReport['rounds'][number] = { found, excluded: scan.excluded.length, unreadable: scan.ownUidUnreadable.length, signals: [], waited: [] };
     report.rounds.push(r);
     const ccs = found.filter((f) => f.claudeCode);

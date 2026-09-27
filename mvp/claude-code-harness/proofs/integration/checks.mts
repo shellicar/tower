@@ -167,8 +167,17 @@ export function resumeVerdict(L: ReqInfo, T: ReqInfo | undefined, mask: [string,
     verdict = read === want && Number(T.usage.cache_creation_input_tokens) === 0 ? 'OK' : `REQ,cache${read - want >= 0 ? '+' : ''}${read - want}r/${String(T.usage.cache_creation_input_tokens)}w`;
   }
   const s = JSON.stringify(T.messages);
+  // With permission mode auto, the live Claude Code sends the server-side
+  // auto-mode classifier's beta (dangerous-tool-use-2026-09-03, a per-
+  // conversation latch in 2.1.282) and a resumed one's first request
+  // doesn't: reported apart, so it reads as what it is.
+  const lb = ((L.body.betas as string[] | undefined) ?? []).filter((b) => !((T.body.betas as string[] | undefined) ?? []).includes(b));
+  const tb = ((T.body.betas as string[] | undefined) ?? []).filter((b) => !((L.body.betas as string[] | undefined) ?? []).includes(b));
+  const onlyBetas = d.length > 0 && d.every((x) => x.startsWith('.betas'));
   return {
     verdict,
+    onlyBetas,
+    betas: { onlyL: lb, onlyT: tb },
     diff: d,
     L: { file: L.file, usage: usageOf(L.usage), chain: L.chain },
     T: { file: T.file, usage: usageOf(T.usage), chain: T.chain, missReason: (T.diagnostics as Json | null)?.cache_miss_reason ?? null },
@@ -196,13 +205,15 @@ export function towerVsRequest(rec: Recording, towerBodies: Json[], L: ReqInfo):
 // entries, cut to what was there at `asOfMs` (the probe's own turn is
 // dropped on both sides). What L has and T lacks should be exactly
 // `expectedMissing`.
-export function messagesVs(rec: Recording, L: ReqInfo, T: ReqInfo, asOfMs: number): { missing: string[]; extra: string[]; placement: string[]; kinds: string[]; unattributed: { L: number; T: number } } {
+export function messagesVs(rec: Recording, L: ReqInfo, T: ReqInfo, asOfMs: number): { missing: string[]; extra: string[]; placement: string[]; kinds: string[]; content: string[]; unattributed: { L: number; T: number } } {
   const describe = (u: string): string => u;
   const drop = new Set(rec.entries.filter((r) => r.ms > asOfMs).map((r) => String(r.entry.uuid)));
   const l = requestUnits(rec, L.messages as never);
   const t = requestUnits(rec, T.messages as never);
   const v = compareUnits(without(l.units, drop), without(t.units, drop), describe);
-  return { missing: v.missing, extra: v.extra, placement: v.placement, kinds: v.kinds, unattributed: { L: l.unattributed, T: t.unattributed } };
+  // `content`: an entry both carry with different text (a resume putting
+  // its own text where the entry was, e.g. a synthetic tool_result).
+  return { missing: v.missing, extra: v.extra, placement: v.placement, kinds: v.kinds, content: v.bytes, unattributed: { L: l.unattributed, T: t.unattributed } };
 }
 
 // The carriers (entries the model sees) at or before `asOfMs` that tower
