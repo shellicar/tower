@@ -311,7 +311,6 @@ commit option commits each entry after its transcript write
 marker) and in `run.mts` (resumeSessionAt, --reply-on-resume, the marker or
 partial left out). `P24_ERROR_TIMEOUT` overrides the API-error cell's
 timeout.
-||||||| ba7194d
 
 ## Proof 21: stopping an orphaned Claude Code
 
@@ -382,3 +381,281 @@ node proofs/orphan-tag-summary.mts runs/25-summary runs/25-*-r1.log > runs/25-su
 A SIGINT goes only to a pid on the list of Claude Codes the case started,
 with the start time it recorded; that list is a safety gate for the proof,
 not how the participant finds a leftover.
+## Proof 22: plain-named skills through the user level, fresh and resumed
+
+`proofs/skills-user-level.mts <model> <scenario> [variant]` runs one scenario
+under its own agent name (`p22-<scenario>[-<variant>]`), reset first through
+`pnpm reset-config-dir`. `proofs/skills-user-level-trace.mts <file.strace>`
+lists every access to a path in the real `~/.claude` or `~/.claude.json` in a
+file-access trace, attributed to the Claude Code that made it (fresh, in the
+agent dir, or resumed, in a `/tmp/claude-resume-*` dir).
+
+The proof, not the harness, opens the `user` setting source, with
+`extraArgs: {'setting-sources': 'user'}` (proof 19's way; the last flag wins,
+`run.json` still records `[]`), except `pair-closed`. Every scenario sets
+`syncClaudeAiSkills: false` through `settings`, resumes through a session
+store (a file store, one JSONL per key, `sessionStoreFlush: 'eager'`), and
+puts sentinels in the agent dir: `CLAUDE.md`, `rules/`, `agents/`,
+`commands/`, `output-styles/`, and a `settings.json` with a permission rule
+and a `UserPromptSubmit` hook that logs the `CLAUDE_CONFIG_DIR` it ran under.
+
+Scenarios:
+
+- `pair-nohook`: a fresh serve, then a resume of it through the store. The
+  declared skills are linked into the agent dir's `skills/` by hand. A skill
+  added between the serves (`p22-late`) can only reach the resumed Claude
+  Code's transcript as a delta if it loaded it.
+- `pair-closed`: the same with the user source closed, the trace baseline.
+- `pair-hook`: the same pair with a `spawnClaudeCodeProcess` hook that links
+  the declared skills into whatever `CLAUDE_CONFIG_DIR` the SDK gives it, then
+  starts the SDK's command (the capture wrapper) unchanged.
+- `live per-dir|dir-link`: a seed serve, then one resumed and one fresh
+  Claude Code at once. Declared skills: none, set, a skill added, a skill
+  edited, a skill removed, repointed to another dir, then `reloadSkills()`.
+  `per-dir`: the proof applies each change to every config dir the hook
+  linked into. `dir-link`: the hook makes a resume dir's `skills/` one link to
+  the agent dir's `skills/`, and the proof changes the agent dir only.
+- `link-shape whole-dir|every-dir|skill-md`: a pair over a declared dir with a
+  plain skill, a plugin-shaped folder with no `SKILL.md` (`p22-shaped`) and a
+  skill folder that is also plugin-shaped (`p22-hybrid`: `SKILL.md` plus
+  `.claude-plugin/plugin.json`, hooks, `.mcp.json`, an agent, an inner skill).
+
+Which entries get linked and how links are kept in step with the config are
+undecided (TODOs in the file). Fixtures are kept, never deleted, under
+`~/.local/state/tower-claude-code-harness/p22/`. Each scenario's
+`runs/<stamp>-p22-<scenario>/` holds `proof-stdout.txt`, `summary.json`, the
+redacted debug logs and request bodies, the store, and the resumed
+transcripts copied from the resume dir before the SDK deletes it. The traces
+(`strace -f -s 0 -e trace=%file,%process`) are `runs/<stamp>-p22-*.strace`,
+read into `runs/<stamp>-p22-*.home-claude.txt`.
+
+```sh
+strace -f -s 0 -e trace=%file,%process -o runs/<stamp>-p22-pair-hook.strace \
+  node proofs/skills-user-level.mts claude-sonnet-5 pair-hook
+node proofs/skills-user-level-trace.mts runs/<stamp>-p22-pair-hook.strace
+```
+
+### What the runs showed (Claude Code 2.1.282, SDK 0.3.282, claude-sonnet-5)
+
+- Fresh, user source open: skills load from the agent dir's `skills/` by plain
+  name. Also loaded from the agent dir: `CLAUDE.md` and `rules/` (in the first
+  request), `agents/` (in `system/init.agents`), `commands/` (listed as a
+  skill), `settings.json` (its hook ran, its permission rule is listed).
+- Resumed through the store, no hook: the debug log loads skills from
+  `/tmp/claude-resume-*/skills` and finds 0. Both bare-name invocations fail
+  ("isn't installed"), and `reloadSkills()` names no declared skill. The
+  resume dir holds `settings.json` (the SDK copies it), so its hook and
+  permission rule still apply. `CLAUDE.md`, rules, agents and commands are not
+  loaded: their text in the resumed requests is only the seed serve's
+  replayed messages.
+- Resumed with the hook: the hook is given the resume dir, links into it
+  before Claude Code starts, and the resumed Claude Code loads the skills
+  (`p22-late` arrives as a delta listing, both invocations run). The same
+  hook is given the agent dir for a fresh serve. The SDK's deletion of the
+  resume dir removed the links, not the declared files (hashes unchanged).
+- Live, both variants, fresh and resumed alike: set, add and edit reach both
+  Claude Codes as delta listings on the next turn after an 8 s settle; a
+  removed or repointed-away skill stops dispatching ("isn't available") but is
+  never announced; `reloadSkills()` writes a full listing (`isInitial: true`)
+  with only the current skills. `dir-link` needed one change in the agent dir
+  to reach both.
+- Link shape: a whole-dir link and linking every directory both adopt
+  `p22-shaped` and `p22-hybrid` as `@skills-dir` plugins (hooks ran, agents
+  and prefixed inner skills listed, the hybrid's MCP server started and
+  failed). Linking only folders with a `SKILL.md` keeps `p22-shaped` out;
+  `p22-hybrid` is still adopted as a plugin, beside its own plain skill.
+- Real `~/.claude`: the credential file is opened read-only only (shared
+  login), in every run. With the user source closed, the only other access is
+  a read of `~/.claude/state/unattended-serving-consent.json` (absent). With
+  it open, fresh and resumed Claude Codes alike also run the retention
+  cleanup (every one in these runs except the three shortest, which ended
+  within about 7 s; when it starts was not measured), which uses hard-coded
+  home paths: they list `~/.claude/bridge-spawn`
+  (the cleanup deletes entries older than 1 day there), open
+  `~/.claude/state/served-calls` (absent) and read and unlink
+  `~/.claude/state/settings-review.json` (absent). Nothing there was changed
+  in these runs.
+- What else opening the user source does, from the runs: the account's
+  claude.ai plugin sync writes `plugins/synced/<org>_<account>/` into the
+  agent dir and each resume dir (absent with the source closed; nothing was
+  installed); the retention cleanup, skipped under `[]`, runs with the
+  default 30 days over the agent dir's own files (nothing was old enough to
+  be deleted here); `output-styles/` is read (the sentinel style is loaded,
+  not selected). The trace shows the fresh Claude Code opening every
+  sentinel in the agent dir, and the resumed one opening none of them, only
+  looking for `CLAUDE.md`, `rules`, `commands` and `output-styles` in its
+  resume dir (absent). No `unlinkat`, `renameat` or `rmdir` relative to a
+  directory fd touched `~/.claude` in any trace.
+- From the binary only (2.1.282, not run): the user source also gates
+  user-scope MCP servers in `<config dir>/.claude.json`, `workflows/`,
+  `processWrapper`, the user `sandbox` block, `env`, hooks, `statusLine`,
+  `apiKeyHelper`, `enabledPlugins` and the other merged-settings keys, the
+  claude.ai skills sync into `skills/synced/` (off with
+  `syncClaudeAiSkills: false`), and writes to `<config dir>/settings.json`
+  (sandbox exclusions, `blockReadsOutsideWorkingDirectories`, `effortLevel`,
+  clearing `model` for an org default). Not gated by it: `keybindings.json`,
+  `themes/`, `loop.md`, the `.claude.json` `env`, startup migrations of
+  `settings.json`, and a set of bare reads of `settings.json`. The real-home
+  paths in the binary (`~/.claude/bridge-spawn`, `~/.claude/state/...`,
+  `~/.claude/ide` when `CLAUDE_CONFIG_DIR` is set, `~/.claude/.device-keys.json`)
+  are not gated by the user source; the cleanup that reaches the first two is.
+- `get_hooks_listing` labels the agent dir's hook "User settings
+  (~/.claude/settings.json)"; the hook log shows it ran from the agent dir
+  and the resume dir, never from `~/.claude`.
+
+## Proof 26: keeping Claude Code's own machinery out of the user's home
+
+`proofs/home.mts <model> <option>` runs proof 22's pair (a fresh serve, then a
+resume of it through a session store) under the agent name `p26-<option>`,
+reset first. It uses proof 22's spawn hook, which links the declared skill
+`p26-seed` into whatever `CLAUDE_CONFIG_DIR` the SDK gives it. The `user`
+source is opened the way proof 22 did it, except in `real-closed`.
+
+Each serve runs these turns:
+
+1. A no-tool turn.
+2. A 30 s idle wait, so the housekeeping runs.
+3. `/p26-seed`.
+4. One Bash command of probes. It prints `HOME` and git's config origins and
+   identity inside this worktree, without values. It prints `gh auth status`'s
+   exit code, npm's userconfig path and whether that file exists, and
+   `ssh -G`'s identity files.
+5. Read and Write of `~/.local/state/tower-claude-code-harness/p26-probe/...`.
+   The same file sits in both homes with different markers.
+6. The stdio MCP server `proofs/home-mcp.mjs`, which reports its `HOME`.
+
+The resumed serve stops after the Bash probe. The agent dir's `settings.json`
+has a hook that logs the `HOME` it ran with.
+
+`sh proofs/home-run.sh <model> <option>` runs one option under
+`strace -f -y -ttt -s 0 -e trace=%file,%process,bind,connect`, which records
+paths and never contents. It then reads the trace:
+
+- `proofs/home-trace.mts` lists every access outside the run's own
+  directories. It covers the real home, `/run/user/<uid>`, `/tmp` and the
+  private HOME, labelled by process and by phase.
+- `proofs/home-trace-brief.py` condenses that listing.
+- `proofs/home-trace-machinery.py` keeps Claude Code's own accesses and every
+  write.
+
+Everything lands in `runs/<stamp>-p26-<option>/`.
+
+HOME is set through `options.env`. The harness forces
+`CLAUDE_SECURESTORAGE_CONFIG_DIR=""`, so the absolute value is set in the spawn
+hook, which is proof code. Options that keep the real HOME with the `user`
+source open run Claude Code inside bwrap with read-only binds of the real
+paths the housekeeping prunes: `~/.claude/bridge-spawn`, `~/.claude/state`,
+`~/.claude.json`, `~/.cache/claude`, `~/.cache/claude-cli-nodejs`,
+`~/.local/share/claude` and `~/.local/state/claude`. This is the test's
+guard: a delete there fails with `EROFS` and shows in the trace. `~/.claude`
+itself is not guarded, because the login and its refresh lock live there.
+
+Options:
+
+| Option | What |
+| --- | --- |
+| `real-closed` | reference: the harness today (real HOME, user closed) |
+| `real-open` | real HOME, user open, nothing switched off |
+| `real-open-env` | + `DISABLE_AUTOUPDATER=1`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`, `XDG_DATA_HOME`, `CLAUDE_CODE_TMPDIR`, `XDG_RUNTIME_DIR` to private dirs |
+| `real-open-cleanup0` | + flag setting `cleanupPeriodDays: 0` |
+| `real-open-all` | both of the above |
+| `real-open-mask` | bwrap binds private dirs over the housekeeping paths |
+| `private-bare` | private HOME, `CLAUDE_SECURESTORAGE_CONFIG_DIR=$REAL_HOME/.claude` |
+| `private-empty-secure` | private HOME with the harness's `""` (control) |
+| `private-prefix-only` | private-bare + `CLAUDE_CODE_SHELL_PREFIX=proofs/home-shell-prefix.sh` (runs `HOME=<real> bash -c "$1"`) |
+| `private-prefix` | + the MCP config's `env` sets `HOME` too |
+| `private-links` | private-bare + links to the real `.gitconfig`, `.config/gh`, `.ssh`, `.npmrc` |
+| `private-full` | private-prefix-only + `CLAUDE_CODE_TMPDIR`, `XDG_RUNTIME_DIR` to private dirs |
+
+Which dotfiles a private HOME links back is undecided (TODO in the file). The
+private HOME is fresh per proof run and kept under
+`~/.local/state/tower-claude-code-harness/p26/`. Whether a participant's is
+per agent and reused is undecided.
+
+### What the runs showed (Claude Code 2.1.282, SDK 0.3.282, claude-sonnet-5, 27 Sep)
+
+**Every option.**
+- The login worked, except in `private-empty-secure` ("Not logged in").
+- The only access to the credentials file was an `O_RDONLY` open of
+  `~/.claude/.credentials.json`.
+- No token refresh happened, so there was no lock and no write. From the
+  code, the refresh lock is `<secure-storage dir>/.oauth_refresh.lock`, beside
+  the file. The secure-storage dir is `$HOME/.claude` for `""` and the path
+  itself when absolute.
+- No `.credentials.json` appeared in the agent dir, the fixtures or any resume
+  dir.
+- Plain-named `/p26-seed` ran fresh and resumed in every option with the user
+  source open. With it closed, it was "not installed".
+
+**Real HOME with the user source closed** (the harness today):
+- Writes MCP logs to `~/.cache/claude-cli-nodejs/<project>/`.
+- The updater housekeeping reads `~/.local/share/claude/versions` and
+  `~/.local/state/claude/locks`, and stats `~/.cache/claude/staging`.
+- Reads `~/.gitconfig`, `~/.config/git/ignore`, `~/.config/anthropic/*` and
+  `~/.claude/state/unattended-serving-consent.json`.
+- Binds a socket in `/run/user/<uid>/cc-socks/`.
+
+**Real HOME with the user source open** also:
+- lists the real `~/.claude/bridge-spawn`. The code has a literal 1-day sweep
+  there, rooted at `homedir()`.
+- opens `~/.claude/state/served-calls`.
+- reads and tries to unlink `~/.claude/state/settings-review.json`. It was
+  absent, and the guard made the unlink `EROFS`.
+- walks every project's folder under the shared `/tmp/claude-1000/`, about 70
+  of them, for `<session>/images`.
+
+Nothing in the real home was changed.
+
+**The option 1 switches:**
+- `real-open-env`: the MCP logs, the updater paths and `/tmp/claude-1000` move
+  away. `cc-socks` goes to `/tmp/cc-socks-<uid>`, not to the private
+  `XDG_RUNTIME_DIR`. The bridge-spawn, served-calls and settings-review
+  accesses stay.
+- `real-open-cleanup0`: those three stop. The debug log says "Skipping
+  cleanup: settings have validation errors but cleanupPeriodDays was
+  explicitly set": `0` is invalid (the docs say so), and the invalid settings
+  are what skip the cleanup. In that run the claude.ai plugin sync wrote no
+  `plugins/synced/`. Hooks still ran and transcripts were still written.
+- `real-open-all`: nothing written to or deleted from the real home. Still
+  there: the reads above, the Read and Write tools' stat of
+  `~/.claude/state/settings-review.json`, and `/tmp/cc-socks-<uid>`.
+- `real-open-mask`: the housekeeping lands in the mask dirs. `/tmp/claude-1000`
+  and `/run/user/<uid>/cc-socks` are untouched by the mask. The 3-day-old
+  entries planted in the masks were not deleted, so there is no positive
+  deletion control. The listing is the evidence the cleanup ran.
+
+**Private HOME** (`private-*`):
+- The real home is reached only by the credentials read and by PATH lookups.
+- The housekeeping lands in the private HOME: bridge-spawn, served-calls,
+  settings-review, the updater dirs, `.cache/claude-cli-nodejs` and
+  `.config/anthropic`.
+- The CLAUDE.md-style ancestor walk no longer stops at the real home. It
+  stats the real `~/.claude/{skills,agents,commands,workflows,output-styles}`
+  as a project `.claude`. That is stat only; nothing was opened, and the
+  project source was closed.
+- `/tmp/claude-1000` and `cc-socks` stay shared unless moved (`private-full`).
+
+**Commands under a private HOME:**
+- Bash, hooks and the MCP server see the private HOME. The git identity fails
+  (exit 128), `gh auth status` fails, and npm's userconfig points at the
+  private HOME.
+- ssh is unaffected: it opened the real `~/.ssh/config`, taking home from the
+  passwd entry.
+- The shell snapshot sources no rc files. With the real HOME it sources
+  `~/.profile` and `~/.bashrc`.
+- `CLAUDE_CODE_SHELL_PREFIX` puts the real HOME back for Bash, hooks and
+  stdio MCP start-up (its log shows each). git, gh and npm then work. It does
+  not wrap the snapshot shell.
+- Read and Write resolve `~` to the private HOME in every private option.
+- Links to the dotfiles fix gh and npm but not the git identity: its includes
+  resolve under the private HOME.
+- Commands inherit whatever switches an option sets. In `real-open-all` the
+  Bash probe printed the private `XDG_CACHE_HOME`, `XDG_STATE_HOME`,
+  `XDG_DATA_HOME`, `XDG_RUNTIME_DIR` and `CLAUDE_CODE_TMPDIR`, and
+  `DISABLE_AUTOUPDATER=1`. In `private-full` it printed `CLAUDE_CODE_TMPDIR`
+  and `XDG_RUNTIME_DIR`. The prefix restores only `HOME`. git, gh and npm
+  still worked in both.
+- Code quotes behind the above (secure-storage dir, credential file, refresh
+  and write locks, the bridge-spawn sweep, the `cleanupPeriodDays` cutoff, and
+  the SDK's Keychain naming and store-resume copy) are collected, verbatim with
+  offsets, in `runs/p26-code-evidence.txt`.
