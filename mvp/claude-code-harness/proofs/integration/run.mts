@@ -40,7 +40,7 @@ import { type PublishedLine } from './committer.mts';
 import { type Cell, cells, type CheckRow, Evidence, printRow, PROBE, resetAgent, short, specFor, WARM } from './common.mts';
 import { chainGaps, forks, heldOnTower, liveVsOffline, lostFromTower, messagesVs, noResponseOnTower, probeRequest, resumeVerdict, towerVsRequest, unclosedAsOf } from './checks.mts';
 import { Participant } from './driver.mts';
-import { CONFIG_DIRS_ROOT, clean, gone, HARNESS_STATE, HERE, INTEGRATION_STATE, iso, type Json, PACKAGE_ROOT, procStat, readJsonl, sleep } from './lib.mts';
+import { AGENT_PREFIX, CONFIG_DIRS_ROOT, clean, gone, HARNESS_STATE, HERE, INTEGRATION_STATE, iso, type Json, PACKAGE_ROOT, procStat, readJsonl, sleep } from './lib.mts';
 import { entryId, Lineage } from './lineage.mts';
 import { recordedResumeDirs, transcripts, union } from './recover.mts';
 
@@ -69,6 +69,11 @@ function parse(argv: string[]): Args {
     else if (k === '--no-prime') a.prime = false;
     else if (k === '--variant') a.variants = String(argv[++i]).split(',').filter(Boolean);
     else throw new Error(`unknown argument ${k}`);
+  }
+  // Every agent name a run uses derives from --agent: refused unless it
+  // carries this attempt's prefix (lib.mts AGENT_PREFIX).
+  if (a.agent !== undefined && !a.agent.startsWith(`${AGENT_PREFIX}-`)) {
+    throw new Error(`--agent ${a.agent}: must start with ${AGENT_PREFIX}- (this attempt's agent names)`);
   }
   return a;
 }
@@ -194,7 +199,7 @@ async function prime(a: Args, agent: string, ev: Evidence): Promise<void> {
 // smoke
 
 async function smoke(a: Args): Promise<CheckRow[]> {
-  const agent = a.agent ?? `int-${short(a.model)}-smoke`;
+  const agent = a.agent ?? `${AGENT_PREFIX}-${short(a.model)}-smoke`;
   const ev = new Evidence(`${short(a.model)}-smoke`);
   useLog(ev);
   if (a.reset) resetAgent(agent, log);
@@ -373,7 +378,7 @@ async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string
 }
 
 async function matrix(a: Args): Promise<CheckRow[]> {
-  const agent = a.agent ?? `int-${short(a.model)}-m`;
+  const agent = a.agent ?? `${AGENT_PREFIX}-${short(a.model)}-m`;
   const towerAgent = `${agent}-t`;
   const root = new Evidence(`${short(a.model)}-matrix`);
   useLog(root);
@@ -453,7 +458,7 @@ async function killAtTool(p: Participant, conv: string): Promise<void> {
 }
 
 async function killed(a: Args): Promise<CheckRow[]> {
-  const agent = a.agent ?? `int-${short(a.model)}-k`;
+  const agent = a.agent ?? `${AGENT_PREFIX}-${short(a.model)}-k`;
   const creator = `${agent}-o`;
   const root = new Evidence(`${short(a.model)}-killed`);
   useLog(root);
@@ -542,7 +547,7 @@ async function killed(a: Args): Promise<CheckRow[]> {
 // tower moved on
 
 async function movedOn(a: Args): Promise<CheckRow[]> {
-  const base = a.agent ?? `int-${short(a.model)}-mo`;
+  const base = a.agent ?? `${AGENT_PREFIX}-${short(a.model)}-mo`;
   const root = new Evidence(`${short(a.model)}-moved-on`);
   useLog(root);
   const rows: CheckRow[] = [];
@@ -692,7 +697,7 @@ async function movedOnCell(a: Args, cell: string, agent: string, root0: Evidence
 // restart of a conversation first resumed from tower here
 
 async function origins(a: Args): Promise<CheckRow[]> {
-  const agent = a.agent ?? `int-${short(a.model)}-or`;
+  const agent = a.agent ?? `${AGENT_PREFIX}-${short(a.model)}-or`;
   const creator = `${agent}-o`;
   const root = new Evidence(`${short(a.model)}-origins`);
   useLog(root);
@@ -780,7 +785,7 @@ function skillView(lineage: string): Json {
 }
 
 async function skills(a: Args): Promise<CheckRow[]> {
-  const agent = a.agent ?? `int-${short(a.model)}-sk`;
+  const agent = a.agent ?? `${AGENT_PREFIX}-${short(a.model)}-sk`;
   const plain = `${agent}-plain`;
   const second = `${agent}-2`;
   const root = new Evidence(`${short(a.model)}-skills`);
@@ -875,7 +880,7 @@ async function skills(a: Args): Promise<CheckRow[]> {
 // two participants at once
 
 async function two(a: Args): Promise<CheckRow[]> {
-  const base = a.agent ?? `int-${short(a.model)}-two`;
+  const base = a.agent ?? `${AGENT_PREFIX}-${short(a.model)}-two`;
   const root = new Evidence(`${short(a.model)}-two`);
   useLog(root);
   const rows: CheckRow[] = [];
@@ -1015,7 +1020,7 @@ async function twoKill(a: Args, base: string, root0: Evidence): Promise<CheckRow
 // the home trace
 
 async function home(a: Args): Promise<CheckRow[]> {
-  const agent = a.agent ?? `int-${short(a.model)}-home`;
+  const agent = a.agent ?? `${AGENT_PREFIX}-${short(a.model)}-home`;
   const root = new Evidence(`${short(a.model)}-home`);
   useLog(root);
   if (a.reset) resetAgent(agent, log);
@@ -1079,7 +1084,7 @@ async function home(a: Args): Promise<CheckRow[]> {
 // participant must mint that turn's queryId (design record, 26 Sep), and the
 // driver must not take its result for the next say's.
 async function selfturn(a: Args): Promise<CheckRow[]> {
-  const agent = a.agent ?? `int-${short(a.model)}-self`;
+  const agent = a.agent ?? `${AGENT_PREFIX}-${short(a.model)}-self`;
   const root = new Evidence(`${short(a.model)}-selfturn`);
   useLog(root);
   if (a.reset) resetAgent(agent, log);

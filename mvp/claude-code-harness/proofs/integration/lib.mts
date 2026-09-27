@@ -33,7 +33,14 @@ export const CONFIG_DIRS_ROOT = join(HARNESS_STATE, 'config-dirs');
 // outside the private temp HOME (which is per process). The alternatives are
 // one body dir per agent (Claude Code's index.jsonl carries session_id) or
 // one per process under the conversation.
-export const INTEGRATION_STATE = join(HARNESS_STATE, 'integration');
+//
+// The third integration attempt keeps its own state dir and its own agent-name
+// prefix, apart from the first attempt's `integration/` and `int-` names: the
+// leftover stop acts on Claude Codes tagged TOWER_AGENT=<agent>, and recovery
+// reads an agent's records, so a reused name could act on or recover from an
+// earlier attempt's leftovers, and earlier lineages would mix into this one's.
+export const INTEGRATION_STATE = join(HARNESS_STATE, 'integration-3');
+export const AGENT_PREFIX = 'i3';
 // The login, pointed back from a private HOME: an absolute path to the real
 // ~/.claude. Built as a string only; this proof never opens, stats or lists
 // anything under it.

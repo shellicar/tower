@@ -5,7 +5,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { clean, fileStamp, iso, type Json, type Known, PACKAGE_ROOT, RUNS } from './lib.mts';
+import { AGENT_PREFIX, clean, fileStamp, iso, type Json, type Known, PACKAGE_ROOT, RUNS } from './lib.mts';
 import type { Spec } from './participant.mts';
 
 // TODO: undecided. The declared values (design.md, Undecided: values): each
@@ -108,7 +108,7 @@ export function resetAgent(agent: string, log: (s: string) => void): void {
 export class Evidence {
   readonly dir: string;
   constructor(label: string) {
-    this.dir = join(RUNS, `int-${fileStamp()}-${label}`);
+    this.dir = join(RUNS, `${AGENT_PREFIX}-${fileStamp()}-${label}`);
     mkdirSync(this.dir, { recursive: true });
   }
   path(...p: string[]): string {
