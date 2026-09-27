@@ -421,6 +421,8 @@ const BASH_PROBE = [
   'u=$(npm config get userconfig 2>/dev/null); echo "npm-userconfig=$u"; test -f "$u" && echo "npm-userconfig-exists=yes" || echo "npm-userconfig-exists=no"',
   'ssh -G github.com 2>/dev/null | grep -i "^identityfile" | head -3',
   'echo "PATH-has-fnm=$(echo "$PATH" | grep -c fnm)"; command -v node || echo "node: not found"',
+  // What an option's switches leak into commands: path variables only.
+  'env | grep -E "^(XDG_[A-Z_]+|CLAUDE_CODE_TMPDIR|TMPDIR|DISABLE_AUTOUPDATER)=" | sort',
 ].join('; ');
 
 function bashTurn(s: Serve): Promise<string> {
