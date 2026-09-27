@@ -125,6 +125,7 @@ function pathsOf(l: string): string[] {
 type Row = { bucket: string; who: string; phase: string; call: string; path: string; flags: string; result: string };
 const rows = new Map<string, { row: Row; n: number }>();
 const own = new Map<string, number>();
+let pathSearches = 0;
 // Collapse numbers that change per run (pids, session ids, timestamps) so
 // the same access in two runs reads as one line.
 function norm(p: string): string {
@@ -140,6 +141,12 @@ for (const l of lines) {
   if (call === 'execve' || call === 'clone' || call === 'clone3' || call === 'exit_group' || call === 'wait4') continue;
   const tid = Number(m[1]);
   for (const p of pathsOf(l)) {
+    // A PATH search (stat or access of <dir>/bin/<name>, or fnm's per-shell
+    // bin dirs) is counted, not listed.
+    if (/^(stat|newfstatat|statx|access|faccessat2?|lstat|readlink)$/.test(call) && (/\/bin\/[^/]+$/.test(p) || p.includes('/fnm_multishells'))) {
+      pathSearches += 1;
+      continue;
+    }
     const b = bucket(p);
     if (!b) {
       if (ownDirs.some((d) => p.startsWith(d)) || p.startsWith('/tmp/claude-resume-')) own.set(label(tid), (own.get(label(tid)) ?? 0) + 1);
@@ -171,6 +178,7 @@ for (const [b, es] of [...byBucket].sort()) {
   }
   out.push('');
 }
+out.push(`== PATH searches (counted, not listed): ${pathSearches}`);
 out.push('== own dirs (accesses counted by process)');
 for (const [w, n] of own) out.push(`  [${w}] ${n}`);
 process.stdout.write(`${out.join('\n')}\n`);
