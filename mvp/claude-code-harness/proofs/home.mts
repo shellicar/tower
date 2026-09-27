@@ -39,6 +39,8 @@ import { type HarnessOptions, startRun } from '../src/harness.mts';
 import { redact, stamp } from '../src/record.mts';
 
 const REAL_HOME = homedir();
+// A repo for the git identity probe: this worktree.
+const REPO = fileURLToPath(new URL('../../..', import.meta.url)).replace(/\/$/, '');
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = join(HERE, '..');
 const STATE_ROOT = join(REAL_HOME, '.local', 'state', 'tower-claude-code-harness');
@@ -313,7 +315,7 @@ function startServe(tag: string, resume?: string): Serve {
         type: 'stdio',
         command: process.execPath,
         args: [join(HERE, 'home-mcp.mjs'), MCP_LOG],
-        env: { P26_TAG: tag, ...(opt.mcpHome === 'real' ? { HOME: REAL_HOME } : {}) },
+        env: { P26_TAG: tag, P26_REPO: REPO, ...(opt.mcpHome === 'real' ? { HOME: REAL_HOME } : {}) },
       },
     },
     canUseTool: async (toolName, input) => {
@@ -379,7 +381,10 @@ function turn(s: Serve, what: string, prompt: string): Promise<string> {
 const BASH_PROBE = [
   'echo "HOME=$HOME"',
   'echo "tilde=$(cd ~ && pwd)"',
-  'git config --global --show-origin --get user.name || echo "git-user-name: none"',
+  // Stephen's identity comes through include/includeIf for repo paths, so
+  // it is asked inside a repo (this worktree, read only); origins only.
+  `git -C ${REPO} config --show-origin --get-regexp '^(user\\.|includeif\\.|include\\.)' | cut -f1 | sort | uniq -c`,
+  `git -C ${REPO} var GIT_AUTHOR_IDENT >/dev/null 2>&1; echo "git-ident-in-repo-exit=$?"`,
   'gh auth status >/dev/null 2>&1; echo "gh-auth-status-exit=$?"',
   'u=$(npm config get userconfig 2>/dev/null); echo "npm-userconfig=$u"; test -f "$u" && echo "npm-userconfig-exists=yes" || echo "npm-userconfig-exists=no"',
   'ssh -G github.com 2>/dev/null | grep -i "^identityfile" | head -3',

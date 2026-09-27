@@ -13,14 +13,18 @@ import { createInterface } from 'node:readline';
 const logFile = process.argv[2];
 
 function facts() {
-  const git = spawnSync('git', ['config', '--global', '--get', 'user.name'], { encoding: 'utf8' });
+  // Inside a repo (P26_REPO), since the identity comes through includeIf.
+  const repo = process.env.P26_REPO ?? '.';
+  const ident = spawnSync('git', ['-C', repo, 'var', 'GIT_AUTHOR_IDENT'], { encoding: 'utf8' });
+  const origins = spawnSync('git', ['-C', repo, 'config', '--show-origin', '--get-regexp', '^(user\\.|includeif\\.|include\\.)'], { encoding: 'utf8' });
   return {
     tag: process.env.P26_TAG ?? null,
     HOME: process.env.HOME ?? null,
     homedir: homedir(),
     passwdHome: userInfo().homedir,
     uid: process.getuid?.() ?? null,
-    gitGlobalUserNameFound: git.status === 0 && git.stdout.trim() !== '',
+    gitIdentInRepoExit: ident.status,
+    gitConfigOrigins: [...new Set(origins.stdout.split('\n').filter(Boolean).map((l) => l.split('\t')[0]))],
   };
 }
 
