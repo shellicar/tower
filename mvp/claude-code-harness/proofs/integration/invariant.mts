@@ -32,14 +32,19 @@
 //   commit/own    every assistant piece: tower up to and including it must
 //                 be a prefix of the history of the request that got that
 //                 response plus the response's content (the question the
-//                 reply answers must be on tower when the reply is).
+//                 reply answers must be on tower when the reply is). It can
+//                 fail a commit but never pass one on its own: with no later
+//                 request, nothing confirms Claude Code kept the reply.
 //   quiet         after every query end, up to the next say, request or
 //                 pickup (a point where nothing is in flight; a pickup's
 //                 point is tower up to the seq it read): tower must be the
 //                 whole conversation, so the next request from a Claude Code
 //                 that holds the conversation independently of tower (the
 //                 same live Claude Code, or one resumed from its own local
-//                 record) must be tower plus only new input.
+//                 record) must be tower plus only new input. Also at every
+//                 quiet point and pickup: every user-side entry the Claude
+//                 Code tower was following wrote before it (from its store
+//                 appends) must be on tower; one that isn't is a hold.
 //   request       every main request from a live Claude Code: by the end of
 //                 the run its history must be on tower (a prefix of what
 //                 tower ends with), unless a later request from the same
@@ -83,13 +88,18 @@
 //   - Which process sent a request: the lineage's latest serve event at or
 //     before the request file's mtime. A dry local check's copied bodies
 //     (the same file name in the lineage it was copied from) are skipped.
-//   - New input at a quiet point: a block of the truth request beyond tower
-//     is new if Claude Code wrote an entry carrying it after the point (a
-//     store append after the query end, in the truth process's lineage:
-//     tool_result by tool_use_id, text by its text); old (so missing from
-//     tower) if only entries at or before the point carry it, or if it is
-//     the model's own output; unplaced (the point is UNCHECKED for it) if no
-//     entry carries it.
+//   - New input at a quiet point, for each atom of the truth request beyond
+//     tower: new if it is the say's prompt or comes after it (Claude Code
+//     appends new input at the end), or if Claude Code wrote an entry
+//     carrying it at or after the say's instant (tool_result by tool_use_id,
+//     text by its text); old, so missing from tower, if it is the model's own
+//     output, a tool_result answering a tool_use tower already holds, or
+//     carried only by entries written before the say; unplaced (the point is
+//     UNCHECKED for it) if no entry carries it. The say, not the query end,
+//     is the boundary: a store append can land a second or more after the
+//     query ended.
+//   - Holds: every user-type entry Claude Code writes is taken to be one it
+//     sends (see holdJudgment).
 //   - Process stop is not a point of its own: every stop in these scenarios
 //     follows a query end with nothing between, so the query end's point
 //     stands for it; a SIGKILL mid-query has no quiet point (its next point is
@@ -577,6 +587,8 @@ export interface Judgment {
   missing?: string[];
   unplaced?: string[];
   roundTrip?: boolean;
+  // No later request confirms Claude Code kept what this judgment passes.
+  unconfirmed?: boolean;
   // The verdict with shape-only divergences set aside (see contentOf).
   contentVerdict?: Verdict;
 }
@@ -595,6 +607,9 @@ export interface Point {
 // received it"); the content verdict sets it aside, so a content divergence
 // can't hide among shape ones.
 function contentOf(j: Judgment): Verdict {
+  if (j.unconfirmed && (j.verdict === 'PASS' || (j.verdict === 'FAIL' && j.divergence?.kind === 'shape only' && !j.missing?.length))) {
+    return 'UNCHECKED';
+  }
   if (j.verdict === 'FAIL' && j.divergence?.kind === 'shape only' && !j.missing?.length) {
     return j.unplaced?.length ? 'UNCHECKED' : j.roundTrip ? 'ROUND-TRIP' : 'PASS';
   }
@@ -668,7 +683,7 @@ function carries(e: Json, a: Atom): boolean {
 }
 
 // The truth request's blocks beyond tower, sorted into new input and old.
-function sortRemainder(lin: Lin, rem: Prefix['remainder'], pointMs: number, reqMs: number): { newInput: string[]; missing: string[]; unplaced: string[] } {
+function sortRemainder(lin: Lin, rem: Prefix['remainder'], pointMs: number, reqMs: number, towerAtoms: Atom[]): { newInput: string[]; missing: string[]; unplaced: string[] } {
   const out = { newInput: [] as string[], missing: [] as string[], unplaced: [] as string[] };
   // The say that started this request (the latest say in its lineage between
   // the point and the request): Claude Code appends new input at the end, so
@@ -681,7 +696,16 @@ function sortRemainder(lin: Lin, rem: Prefix['remainder'], pointMs: number, reqM
       if (a.role === 'user' && a.text === sayText) from = i;
     });
   }
+  // Old versus new by the say's instant, not the point's: a store append
+  // can land a second or more after the query ended (auto mode), and nothing
+  // written before the say is its input.
+  const boundary = say ? Number(say.ms) : pointMs;
+  const onTowerToolUse = new Set(towerAtoms.filter((a) => a.key.startsWith('tool_use:')).map((a) => a.key.split(':')[1]));
   for (const [i, r] of rem.entries()) {
+    if (r.key.startsWith('tool_result:') && onTowerToolUse.has(r.key.split(':')[1]) && i < from) {
+      out.missing.push(`${r.role} ${r.show} (answers a tool_use tower already holds, so it can't be new input)`);
+      continue;
+    }
     if (i >= from) {
       out.newInput.push(`${r.role} ${r.show}${i === from ? ' (the say\'s prompt)' : ' (after the say\'s prompt)'}`);
       continue;
@@ -692,10 +716,10 @@ function sortRemainder(lin: Lin, rem: Prefix['remainder'], pointMs: number, reqM
       continue;
     }
     const hits = lin.appends.filter((a) => a.ms <= reqMs && carries(a.entry, r));
-    if (hits.some((a) => a.ms > pointMs)) {
+    if (hits.some((a) => a.ms >= boundary)) {
       out.newInput.push(d);
     } else if (hits.length > 0) {
-      out.missing.push(`${d} (written ${new Date(Math.min(...hits.map((a) => a.ms))).toISOString()}, entry ${String(hits[0]?.entry.uuid ?? '-').slice(0, 8)}, before the point)`);
+      out.missing.push(`${d} (written ${new Date(Math.min(...hits.map((a) => a.ms))).toISOString()}, entry ${String(hits[0]?.entry.uuid ?? '-').slice(0, 8)}, before the say that started this request)`);
     } else {
       out.unplaced.push(d);
     }
@@ -800,6 +824,16 @@ export function judge(ev: Evidence, tower: TowerMsg[]): Report {
             j.why = `tower holds this reply piece but not the message it answers: ${lacking.length} of its atom(s) are not on tower before it${j.divergence ? `; and ${kindOfDiv(j.divergence)}` : ''}`;
           }
         }
+        if (!next) {
+          // The own request is a truth for what came before the reply, not
+          // for whether Claude Code kept the reply: with no later request it
+          // can fail the point but never pass it.
+          j.unconfirmed = true;
+          if (j.verdict === 'PASS') {
+            j.verdict = 'UNCHECKED';
+            j.why = 'the message this reply answers is on tower, but no later request confirms Claude Code kept the reply';
+          }
+        }
         js.push(j);
       }
     }
@@ -831,6 +865,8 @@ export function judge(ev: Evidence, tower: TowerMsg[]): Report {
     const seq = tower[n - 1]?.seq ?? 0;
     const pickup = livePickups.find((p) => p.serveMs === closeMs);
     const js = quietJudgments(ev, T, seq, q.ms, q.proc, liveReqs);
+    const hold = holdJudgment(ev, q.proc, T, closeMs, upTo(tower.length));
+    if (hold) js.push(hold);
     push({ kind: 'quiet', label: `query end ${new Date(q.ms).toISOString()} (${q.proc.key}, ${String(q.e.subtype)}/${String(q.e.reason)}); tower through seq ${seq}${pickup ? `; closes at ${pickup.key}'s pickup` : ''}`, towerUpTo: seq, towerCount: n, judgments: js });
   }
   // Pickups from tower: tower as that process read it, against the Claude
@@ -852,6 +888,10 @@ export function judge(ev: Evidence, tower: TowerMsg[]): Report {
       } else {
         js.push({ truth: 'the Claude Code tower followed before', verdict: 'UNCHECKED', why: `${prev.proc.key} sent no request after this point and no restart of it from its own record did: its conversation at the pickup is not known from what the model received` });
       }
+    }
+    if (prev) {
+      const hold = holdJudgment(ev, prev.proc, T, p.serveMs, upTo(tower.length));
+      if (hold) js.push(hold);
     }
     const first = liveReqs.find((r) => r.proc === p);
     if (first) {
@@ -905,10 +945,10 @@ export function judge(ev: Evidence, tower: TowerMsg[]): Report {
   for (const lin of ev.lins) {
     for (const n of readJsonl(join(lin.dir, 'committer.jsonl'))) {
       if (['unanchored', 'order-warning', 'error', 'changed', 'late-insert'].includes(String(n.kind))) {
-        // A dry check resume's committer never publishes: its notes are
-        // reported, not counted (TODO: undecided, the check's own choice).
+        // A dry check resume's committer never publishes: its notes count
+        // as failures all the same, labelled as dry.
         if (lin.meta.origin === 'dry' || lin.procs.every((p) => p.dry)) {
-          push({ kind: 'admission', label: `${lin.agent}/${basename(lin.dir)} (dry, never published) committer ${String(n.kind)}`, towerUpTo: null, towerCount: 0, judgments: [{ truth: 'the committer\'s own note', verdict: 'UNCHECKED', why: `dry: ${JSON.stringify({ ...n, ts: undefined, ms: undefined }).slice(0, 400)}` }] });
+          push({ kind: 'admission', label: `${lin.agent}/${basename(lin.dir)} (dry, never published) committer ${String(n.kind)}`, towerUpTo: null, towerCount: 0, judgments: [{ truth: 'the committer\'s own note', verdict: 'FAIL', why: `dry: ${JSON.stringify({ ...n, ts: undefined, ms: undefined }).slice(0, 400)}` }] });
           continue;
         }
         push({ kind: 'admission', label: `${lin.agent}/${basename(lin.dir)} committer ${String(n.kind)}`, towerUpTo: null, towerCount: 0, judgments: [{ truth: 'the committer\'s own note', verdict: 'FAIL', why: JSON.stringify({ ...n, ts: undefined, ms: undefined }).slice(0, 400) }] });
@@ -933,6 +973,44 @@ export function judge(ev: Evidence, tower: TowerMsg[]): Report {
     counts,
     contentCounts,
   };
+}
+
+// Holds: user-side entries the followed Claude Code wrote before the window
+// closed that tower doesn't carry by then. Found from its own store appends,
+// since the committer records no hold. Only failures are reported: finding
+// none shows nothing about what Claude Code builds on.
+//
+// TODO: undecided (the check's own assumption): every user-type entry Claude
+// Code writes (prompts, tool results, the interrupt marker, meta nudges) is
+// something it sends; a tool_result is carried when tower holds a tool_result
+// for the same tool_use_id, a text when tower holds the same text (a reminder
+// with or without its wrapper).
+function holdJudgment(ev: Evidence, proc: Proc, T: Msg[], closeMs: number, towerLater: Msg[]): Judgment | undefined {
+  const lin = ev.lins.find((l) => l.dir === proc.lineage);
+  if (!lin) return undefined;
+  const ta = atoms(T);
+  const later = atoms(towerLater);
+  // A tool_result is carried only as written (same id, same content).
+  const carried = (xs: Atom[], kind: 'result' | 'text', v: string): boolean => xs.some((a) => (kind === 'result' ? a.key === v : a.text === v || a.text === `<system-reminder>\n${v}\n</system-reminder>`));
+  const sameId = (xs: Atom[], id: string): boolean => xs.some((a) => a.key.startsWith(`tool_result:${id}:`));
+  const held: string[] = [];
+  for (const a of lin.appends) {
+    const e = a.entry;
+    if (a.how === 'seed' || a.ms < proc.serveMs || a.ms >= closeMs || e.type !== 'user' || e.isSidechain === true) continue;
+    for (const b of listOf((e.message as Json | undefined)?.content)) {
+      const parts: ['result' | 'text', string][] = b.type === 'tool_result' ? [['result', blk(b).nl]] : b.type === 'text' ? segments(String(b.text ?? '')).map((x) => ['text', x] as ['text', string]) : [];
+      for (const [kind, v] of parts) {
+        if (!carried(ta, kind, v)) {
+          const id = String(b.tool_use_id);
+          const what = kind === 'result' ? blk(b).show : `text ${cut(v)}`;
+          const after = carried(later, kind, v) ? '; on tower later' : kind === 'result' && sameId(later, id) ? '; tower later holds a different tool_result for this tool_use' : '; never on tower';
+          held.push(`user ${what} (entry ${String(e.uuid).slice(0, 8)}, written ${new Date(a.ms).toISOString()}${after})`);
+        }
+      }
+    }
+  }
+  if (held.length === 0) return undefined;
+  return { truth: `what ${proc.key} wrote`, sender: procDesc(proc), verdict: 'FAIL', why: `${held.length} user-side part(s) ${proc.key} wrote before this point are not on tower: held, not committed`, missing: held };
 }
 
 // A quiet point: tower should be the whole conversation. Truths, in order of
@@ -960,7 +1038,7 @@ function quietJudgments(ev: Evidence, T: Msg[], seq: number, pointMs: number, pr
       js.push({ truth: label, request: reqName(r), sender: procDesc(r.proc), verdict: 'FAIL', why: `tower is not the start of what Claude Code built its next query on: ${kindOfDiv(p.divergence)}`, divergence: p.divergence });
       continue;
     }
-    const s = sortRemainder(lin, p.remainder, pointMs, r.ms);
+    const s = sortRemainder(lin, p.remainder, pointMs, r.ms, atoms(T));
     const base = { truth: label, request: reqName(r), sender: procDesc(r.proc), newInput: s.newInput, missing: s.missing, unplaced: s.unplaced };
     const shapeNote = p.ok ? '' : ` (and differs in shape: ${kindOfDiv(p.divergence)})`;
     if (s.missing.length > 0) {
