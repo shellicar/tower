@@ -124,11 +124,35 @@ for (const logPath of logs) {
     const pid = Number(t.pid);
     ground.set(pid, { pid, role: String(t.role), cmd: String(t.cmd).slice(0, 40), starttime: t.starttime ? Number(t.starttime) : null, exitT: exitOf(pid) ?? (t.goneAt ? ms(t.goneAt) : null), how: exitOf(pid) !== null ? 'trace' : 'driver' });
   }
+  // A pid only the guard samples saw is the old tree's when its parent is (as
+  // recorded), or, with no parent recorded, when it started before the first
+  // Claude Code of serve 2 or 3.
+  const laterStart = Math.min(...[...((s2state.convs as Json[]) ?? []), ...((s3state?.convs as Json[]) ?? [])].map((c) => Number(c.claudeStarttime)).filter((n) => n > 0));
+  const guardOnly = new Map<number, { st: number | null; ppid: number | null }>();
   for (const sm of samples) {
-    for (const [pid, , st] of sm.tagFound as [number, string, string?][]) {
-      if (!ground.has(pid) && !laterClaudes.has(pid)) {
-        ground.set(pid, { pid, role: 'tagged (seen by the guard samples only)', cmd: '', starttime: st ? Number(st) : null, exitT: exitOf(pid), how: exitOf(pid) !== null ? 'trace' : 'none' });
+    for (const [pid, , st, ppid] of sm.tagFound as [number, string, string?, number?][]) {
+      if (!guardOnly.has(pid)) {
+        guardOnly.set(pid, { st: st ? Number(st) : null, ppid: ppid ?? null });
       }
+    }
+  }
+  const unattributed: number[] = [];
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const [pid, g] of guardOnly) {
+      if (ground.has(pid) || laterClaudes.has(pid)) {
+        continue;
+      }
+      const old = g.ppid !== null ? ground.has(g.ppid) : g.st !== null && g.st < laterStart;
+      if (old) {
+        ground.set(pid, { pid, role: 'tagged (seen by the guard samples only)', cmd: '', starttime: g.st, exitT: exitOf(pid) ?? null, how: exitOf(pid) !== null ? 'trace' : 'none' });
+        changed = true;
+      }
+    }
+  }
+  for (const pid of guardOnly.keys()) {
+    if (!ground.has(pid) && !laterClaudes.has(pid)) {
+      unattributed.push(pid);
     }
   }
   const lastExit = Math.max(...[...ground.values()].map((g) => g.exitT ?? 0));
@@ -162,11 +186,11 @@ for (const logPath of logs) {
     }
   }
   // Per scan: alive then (started before it, exited after it), and missed.
-  const scans: { at: number; ticks: number | null; found: number[] }[] = tagStop
-    ? (tagStop.rounds as Json[]).map((r) => ({ at: ms((r.scan as Json).at), ticks: ((r.scan as Json).uptimeTicks as number | undefined) ?? null, found: ((r.scan as Json).found as Json[]).map((p) => Number(p.pid)) }))
+  const scans: { at: number; ticks: number | null; found: number[]; empty: Json[] }[] = tagStop
+    ? (tagStop.rounds as Json[]).map((r) => ({ at: ms((r.scan as Json).at), ticks: ((r.scan as Json).uptimeTicks as number | undefined) ?? null, found: ((r.scan as Json).found as Json[]).map((p) => Number(p.pid)), empty: ((r.scan as Json).ownUidEmpty as Json[] | undefined) ?? [] }))
     : scanT === null
       ? []
-      : [{ at: scanT, ticks: null, found: foundPids }];
+      : [{ at: scanT, ticks: null, found: foundPids, empty: [] }];
   const startedBefore = (g: { starttime: number | null }, ticks: number | null): boolean | null => (ticks === null || g.starttime === null ? null : g.starttime < ticks ? true : g.starttime > ticks ? false : null);
   const perScan = scans.map((sc) => {
     const alive = [...ground.values()].filter((g) => (g.exitT === null || g.exitT > sc.at) && startedBefore(g, sc.ticks) !== false);
@@ -174,7 +198,7 @@ for (const logPath of logs) {
       atMsAfterDeath: sc.at - death,
       alive: alive.map((g) => g.pid),
       startedUnknown: alive.filter((g) => startedBefore(g, sc.ticks) === null).map((g) => g.pid),
-      missed: alive.filter((g) => !sc.found.includes(g.pid)).map((g) => ({ pid: g.pid, role: g.role, startedBefore: startedBefore(g, sc.ticks), exitMsAfterScan: g.exitT === null ? null : g.exitT - sc.at })),
+      missed: alive.filter((g) => !sc.found.includes(g.pid)).map((g) => ({ pid: g.pid, role: g.role, startedBefore: startedBefore(g, sc.ticks), exitMsAfterScan: g.exitT === null ? null : g.exitT - sc.at, exit: trace.find((x) => x.pid === g.pid && x.kind === 'exit')?.text ?? null, environReadEmpty: tagStop ? (sc.empty.find((e) => Number(e.pid) === g.pid) ?? false) : 'not recorded (pid-file stop)' })),
     };
   });
   const aliveAtScan = scanT === null ? [] : [...ground.values()].filter((g) => perScan[0]?.alive.includes(g.pid));
@@ -209,6 +233,7 @@ for (const logPath of logs) {
     aliveAtScan: aliveAtScan.map((g) => g.pid),
     perScan,
     missedAtScan,
+    unattributedGuardPids: unattributed,
     guardMisses,
     stopRounds,
     signalled,

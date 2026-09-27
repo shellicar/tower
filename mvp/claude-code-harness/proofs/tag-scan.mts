@@ -34,6 +34,9 @@ export interface TagScan {
   scanned: number;
   // Same-uid processes whose environ couldn't be read (anything but gone).
   ownUidUnreadable: { pid: number; cmd: string; code: string; state: string | null }[];
+  // Same-uid processes whose environ read empty (a process past releasing its
+  // memory on exit reads empty, as does a zombie), with state and parent.
+  ownUidEmpty: { pid: number; state: string | null; ppid: number | null }[];
   found: TaggedProc[];
   // Tagged, but the caller's own (a pid in `own` or a descendant of one).
   excluded: TaggedProc[];
@@ -113,6 +116,7 @@ export function scanTag(name: string, own: Set<number> = new Set()): TagScan {
   const found: TaggedProc[] = [];
   const excluded: TaggedProc[] = [];
   const ownUidUnreadable: TagScan['ownUidUnreadable'] = [];
+  const ownUidEmpty: TagScan['ownUidEmpty'] = [];
   let scanned = 0;
   for (const n of readdirSync('/proc')) {
     if (!/^\d+$/.test(n)) {
@@ -143,6 +147,13 @@ export function scanTag(name: string, own: Set<number> = new Set()): TagScan {
       } catch {}
     }
     scanned += 1;
+    if (buf.length === 0) {
+      const st = procStat(pid);
+      if (realUid(pid) === uid || st?.state === 'Z') {
+        ownUidEmpty.push({ pid, state: st?.state ?? null, ppid: st?.ppid ?? null });
+      }
+      continue;
+    }
     const { tagged, configDir } = readTag(buf, want);
     if (!tagged) {
       continue;
@@ -166,5 +177,5 @@ export function scanTag(name: string, own: Set<number> = new Set()): TagScan {
     const row: TaggedProc = { pid, starttime: st.starttime, ppid: st.ppid, state: st.state, cmd: cmdline(pid).slice(0, 100), configDir, pidFile, pidFileLive };
     (isOwn(pid, own) ? excluded : found).push(row);
   }
-  return { at, t, uptimeTicks, ms: Math.round((performance.now() - t0) * 10) / 10, scanned, ownUidUnreadable, found, excluded };
+  return { at, t, uptimeTicks, ms: Math.round((performance.now() - t0) * 10) / 10, scanned, ownUidUnreadable, ownUidEmpty, found, excluded };
 }
