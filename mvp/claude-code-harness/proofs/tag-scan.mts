@@ -37,6 +37,9 @@ export interface TagScan {
   // Same-uid processes whose environ read empty (a process past releasing its
   // memory on exit reads empty, as does a zombie), with state and parent.
   ownUidEmpty: { pid: number; state: string | null; ppid: number | null }[];
+  // Listed by readdir, then gone (ENOENT/ESRCH) before its environ was read:
+  // exited and reaped during the scan.
+  vanished: number[];
   found: TaggedProc[];
   // Tagged, but the caller's own (a pid in `own` or a descendant of one).
   excluded: TaggedProc[];
@@ -117,6 +120,7 @@ export function scanTag(name: string, own: Set<number> = new Set()): TagScan {
   const excluded: TaggedProc[] = [];
   const ownUidUnreadable: TagScan['ownUidUnreadable'] = [];
   const ownUidEmpty: TagScan['ownUidEmpty'] = [];
+  const vanished: number[] = [];
   let scanned = 0;
   for (const n of readdirSync('/proc')) {
     if (!/^\d+$/.test(n)) {
@@ -126,15 +130,38 @@ export function scanTag(name: string, own: Set<number> = new Set()): TagScan {
     if (pid === process.pid) {
       continue;
     }
-    let buf: Buffer;
+    let buf: Buffer | undefined;
     try {
       buf = readFileSync(`/proc/${pid}/environ`);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code ?? '?';
-      if (code !== 'ENOENT' && code !== 'ESRCH' && realUid(pid) === uid) {
-        ownUidUnreadable.push({ pid, cmd: cmdline(pid).slice(0, 80), code, state: procStat(pid)?.state ?? null });
+      if (code === 'ENOENT' || code === 'ESRCH') {
+        vanished.push(pid);
+        continue;
       }
-      continue;
+      // A thread-group leader past its own exit (a zombie leader, or one
+      // releasing its memory) reads EACCES while another thread may still
+      // run: read through each other thread before giving up.
+      try {
+        for (const tid of readdirSync(`/proc/${pid}/task`)) {
+          if (tid === String(pid)) {
+            continue;
+          }
+          try {
+            const b = readFileSync(`/proc/${pid}/task/${tid}/environ`);
+            if (b.length > 0) {
+              buf = b;
+              break;
+            }
+          } catch {}
+        }
+      } catch {}
+      if (buf === undefined) {
+        if (realUid(pid) === uid) {
+          ownUidUnreadable.push({ pid, cmd: cmdline(pid).slice(0, 80), code, state: procStat(pid)?.state ?? null });
+        }
+        continue;
+      }
     }
     // A zombie leader whose other threads still run reads empty; read
     // through one of those threads instead.
@@ -177,5 +204,5 @@ export function scanTag(name: string, own: Set<number> = new Set()): TagScan {
     const row: TaggedProc = { pid, starttime: st.starttime, ppid: st.ppid, state: st.state, cmd: cmdline(pid).slice(0, 100), configDir, pidFile, pidFileLive };
     (isOwn(pid, own) ? excluded : found).push(row);
   }
-  return { at, t, uptimeTicks, ms: Math.round((performance.now() - t0) * 10) / 10, scanned, ownUidUnreadable, ownUidEmpty, found, excluded };
+  return { at, t, uptimeTicks, ms: Math.round((performance.now() - t0) * 10) / 10, scanned, ownUidUnreadable, ownUidEmpty, vanished, found, excluded };
 }

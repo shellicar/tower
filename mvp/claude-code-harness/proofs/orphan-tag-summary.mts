@@ -186,11 +186,14 @@ for (const logPath of logs) {
     }
   }
   // Per scan: alive then (started before it, exited after it), and missed.
-  const scans: { at: number; ticks: number | null; found: number[]; empty: Json[] }[] = tagStop
-    ? (tagStop.rounds as Json[]).map((r) => ({ at: ms((r.scan as Json).at), ticks: ((r.scan as Json).uptimeTicks as number | undefined) ?? null, found: ((r.scan as Json).found as Json[]).map((p) => Number(p.pid)), empty: ((r.scan as Json).ownUidEmpty as Json[] | undefined) ?? [] }))
+  const scans: { at: number; ticks: number | null; found: number[]; empty: Json[]; unreadable: Json[]; vanished: number[] | null }[] = tagStop
+    ? (tagStop.rounds as Json[]).map((r) => {
+        const sc = r.scan as Json;
+        return { at: ms(sc.at), ticks: (sc.uptimeTicks as number | undefined) ?? null, found: (sc.found as Json[]).map((p) => Number(p.pid)), empty: (sc.ownUidEmpty as Json[] | undefined) ?? [], unreadable: (sc.ownUidUnreadable as Json[] | undefined) ?? [], vanished: (sc.vanished as number[] | undefined) ?? null };
+      })
     : scanT === null
       ? []
-      : [{ at: scanT, ticks: null, found: foundPids, empty: [] }];
+      : [{ at: scanT, ticks: null, found: foundPids, empty: [], unreadable: [], vanished: null }];
   const startedBefore = (g: { starttime: number | null }, ticks: number | null): boolean | null => (ticks === null || g.starttime === null ? null : g.starttime < ticks ? true : g.starttime > ticks ? false : null);
   const perScan = scans.map((sc) => {
     const alive = [...ground.values()].filter((g) => (g.exitT === null || g.exitT > sc.at) && startedBefore(g, sc.ticks) !== false);
@@ -198,7 +201,7 @@ for (const logPath of logs) {
       atMsAfterDeath: sc.at - death,
       alive: alive.map((g) => g.pid),
       startedUnknown: alive.filter((g) => startedBefore(g, sc.ticks) === null).map((g) => g.pid),
-      missed: alive.filter((g) => !sc.found.includes(g.pid)).map((g) => ({ pid: g.pid, role: g.role, startedBefore: startedBefore(g, sc.ticks), exitMsAfterScan: g.exitT === null ? null : g.exitT - sc.at, exit: trace.find((x) => x.pid === g.pid && x.kind === 'exit')?.text ?? null, environReadEmpty: tagStop ? (sc.empty.find((e) => Number(e.pid) === g.pid) ?? false) : 'not recorded (pid-file stop)' })),
+      missed: alive.filter((g) => !sc.found.includes(g.pid)).map((g) => ({ pid: g.pid, role: g.role, startedBefore: startedBefore(g, sc.ticks), exitMsAfterScan: g.exitT === null ? null : g.exitT - sc.at, exit: trace.find((x) => x.pid === g.pid && x.kind === 'exit')?.text ?? null, environReadEmpty: tagStop ? (sc.empty.find((e) => Number(e.pid) === g.pid) ?? false) : 'not recorded (pid-file stop)', unreadableAtScan: sc.unreadable.find((e) => Number(e.pid) === g.pid) ?? false, vanishedDuringScan: sc.vanished === null ? 'not recorded' : sc.vanished.includes(g.pid) })),
     };
   });
   const aliveAtScan = scanT === null ? [] : [...ground.values()].filter((g) => perScan[0]?.alive.includes(g.pid));
