@@ -6,7 +6,7 @@
 import { basename } from 'node:path';
 import type { Json } from './holding.mts';
 import { assistantCommits, build, foldPrediction, holdingAt, kindOf, OPTIONS, sameForm } from './holding.mts';
-import { compareUnits, describeEntry, probeHistory, requestUnits, towerBeforeProbeReply, towerUnits } from './compare.mts';
+import { compareUnits, describeEntry, probeCut, probeHistory, requestUnits, towerBeforeProbeReply, towerUnits, without } from './compare.mts';
 import { roundTrip } from './load.mts';
 import { readRecording } from './recording.mts';
 
@@ -57,7 +57,7 @@ export function analyse(rawDir: string, model = modelFromDir(rawDir)): Json {
     const o: Json = { orderWarnings: built.orderWarnings };
     if (probe && probeReq && reqUnits) {
       const final = towerBeforeProbeReply(built.all, probeReq.ms, rec);
-      const v = compareUnits(reqUnits.units, towerUnits(final), describe);
+      const v = compareUnits(reqUnits.units, without(towerUnits(final), probeCut(probeReq.ms, rec)), describe);
       o.final = v;
       out.requestShape = v.shape.request;
     }

@@ -280,10 +280,28 @@ export function probeHistory(bodiesDir: string, rec: Recording, probe: string): 
 }
 
 // Tower's messages that the probe's request should hold: everything but the
-// probe's own reply (and anything after it).
+// probe's own reply and what its turn wrote after the request went out (the
+// first reply piece written after the request marks that point).
+export function probeCut(probeRequestMs: number, rec: Recording): Set<string> {
+  const cut = Math.min(...rec.entries.filter((r) => r.ms > probeRequestMs && r.entry.type === 'assistant').map((r) => r.ms), Number.POSITIVE_INFINITY);
+  return new Set(rec.entries.filter((r) => r.ms >= cut).map((r) => String(r.entry.uuid)));
+}
+
+// Units without the items of entries in `drop`.
+export function without(units: Unit[], drop: Set<string>): Unit[] {
+  return units.map((u) => ({ role: u.role, items: u.items.filter((i) => i.uuid === null || !drop.has(i.uuid)) })).filter((u) => u.items.length > 0);
+}
+
 export function towerBeforeProbeReply(messages: TMsg[], probeRequestMs: number, rec: Recording): TMsg[] {
   const after = new Set(rec.entries.filter((r) => r.ms > probeRequestMs && kindOf(r.entry) === 'assistant').map((r) => String(r.entry.uuid)));
-  return messages.filter((m) => !(m.role === 'assistant' && after.has(m.id)));
+  const cut = Math.min(...rec.entries.filter((r) => r.ms > probeRequestMs && r.entry.type === 'assistant').map((r) => r.ms), Number.POSITIVE_INFINITY);
+  const appended = new Map(rec.entries.map((r) => [String(r.entry.uuid), r.ms]));
+  return messages.filter((m) => {
+    if (m.role === 'assistant') {
+      return !after.has(m.id);
+    }
+    return m.cc.length === 0 || !m.cc.every((c) => (appended.get(c.uuid) ?? 0) >= cut);
+  });
 }
 
 export { isCarrier };

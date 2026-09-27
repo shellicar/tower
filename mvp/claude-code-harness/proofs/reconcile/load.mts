@@ -100,6 +100,50 @@ function rebuildAttachment(body: TowerBody, c: CcItem): Json {
   return { ...e, rendered: r.map((x, i) => ({ ...x, content: texts[i] })) };
 }
 
+// Without the two carriers tower doesn't have (`seq`, and the unshown list
+// beside the messages): entries in tower's message order; an unshown entry
+// only if it rides on a message (placed before that message's entries);
+// `parent` 'previous' chains each entry to the one before it in that order,
+// 'raw' keeps the entry's own parentUuid where tower has that parent.
+export function loadBare(bodies: TowerBody[], carried: Map<number, Rec[]>, parent: 'previous' | 'raw'): { entries: Json[]; lastChain: string | undefined } {
+  const seq = load(bodies, []);
+  const byUuid = new Map(seq.entries.map((e) => [String(e.uuid), e]));
+  const ordered: Json[] = [];
+  bodies.forEach((b, i) => {
+    for (const r of carried.get(i) ?? []) {
+      ordered.push(r.entry);
+    }
+    for (const c of b.ccEntries ?? []) {
+      const e = byUuid.get(c.uuid);
+      if (e) {
+        ordered.push({ ...e, parentUuid: (c.entry as Json).parentUuid ?? null });
+      }
+    }
+  });
+  const present = new Set(ordered.map((e) => e.uuid).filter((u): u is string => typeof u === 'string'));
+  let prev: string | undefined;
+  const entries = ordered.map((e0) => {
+    let e = e0;
+    if (typeof e.uuid === 'string') {
+      const keep = parent === 'raw' && typeof e.parentUuid === 'string' && present.has(e.parentUuid);
+      if (!keep && !(e.parentUuid === null && prev === undefined)) {
+        e = { ...e, parentUuid: prev ?? null };
+      }
+      prev = String(e.uuid);
+    }
+    return e;
+  });
+  let lastChain: string | undefined;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i] as Json;
+    if (typeof e.uuid === 'string' && e.type !== 'system' && e.type !== 'progress') {
+      lastChain = e.uuid;
+      break;
+    }
+  }
+  return { entries, lastChain };
+}
+
 export function load(bodies: TowerBody[], unshown: Rec[]): { entries: Json[]; lastChain: string | undefined } {
   const items: { seq: number; entry: Json }[] = [];
   for (const b of bodies) {

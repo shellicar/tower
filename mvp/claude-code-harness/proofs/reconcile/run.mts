@@ -44,7 +44,7 @@ import { startRun } from '../../src/harness.mts';
 import { redact, stamp } from '../../src/record.mts';
 import type { Json } from './holding.mts';
 import { assistantCommits, holdingAt, kindOf } from './holding.mts';
-import { checkBody, load, toBodies, type TowerBody } from './load.mts';
+import { checkBody, load, loadBare, toBodies, type TowerBody } from './load.mts';
 import { readRecording } from './recording.mts';
 
 const HARNESS_STATE = join(homedir(), '.local', 'state', 'tower-claude-code-harness');
@@ -283,6 +283,23 @@ function holdingsAt(rawDir: string, model: string): Holding[] {
     const invalid = bodies.flatMap((b) => checkBody(b).map((e) => `${b.id}: ${e}`));
     const l = load(bodies, h.unshown);
     out.push({ way: option, entries: l.entries, resume: l.lastChain ? { resumeSessionAt: l.lastChain } : {}, bodies: bodies.length, invalid, notCommitted: h.notCommitted.map((r) => String(r.entry.uuid)) });
+    // RC_BARE=1: the same holding without `seq` or the unshown list, each
+    // unshown entry riding on the first message committed at or after its
+    // append (lost if none by the result); chained to the entry before, or
+    // keeping its own parentUuid.
+    if (process.env.RC_BARE === '1' && (option === 'entry' || option === 'run+last' || option === 'run+entry')) {
+      const carried = new Map<number, typeof h.unshown>();
+      for (const r of h.unshown) {
+        const i = h.messages.findIndex((m) => m.commitMs >= r.ms);
+        if (i >= 0) {
+          carried.set(i, [...(carried.get(i) ?? []), r]);
+        }
+      }
+      for (const parent of ['previous', 'raw'] as const) {
+        const b = loadBare(bodies, carried, parent);
+        out.push({ way: `${option}/bare-${parent}`, entries: b.entries, resume: b.lastChain ? { resumeSessionAt: b.lastChain } : {}, bodies: bodies.length, invalid, notCommitted: h.notCommitted.map((r) => String(r.entry.uuid)) });
+      }
+    }
   }
   return out;
 }
