@@ -27,10 +27,13 @@ export interface TaggedProc {
 export interface TagScan {
   at: string;
   t: number;
+  // /proc/uptime at the scan's start, in clock ticks (1/100 s): a process
+  // whose starttime is below this existed when the scan began.
+  uptimeTicks: number;
   ms: number;
   scanned: number;
   // Same-uid processes whose environ couldn't be read (anything but gone).
-  ownUidUnreadable: { pid: number; cmd: string; code: string }[];
+  ownUidUnreadable: { pid: number; cmd: string; code: string; state: string | null }[];
   found: TaggedProc[];
   // Tagged, but the caller's own (a pid in `own` or a descendant of one).
   excluded: TaggedProc[];
@@ -101,6 +104,7 @@ function isOwn(pid: number, own: Set<number>): boolean {
 }
 
 export function scanTag(name: string, own: Set<number> = new Set()): TagScan {
+  const uptimeTicks = Math.round(Number(readFileSync('/proc/uptime', 'utf8').split(' ')[0]) * 100);
   const t0 = performance.now();
   const at = new Date().toISOString();
   const t = Date.now();
@@ -124,9 +128,19 @@ export function scanTag(name: string, own: Set<number> = new Set()): TagScan {
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code ?? '?';
       if (code !== 'ENOENT' && code !== 'ESRCH' && realUid(pid) === uid) {
-        ownUidUnreadable.push({ pid, cmd: cmdline(pid).slice(0, 80), code });
+        ownUidUnreadable.push({ pid, cmd: cmdline(pid).slice(0, 80), code, state: procStat(pid)?.state ?? null });
       }
       continue;
+    }
+    // A zombie leader whose other threads still run reads empty; read
+    // through one of those threads instead.
+    if (buf.length === 0) {
+      try {
+        const other = readdirSync(`/proc/${pid}/task`).find((x) => x !== String(pid));
+        if (other) {
+          buf = readFileSync(`/proc/${pid}/task/${other}/environ`);
+        }
+      } catch {}
     }
     scanned += 1;
     const { tagged, configDir } = readTag(buf, want);
@@ -152,5 +166,5 @@ export function scanTag(name: string, own: Set<number> = new Set()): TagScan {
     const row: TaggedProc = { pid, starttime: st.starttime, ppid: st.ppid, state: st.state, cmd: cmdline(pid).slice(0, 100), configDir, pidFile, pidFileLive };
     (isOwn(pid, own) ? excluded : found).push(row);
   }
-  return { at, t, ms: Math.round((performance.now() - t0) * 10) / 10, scanned, ownUidUnreadable, found, excluded };
+  return { at, t, uptimeTicks, ms: Math.round((performance.now() - t0) * 10) / 10, scanned, ownUidUnreadable, found, excluded };
 }

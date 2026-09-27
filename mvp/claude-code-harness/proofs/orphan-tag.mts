@@ -40,6 +40,16 @@
 // descendant of one (a /proc ppid walk at scan time). The tag value names
 // the agent only. The alternative is a per-participant value alongside it.
 //
+// TODO: undecided. A same-uid process whose environ can't be read. The first
+// r1 run caught a Claude Code, still running (state R), whose environ read
+// EACCES 8 ms before its last thread exited, so its tag can't be seen in the
+// last moments of its exit. Built: the easiest, such a process is recorded
+// (ownUidUnreadable) and otherwise ignored. The alternative is to wait for
+// any unreadable same-uid process that wasn't unreadable at baseline.
+//
+// "Exited" means every thread has exited: a zombie thread-group leader with
+// other threads still listed in /proc/<pid>/task is still running (gone()).
+//
 // TODO: undecided (as proof 21). What happens if a leftover hasn't exited
 // long after SIGINT. Built: the easiest, wait STOP_WAIT_MS (30 s, a value
 // picked for this proof), then log it and serve anyway.
@@ -535,9 +545,22 @@ interface Known {
   starttime: string;
 }
 
+// Gone once every thread has exited. Proof 25 found a thread-group leader
+// reads as a zombie while another of its threads runs on (11 ms, in the first
+// r1 run), so a zombie leader counts only once /proc/<pid>/task lists it alone.
 function gone(k: Known): boolean {
   const s = procStat(k.pid);
-  return s === undefined || s.state === 'Z' || s.state === 'X' || s.starttime !== k.starttime;
+  if (s === undefined || s.starttime !== k.starttime) {
+    return true;
+  }
+  if (s.state === 'Z' || s.state === 'X') {
+    try {
+      return readdirSync(`/proc/${k.pid}/task`).length <= 1;
+    } catch {
+      return true;
+    }
+  }
+  return false;
 }
 
 function signalChecked(k: Known, sig: NodeJS.Signals, log: (s: string) => void): boolean {
@@ -1728,13 +1751,14 @@ class GuardSampler {
       scanMs: scan.ms,
       oldAlive: through.map((p) => [p, this.pw.tracked.get(p)?.role]),
       oldClaudeAlive: through.filter((p) => !String(this.pw.tracked.get(p)?.role).endsWith('descendant')),
-      tagFound: scan.found.map((p) => [p.pid, p.pidFileLive ? 'live pid file' : 'no live pid file']),
+      uptimeTicks: scan.uptimeTicks,
+      tagFound: scan.found.map((p) => [p.pid, p.pidFileLive ? 'live pid file' : 'no live pid file', p.starttime]),
       otherTagged: scan.found.filter((p) => !oldIds.has(p.pid)).map((p) => [p.pid, p.cmd.slice(0, 30)]),
       tagRefuses: scan.found.length > 0,
       harnessLive: harness,
       harnessRefuses: harness.length > 0,
       missed,
-      ownUidUnreadable: scan.ownUidUnreadable.map((u) => u.pid),
+      ownUidUnreadable: scan.ownUidUnreadable.map((u) => [u.pid, u.state, u.code]),
     });
   }
   runScript(): void {

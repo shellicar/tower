@@ -11,8 +11,11 @@
 // the old participant's tree the driver tracked (each held Claude Code and
 // every descendant it saw), plus every tagged pid the driver's own 20 ms guard
 // samples saw that isn't a Claude Code of serve 2 or 3. A leftover was alive
-// at the serve 2 scan if the trace has its exit after the scan (or, with no
-// traced exit, the driver saw it gone after the scan).
+// at a scan of serve 2's stop if it had started before the scan (its
+// /proc starttime below the scan's /proc/uptime, both in 1/100 s ticks; the
+// same tick counts as unknown) and the trace has its exit (the thread-group
+// leader's, which comes once every thread has exited) after the scan; with no
+// traced exit, the time the driver saw it gone.
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -113,18 +116,18 @@ for (const logPath of logs) {
   const exitOf = (pid: number): number | null => trace.find((s) => s.pid === pid && s.kind === 'exit')?.t ?? null;
 
   // Ground truth: the old tree's processes.
-  const ground = new Map<number, { pid: number; role: string; cmd: string; exitT: number | null; how: string }>();
+  const ground = new Map<number, { pid: number; role: string; cmd: string; starttime: number | null; exitT: number | null; how: string }>();
   for (const t of timings) {
     if (t.role === 'participant') {
       continue;
     }
     const pid = Number(t.pid);
-    ground.set(pid, { pid, role: String(t.role), cmd: String(t.cmd).slice(0, 40), exitT: exitOf(pid) ?? (t.goneAt ? ms(t.goneAt) : null), how: exitOf(pid) !== null ? 'trace' : 'driver' });
+    ground.set(pid, { pid, role: String(t.role), cmd: String(t.cmd).slice(0, 40), starttime: t.starttime ? Number(t.starttime) : null, exitT: exitOf(pid) ?? (t.goneAt ? ms(t.goneAt) : null), how: exitOf(pid) !== null ? 'trace' : 'driver' });
   }
   for (const sm of samples) {
-    for (const [pid] of sm.tagFound as [number, string][]) {
+    for (const [pid, , st] of sm.tagFound as [number, string, string?][]) {
       if (!ground.has(pid) && !laterClaudes.has(pid)) {
-        ground.set(pid, { pid, role: 'tagged (seen by the guard samples only)', cmd: '', exitT: exitOf(pid), how: exitOf(pid) !== null ? 'trace' : 'none' });
+        ground.set(pid, { pid, role: 'tagged (seen by the guard samples only)', cmd: '', starttime: st ? Number(st) : null, exitT: exitOf(pid), how: exitOf(pid) !== null ? 'trace' : 'none' });
       }
     }
   }
@@ -158,8 +161,28 @@ for (const logPath of logs) {
       stopRounds.push({ tag, at: st.startedAt, pidFiles: (st.pidFiles as Json[]).map((p) => [p.pid, p.live]), outcome: st.outcome });
     }
   }
-  const aliveAtScan = scanT === null ? [] : [...ground.values()].filter((g) => g.exitT === null || g.exitT > (scanT as number));
-  const missedAtScan = aliveAtScan.filter((g) => !foundPids.includes(g.pid));
+  // Per scan: alive then (started before it, exited after it), and missed.
+  const scans: { at: number; ticks: number | null; found: number[] }[] = tagStop
+    ? (tagStop.rounds as Json[]).map((r) => ({ at: ms((r.scan as Json).at), ticks: ((r.scan as Json).uptimeTicks as number | undefined) ?? null, found: ((r.scan as Json).found as Json[]).map((p) => Number(p.pid)) }))
+    : scanT === null
+      ? []
+      : [{ at: scanT, ticks: null, found: foundPids }];
+  const startedBefore = (g: { starttime: number | null }, ticks: number | null): boolean | null => (ticks === null || g.starttime === null ? null : g.starttime < ticks ? true : g.starttime > ticks ? false : null);
+  const perScan = scans.map((sc) => {
+    const alive = [...ground.values()].filter((g) => (g.exitT === null || g.exitT > sc.at) && startedBefore(g, sc.ticks) !== false);
+    return {
+      atMsAfterDeath: sc.at - death,
+      alive: alive.map((g) => g.pid),
+      startedUnknown: alive.filter((g) => startedBefore(g, sc.ticks) === null).map((g) => g.pid),
+      missed: alive.filter((g) => !sc.found.includes(g.pid)).map((g) => ({ pid: g.pid, role: g.role, startedBefore: startedBefore(g, sc.ticks), exitMsAfterScan: g.exitT === null ? null : g.exitT - sc.at })),
+    };
+  });
+  const aliveAtScan = scanT === null ? [] : [...ground.values()].filter((g) => perScan[0]?.alive.includes(g.pid));
+  const missedAtScan = perScan.flatMap((p) => p.missed);
+  // A guard sample's miss: how long before that process's full exit.
+  const guardMisses = samples
+    .filter((x) => (x.missed as unknown[]).length > 0)
+    .flatMap((x) => (x.missed as Json[]).map((m) => ({ at: x.at, pid: m.pid, role: m.role, state: m.state, environ: m.environBytes, msBeforeFullExit: ground.get(Number(m.pid))?.exitT ? (ground.get(Number(m.pid))?.exitT as number) - ms(x.at) : null })));
   // A second SIGINT: the trace shows two or more SIGINTs delivered to one
   // held Claude Code after the death.
   const heldClaudes = (held.convs as Json[]).map((c) => ({ tag: String(c.tag), pid: Number(c.claudePid) }));
@@ -184,7 +207,9 @@ for (const logPath of logs) {
     lastLeftoverExitMsAfterDeath: lastExit - death,
     leftovers: [...ground.values()].map((g) => ({ ...g, exitMsAfterDeath: g.exitT === null ? null : g.exitT - death, aliveAtScan: aliveAtScan.includes(g), found: foundPids.includes(g.pid) })),
     aliveAtScan: aliveAtScan.map((g) => g.pid),
-    missedAtScan: missedAtScan.map((g) => [g.pid, g.role]),
+    perScan,
+    missedAtScan,
+    guardMisses,
     stopRounds,
     signalled,
     secondSigint: ending.secondSigint ?? null,
@@ -227,7 +252,8 @@ for (const logPath of logs) {
       serve3: { prior: s3.priorEntries, notCarried: (s3.priorNotCarried as unknown[]).length, heldNotCarried: s3held, serve2TurnNotCarried: s3s2, branches: branchCount(s3), invented: invCount(s3), answer: String(s3.answer).slice(0, 120) },
     };
     (out.convs as Json)[tag] = c;
-    const found = missedAtScan.length === 0 ? 'yes' : `NO (missed ${missedAtScan.map((g) => g.pid).join(',')})`;
+    const unknown = perScan.flatMap((p) => p.startedUnknown);
+    const found = missedAtScan.length === 0 ? (unknown.length === 0 ? 'yes' : `yes (start tick unknown for ${unknown.join(',')})`) : `NO (missed ${missedAtScan.map((g) => g.pid).join(',')})`;
     const waited = (c.checkAfterLastLeftoverExitMs as number) > 0 && !c.orphanWroteAfterCheck ? 'yes' : 'NO';
     const noFork = branchCount(s2) === 0 && branchCount(s3) === 0 && invCount(s2) === 0 && invCount(s3) === 0 ? 'yes' : 'NO';
     const complete = (s2.priorNotCarried as unknown[]).length === 0 && (s3.priorNotCarried as unknown[]).length === 0 ? 'yes' : 'NO';
@@ -258,7 +284,11 @@ for (const logPath of logs) {
   if (out.secondSigint) {
     process.stdout.write(`    driver's second SIGINT: ${JSON.stringify(out.secondSigint)}\n`);
   }
+  process.stdout.write(`    per scan: ${JSON.stringify(perScan)}\n`);
   process.stdout.write(`    guard: ${JSON.stringify(out.guard)}\n`);
+  if (guardMisses.length > 0) {
+    process.stdout.write(`    guard sample misses: ${JSON.stringify(guardMisses)}\n`);
+  }
   for (const [tag, v] of Object.entries(out.convs as Json)) {
     const x = v as Json;
     process.stdout.write(`  ${tag} claude ${String(x.claudePid)}: signals ${JSON.stringify(x.signals)}; pid file gone +${String(x.pidFileGoneMsAfterDeath)}; last write +${String(x.lastOrphanWriteMsAfterDeath)}; exit +${String(x.exitMsAfterDeath)}; check +${String(x.checkMsAfterDeath)} (after last leftover exit by ${String(x.checkAfterLastLeftoverExitMs)} ms; tagged at check start ${JSON.stringify(x.tagAtCheckStart)} end ${JSON.stringify(x.tagAtCheckEnd)}); check added ${JSON.stringify(x.checkAdded)}; wrote after check ${String(x.orphanWroteAfterCheck)}\n`);
