@@ -4,22 +4,8 @@
 //   node proofs/reconcile/aggregate.mts <jsonl> [...]
 
 import { readFileSync } from 'node:fs';
+import { reached } from './ending.mts';
 import type { Json } from './holding.mts';
-
-export function reached(r: Json): boolean {
-  const e = r.ending as Json;
-  switch (e.cell) {
-    case 'normal':
-      return e.keptReply === true;
-    case 'thinking-only':
-      return Number(e.droppedThinking) > 0 && e.keptReply !== true;
-    case 'limit':
-    case 'api-error':
-      return Number(e.apiErrors) > 0;
-    default:
-      return e.stopped !== null && e.stopped !== 'after the result';
-  }
-}
 
 const rows = process.argv.slice(2).flatMap((f) => readFileSync(f, 'utf8').split('\n').filter((l) => l.trim() !== '').map((l) => JSON.parse(l) as Json)).filter((r) => !r.error && r.ending);
 const key = (field: 'final' | 'atResult') => (o: Json): string => ((o[field] as Json | undefined)?.kinds as string[] | undefined)?.join('+') ?? 'n/a';
