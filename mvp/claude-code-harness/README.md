@@ -174,7 +174,7 @@ varies both. Once, from the repo root, `pnpm install` (the lockfile has
 binary). Then, from `mvp/claude-code-harness/`:
 
 ```sh
-node proofs/macos-keychain.mts | tee runs/macos-keychain.log
+mkdir -p runs && node proofs/macos-keychain.mts | tee runs/macos-keychain.log
 ```
 
 Add `--with-real-home-baseline` to also run it once with the real `HOME`;
