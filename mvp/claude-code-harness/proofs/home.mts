@@ -94,11 +94,21 @@ const DOTFILES = ['.gitconfig', '.config/gh', '.ssh', '.npmrc'];
 const OPTIONS: Record<string, Opt> = {
   'real-closed': { ...base, what: 'reference: the harness baseline, real HOME, user source closed', userOpen: false },
   'real-open': { ...base, what: 'option 1 baseline: real HOME, user source open, nothing switched off (guarded read-only)', guards: GUARDS },
+  // Switches read from the 2.1.282 binary (proof 26's research): the updater
+  // paths are gated by DISABLE_AUTOUPDATER and placed by XDG_*; the MCP log
+  // cache is env-paths' XDG_CACHE_HOME; Claude Code's temp root is
+  // CLAUDE_CODE_TMPDIR (documented); cc-socks is under XDG_RUNTIME_DIR
+  // (inferred). {FIX} is this run's fixture dir.
+  'real-open-env': { ...base, what: 'option 1, switches: real HOME, user source open, DISABLE_AUTOUPDATER, XDG_CACHE_HOME, XDG_STATE_HOME, XDG_DATA_HOME, CLAUDE_CODE_TMPDIR, XDG_RUNTIME_DIR moved to private dirs (guarded read-only)', guards: GUARDS, env: { DISABLE_AUTOUPDATER: '1', XDG_CACHE_HOME: '{FIX}/xdg/cache', XDG_STATE_HOME: '{FIX}/xdg/state', XDG_DATA_HOME: '{FIX}/xdg/data', CLAUDE_CODE_TMPDIR: '{FIX}/xdg/tmp', XDG_RUNTIME_DIR: '{FIX}/xdg/runtime' } },
+  // cleanupPeriodDays 0 makes the settings-driven cutoff null (binary); the
+  // docs say 0 fails validation. Passed as a flag setting.
+  'real-open-cleanup0': { ...base, what: 'option 1, switch: real HOME, user source open, cleanupPeriodDays 0 as a flag setting (guarded read-only)', guards: GUARDS, settings: { cleanupPeriodDays: 0 } },
   'real-open-mask': { ...base, what: 'option 1, avoid: real HOME, user source open, private directories mounted (bwrap) over the housekeeping paths', guards: GUARDS, masks: MASKS },
   'private-bare': { ...base, what: 'option 2: private HOME, login by absolute CLAUDE_SECURESTORAGE_CONFIG_DIR, nothing put back for commands', privateHome: true, secure: 'absolute-real' },
   'private-empty-secure': { ...base, what: 'option 2 control: private HOME with the harness\'s empty CLAUDE_SECURESTORAGE_CONFIG_DIR (login expected to be missing)', privateHome: true },
   'private-prefix': { ...base, what: 'option 2: private HOME, absolute secure storage, CLAUDE_CODE_SHELL_PREFIX restores HOME for commands, MCP config env restores HOME', privateHome: true, secure: 'absolute-real', shellPrefix: true, mcpHome: 'real' },
   'private-prefix-only': { ...base, what: 'option 2: private HOME, absolute secure storage, CLAUDE_CODE_SHELL_PREFIX only (the MCP config leaves HOME alone)', privateHome: true, secure: 'absolute-real', shellPrefix: true },
+  'private-full': { ...base, what: 'option 2: private-prefix-only plus CLAUDE_CODE_TMPDIR and XDG_RUNTIME_DIR moved to private dirs (HOME does not move them)', privateHome: true, secure: 'absolute-real', shellPrefix: true, env: { CLAUDE_CODE_TMPDIR: '{FIX}/xdg/tmp', XDG_RUNTIME_DIR: '{FIX}/xdg/runtime' } },
   'private-links': { ...base, what: 'option 2: private HOME, absolute secure storage, symlinks to real dotfiles in the private HOME', privateHome: true, secure: 'absolute-real', dotLinks: DOTFILES },
 };
 
@@ -310,7 +320,9 @@ function startServe(tag: string, resume?: string): Serve {
   if (!opt) throw new Error('no option');
   const bodies = join(FIX, 'bodies', tag);
   mkdirSync(bodies, { recursive: true });
-  const env: Record<string, string | undefined> = { ...process.env, OTEL_LOG_RAW_API_BODIES: `file:${bodies}`, P26_TAG: tag, ...opt.env };
+  const optEnv = Object.fromEntries(Object.entries(opt.env).map(([k, v]) => [k, v.replace('{FIX}', FIX)]));
+  for (const v of Object.values(optEnv)) if (v.startsWith(FIX)) mkdirSync(v, { recursive: true, mode: 0o700 });
+  const env: Record<string, string | undefined> = { ...process.env, OTEL_LOG_RAW_API_BODIES: `file:${bodies}`, P26_TAG: tag, ...optEnv };
   if (opt.privateHome) env.HOME = HOME_DIR;
   if (opt.shellPrefix) {
     env.CLAUDE_CODE_SHELL_PREFIX = PREFIX;
