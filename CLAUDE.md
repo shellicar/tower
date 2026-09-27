@@ -234,6 +234,14 @@ decision made in the brief, never invented by the operator.
   `NATS_URL` defaults to 4222, so a process started without thinking about it
   lands on the live deployment — and conv subjects are keyed by conversation
   id, not by world, so what it publishes there is permanent.
+- The Claude Code harness's proofs (`mvp/claude-code-harness/proofs/`) have a
+  broker of their own: `mvp/compose.harness.yaml`, project `tower-harness`,
+  127.0.0.1:31417, JetStream on a named volume, `restart: unless-stopped`.
+  It persists across runs (a resume from tower reads earlier publishes), so
+  it is never taken down and its volume is never removed. Start it from
+  `mvp/`: `docker compose -f compose.harness.yaml up -d nats`, then
+  `docker compose -f compose.harness.yaml run --rm stream-init`. Proofs never
+  use the bridge test broker (31416) or `just broker-run`.
 - One integration check: compose broker, scripted publisher, WS client asserts.
 - Fix lands twice: code + fixture, same commit.
 

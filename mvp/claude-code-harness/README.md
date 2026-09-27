@@ -162,6 +162,26 @@ Things to know:
   string shares the login; a path, even `~/.claude`, names a different
   Keychain item.
 
+## The broker
+
+The harness itself touches no NATS, but the proofs that publish to tower
+(`proofs/integration/`, `proofs/semantic/`) use the harness's own broker,
+`mvp/compose.harness.yaml`: compose project `tower-harness`, nats on
+127.0.0.1:31417, JetStream on a named volume, `restart: unless-stopped`.
+Start it from `mvp/`:
+
+```sh
+docker compose -f compose.harness.yaml up -d nats
+docker compose -f compose.harness.yaml run --rm stream-init
+```
+
+It persists across runs, since a resume from tower reads what earlier runs
+published, so a proof never takes it down or removes its volume. Proofs
+never use the bridge test broker (`compose.test.yaml`, 31416) or
+`just broker-run`, and every process they start gets
+`NATS_URL=nats://127.0.0.1:31417` explicitly, since an unset `NATS_URL`
+means the fleet's 4222.
+
 ## What a run records
 
 `runs/<timestamp>-<name>/` (gitignored):

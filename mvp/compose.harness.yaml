@@ -1,0 +1,44 @@
+# The Claude Code harness's own broker (mvp/claude-code-harness/proofs), kept
+# apart from the bridge test broker (compose.test.yaml, 31416) so a proof run
+# and a bridge test run never share or tear down each other's broker. Never
+# the fleet's: compose.yaml is the deployment, on 4222.
+#
+# 31417: next to the test broker's 31416, below 49152 for the same reason
+# (macOS hands out 49152 and up as ephemeral ports), and bound to 127.0.0.1
+# only.
+#
+# The project is named so every command against it reaches this and nothing
+# else on the machine.
+name: tower-harness
+
+services:
+  # Unlike the test broker, this one persists: proof runs publish
+  # conversations that later runs read back (a resume from tower), so the
+  # JetStream store sits on a named volume and the broker comes back by
+  # itself. Never take it down or remove the volume from a proof run.
+  nats:
+    image: nats:latest
+    # `-sd /data` points JetStream at the mounted volume; without it the store
+    # defaults to /tmp inside the container and the volume is decorative.
+    command: ['-js', '-sd', '/data']
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:31417:4222'
+    volumes:
+      - harness-nats-data:/data
+
+  # The same stream-init the deployment and the test broker run, so a proof
+  # exercises the routing the real broker has. Run it once after the broker
+  # first comes up; on a converged broker its phases find nothing to do.
+  stream-init:
+    image: natsio/nats-box:latest
+    depends_on:
+      - nats
+    volumes:
+      - ./stream-init.sh:/stream-init.sh:ro
+    entrypoint:
+      - sh
+      - /stream-init.sh
+
+volumes:
+  harness-nats-data:

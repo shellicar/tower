@@ -31,7 +31,9 @@ check:
 # up before it and taken down after it. The url is fixed here rather than read
 # from the environment, so no inherited NATS_URL can aim the run at the fleet's
 # broker on 4222. The Broker fake covers ordinary tests; reach for this only
-# when a run genuinely needs a real broker.
+# when a run genuinely needs a real broker. The Claude Code harness's proofs
+# never use this: they have their own persistent broker, compose.harness.yaml
+# on 31417.
 #
 #     just broker-run 'cargo test -p bridge -- --ignored'
 broker-run +command:

@@ -41,8 +41,9 @@ export const REAL_CLAUDE_DIR = join(REAL_HOME, '.claude');
 // Proof 26's shell prefix: runs each command Claude Code spawns with HOME set
 // back to the real home (P26_REAL_HOME).
 export const SHELL_PREFIX = join(HERE, '..', 'home-shell-prefix.sh');
-// Tower's test broker only (rules: never 4222).
-export const NATS_TEST_URL = '127.0.0.1:31416';
+// The harness's own broker only (mvp/compose.harness.yaml, 31417): never the
+// fleet's 4222, and never the bridge test broker's 31416.
+export const NATS_TEST_URL = '127.0.0.1:31417';
 
 export const nowMs = (): number => Date.now();
 export const iso = (ms: number = Date.now()): string => new Date(ms).toISOString();

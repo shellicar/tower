@@ -1,4 +1,5 @@
-// Tower's test broker (127.0.0.1:31416, never 4222), the conv.v2 subjects
+// The harness's own broker (mvp/compose.harness.yaml, 127.0.0.1:31417; never
+// the fleet's 4222 or the bridge test broker's 31416), the conv.v2 subjects
 // this proof publishes, and reading them back. From proof 14
 // (pure-resume.mts), without the side subject.
 
@@ -6,7 +7,7 @@ import { type JetStreamClient, type JetStreamManager, jetstream, jetstreamManage
 import { connect, type NatsConnection } from '@nats-io/transport-node';
 import type { Json, TowerMessage } from './form.mts';
 
-export const NATS_URL = '127.0.0.1:31416';
+export const NATS_URL = '127.0.0.1:31417';
 export const AUDIT_STREAM = 'conv-approval';
 
 export interface Tower {
