@@ -305,3 +305,43 @@ node proofs/orphans-summary.mts runs/21-*-r1.log > runs/21-summary.txt
 A layer 2 signal goes only to a pid on the list of Claude Codes the case
 started, with the start time it recorded; that list is a safety gate for the
 proof, not how the participant finds an orphan.
+
+## Proof 25: finding every leftover by a tag
+
+`proofs/orphan-tag.mts` builds on proof 21's `proofs/orphans.mts` (brought in
+from `proof-21-orphans`). Agent name `orphans-25`, file store under
+`stores/proof-25-orphan-tag/`, store resume only.
+
+- The tag: each Claude Code is spawned with `TOWER_AGENT=orphans-25` added to
+  its environment (`spawnClaudeCodeProcess`); the participant's own
+  environment doesn't carry it. Claude Code's own children inherit it.
+- `proofs/tag-scan.mts`: reads every `/proc/<pid>/environ` and matches the
+  whole entry `TOWER_AGENT=<name>`. From a tagged process it keeps only
+  `CLAUDE_CONFIG_DIR`, to find that Claude Code's `sessions/<pid>.json`;
+  from any other process, nothing.
+- The tag stop, before each serve: scan (excluding the participant's own
+  spawns and their descendants), SIGINT each found process with a live pid
+  file, wait until everything found has exited, scan again until a scan finds
+  none, then proof 17's check, then serve. The file header says what is
+  undecided (TODOs).
+- `proofs/tag-guard.mts <name>`: the same scan as a reset guard, read-only
+  (exit 1 while anything carries the tag, 0 otherwise; never deletes). Not
+  wired into `src/harness.mts`. Each case's clean start runs it, then
+  `pnpm reset-config-dir`.
+- Cases: proof 21's eight with the tag stop; `-now` variants of the four
+  served at once, where serve 2's participant is started beforehand and sent
+  GO the moment the old one exits; `pf-...-now` controls with proof 21's
+  pid-file stop; `pd-double`, a second SIGINT to a Claude Code already
+  shutting down. Each `fresh` or `resumed`.
+
+From `mvp/claude-code-harness/`, each case under a signal-only trace, then the
+summary:
+
+```sh
+sh proofs/orphan-tag-all.sh claude-sonnet-5 r1 pd-stop-now:fresh crash-stop:resumed ...
+node proofs/orphan-tag-summary.mts runs/25-summary runs/25-*-r1.log > runs/25-summary.txt
+```
+
+A SIGINT goes only to a pid on the list of Claude Codes the case started,
+with the start time it recorded; that list is a safety gate for the proof,
+not how the participant finds a leftover.
