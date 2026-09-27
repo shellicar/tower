@@ -95,7 +95,8 @@ const HARD = 'Work out, carefully and step by step, how many integers from 1 to 
 const NO_TOOLS = 'Answer in your reply itself; do not use any tools.';
 // 800 ms timed out every attempt on Sonnet, Opus and Fable in proof 23;
 // Haiku answered inside it (proof 24 pilot), so Haiku gets 100 ms.
-const errorEnv = (model: string): Record<string, string> => ({ API_TIMEOUT_MS: /haiku/.test(model) ? '100' : '800', CLAUDE_CODE_MAX_RETRIES: '2' });
+// P24_ERROR_TIMEOUT overrides (Fable answered inside 800 ms in the later rounds).
+const errorEnv = (model: string): Record<string, string> => ({ API_TIMEOUT_MS: process.env.P24_ERROR_TIMEOUT ?? (/haiku/.test(model) ? '100' : '800'), CLAUDE_CODE_MAX_RETRIES: '2' });
 
 function cells(model: string): Cell[] {
   // P24_LIMIT overrides (Sonnet at 256 never hit the limit in rounds 1 and 2).

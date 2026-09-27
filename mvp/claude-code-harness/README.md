@@ -302,3 +302,12 @@ Raw bodies and store appends stay under
 redacted copies. The harness's own `claude/<n>/stdout.txt` and, for
 resumes, `run.json` (the store object's loaded entries) are not redacted
 for email.
+
+`options.mts <analysis.jsonl> [...]` writes option by ending
+(`runs/p24-options.md`), and `r1.mts <proof-23 runs dir>` how soon each
+commit option commits each entry after its transcript write
+(`runs/p24-r1.txt`). The resume routes `run.mts` tries are listed in
+`ways.mts` (fold, the API error entries kept, an unsent attachment after the
+marker) and in `run.mts` (resumeSessionAt, --reply-on-resume, the marker or
+partial left out). `P24_ERROR_TIMEOUT` overrides the API-error cell's
+timeout.
