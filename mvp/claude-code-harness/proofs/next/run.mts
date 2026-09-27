@@ -62,7 +62,8 @@ import { startRun } from '../../src/harness.mts';
 import { redact, stamp } from '../../src/record.mts';
 import type { Json } from './history.mts';
 import { entryBlocks } from './history.mts';
-import { fold, relink, sdkEventBlocks, sdkReader } from './ways.mts';
+import { fold, foldKeepErrors, isMarker, isPartial, lastChainEntry, relink, sdkEventBlocks, sdkReader, withTailAttachment, without } from './ways.mts';
+import { randomUUID } from 'node:crypto';
 
 const HARNESS_STATE = join(homedir(), '.local', 'state', 'tower-claude-code-harness');
 const STATE = join(HARNESS_STATE, 'proof-24');
@@ -289,6 +290,11 @@ interface Holding {
   way: string;
   atMs: number; // ms after the result message arrived
   entries: Json[];
+  // The conversation as tower would show it, when the holding also carries
+  // entries the model never sees. Defaults to entries.
+  conversation?: Json[];
+  // Resume options beyond the store (extraArgs, resumeSessionAt).
+  resume?: Json;
   note?: string;
 }
 
@@ -299,6 +305,36 @@ async function waysAtResult(sessionId: string, store: RecordingStore, sdkSteps: 
 
   const f = fold(snap);
   out.push({ way: 'store+fold', atMs: now() - resultMs, entries: f.kept, note: f.dropped.map((d) => `${d.rule}:${d.uuid.slice(0, 8)}`).join(',') });
+
+  // Routes around the resume's "No response requested." (see ways.mts).
+  const fk = foldKeepErrors(snap);
+  out.push({ way: 'fold+errors', atMs: now() - resultMs, entries: fk.kept, conversation: f.kept });
+  for (const type of ['prompt_snapshot', 'credential_org']) {
+    const t = withTailAttachment(fk.kept, type, randomUUID);
+    out.push({ way: `fold+errors+${type}`, atMs: now() - resultMs, entries: t.entries, conversation: f.kept, note: t.added ? `appended ${type}` : 'nothing appended' });
+  }
+  const st = withTailAttachment(snap, 'prompt_snapshot', randomUUID);
+  out.push({ way: 'store+prompt_snapshot', atMs: now() - resultMs, entries: st.entries, note: st.added ? 'appended prompt_snapshot' : 'nothing appended' });
+  // API error entries dropped too, with the attachment: does the attachment
+  // alone do for the output-limit and API-error endings?
+  const ft = withTailAttachment(f.kept, 'prompt_snapshot', randomUUID);
+  out.push({ way: 'fold+prompt_snapshot', atMs: now() - resultMs, entries: ft.entries, note: ft.added ? 'appended prompt_snapshot' : 'nothing appended' });
+  // Without the marker, the partial reply, or both (Stephen allows these).
+  const nm = without(fk.kept, isMarker);
+  out.push({ way: 'fold+errors-marker', atMs: now() - resultMs, entries: nm.entries, note: `removed ${nm.removed}` });
+  const np = without(fk.kept, isPartial);
+  out.push({ way: 'fold+errors-partial', atMs: now() - resultMs, entries: np.entries, note: `removed ${np.removed}` });
+  const npm = without(fk.kept, (e) => isMarker(e) || isPartial(e));
+  out.push({ way: 'fold+errors-partial-marker', atMs: now() - resultMs, entries: npm.entries, note: `removed ${npm.removed}` });
+  const npmt = withTailAttachment(np.entries, 'prompt_snapshot', randomUUID);
+  out.push({ way: 'fold+errors-partial+prompt_snapshot', atMs: now() - resultMs, entries: npmt.entries, note: `removed ${np.removed}; ${npmt.added ? 'appended' : 'nothing appended'}` });
+  // Options that reach the resume code: --reply-on-resume (extraArgs), and
+  // resumeSessionAt the chain's last entry.
+  out.push({ way: 'fold+errors,reply-on-resume', atMs: now() - resultMs, entries: fk.kept, resume: { extraArgs: { 'reply-on-resume': null } } });
+  const lastE = lastChainEntry(fk.kept);
+  if (lastE) {
+    out.push({ way: 'fold+errors,resumeSessionAt-last', atMs: now() - resultMs, entries: fk.kept, resume: { resumeSessionAt: lastE.uuid } });
+  }
 
   const r = await sdkReader(sessionId, snap);
   out.push({ way: 'sdk-reader', atMs: now() - resultMs, entries: holdingFrom(snap, new Set(r.uuids)) });
@@ -529,7 +565,7 @@ async function runMain(model: string, cell: Cell, contextUsage: boolean): Promis
 // ---------------------------------------------------------------------------
 // A resume from one holding.
 
-async function runResume(model: string, cell: Cell, sessionId: string, label: string, entries: Json[]): Promise<{ dir: string; rawDir: string }> {
+async function runResume(model: string, cell: Cell, sessionId: string, label: string, entries: Json[], resumeExtra: Json = {}): Promise<{ dir: string; rawDir: string }> {
   const rawDir = newRawDir(model, `${cell.id}-${label}`);
   const bodies = join(rawDir, 'api-bodies');
   const pre: [string, string, Json][] = [];
@@ -539,7 +575,7 @@ async function runResume(model: string, cell: Cell, sessionId: string, label: st
   // P24_RESUME_ENV (JSON) adds to the resumes' env only, e.g. to try
   // CLAUDE_CODE_RESUME_TOLERATES_CONTEXT_APPENDS (undocumented).
   const extra = JSON.parse(process.env.P24_RESUME_ENV ?? '{}') as Record<string, string>;
-  const options: HarnessOptions = { ...baseOptions(model, store, bodies, { ...(cell.resumeEnv ?? cell.env ?? {}), ...extra }, ev, () => {}), resume: sessionId };
+  const options: HarnessOptions = { ...baseOptions(model, store, bodies, { ...(cell.resumeEnv ?? cell.env ?? {}), ...extra }, ev, () => {}), resume: sessionId, ...(resumeExtra as Partial<HarnessOptions>) };
   const bw = new BodiesWatch(bodies, ev);
   const run = startRun({ name: agentName(model), options });
   events = new Events(run.dir, rawDir);
@@ -608,14 +644,14 @@ async function runPrime(model: string): Promise<void> {
   process.stdout.write(`${stamp()} prime: ${run.dir}\n`);
 }
 
-const hash = (entries: Json[]): string => createHash('sha256').update(JSON.stringify(entries)).digest('hex').slice(0, 12);
+const hashOf = (h: Holding): string => createHash('sha256').update(JSON.stringify([h.entries, h.resume ?? null])).digest('hex').slice(0, 12);
 
 async function runCell(model: string, cell: Cell, contextUsage: boolean): Promise<Json> {
   const main = await runMain(model, cell, contextUsage);
   const row: Json = { model, cell: cell.id, main: main.dir, rawDir: main.rawDir, sessionId: main.sessionId, stopped: main.stopped, probeFile: main.probeFile ?? null, ways: {}, resumes: {} };
   const byHash = new Map<string, string[]>();
   for (const h of main.holdings) {
-    const k = hash(h.entries);
+    const k = hashOf(h);
     (row.ways as Json)[h.way] = { atMs: h.atMs, entries: h.entries.length, hash: k, note: h.note ?? null };
     byHash.set(k, [...(byHash.get(k) ?? []), h.way]);
   }
@@ -623,11 +659,11 @@ async function runCell(model: string, cell: Cell, contextUsage: boolean): Promis
     return row;
   }
   for (const [k, ways] of byHash) {
-    const h = main.holdings.find((x) => hash(x.entries) === k);
+    const h = main.holdings.find((x) => hashOf(x) === k);
     if (!h) {
       continue;
     }
-    const r = await runResume(model, cell, main.sessionId, ways.join('+').replace(/[^A-Za-z0-9+-]/g, '_'), h.entries);
+    const r = await runResume(model, cell, main.sessionId, ways[0]?.replace(/[^A-Za-z0-9+-]/g, '_') ?? 'resume', h.entries, h.resume ?? {});
     (row.resumes as Json)[k] = { ways, dir: r.dir, rawDir: r.rawDir };
   }
   return row;

@@ -158,3 +158,83 @@ export function sdkEventBlocks(steps: { prompt: string; messages: Json[] }[]): B
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Resuming as the live Claude Code would continue.
+//
+// Claude Code's resume deserialiser (JUt, near byte 140585389 of 2.1.282's
+// JS) inserts an assistant "No response requested." after the last entry
+// when that entry (skipping system and progress entries) is a user entry,
+// or an attachment while it is re-running an interrupted turn. The live
+// Claude Code inserts nothing: the interrupt marker merges with the next
+// prompt. Two things keep the last entry from being a user entry:
+//   - an API error entry (the output-limit one included) left in place:
+//     Claude Code skips it when sending (F1) and when classifying the turn
+//     (VUt), so it changes nothing else;
+//   - after an interrupt, an attachment of a type Claude Code never sends
+//     (prompt_snapshot or credential_org: LS at byte 134658648) placed after
+//     the marker. The marker makes the turn classify as complete (jUt ->
+//     HUt), so an attachment at the end is not re-run.
+// TODO: undecided. Carrying API error entries as entries the model never
+// sees, and adding an entry Claude Code didn't write, are this proof's
+// easiest routes, not decisions.
+
+export function foldKeepErrors(entries: Json[]): FoldResult {
+  const f = fold(entries);
+  const keep = new Set(f.dropped.filter((d) => d.rule === 'F1').map((d) => d.uuid));
+  const drop = new Set(f.dropped.filter((d) => d.rule !== 'F1').map((d) => d.uuid));
+  return { kept: relink(entries, drop), dropped: f.dropped.filter((d) => !keep.has(d.uuid)) };
+}
+
+function lastChainEntry(entries: Json[]): Json | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i] as Json;
+    if (typeof e.uuid === 'string' && e.type !== 'system' && e.type !== 'progress') {
+      return e;
+    }
+  }
+  return undefined;
+}
+
+// Appends a copy of the latest attachment of `type` after the chain's last
+// entry when that entry is a user entry. Returns the entries unchanged
+// otherwise.
+export function withTailAttachment(entries: Json[], type: string, newUuid: () => string): { entries: Json[]; added: boolean } {
+  const last = lastChainEntry(entries);
+  if (!last || last.type !== 'user') {
+    return { entries, added: false };
+  }
+  const src = [...entries].reverse().find((e) => e.type === 'attachment' && (e.attachment as Json | undefined)?.type === type);
+  if (!src) {
+    return { entries, added: false };
+  }
+  // The chain's leaf: the last entry with a uuid (a system entry may follow
+  // the user entry).
+  const leaf = [...entries].reverse().find((e) => typeof e.uuid === 'string') as Json;
+  const copy: Json = { ...src, uuid: newUuid(), parentUuid: leaf.uuid, timestamp: leaf.timestamp ?? src.timestamp };
+  return { entries: [...entries, copy], added: true };
+}
+
+const MARKERS = new Set(['[Request interrupted by user]', '[Request interrupted by user for tool use]']);
+
+function entryText(e: Json): string | undefined {
+  const c = (e.message as Json | undefined)?.content;
+  if (typeof c === 'string') {
+    return c;
+  }
+  if (Array.isArray(c) && c.length === 1 && (c[0] as Json).type === 'text') {
+    return String((c[0] as Json).text);
+  }
+  return undefined;
+}
+
+export const isMarker = (e: Json): boolean => e.type === 'user' && MARKERS.has(entryText(e) ?? '');
+export const isPartial = (e: Json): boolean => e.type === 'assistant' && e.isAbortedMidStream === true;
+
+// Leaves out the entries `pick` names, relinking the chain.
+export function without(entries: Json[], pick: (e: Json) => boolean): { entries: Json[]; removed: number } {
+  const drop = new Set(entries.filter((e) => pick(e) && typeof e.uuid === 'string').map((e) => String(e.uuid)));
+  return { entries: relink(entries, drop), removed: drop.size };
+}
+
+export { lastChainEntry };

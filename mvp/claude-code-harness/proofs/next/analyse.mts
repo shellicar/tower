@@ -204,7 +204,7 @@ export function analyseRow(row: Json): Json {
   const model = String(row.model);
   const rawDir = String(row.rawDir);
   const events = lines(join(rawDir, 'next-events.jsonl'));
-  const holdings = JSON.parse(readFileSync(join(rawDir, 'holdings.json'), 'utf8')) as { way: string; atMs: number; entries: Json[]; note?: string }[];
+  const holdings = JSON.parse(readFileSync(join(rawDir, 'holdings.json'), 'utf8')) as { way: string; atMs: number; entries: Json[]; conversation?: Json[]; note?: string }[];
   const L = probeRequest(join(rawDir, 'api-bodies'), model);
   // Store appends after the result and before the probe: what a commit at
   // the result would have missed.
@@ -224,7 +224,7 @@ export function analyseRow(row: Json): Json {
   for (const h of holdings) {
     const w: Json = { way: h.way, atMs: h.atMs, entries: h.entries.length, note: h.note ?? null };
     if (truth) {
-      const c = compareBlocks(entryBlocks(h.entries), truth.before);
+      const c = compareBlocks(entryBlocks(h.conversation ?? h.entries), truth.before);
       Object.assign(w, { history: c.exact ? 'exact' : c.equal ? 'equal but trailing newline' : 'differs', missing: c.missing, extra: c.extra });
     }
     const hash = String(ways[h.way]?.hash ?? '');
