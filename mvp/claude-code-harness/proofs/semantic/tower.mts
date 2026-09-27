@@ -105,3 +105,9 @@ export async function modelsByTurn(tower: Tower, convId: string, upto: number): 
   }
   return out;
 }
+
+// changes.held (the integration proof's held-carrier variant, TODO:
+// undecided): each a record of the user side still held at a query's end.
+export async function towerHeld(tower: Tower, convId: string, upto: number): Promise<{ seq: number; body: Json }[]> {
+  return readStream(tower, `conv.v2.${convId}.changes.held`, upto);
+}

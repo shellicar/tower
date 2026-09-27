@@ -34,14 +34,14 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { toBodies } from '../reconcile/load.mts';
 import { assistantCommits, kindOf, type TMsg } from '../reconcile/holding.mts';
-import { lastSeq, openTower, type Tower, towerMessages } from '../semantic/tower.mts';
+import { lastSeq, openTower, type Tower, towerHeld, towerMessages } from '../semantic/tower.mts';
 import { scanTag } from '../tag-scan.mts';
 import { type PublishedLine } from './committer.mts';
 import { type Cell, cells, type CheckRow, Evidence, printRow, PROBE, resetAgent, short, specFor, WARM } from './common.mts';
-import { forks, liveVsOffline, lostFromTower, messagesVs, noResponseOnTower, probeRequest, resumeVerdict, towerVsRequest, unclosedAsOf } from './checks.mts';
+import { chainGaps, forks, heldOnTower, liveVsOffline, lostFromTower, messagesVs, noResponseOnTower, probeRequest, resumeVerdict, towerVsRequest, unclosedAsOf } from './checks.mts';
 import { Participant } from './driver.mts';
-import { CONFIG_DIRS_ROOT, clean, HARNESS_STATE, INTEGRATION_STATE, iso, type Json, PACKAGE_ROOT, readJsonl, sleep } from './lib.mts';
-import { Lineage } from './lineage.mts';
+import { CONFIG_DIRS_ROOT, clean, gone, HARNESS_STATE, HERE, INTEGRATION_STATE, iso, type Json, PACKAGE_ROOT, procStat, readJsonl, sleep } from './lib.mts';
+import { entryId, Lineage } from './lineage.mts';
 import { recordedResumeDirs, transcripts, union } from './recover.mts';
 
 interface Args {
@@ -52,10 +52,13 @@ interface Args {
   strace: boolean;
   reset: boolean;
   prime: boolean;
+  // Part B's ways through (each TODO: undecided), passed to every
+  // participant this run starts.
+  variants: string[];
 }
 
 function parse(argv: string[]): Args {
-  const a: Args = { scenario: argv[0] ?? '', model: 'claude-haiku-4-5', agent: undefined, cells: undefined, strace: false, reset: true, prime: true };
+  const a: Args = { scenario: argv[0] ?? '', model: 'claude-haiku-4-5', agent: undefined, cells: undefined, strace: false, reset: true, prime: true, variants: [] };
   for (let i = 1; i < argv.length; i += 1) {
     const k = argv[i];
     if (k === '--model') a.model = String(argv[++i]);
@@ -64,6 +67,7 @@ function parse(argv: string[]): Args {
     else if (k === '--strace') a.strace = true;
     else if (k === '--no-reset') a.reset = false;
     else if (k === '--no-prime') a.prime = false;
+    else if (k === '--variant') a.variants = String(argv[++i]).split(',').filter(Boolean);
     else throw new Error(`unknown argument ${k}`);
   }
   return a;
@@ -88,6 +92,9 @@ class UsageLimit extends Error {}
 // Every participant this run starts, so a usage-limit 429 stops everything.
 const started: Participant[] = [];
 function start(spec: ReturnType<typeof specFor>, a: Args): Participant {
+  if (a.variants.length > 0 && !spec.variants) {
+    spec.variants = a.variants;
+  }
   const p = new Participant(spec, { strace: a.strace, log });
   started.push(p);
   return p;
@@ -116,7 +123,7 @@ function published(lineage: string): PublishedLine[] {
 // Tower's stream sequence as of an instant: the last message published for
 // something committed at or before it (chosen by commit instant, not ack).
 function seqAsOf(lineage: string, ms: number): number {
-  const ps = published(lineage).filter((p) => p.kind === 'message' && p.commitMs <= ms && typeof p.seq === 'number');
+  const ps = published(lineage).filter((p) => (p.kind === 'message' || p.kind === 'held') && p.commitMs <= ms && typeof p.seq === 'number');
   return Math.max(0, ...ps.map((p) => p.seq as number));
 }
 
@@ -138,7 +145,10 @@ function ending(lin: Lineage, cell: Cell, sayMs: number, resultMs: number, trigg
       reached = e.keptReply;
       break;
     case 'thinking-only':
-      reached = e.droppedThinking > 0 && !e.keptReply;
+      // A thinking-only reply was produced (and dropped). Claude Code
+      // 2.1.282 never ends a query on one: it adds its own meta nudge and
+      // asks again, so the query ends on a kept reply (round 1).
+      reached = e.droppedThinking > 0;
       break;
     case 'limit':
     case 'api-error':
@@ -206,6 +216,20 @@ async function smoke(a: Args): Promise<CheckRow[]> {
 // ---------------------------------------------------------------------------
 // matrix
 
+// Step 1 of a cell: its env trigger applied live for this step only.
+async function stepOne(p: Participant, conv: string, cell: Cell): Promise<Json> {
+  if (cell.step1Env) {
+    await p.flag(conv, { env: cell.step1Env });
+  }
+  const r = await p.say(conv, cell.prompt, { step: 1, ...(cell.ending ? { ending: cell.ending } : {}) });
+  if (cell.restoreEnv) {
+    await p.flag(conv, { env: cell.restoreEnv });
+  }
+  return r;
+}
+
+const probeAnswered = (r: Json): boolean => r.subtype === 'success' && r.isError !== true && /NEXT/.test(String(r.text));
+
 async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string, root: Evidence, attempt: number): Promise<{ rows: CheckRow[]; reached: boolean }> {
   const tag = `${cell.id}${attempt > 1 ? `-try${attempt}` : ''}`;
   const dir = root.path(tag);
@@ -219,7 +243,8 @@ async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string
   };
 
   // The live run: warm-up, the prompt ended at the cell's ending, the probe.
-  const p1 = start(specFor(agent, a.model, ev.path('p1-live'), { maxTokens: cell.maxTokens, extraEnv: cell.env }), a);
+  const cellOpts = cell.effort ? { effort: cell.effort } : {};
+  const p1 = start(specFor(agent, a.model, ev.path('p1-live'), cellOpts), a);
   await p1.ready();
   const served = await p1.serve({ conv: 'c' });
   const id = String(served.id);
@@ -227,7 +252,7 @@ async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string
   await p1.say('c', WARM, { step: 0 });
   checkUsageLimit();
   const sent1 = p1.events.length;
-  const r1 = await p1.say('c', cell.prompt, { step: 1, ...(cell.ending ? { ending: cell.ending } : {}) });
+  const r1 = await stepOne(p1, 'c', cell);
   checkUsageLimit();
   const say1 = p1.events.slice(sent1).find((e) => e.ev === 'sent');
   const triggered = p1.events.slice(sent1).some((e) => e.ev === 'trigger');
@@ -259,7 +284,9 @@ async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string
     row('L request', false, 'no probe request found in the live lineage', keptL);
     return { rows, reached: end.reached === true };
   }
-  row('L probe', r2.subtype === 'success', `${String(r2.subtype)} ${JSON.stringify(String(r2.text).slice(0, 60))} (L ${L.file})`, keptL);
+  // Answered, not merely `success`: Claude Code reports an API error ending
+  // as subtype success with is_error (round 1 passed those).
+  row('L probe', probeAnswered(r2), `${String(r2.subtype)} isError ${String(r2.isError)} ${JSON.stringify(String(r2.text).slice(0, 60))} (L ${L.file})`, keptL);
 
   // Tower holds what the model received, for every part a kept reply closed.
   const tv = towerVsRequest(lin.rec, tower, L);
@@ -268,7 +295,7 @@ async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string
   // Join 8 and order.
   const lo = liveVsOffline(lineage, bodyOf);
   writeFileSync(ev.path('live-vs-offline.json'), clean(JSON.stringify(lo, null, 2)));
-  const notes = (lo.committerNotes as Json[]).filter((n) => ['changed', 'late-insert', 'error'].includes(String(n.kind)));
+  const notes = (lo.committerNotes as Json[]).filter((n) => ['changed', 'late-insert', 'error', 'unanchored'].includes(String(n.kind)));
   row('live = offline build', lo.equal === true && notes.length === 0, `${lo.equal ? 'equal' : `first difference ${JSON.stringify(lo.firstDifference)}`}; live ${String(lo.live)} offline ${String(lo.offline)}; notes ${JSON.stringify(notes)}`, ev.path('live-vs-offline.json'));
   row('order', (lo.orderWarnings as string[]).length === 0, `assistant pieces before their run's user side: ${(lo.orderWarnings as string[]).length} ${JSON.stringify(lo.orderWarnings)}`, ev.path('live-vs-offline.json'));
   const pubIds = published(lineage).filter((x) => x.kind === 'message').map((x) => x.id);
@@ -276,9 +303,21 @@ async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string
   row('tower = published', JSON.stringify(pubIds) === JSON.stringify(towerIds), `published ${pubIds.length}, tower ${towerIds.length}`, ev.path('tower.json'));
   const nrr = noResponseOnTower(tower);
   row('no "No response requested."', nrr.length === 0, nrr.length ? `on tower: ${nrr.join(',')}` : 'none on tower', ev.path('tower.json'));
+  if (cell.id === 'thinking-only') {
+    // What the design did with the thinking-only reply: dropped (never on
+    // tower), and Claude Code's meta nudge committed as your side.
+    const held = heldOnTower(tower);
+    const commits = assistantCommits(lin.rec);
+    const win = lin.rec.entries.filter((r) => r.ms >= Number(say1?.ms ?? 0) && r.ms <= step1Ms);
+    const dropped = win.filter((r) => kindOf(r.entry) === 'assistant' && !commits.has(String(r.entry.uuid))).map((r) => String(r.entry.uuid));
+    row('thinking-only reply dropped', dropped.length > 0 && dropped.every((u) => !held.has(`uuid:${u}`)), `dropped ${JSON.stringify(dropped)}; on tower ${JSON.stringify(dropped.filter((u) => held.has(`uuid:${u}`)))}; resumedFromIncompleteThinking ${win.some((r) => r.entry.resumedFromIncompleteThinking === true)}`, ev.path('tower.json'));
+    const nudges = win.filter((r) => r.entry.type === 'user' && r.entry.isMeta === true && JSON.stringify((r.entry.message as Json | undefined)?.content ?? '').includes('no visible output')).map((r) => String(r.entry.uuid));
+    const carrying = tower.filter((b) => ((b.ccEntries as Json[] | undefined) ?? []).some((c) => nudges.includes(String(c.uuid))));
+    row('nudge committed as your side', nudges.length > 0 && nudges.every((u) => held.has(`uuid:${u}`)) && carrying.every((b) => b.role === 'user'), `nudges ${JSON.stringify(nudges)}; carried by tower messages ${JSON.stringify(carrying.map((b) => [b.id, b.role]))}; its parent (the dropped reply) on tower: ${nudges.map((u) => lin.rec.entries.find((r) => String(r.entry.uuid) === u)?.entry.parentUuid).some((pu) => held.has(`uuid:${String(pu)}`))}`, ev.path('tower.json'));
+  }
 
   // A restart on the same machine, from the local record as of step 1.
-  const p2 = start(specFor(agent, a.model, ev.path('p2-restart'), { maxTokens: cell.maxTokens }), a);
+  const p2 = start(specFor(agent, a.model, ev.path('p2-restart'), cellOpts), a);
   await p2.ready();
   const s2 = await p2.serve({ conv: 'restart', id, dry: true, asOfMs: step1Ms, name: 'restart-local' });
   const r2t = await p2.say('restart', PROBE, { step: 2 });
@@ -294,7 +333,7 @@ async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string
   // A resume from tower alone, another agent name, as of step 1.
   const asOfSeq = seqAsOf(lineage, step1Ms);
   const towerAsOf = await towerNow(id, asOfSeq);
-  const p3 = start(specFor(towerAgent, a.model, ev.path('p3-tower-alone'), { maxTokens: cell.maxTokens }), a);
+  const p3 = start(specFor(towerAgent, a.model, ev.path('p3-tower-alone'), cellOpts), a);
   await p3.ready();
   const s3 = await p3.serve({ conv: 'tower', id, dry: true, asOfSeq, name: 'tower-alone' });
   const r3t = await p3.say('tower', PROBE, { step: 2 });
@@ -305,7 +344,7 @@ async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string
   if (!T2) {
     row('tower alone', false, `no T request (decision ${String(s3.decision)}, result ${String(r3t.subtype)})`, ev.path('p3-tower-alone'));
   } else {
-    const mv = messagesVs(lin.rec, L, T2, step1Ms);
+    const mv = messagesVs(lin.rec, L, Lineage.open(String(s3.lineage)).rec, T2, step1Ms);
     const expected = unclosedAsOf(lin.rec, towerAsOf, step1Ms);
     const same = JSON.stringify([...new Set(mv.missing)].sort()) === JSON.stringify([...new Set(expected)].sort());
     // The harness fixes cwd per agent name (work/<name>): masked for the
@@ -314,7 +353,7 @@ async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string
     const workOf = (n: string): string => join(HARNESS_STATE, 'work', n);
     const full = resumeVerdict(L, T2, [[workOf(towerAgent), workOf(agent)], [`-work-${towerAgent}`, `-work-${agent}`]]);
     writeFileSync(ev.path('tower-alone-vs-L.json'), clean(JSON.stringify({ served: s3, asOfSeq, towerMessagesAsOf: towerAsOf.length, messages: mv, expectedMissing: expected, fullRequest: full }, null, 2)));
-    row('tower alone misses only the unclosed part', s3.decision === 'tower' && same && mv.extra.length === 0 && mv.placement.length === 0 && mv.content.length === 0, `decision ${String(s3.decision)}; L-not-T ${JSON.stringify(mv.missing)} expected ${JSON.stringify(expected)}; extra ${JSON.stringify(mv.extra)}; ${mv.placement.join('; ')}${mv.content.length ? `; carried with other text in T: ${mv.content.join(' | ')}` : ''}; full request (cwd masked) ${String(full.verdict)} ${((full.diff as string[]) ?? []).slice(0, 2).join(' | ')}`, ev.path('tower-alone-vs-L.json'));
+    row('tower alone misses only the unclosed part', s3.decision === 'tower' && same && mv.extra.length === 0 && mv.placement.length === 0 && mv.content.length === 0 && mv.unbacked.length === 0, `decision ${String(s3.decision)}; L-not-T ${JSON.stringify(mv.missing)} expected ${JSON.stringify(expected)}; extra ${JSON.stringify(mv.extra)}; ${mv.placement.join('; ')}${mv.content.length ? `; carried with other text in T: ${mv.content.join(' | ')}` : ''}${mv.unbacked.length ? `; blocks in T no entry backs: ${mv.unbacked.join(' | ')}` : ''}; full request (cwd masked) ${String(full.verdict)} ${((full.diff as string[]) ?? []).slice(0, 2).join(' | ')}`, ev.path('tower-alone-vs-L.json'));
   }
   return { rows, reached: end.reached === true };
 }
@@ -469,12 +508,12 @@ async function killed(a: Args): Promise<CheckRow[]> {
     const nrr = noResponseOnTower(tower);
     row('no "No response requested."', nrr.length === 0, nrr.length ? nrr.join(',') : 'none on tower', join(dir, 'tower.json'));
     const probeOn = tower.some((b) => b.role === 'user' && JSON.stringify(b.content).includes(PROBE));
-    row('probe committed', r.subtype === 'success' && probeOn, `probe ${String(r.subtype)} ${JSON.stringify(String(r.text).slice(0, 40))}; its message on tower: ${probeOn}`, join(dir, 'tower.json'));
+    row('probe committed', probeAnswered(r) && probeOn, `probe ${String(r.subtype)} isError ${String(r.isError)} ${JSON.stringify(String(r.text).slice(0, 40))}; its message on tower: ${probeOn}; results seen by the served participant ${JSON.stringify(p2.events.filter((e) => e.ev === 'result').map((e) => ({ queryId: String(e.queryId).slice(0, 8), selfStarted: e.selfStarted, numTurns: e.numTurns, text: String(e.text).slice(0, 20) })))}`, join(dir, 'tower.json'));
     for (const [name, lineage] of [...new Set([String(s1.lineage), String(s2.lineage)])].map((l, i) => [`lineage-${i + 1}`, l] as const)) {
       const lo = liveVsOffline(lineage, bodyOf);
       keepLineage({ path: (...p: string[]) => join(dir, ...p) } as Evidence, name, lineage);
       writeFileSync(join(dir, `${name}-live-vs-offline.json`), clean(JSON.stringify(lo, null, 2)));
-      const notes = (lo.committerNotes as Json[]).filter((n) => ['changed', 'late-insert', 'error'].includes(String(n.kind)));
+      const notes = (lo.committerNotes as Json[]).filter((n) => ['changed', 'late-insert', 'error', 'unanchored'].includes(String(n.kind)));
       row(`live = offline build (${name})`, lo.equal === true && notes.length === 0, `${lo.equal ? 'equal' : JSON.stringify(lo.firstDifference)}; order warnings ${(lo.orderWarnings as string[]).length}; notes ${JSON.stringify(notes)}`, join(dir, `${name}-live-vs-offline.json`));
     }
   }
@@ -486,10 +525,26 @@ async function killed(a: Args): Promise<CheckRow[]> {
 // tower moved on
 
 async function movedOn(a: Args): Promise<CheckRow[]> {
-  const agent = a.agent ?? `int-${short(a.model)}-mo`;
-  const other = `${agent}-2`;
+  const base = a.agent ?? `int-${short(a.model)}-mo`;
   const root = new Evidence(`${short(a.model)}-moved-on`);
   useLog(root);
+  const rows: CheckRow[] = [];
+  // kill: machine 1 SIGKILLed mid-tool (round 1's; nothing after the tool_use
+  // is written). interrupt: machine 1 interrupted mid-tool and shut down (its
+  // Claude Code writes the rejected tool_result and the marker, which "run"
+  // holds), so the ways through that act on those have something to act on.
+  for (const cell of a.cells ?? ['kill', 'interrupt']) {
+    rows.push(...(await movedOnCell(a, cell, cell === 'kill' ? base : `${base}-i`, root)));
+  }
+  writeTable(root, `moved-on ${a.model}${a.variants.length ? ` variants ${a.variants.join(',')}` : ''}`, rows);
+  return rows;
+}
+
+async function movedOnCell(a: Args, cell: string, agent: string, root0: Evidence): Promise<CheckRow[]> {
+  const other = `${agent}-2`;
+  const dir = root0.path(cell);
+  mkdirSync(dir, { recursive: true });
+  const root = { dir, path: (...p: string[]) => join(dir, ...p) } as Evidence;
   if (a.reset) {
     resetAgent(agent, log);
     resetAgent(other, log);
@@ -497,7 +552,7 @@ async function movedOn(a: Args): Promise<CheckRow[]> {
   await prime(a, agent, root);
   const rows: CheckRow[] = [];
   const row = (check: string, pass: boolean, reason: string, evidence: string): void => {
-    const r = { scenario: 'moved-on', cell: '-', check, pass, reason, evidence };
+    const r = { scenario: 'moved-on', cell, check, pass, reason, evidence };
     rows.push(r);
     printRow(r);
   };
@@ -507,40 +562,88 @@ async function movedOn(a: Args): Promise<CheckRow[]> {
   await p1.ready();
   const id = String((await p1.serve({ conv: 'c' })).id);
   await p1.say('c', WARM, { step: 0 });
-  await killAtTool(p1, 'c');
+  if (cell === 'kill') {
+    await killAtTool(p1, 'c');
+  } else {
+    const r1 = await p1.say('c', KILL_PROMPT, { step: 1, ending: 'tool-exec' });
+    row('machine 1 interrupted mid-tool', p1.events.some((e) => e.ev === 'trigger') && existsSync(root.path('p1-machine1', 'prefix.log')), `${String(r1.subtype)} ${String(r1.reason)}; command ran: ${existsSync(root.path('p1-machine1', 'prefix.log'))}`, root.path('p1-machine1'));
+    await p1.shutdown();
+  }
   await p1.claudesGone();
   const towerBefore = await towerNow(id);
-  const held = new Set(towerBefore.flatMap((b) => ((b.ccEntries as Json[] | undefined) ?? []).map((c) => String(c.uuid))));
-  const stale = localUnion(agent, id).filter((e) => typeof e.uuid === 'string' && !held.has(String(e.uuid)));
+  // Stale: what machine 1's record holds that tower (messages, the unshown
+  // record, and with held-carrier the latest held record) doesn't.
+  const heldBefore = heldOnTower(towerBefore);
+  towerConn ??= await openTower();
+  for (const h of ((await towerHeld(towerConn, id, await lastSeq(towerConn))).at(-1)?.body.entries as Json[] | undefined) ?? []) {
+    heldBefore.add(entryId(h.entry as Json));
+  }
+  const stale = localUnion(agent, id).filter((e) => typeof e.uuid === 'string' && !heldBefore.has(entryId(e)));
   writeFileSync(root.path('stale.json'), clean(JSON.stringify(stale.map((e) => ({ uuid: e.uuid, type: e.type })), null, 2)));
   // Machine 2 carries it on from tower.
   const pB = start(specFor(other, a.model, root.path('p2-machine2')), a);
   await pB.ready();
   const sB = await pB.serve({ conv: 'c', id });
-  await pB.say('c', 'Reply with the word OTHER only.', { step: 1 });
+  const rB = await pB.say('c', 'Reply with the word OTHER only.', { step: 1 });
   checkUsageLimit();
   await pB.shutdown();
+  const towerMid = await towerNow(id);
   // Machine 1 again.
   const p2 = start(specFor(agent, a.model, root.path('p3-machine1-again'), { ours: p1.claudes }), a);
   await p2.ready();
   const s2 = await p2.serve({ conv: 'c', id });
-  await p2.say('c', PROBE, { step: 2 });
+  const r2 = await p2.say('c', PROBE, { step: 2 });
   checkUsageLimit();
   await p2.shutdown();
   const tower = await towerNow(id);
   writeFileSync(root.path('tower.json'), clean(JSON.stringify(tower, null, 2)));
-  const onTower = new Set(tower.flatMap((b) => ((b.ccEntries as Json[] | undefined) ?? []).map((c) => String(c.uuid))));
-  const leaked = stale.filter((e) => onTower.has(String(e.uuid)));
-  row('machine 2 resumed from tower', sB.decision === 'tower', `decision ${String(sB.decision)}`, root.path('p2-machine2'));
-  row('machine 1 follows tower', s2.decision === 'tower' && s2.movedOn === true, `decision ${String(s2.decision)} movedOn ${String(s2.movedOn)} recovery ${JSON.stringify(s2.recovery)}`, root.path('p3-machine1-again'));
-  row('stale tail never published', stale.length > 0 && leaked.length === 0, `stale local entries ${stale.length}, on tower ${leaked.length} ${JSON.stringify(leaked.map((e) => e.uuid))}`, root.path('stale.json'));
+  const onTower = heldOnTower(tower);
+  const leaked = stale.filter((e) => onTower.has(entryId(e)));
+  row('machine 2 resumed from tower', sB.decision === 'tower', `decision ${String(sB.decision)}; its reply ${String(rB.subtype)} ${JSON.stringify(String(rB.text).slice(0, 30))}${sB.cut ? `; cut ${JSON.stringify(sB.cut)}` : ''}${sB.held ? `; held entries loaded ${JSON.stringify(sB.held)}` : ''}${sB.fabricated ? `; rebuilt ${JSON.stringify(sB.fabricated)}` : ''}${sB.materialised ? '; materialised' : ''}`, root.path('p2-machine2'));
+  row('machine 1 follows tower', s2.decision === 'tower' && s2.movedOn === true, `decision ${String(s2.decision)} movedOn ${String(s2.movedOn)} recovery ${JSON.stringify(s2.recovery)}${s2.fabricated ? `; rebuilt ${JSON.stringify(s2.fabricated)}` : ''}${s2.materialised ? `; materialised ${JSON.stringify(s2.materialised)}` : ''}`, root.path('p3-machine1-again'));
+  // In the kill cell a stale tail is the scenario's premise; in the
+  // interrupt cell a way through may leave none (it put the held side on
+  // tower before machine 2 came).
+  row('stale tail never published', (stale.length > 0 || cell === 'interrupt') && leaked.length === 0, `stale local entries ${stale.length} ${JSON.stringify(stale.map((e) => String(e.type)))}, on tower ${leaked.length} ${JSON.stringify(leaked.map((e) => e.uuid))}`, root.path('stale.json'));
   const f = forks(tower);
   row('nothing forks', f.length === 0, f.length ? JSON.stringify(f) : 'no two tower entries share a parent', root.path('tower.json'));
+  const gaps = chainGaps(tower);
+  row('no chain gaps', gaps.length === 0, gaps.length ? `entries whose parent tower doesn't hold: ${JSON.stringify(gaps)}` : 'every chain entry\'s parent is on tower', root.path('tower.json'));
+  // Nothing either machine wrote after the kill is lost: every entry their
+  // Claude Codes wrote live (the recordings; a store resume's own record was
+  // a /tmp/claude-resume-* dir the SDK deleted) is on tower, bar the
+  // expected kinds.
+  const liveOf = (lineage: string): Json[] => readJsonl(join(lineage, 'store-appends.jsonl')).filter((x) => x.how === 'live' && !(x.key as Json | undefined)?.subpath).flatMap((x) => x.entries as Json[]);
+  const written = [...liveOf(String(sB.lineage)), ...liveOf(String(s2.lineage))];
+  const lost = lostFromTower(written, tower);
+  writeFileSync(root.path('lost.json'), clean(JSON.stringify(lost, null, 2)));
+  row('nothing written is lost', lost.lostVisible.length === 0, `model-visible entries not on tower: ${JSON.stringify(lost.lostVisible)}; unshown not carried: ${lost.unshownNotCarried.length}; dropped thinking-only: ${lost.droppedThinking.length}; synthetic: ${lost.synthetic.length}`, root.path('lost.json'));
+  const probeOn = tower.some((b) => b.role === 'user' && JSON.stringify(b.content).includes(PROBE));
+  row('probe committed', probeAnswered(r2) && probeOn, `machine 1's probe ${String(r2.subtype)} isError ${String(r2.isError)} ${JSON.stringify(String(r2.text).slice(0, 30))}; its prompt on tower: ${probeOn}`, root.path('tower.json'));
   const T = probeRequest(join(String(s2.lineage), 'api-bodies'), a.model, PROBE);
   row('machine 1 builds on machine 2', T !== undefined && JSON.stringify(T.messages).includes('OTHER'), T ? `machine 1's probe request carries machine 2's turn: ${JSON.stringify(T.messages).includes('OTHER')}` : 'no probe request', String(s2.lineage));
+  // What each machine's model received against what tower holds.
+  for (const [label, lineage, text, towerAt] of [
+    ['machine 2', String(sB.lineage), 'Reply with the word OTHER only.', towerMid],
+    ['machine 1', String(s2.lineage), PROBE, tower],
+  ] as const) {
+    const linX = Lineage.open(lineage);
+    linX.pollBodies();
+    const R = probeRequest(linX.bodies, a.model, text);
+    if (!R) {
+      row(`${label}'s request = tower`, false, 'no request found', lineage);
+      continue;
+    }
+    const tv = towerVsRequest(linX.rec, towerAt, R);
+    const name = `tower-vs-${label.replace(' ', '')}.json`;
+    writeFileSync(root.path(name), clean(JSON.stringify(tv, null, 2)));
+    const lo = liveVsOffline(lineage, bodyOf);
+    const unanchored = (lo.committerNotes as Json[]).filter((n) => n.kind === 'unanchored');
+    const unbacked = R.messages.flatMap((m) => (Array.isArray(m.content) ? (m.content as Json[]) : [])).filter((b) => b.type === 'tool_result' && /Tool result missing/.test(JSON.stringify(b.content)));
+    row(`${label}'s request = tower`, tv.kinds.every((k) => k === 'exact' || k === 'newline') && unanchored.length === 0, `${tv.kinds.join(',')} request ${tv.shape.request} tower ${tv.shape.tower}${tv.missing.length ? ` missing ${tv.missing.join('; ')}` : ''}${tv.extra.length ? ` extra ${tv.extra.join('; ')}` : ''}${tv.placement.length ? ` ${tv.placement.join('; ')}` : ''}; synthetic tool_results in its request ${unbacked.length}; committer: ${unanchored.length ? `unanchored ${JSON.stringify(unanchored)}` : 'every request anchored'}; live = offline ${String(lo.equal)}`, root.path(name));
+  }
   const nrr = noResponseOnTower(tower);
   row('no "No response requested."', nrr.length === 0, nrr.length ? nrr.join(',') : 'none on tower', root.path('tower.json'));
-  writeTable(root, `moved-on ${a.model}`, rows);
   return rows;
 }
 
@@ -573,10 +676,11 @@ async function origins(a: Args): Promise<CheckRow[]> {
     const id = String((await p0.serve({ conv: 'c' })).id);
     await p0.say('c', WARM, { step: 0 });
     await p0.shutdown();
-    const p1 = start(specFor(agent, a.model, join(dir, 'p1-live'), { maxTokens: cell.maxTokens, extraEnv: cell.env }), a);
+    const cellOpts = cell.effort ? { effort: cell.effort } : {};
+    const p1 = start(specFor(agent, a.model, join(dir, 'p1-live'), cellOpts), a);
     await p1.ready();
     const s1 = await p1.serve({ conv: 'c', id });
-    const r1 = await p1.say('c', cell.prompt, { step: 1, ...(cell.ending ? { ending: cell.ending } : {}) });
+    const r1 = await stepOne(p1, 'c', cell);
     await p1.say('c', PROBE, { step: 2 });
     checkUsageLimit();
     await p1.shutdown();
@@ -592,7 +696,7 @@ async function origins(a: Args): Promise<CheckRow[]> {
       ['restart (auto)', 'auto'],
       ['restart from own recording (variant)', 'record'],
     ] as const) {
-      const p = start(specFor(agent, a.model, join(dir, `p-${from}`), { maxTokens: cell.maxTokens }), a);
+      const p = start(specFor(agent, a.model, join(dir, `p-${from}`), cellOpts), a);
       await p.ready();
       const s = await p.serve({ conv: `r-${from}`, id, dry: true, from, asOfMs: step1Ms, asOfSeq: seqAsOf(lineage, step1Ms), name: `restart-${from}` });
       await p.say(`r-${from}`, PROBE, { step: 2 });
@@ -682,7 +786,7 @@ async function skills(a: Args): Promise<CheckRow[]> {
     await q.say('c', OK, { step: 6 });
     await q.say('c', '/int-seed', { step: 7 });
     await q.shutdown();
-    views[side] = { fresh: skillView(String(s.lineage)), resumed: skillView(String(s2.lineage)), decision: s2.decision, init: [p, q].map((x) => ((x.events.find((e) => e.ev === 'init')?.skills as string[]) ?? []).filter((n) => n.startsWith('int-'))) };
+    views[side] = { freshLineage: s.lineage, resumedLineage: s2.lineage, fresh: skillView(String(s.lineage)), resumed: skillView(String(s2.lineage)), decision: s2.decision, init: [p, q].map((x) => ((x.events.find((e) => e.ev === 'init')?.skills as string[]) ?? []).filter((n) => n.startsWith('int-'))) };
     if (side === 'participant') {
       // Resumed from tower under another agent name: a store resume, the
       // skills linked by the spawn hook into /tmp/claude-resume-*.
@@ -696,6 +800,17 @@ async function skills(a: Args): Promise<CheckRow[]> {
       (views[side] as Json).towerResumed = { decision: s3.decision, view: skillView(String(s3.lineage)), init: ((t.events.find((e) => e.ev === 'init')?.skills as string[]) ?? []).filter((n) => n.startsWith('int-')), spawns: t.events.filter((e) => e.ev === 'spawn').map((e) => e.configDir) };
     }
   }
+  // What reached each main request about skills (round 1's scratch
+  // skill-req.py): listings (int- names and markers, and how many others),
+  // invocations, bodies loaded, "no command" notices, request by request.
+  const reqView = (lineage: string): Json[] => {
+    const r = spawnSync('python3', [join(HERE, 'skill-req.py'), lineage], { encoding: 'utf8', maxBuffer: 1 << 26 });
+    return (((JSON.parse(r.stdout || '{}') as Json)[lineage] as Json[] | undefined) ?? []).map((x) => x.seq as Json);
+  };
+  for (const side of ['participant', 'plain'] as const) {
+    const v = views[side] as Json;
+    v.requests = { fresh: reqView(String(v.freshLineage)), resumed: reqView(String(v.resumedLineage)) };
+  }
   const out = root.write('skills.json', views);
   const pv = views.participant as Json;
   const bv = views.plain as Json;
@@ -703,6 +818,11 @@ async function skills(a: Args): Promise<CheckRow[]> {
   const rows: CheckRow[] = [
     { scenario: 'skills', cell: 'fresh', check: 'as plain Claude Code', pass: strip(pv.fresh as Json) === strip(bv.fresh as Json), reason: `participant ${strip(pv.fresh as Json)} plain ${strip(bv.fresh as Json)}`, evidence: out },
     { scenario: 'skills', cell: 'resumed', check: 'as plain Claude Code', pass: strip(pv.resumed as Json) === strip(bv.resumed as Json), reason: `participant ${strip(pv.resumed as Json)} plain ${strip(bv.resumed as Json)}`, evidence: out },
+    ...(['fresh', 'resumed'] as const).map((k) => {
+      const pr = strip(((pv.requests as Json)[k]) as Json);
+      const br = strip(((bv.requests as Json)[k]) as Json);
+      return { scenario: 'skills', cell: k, check: 'requests as plain Claude Code', pass: pr === br && pr !== '[]', reason: `participant ${pr.slice(0, 600)} plain ${br.slice(0, 600)}`, evidence: out };
+    }),
     { scenario: 'skills', cell: 'tower-resumed', check: 'linked into the resume dir', pass: JSON.stringify(((pv.towerResumed as Json).view as Json).done).includes('DONE-int-late'), reason: JSON.stringify(pv.towerResumed), evidence: out },
   ];
   for (const r of rows) printRow(r);
@@ -715,9 +835,20 @@ async function skills(a: Args): Promise<CheckRow[]> {
 
 async function two(a: Args): Promise<CheckRow[]> {
   const base = a.agent ?? `int-${short(a.model)}-two`;
-  const names = [`${base}-a`, `${base}-b`];
   const root = new Evidence(`${short(a.model)}-two`);
   useLog(root);
+  const rows: CheckRow[] = [];
+  for (const cell of a.cells ?? ['mid-tool', 'kill']) {
+    rows.push(...(cell === 'kill' ? await twoKill(a, `${base}-k`, root) : await twoMidTool(a, base, root)));
+  }
+  writeTable(root, `two ${a.model}`, rows);
+  return rows;
+}
+
+async function twoMidTool(a: Args, base: string, root0: Evidence): Promise<CheckRow[]> {
+  const names = [`${base}-a`, `${base}-b`];
+  const root = { dir: root0.path('mid-tool'), path: (...p: string[]) => root0.path('mid-tool', ...p) } as Evidence;
+  mkdirSync(root.dir, { recursive: true });
   for (const n of names) if (a.reset) resetAgent(n, log);
   const fix = join(INTEGRATION_STATE, 'fixtures', `${iso().replace(/[:.]/g, '')}-${base}`);
   const decl = names.map((n, i) => {
@@ -740,7 +871,7 @@ async function two(a: Args): Promise<CheckRow[]> {
   await Promise.all(ps.map((p) => p.shutdown()));
   const rows: CheckRow[] = [];
   const row = (check: string, pass: boolean, reason: string): void => {
-    const r = { scenario: 'two', cell: '-', check, pass, reason, evidence: root.dir };
+    const r = { scenario: 'two', cell: 'mid-tool', check, pass, reason, evidence: root.dir };
     rows.push(r);
     printRow(r);
   };
@@ -755,7 +886,87 @@ async function two(a: Args): Promise<CheckRow[]> {
     row(`${n} sees only its skills`, JSON.stringify(links) === JSON.stringify([`int-only-${n.slice(-1)}`]) && JSON.stringify(init) === JSON.stringify([`int-only-${n.slice(-1)}`]), `links ${JSON.stringify(links)} init ${JSON.stringify(init)}`);
   }
   void served;
-  writeTable(root, `two ${a.model}`, rows);
+  return rows;
+}
+
+// One participant SIGKILLed mid-tool and served again straight away while
+// the other is mid-tool (round 1's scratch two-kill.mts, folded in): the
+// other's Claude Codes untouched (same pids and start times, its turn
+// completes with no interrupt), and the served-again one's leftover stop
+// finds and signals only its own agent's Claude Codes.
+async function twoKill(a: Args, base: string, root0: Evidence): Promise<CheckRow[]> {
+  const A = `${base}-a`;
+  const B = `${base}-b`;
+  const dir = root0.path('kill');
+  mkdirSync(dir, { recursive: true });
+  const rows: CheckRow[] = [];
+  const row = (check: string, pass: boolean, reason: string): void => {
+    const r = { scenario: 'two', cell: 'kill', check, pass, reason, evidence: dir };
+    rows.push(r);
+    printRow(r);
+  };
+  for (const n of [A, B]) if (a.reset) resetAgent(n, log);
+  const fix = join(INTEGRATION_STATE, 'fixtures', `${iso().replace(/[:.]/g, '')}-${base}`);
+  const decl = [A, B].map((n, i) => {
+    const d = join(fix, `declared-${i}`);
+    writeSkill(d, `int-only-${n.slice(-1)}`, n.slice(-1).toUpperCase());
+    return d;
+  });
+  const a1 = start(specFor(A, a.model, join(dir, 'a1'), { skills: [decl[0] as string] }), a);
+  const b = start(specFor(B, a.model, join(dir, 'b'), { skills: [decl[1] as string] }), a);
+  await Promise.all([a1.ready(), b.ready()]);
+  const [sa, sb] = await Promise.all([a1.serve({ conv: 'c' }), b.serve({ conv: 'c' })]);
+  const idA = String(sa.id);
+  const TOOL_B = 'Run this exact Bash command in the foreground (not in the background), once: `sleep 20; echo TWO`. Then reply with its output only.';
+  // A mid-tool first, then B mid-tool, so B's command is running through A's
+  // kill and A's serve.
+  const a2 = start(specFor(A, a.model, join(dir, 'a2'), { skills: [decl[0] as string], ours: a1.claudes }), a);
+  await a2.ready();
+  const na = a1.events.length;
+  a1.send({ cmd: 'say', conv: 'c', text: KILL_PROMPT, step: 1 });
+  const ta = await a1.waitFor((e) => e.ev === 'tool-started' || e.ev === 'result', 180_000, 'A tool', na);
+  checkUsageLimit();
+  if (ta.ev === 'result') {
+    throw new Error(`A's turn ended before its tool started: ${JSON.stringify(ta).slice(0, 200)}`);
+  }
+  const nb = b.events.length;
+  const bTurn = b.say('c', TOOL_B, { step: 1, timeoutMs: 300_000 });
+  const tb = await b.waitFor((e) => e.ev === 'tool-started' || e.ev === 'result', 180_000, 'B tool', nb);
+  if (tb.ev === 'result') {
+    throw new Error(`B's turn ended before its tool started: ${JSON.stringify(tb).slice(0, 200)}`);
+  }
+  const bBefore = b.claudes.map((k) => ({ ...k, live: procStat(k.pid)?.starttime ?? null }));
+  const scansBefore = { A: scanTag(A).found.map((f) => f.pid), B: scanTag(B).found.map((f) => f.pid) };
+  await sleep(2000);
+  log(`SIGKILL participant ${a1.me?.pid} (${A}) mid-tool`);
+  a1.kill9();
+  await a1.exited;
+  a2.send({ cmd: 'ours', add: a1.claudes });
+  const s2 = await a2.serve({ conv: 'c', id: idA });
+  const stopA2 = JSON.parse(readFileSync(join(dir, 'a2', 'stop-c.json'), 'utf8')) as Json;
+  const bMid = b.claudes.map((k) => ({ pid: k.pid, starttime: k.starttime, live: procStat(k.pid)?.starttime ?? null, gone: gone(k) }));
+  const rb = await bTurn;
+  checkUsageLimit();
+  const rProbe = await a2.say('c', PROBE, { step: 2 });
+  checkUsageLimit();
+  const bAfter = b.claudes.map((k) => ({ pid: k.pid, starttime: k.starttime, live: procStat(k.pid)?.starttime ?? null, gone: gone(k) }));
+  const bExitsBeforeShutdown = b.events.filter((e) => e.ev === 'claude-exit');
+  await Promise.all([a2.shutdown(), b.shutdown()]);
+  const bPids = new Set(bBefore.map((k) => k.pid));
+  const a1Pids = new Set(a1.claudes.map((k) => k.pid));
+  const rounds = (stopA2.rounds as Json[]) ?? [];
+  const found = rounds.flatMap((r) => (r.found as Json[]) ?? []);
+  const signals = rounds.flatMap((r) => (r.signals as Json[]) ?? []);
+  row('scans before: each tag finds only its own', scansBefore.A.every((p) => !bPids.has(p)) && scansBefore.B.every((p) => !a1Pids.has(p)) && scansBefore.A.length > 0 && scansBefore.B.length > 0, JSON.stringify({ scansBefore, a1: [...a1Pids], b: [...bPids] }));
+  row("A's leftover stop found only A's", found.length > 0 && found.every((f) => !bPids.has(Number(f.pid))), `outcome ${String(stopA2.outcome)}; found ${JSON.stringify(found.map((f) => [f.pid, f.claudeCode]))}`);
+  row("A's leftover stop signalled only A's", signals.every((x) => a1Pids.has(Number(x.pid)) && !bPids.has(Number(x.pid))), JSON.stringify(signals));
+  row("B's Claude Codes untouched", bMid.every((k) => !k.gone && k.live === k.starttime) && bAfter.every((k) => !k.gone && k.live === k.starttime) && bExitsBeforeShutdown.length === 0, JSON.stringify({ bBefore, bMid, bAfter, bExitsBeforeShutdown }));
+  const bPrefix = existsSync(join(dir, 'b', 'prefix.log')) ? readFileSync(join(dir, 'b', 'prefix.log'), 'utf8').split('\n').filter(Boolean).length : 0;
+  const bRanThrough = bPrefix > 0 && Number(rb.ms) > Number(s2.ms);
+  const interruptMarks = JSON.stringify(readJsonl(join(String(sb.lineage), 'store-appends.jsonl'))).match(/Request interrupted by user[^"\\]{0,30}/g) ?? [];
+  row("B's turn completed with no interrupt", rb.subtype === 'success' && rb.reason === 'completed' && /TWO/.test(String(rb.text)) && interruptMarks.length === 0 && bRanThrough, `B's command ran through A's kill and serve: ${bRanThrough}; B result ${String(rb.subtype)}/${String(rb.reason)} ${JSON.stringify(rb.text)}; interrupt markers in B's record: ${interruptMarks.length}`);
+  row('A served again and answers', probeAnswered(rProbe), `decision ${String(s2.decision)}; probe ${String(rProbe.subtype)} isError ${String(rProbe.isError)} ${JSON.stringify(String(rProbe.text).slice(0, 40))}; results ${JSON.stringify(a2.events.filter((e) => e.ev === 'result').map((e) => ({ selfStarted: e.selfStarted, numTurns: e.numTurns, text: String(e.text).slice(0, 20) })))}; recovery ${JSON.stringify(s2.recovery).slice(0, 200)}`);
+  writeFileSync(join(dir, 'two-kill.json'), clean(JSON.stringify({ rows, idA, idB: sb.id, s2, stopA2, bBefore, bMid, bAfter, rb }, null, 2)));
   return rows;
 }
 
@@ -798,19 +1009,20 @@ async function home(a: Args): Promise<CheckRow[]> {
   ] as const) {
     const privateHome = String(x.events.find((e) => e.ev === 'ready')?.privateHome);
     const r = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', join(PACKAGE_ROOT, 'proofs', 'home-trace.mts'), String(x.tracePath), root.path('phases.json'), `home=${privateHome}`, join(CONFIG_DIRS_ROOT, agent), join(HARNESS_STATE, 'work', agent), HARNESS_STATE, join(PACKAGE_ROOT, 'runs')], { encoding: 'utf8', maxBuffer: 1 << 28 });
-    const text = r.stdout;
-    const p = root.write(`home-trace-${n}.txt`, text);
-    // Claude Code's own machinery writing in the real home (a W line by
-    // [claude] in a real-home bucket). Commands through the shell prefix
-    // ([claude > bash ...]) are expected to use the real home.
-    let bucket = '';
-    const writes: string[] = [];
-    for (const l of text.split('\n')) {
-      if (l.startsWith('== ')) bucket = l.slice(3);
-      if (/^~|^\/run\/user/.test(bucket) && /^\s+W \[claude\]/.test(l)) writes.push(`${bucket}: ${l.trim()}`);
-    }
-    const bodyLog = text.split('\n').filter((l) => l.includes('api-bodies') || /\.request\.json/.test(l));
-    const row = { scenario: 'home', cell: n, check: 'Claude Code writes nothing in the real home', pass: r.status === 0 && writes.length === 0, reason: writes.length ? writes.slice(0, 5).join(' || ') : `no writes by claude in the real home; body-log lines outside own dirs: ${bodyLog.length}`, evidence: p };
+    const p = root.write(`home-trace-${n}.txt`, r.stdout);
+    // Who touched the real home, in three groups (round 1's scratch
+    // home-classify.py): the login (pointed back, by design), what the
+    // participant declared (agent config dir, work dir, durable state), and
+    // everything else. Claude Code's own machinery ([claude], and children it
+    // started without the shell prefix) must write nothing in "else".
+    // Commands through the shell prefix use the real home by design and
+    // aren't counted. /run/user is not the home (round 1 counted it).
+    const hc = spawnSync('python3', [join(HERE, 'home-classify.py'), String(x.tracePath), agent, privateHome], { encoding: 'utf8', maxBuffer: 1 << 28 });
+    const cp = root.write(`home-classify-${n}.txt`, hc.stdout);
+    const groups = Object.fromEntries([...hc.stdout.matchAll(/^== (.+?): (\d+) accesses, (\d+) mutating$/gm)].map((m) => [m[1], { accesses: Number(m[2]), mutating: Number(m[3]) }])) as Record<string, { accesses: number; mutating: number }>;
+    const elseW = hc.stdout.slice(hc.stdout.indexOf('== else')).split('\n').filter((l) => /^\s+W /.test(l));
+    const loginW = groups.login?.mutating ?? 0;
+    const row = { scenario: 'home', cell: n, check: 'Claude Code writes nothing in the real home', pass: r.status === 0 && hc.status === 0 && groups.else !== undefined && groups.else.mutating === 0 && loginW === 0, reason: `${JSON.stringify(groups)}${elseW.length ? `; writes outside the declared dirs: ${elseW.slice(0, 5).map((l) => l.trim()).join(' || ')}` : ''}; classifier exit ${String(hc.status)} ${hc.stderr.slice(0, 200)}`, evidence: `${cp} (${p})` };
     rows.push(row);
     printRow(row);
   }

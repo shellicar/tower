@@ -8,7 +8,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { build, kindOf, type Recording, type TMsg } from '../reconcile/holding.mts';
+import { build, type BuildOpts, kindOf, type Recording, type TMsg } from '../reconcile/holding.mts';
 import { compareUnits, describeEntry, probeCut, requestUnits, towerBeforeProbeReply, towerUnits, type Verdict, without } from '../reconcile/compare.mts';
 import { fullHistory, readIndex } from '../next/history.mts';
 import { coreHash, NO_RESPONSE, type PublishedLine } from './committer.mts';
@@ -201,19 +201,41 @@ export function towerVsRequest(rec: Recording, towerBodies: Json[], L: ReqInfo):
   return compareUnits(reqUnits.units, without(towerUnits(msgs), probeCut(L.mtimeMs, rec)), describe);
 }
 
-// T's messages against L's, both attributed to the live recording's
-// entries, cut to what was there at `asOfMs` (the probe's own turn is
-// dropped on both sides). What L has and T lacks should be exactly
+// T's messages against L's, cut to what was there at `asOfMs` (the probe's
+// own turn dropped on both sides). What L has and T lacks should be exactly
 // `expectedMissing`.
-export function messagesVs(rec: Recording, L: ReqInfo, T: ReqInfo, asOfMs: number): { missing: string[]; extra: string[]; placement: string[]; kinds: string[]; content: string[]; unattributed: { L: number; T: number } } {
+//
+// Each request is attributed against the recording of the Claude Code that
+// sent it (L against the live lineage, T against its own, seeded from tower):
+// attributing T against L's recording credited T's own fresh reminder to an
+// unclosed step-1 reminder with the same text (round 1's false FAILs). T's
+// own entries (its probe turn: anything its recording holds that L's
+// doesn't) are dropped. A block T carries that no entry backs (a synthetic
+// tool_result Claude Code inserts at request time) is `unbacked` unless L
+// carries the same unbacked text too.
+export function messagesVs(recL: Recording, L: ReqInfo, recT: Recording, T: ReqInfo, asOfMs: number): { missing: string[]; extra: string[]; placement: string[]; kinds: string[]; content: string[]; unbacked: string[]; unattributed: { L: number; T: number } } {
   const describe = (u: string): string => u;
-  const drop = new Set(rec.entries.filter((r) => r.ms > asOfMs).map((r) => String(r.entry.uuid)));
-  const l = requestUnits(rec, L.messages as never);
-  const t = requestUnits(rec, T.messages as never);
-  const v = compareUnits(without(l.units, drop), without(t.units, drop), describe);
-  // `content`: an entry both carry with different text (a resume putting
-  // its own text where the entry was, e.g. a synthetic tool_result).
-  return { missing: v.missing, extra: v.extra, placement: v.placement, kinds: v.kinds, content: v.bytes, unattributed: { L: l.unattributed, T: t.unattributed } };
+  const inL = new Set(recL.entries.map((r) => String(r.entry.uuid)));
+  const dropL = new Set(recL.entries.filter((r) => r.ms > asOfMs).map((r) => String(r.entry.uuid)));
+  const dropT = new Set(recT.entries.filter((r) => !inL.has(String(r.entry.uuid)) || dropL.has(String(r.entry.uuid))).map((r) => String(r.entry.uuid)));
+  const l = requestUnits(recL, L.messages as never);
+  const t = requestUnits(recT, T.messages as never);
+  const lu = without(l.units, dropL);
+  const tu = without(t.units, dropT);
+  const v = compareUnits(lu, tu, describe);
+  const nulls = (us: typeof lu): string[] => us.flatMap((u) => u.items.filter((i) => i.uuid === null).map((i) => `${u.role}: ${i.text}`));
+  const lNull = nulls(lu);
+  const unbacked: string[] = [];
+  for (const x of nulls(tu)) {
+    const at = lNull.indexOf(x);
+    if (at >= 0) {
+      lNull.splice(at, 1);
+    } else {
+      unbacked.push(x.slice(0, 140));
+    }
+  }
+  // `content`: an entry both carry with different text.
+  return { missing: v.missing, extra: v.extra, placement: v.placement, kinds: v.kinds, content: v.bytes, unbacked, unattributed: { L: l.unattributed, T: t.unattributed } };
 }
 
 // The carriers (entries the model sees) at or before `asOfMs` that tower
@@ -227,7 +249,9 @@ export function unclosedAsOf(rec: Recording, towerBodies: Json[], asOfMs: number
 export function liveVsOffline(lineageDir: string, bodyOf: (m: TMsg) => Json): Json {
   const lin = Lineage.open(lineageDir);
   lin.pollBodies();
-  const b = build(lin.rec, 'run');
+  const optsFile = join(lineageDir, 'build-options.json');
+  const opts = existsSync(optsFile) ? ((JSON.parse(readFileSync(optsFile, 'utf8')) as Json).opts as BuildOpts) : {};
+  const b = build(lin.rec, 'run', opts);
   const pub = (readJsonl(join(lineageDir, 'published.jsonl')) as unknown as PublishedLine[]).filter((p) => p.kind === 'message');
   const seeded = new Set((readJsonl(join(lineageDir, 'published.jsonl')) as unknown as PublishedLine[]).filter((p) => p.kind === 'seed').map((p) => p.id));
   const carriedBySeed = new Set((readJsonl(join(lineageDir, 'published.jsonl')) as unknown as PublishedLine[]).filter((p) => p.kind === 'seed').flatMap((p) => p.cc));
@@ -248,7 +272,8 @@ export function liveVsOffline(lineageDir: string, bodyOf: (m: TMsg) => Json): Js
     live: live.length,
     offline: offline.length,
     orderWarnings: b.orderWarnings,
-    committerNotes: committer.map((c) => ({ kind: c.kind, id: c.id ?? null, warning: c.warning ?? null, error: c.error ?? null })),
+    committerNotes: committer.map((c) => ({ kind: c.kind, id: c.id ?? null, warning: c.warning ?? null, error: c.error ?? null, ...(c.kind === 'unanchored' ? { file: c.file, reason: c.reason, fallback: c.fallback } : {}) })),
+    unanchored: b.unanchored,
   };
 }
 
@@ -257,25 +282,8 @@ export function noResponseOnTower(bodies: Json[]): string[] {
   return bodies.filter((b) => JSON.stringify(b.content).includes(NO_RESPONSE)).map((b) => String(b.id));
 }
 
-// A fork: two of tower's chain entries share a parent.
-export function forks(bodies: Json[]): { parent: string; children: string[] }[] {
-  const kids = new Map<string, string[]>();
-  for (const b of bodies) {
-    for (const c of (b.ccEntries as Json[] | undefined) ?? []) {
-      const e = c.entry as Json;
-      const parent = e.parentUuid;
-      if (typeof parent === 'string' && e.isSidechain !== true) {
-        kids.set(parent, [...(kids.get(parent) ?? []), String(c.uuid)]);
-      }
-    }
-  }
-  return [...kids].filter(([, ch]) => new Set(ch).size > 1).map(([parent, children]) => ({ parent, children: [...new Set(children)] }));
-}
-
-// What any of this machine's transcripts hold that tower doesn't, by kind:
-// dropped thinking-only pieces and the synthetic "No response requested."
-// are expected; the model-visible rest is lost.
-export function lostFromTower(local: Json[], bodies: Json[]): { lostVisible: string[]; unshownNotCarried: string[]; droppedThinking: string[]; synthetic: string[] } {
+// Every entry id tower holds: ccEntries' uuids and ccUnshown's entries.
+export function heldOnTower(bodies: Json[]): Set<string> {
   const held = new Set<string>();
   for (const b of bodies) {
     for (const c of (b.ccEntries as Json[] | undefined) ?? []) {
@@ -285,6 +293,41 @@ export function lostFromTower(local: Json[], bodies: Json[]): { lostVisible: str
       held.add(entryId(u.entry as Json));
     }
   }
+  return held;
+}
+
+const chainEntries = (bodies: Json[]): Json[] => bodies.flatMap((b) => [...((b.ccEntries as Json[] | undefined) ?? []).map((c) => c.entry as Json), ...((b.ccUnshown as Json[] | undefined) ?? []).map((u) => u.entry as Json)]).filter((e) => typeof e.uuid === 'string' && e.isSidechain !== true);
+
+// A fork: two of tower's chain entries (messages' and the unshown record's)
+// share a parent.
+export function forks(bodies: Json[]): { parent: string; children: string[] }[] {
+  const kids = new Map<string, string[]>();
+  for (const e of chainEntries(bodies)) {
+    const parent = e.parentUuid;
+    if (typeof parent === 'string') {
+      kids.set(parent, [...(kids.get(parent) ?? []), String(e.uuid)]);
+    }
+  }
+  return [...kids].filter(([, ch]) => new Set(ch).size > 1).map(([parent, children]) => ({ parent, children: [...new Set(children)] }));
+}
+
+// A chain gap: a chain entry on tower whose parent tower doesn't hold (load()
+// relinks it to the entry before it). Each with what the entry is, so a gap
+// by design (the nudge after a dropped thinking-only reply) reads apart from
+// one that isn't.
+export function chainGaps(bodies: Json[]): { uuid: string; parent: string; what: string }[] {
+  const all = chainEntries(bodies);
+  const present = new Set(all.map((e) => String(e.uuid)));
+  return all
+    .filter((e) => typeof e.parentUuid === 'string' && !present.has(String(e.parentUuid)))
+    .map((e) => ({ uuid: String(e.uuid), parent: String(e.parentUuid), what: `${String(e.type)}${e.isMeta === true ? ' meta' : ''}${e.type === 'attachment' ? ` ${String((e.attachment as Json | undefined)?.type)}` : ''}` }));
+}
+
+// What any of this machine's transcripts hold that tower doesn't, by kind:
+// dropped thinking-only pieces and the synthetic "No response requested."
+// are expected; the model-visible rest is lost.
+export function lostFromTower(local: Json[], bodies: Json[]): { lostVisible: string[]; unshownNotCarried: string[]; droppedThinking: string[]; synthetic: string[] } {
+  const held = heldOnTower(bodies);
   const out = { lostVisible: [] as string[], unshownNotCarried: [] as string[], droppedThinking: [] as string[], synthetic: [] as string[] };
   for (const e of local) {
     if (held.has(entryId(e)) || e.isSidechain === true) {

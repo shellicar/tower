@@ -43,15 +43,16 @@
 //     participant -> cancelled, any error subtype -> aborted.
 
 import { createHash } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { build, type Built, type TMsg } from '../reconcile/holding.mts';
+import { build, type BuildOpts, type Built, kindOf, type TMsg } from '../reconcile/holding.mts';
 import { toBodies, type TowerBody } from '../reconcile/load.mts';
 import type { Tower } from '../semantic/tower.mts';
 import { appendJsonl, iso, type Json, readJsonl } from './lib.mts';
 import { entryId, type Lineage } from './lineage.mts';
 
 export interface PublishedLine {
-  kind: 'message' | 'query' | 'seed';
+  kind: 'message' | 'query' | 'seed' | 'held';
   ts: string;
   ms: number;
   seq: number | null;
@@ -95,8 +96,13 @@ export class Committer {
   private running: Promise<void> | undefined;
   lastBuild: Built | undefined;
   failed: unknown;
+  // Part B's variants (each TODO: undecided): build options, and whether the
+  // held user side is published at each query's end (held-carrier).
+  readonly opts: BuildOpts;
+  readonly heldCarrier: boolean;
+  readonly heldAt = new Set<string>();
 
-  constructor(lin: Lineage, o: { convId: string; instanceId: string; dry: boolean; tower?: Tower; log: (s: string) => void; onPublish?: (p: PublishedLine) => void }) {
+  constructor(lin: Lineage, o: { convId: string; instanceId: string; dry: boolean; tower?: Tower; log: (s: string) => void; onPublish?: (p: PublishedLine) => void; variants?: string[] }) {
     this.lin = lin;
     this.convId = o.convId;
     this.instanceId = o.instanceId;
@@ -104,6 +110,11 @@ export class Committer {
     this.tower = o.tower;
     this.log = o.log;
     this.onPublish = o.onPublish ?? (() => {});
+    const v = new Set(o.variants ?? []);
+    this.opts = { ...(v.has('commit-dangling') ? { commitDangling: true } : {}), ...(v.has('anchor-fallback') ? { anchorFallback: true } : {}) };
+    this.heldCarrier = v.has('held-carrier');
+    // The offline build (join 8) reads the same options.
+    writeFileSync(join(lin.dir, 'build-options.json'), `${JSON.stringify({ opts: this.opts, variants: [...v] })}\n`);
     for (const p of readJsonl(join(lin.dir, 'published.jsonl')) as unknown as PublishedLine[]) {
       this.mark(p);
     }
@@ -112,6 +123,10 @@ export class Committer {
   private mark(p: PublishedLine): void {
     if (p.kind === 'query') {
       this.closed.add(`${p.queryId}@${p.commitMs}`);
+      return;
+    }
+    if (p.kind === 'held') {
+      this.heldAt.add(`${p.queryId}@${p.commitMs}`);
       return;
     }
     if (!this.published.has(p.id)) {
@@ -189,10 +204,13 @@ export class Committer {
       this.dirty = false;
       try {
         this.lin.pollBodies();
-        const b = build(this.lin.rec, 'run');
+        const b = build(this.lin.rec, 'run', this.opts);
         this.lastBuild = b;
         for (const w of b.orderWarnings) {
           this.note('order-warning', w, { warning: w });
+        }
+        for (const u of b.unanchored) {
+          this.note('unanchored', u.file, { file: u.file, reason: u.reason, fallback: u.fallback });
         }
         await this.publishFrom(b);
         await this.closures(b);
@@ -275,6 +293,27 @@ export class Committer {
     }
   }
 
+  // held-carrier (TODO: undecided, Part B way 4): at a query's end, the user
+  // side "run" still holds (carriers by then that no committed message
+  // carries) rides on tower as raw entries on a leaf of its own, never shown
+  // and never a message, so a resume from tower can hand them to Claude Code
+  // (load() adds them) instead of ending on a dangling tool_use. An empty
+  // record is published too when an earlier one held something, so the
+  // latest record is always what is held now.
+  private async publishHeld(b: Built, ms: number, queryId: string): Promise<void> {
+    const inMessages = new Set(b.all.filter((m) => m.commitMs <= ms).flatMap((m) => m.cc.map((c) => c.uuid)));
+    const held = this.lin.rec.entries.filter((r) => r.ms <= ms && kindOf(r.entry) === 'carrier' && !inMessages.has(String(r.entry.uuid)) && !this.carriedCc.has(String(r.entry.uuid)));
+    if (held.length === 0 && this.heldAt.size === 0) {
+      return;
+    }
+    const body = { ts: iso(ms), instanceId: this.instanceId, queryId, entries: held.map((r) => ({ seq: r.seq, entry: r.entry })) };
+    const seq = await this.publish('changes.held', body);
+    const p: PublishedLine = { kind: 'held', ts: iso(), ms: Date.now(), seq, subject: `conv.v2.${this.convId}.changes.held`, id: `held@${ms}`, commitMs: ms, hash: '', cc: held.map((r) => String(r.entry.uuid)), unshown: [], queryId, instanceId: this.instanceId, dry: this.dry };
+    appendJsonl(join(this.lin.dir, 'published.jsonl'), p);
+    this.mark(p);
+    this.onPublish(p);
+  }
+
   private async closures(b: Built): Promise<void> {
     for (const r of this.lin.resultsFull) {
       const key = `${r.queryId}@${r.ms}`;
@@ -286,6 +325,9 @@ export class Committer {
       const due = b.all.filter((m) => m.commitMs <= r.ms && !this.published.has(m.id) && !m.cc.every((c) => this.carriedCc.has(c.uuid)));
       if (due.length > 0) {
         continue;
+      }
+      if (this.heldCarrier && !this.heldAt.has(key)) {
+        await this.publishHeld(b, r.ms, r.queryId);
       }
       const body = { ts: iso(r.ms), instanceId: this.instanceId, queryId: r.queryId, reason: r.reason };
       const seq = await this.publish('changes.query', body);

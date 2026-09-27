@@ -130,11 +130,12 @@ export class Lineage {
       } else if (e.src === 'sdk' && e.kind === 'result') {
         this.rec.results.push(Number(e.ms));
         this.resultsFull.push({ ms: Number(e.ms), queryId: String(e.queryId), subtype: String(e.subtype), reason: String(e.reason) });
-      } else if (e.src === 'participant' && e.kind === 'say') {
+      } else if (e.src === 'participant' && (e.kind === 'say' || e.kind === 'turn')) {
         this.says.push({ ms: Number(e.ms), queryId: String(e.queryId), text: String(e.text) });
       }
     }
     this.rec.requests.sort((a, b) => a.ms - b.ms);
+    this.says.sort((a, b) => a.ms - b.ms);
   }
 
   static create(dir: string, meta: LineageMeta): Lineage {
@@ -240,6 +241,14 @@ export class Lineage {
     appendJsonl(join(this.dir, 'next-events.jsonl'), { ts: iso(s.ms), ms: s.ms, src: 'participant', kind: 'say', queryId: s.queryId, text: s.text, ...extra });
   }
 
+  // A queryId boundary that isn't a say: a turn Claude Code started itself
+  // (its minted id, from `ms` on), or the pending say's id resuming after it.
+  addTurn(s: Say, extra: Json = {}): void {
+    this.says.push(s);
+    this.says.sort((a, b) => a.ms - b.ms);
+    appendJsonl(join(this.dir, 'next-events.jsonl'), { ts: iso(s.ms), ms: s.ms, src: 'participant', kind: 'turn', queryId: s.queryId, text: s.text, ...extra });
+  }
+
   addResult(r: Result, extra: Json = {}): void {
     this.rec.results.push(r.ms);
     this.resultsFull.push(r);
@@ -267,7 +276,7 @@ export class Lineage {
       }
     }
     for (const e of readJsonl(join(this.dir, 'next-events.jsonl'))) {
-      if (Number(e.ms) <= asOfMs && ['request', 'result', 'say'].includes(String(e.kind))) {
+      if (Number(e.ms) <= asOfMs && ['request', 'result', 'say', 'turn'].includes(String(e.kind))) {
         appendJsonl(join(dir, 'next-events.jsonl'), e);
         if (e.kind === 'request' && existsSync(join(this.bodies, String(e.file)))) {
           copyFileSync(join(this.bodies, String(e.file)), join(d.bodies, String(e.file)));

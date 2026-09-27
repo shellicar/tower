@@ -32,11 +32,21 @@ export interface Cell {
   id: string;
   prompt: string;
   ending?: string;
-  // Claude Code env for the live run only (the cell's trigger).
-  env?: Record<string, string>;
-  // Declared max tokens for every run of the cell (the limit cell's trigger
-  // is the declared value itself).
-  maxTokens?: number;
+  // Claude Code env for step 1 only: applied live before step 1 through the
+  // flag settings layer (the SDK's applyFlagSettings), and `restoreEnv`
+  // applied after step 1's result, so the warm-up before it is kept and the
+  // probe after it can be answered (round 1 set these for the whole live
+  // Claude Code, so nothing was ever kept). Measured on Sonnet 5 (scratch
+  // flag-env.mts, runs/int-2026-09-27T120009452Z-sonnet5-flag-env): each
+  // request reads them afresh. `null` deletes the variable from Claude
+  // Code's environment (CLAUDE_CODE_MAX_OUTPUT_TOKENS: null gave the next
+  // request Claude Code's default 64000, not the declared value), so a
+  // declared value is restored explicitly.
+  step1Env?: Record<string, string>;
+  restoreEnv?: Record<string, string | null>;
+  // Effort for every run of the cell (the thinking cell on Fable: at the
+  // declared medium Fable produced no thinking block to interrupt).
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 }
 
 // Proof 23/24/reconcile's cells and triggers (proofs/reconcile/run.mts),
@@ -44,13 +54,17 @@ export interface Cell {
 // INT_ERROR_TIMEOUT here), the limit cell's 64 (INT_LIMIT).
 export function cells(model: string): Cell[] {
   const errorTimeout = process.env.INT_ERROR_TIMEOUT ?? (/haiku/.test(model) ? '100' : /fable/.test(model) ? '300' : '800');
+  // TODO: undecided (test-only value): the thinking cell's effort on Fable,
+  // raised to high (INT_THINKING_EFFORT overrides); the other models keep the
+  // declared effort.
+  const thinkingEffort = (process.env.INT_THINKING_EFFORT ?? (/fable/.test(model) ? 'high' : '')) as Cell['effort'] | '';
   return [
     { id: 'normal', prompt: `What is 17 times 23? Work it out, then reply with the number only. ${NO_TOOLS}` },
     { id: 'thinking-only', prompt: `Think carefully about whether 391 is prime. Then end your turn with an empty reply: write no text at all, not even a single word or punctuation mark. ${NO_TOOLS}` },
-    { id: 'limit', prompt: `${HARD} Reply with the number only. ${NO_TOOLS}`, maxTokens: Number(process.env.INT_LIMIT ?? '64') },
-    { id: 'api-error', prompt: `What is 17 times 23? Work it out, then reply with the number only. ${NO_TOOLS}`, env: { API_TIMEOUT_MS: errorTimeout, CLAUDE_CODE_MAX_RETRIES: '2' } },
+    { id: 'limit', prompt: `${HARD} Reply with the number only. ${NO_TOOLS}`, step1Env: { CLAUDE_CODE_MAX_OUTPUT_TOKENS: process.env.INT_LIMIT ?? '64' }, restoreEnv: { CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(DECLARED.maxTokens) } },
+    { id: 'api-error', prompt: `What is 17 times 23? Work it out, then reply with the number only. ${NO_TOOLS}`, step1Env: { API_TIMEOUT_MS: errorTimeout, CLAUDE_CODE_MAX_RETRIES: '2' }, restoreEnv: { API_TIMEOUT_MS: null, CLAUDE_CODE_MAX_RETRIES: null } },
     { id: 'first-byte', prompt: `What is 17 times 23? Reply with the number only. ${NO_TOOLS}`, ending: 'first-byte' },
-    { id: 'thinking', prompt: `${HARD} Reply with the number only. ${NO_TOOLS}`, ending: 'thinking' },
+    { id: 'thinking', prompt: `${HARD} Reply with the number only. ${NO_TOOLS}`, ending: 'thinking', ...(thinkingEffort ? { effort: thinkingEffort } : {}) },
     { id: 'mid-text', prompt: `Write the numbers one to sixty in words, one per line, nothing else. ${NO_TOOLS}`, ending: 'mid-text' },
     { id: 'tool-input', prompt: 'Use the Write tool to create story.txt containing a 300-word story about a lighthouse keeper. Call the Write tool straight away, with no text before it.', ending: 'tool-input' },
     { id: 'tool-exec', prompt: 'Run this exact Bash command in the foreground (not in the background), once: `sleep 20; echo DONE`. Then reply with its output only.', ending: 'tool-exec' },
@@ -59,19 +73,20 @@ export function cells(model: string): Cell[] {
 
 export const short = (model: string): string => model.replace(/^claude-/, '').replace(/[^A-Za-z0-9]/g, '');
 
-export function specFor(agent: string, model: string, runDir: string, o: { maxTokens?: number; extraEnv?: Record<string, string>; skills?: string[]; ours?: Known[] } = {}): Spec {
+export function specFor(agent: string, model: string, runDir: string, o: { maxTokens?: number; effort?: Spec['effort']; extraEnv?: Record<string, string>; skills?: string[]; ours?: Known[]; variants?: string[] } = {}): Spec {
   return {
     agent,
     runDir,
     model,
     maxTokens: o.maxTokens ?? DECLARED.maxTokens,
     thinking: DECLARED.thinking,
-    effort: DECLARED.effort,
+    effort: o.effort ?? DECLARED.effort,
     systemPrompt: DECLARED.systemPrompt,
     permissionMode: DECLARED.permissionMode,
     skills: o.skills ?? [],
     ours: o.ours ?? [],
     ...(o.extraEnv ? { extraEnv: o.extraEnv } : {}),
+    ...(o.variants?.length ? { variants: o.variants } : {}),
   };
 }
 

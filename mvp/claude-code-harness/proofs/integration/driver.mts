@@ -148,6 +148,17 @@ export class Participant {
     return r;
   }
 
+  // A live change to Claude Code's flag settings (test-only trigger).
+  async flag(conv: string, settings: Json): Promise<Json> {
+    const n = this.events.length;
+    this.send({ cmd: 'flag', conv, settings });
+    const e = await this.waitFor((x) => (x.ev === 'flagged' || x.ev === 'error') && x.conv === conv, 30_000, `flagged ${conv}`, n);
+    if (e.ev === 'error') {
+      throw new Error(`flag ${conv}: ${String(e.message)}`);
+    }
+    return e;
+  }
+
   async shutdown(ms = 180_000): Promise<void> {
     this.send({ cmd: 'shutdown' });
     const t = setTimeout(() => this.log(`[${this.spec.agent}] shutdown still running after ${ms} ms`), ms);

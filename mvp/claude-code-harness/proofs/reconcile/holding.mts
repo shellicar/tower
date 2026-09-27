@@ -54,7 +54,7 @@
 import { attributeMessages, newMessages } from '../semantic/by-body.mts';
 import { predict, settingsForModel } from '../semantic/by-fold.mts';
 import { type Block, blocksOf, type CcEntry, type FormMessage, isCarrier, type Json, normalise, PAYLOAD_TEXT_TYPES, renderedTexts, type Span } from '../semantic/form.mts';
-import { type Accepted, flatTail, mainResponses, offlinePending, select } from '../semantic/select.mts';
+import { type Accepted, bodyAssistants, flatTail, mainResponses, offlinePending, select } from '../semantic/select.mts';
 
 export type { Json };
 
@@ -195,7 +195,28 @@ export interface MainReq {
   firstReplyMs: number | undefined;
 }
 
-export function mainRequests(rec: Recording, commits: Map<string, number>): MainReq[] {
+// Options the integration proof's variants add (each TODO: undecided, none
+// the settled rule; reconcile's own callers pass none).
+export interface BuildOpts {
+  // Part B, way 2 for a dangling tool_use: at the interrupt marker's append,
+  // when tower would otherwise end on an assistant tool_use, commit the
+  // interrupted tool's result and the marker (every held carrier by then) as
+  // written, without waiting for a kept reply.
+  commitDangling?: boolean;
+  // Part B, failure 2: when select() can't anchor a served main request,
+  // anchor it on the body's last assistant message if that is one of the
+  // main conversation's responses, and take what follows as its run.
+  anchorFallback?: boolean;
+}
+
+export interface Unanchored {
+  file: string;
+  ms: number;
+  reason: string;
+  fallback: string | null;
+}
+
+export function mainRequests(rec: Recording, commits: Map<string, number>, o: BuildOpts = {}, unanchored: Unanchored[] = []): MainReq[] {
   const served = rec.requests.filter((r) => String(r.body.model).startsWith(rec.model) && Array.isArray(r.body.messages)).sort((a, b) => a.ms - b.ms);
   const accepted: Accepted[] = [];
   const out: MainReq[] = [];
@@ -204,9 +225,37 @@ export function mainRequests(rec: Recording, commits: Map<string, number>): Main
     // Entries in the store before the next request: enough to attribute
     // this one (its prompt reaches the store ~80 ms after the file).
     const main = rec.entries.filter((x) => x.ms < nextMs && x.entry.isSidechain !== true).map((x) => x.entry);
-    const v = select(r.body as Json & { messages: never[] }, { model: rec.model, main, pending: offlinePending(main, new Set()), accepted });
+    let v = select(r.body as Json & { messages: never[] }, { model: rec.model, main, pending: offlinePending(main, new Set()), accepted });
     if (!v.main) {
-      return;
+      // Never silent: a served main-loop request (thinking on, tools or a
+      // thread) that select() can't anchor is reported; its run is never
+      // committed unless the fallback variant anchors it.
+      const served = r.body.thinking !== undefined;
+      let fallback: string | null = null;
+      if (served && o.anchorFallback) {
+        const keys = bodyAssistants(r.body as never);
+        const lastKey = keys[keys.length - 1];
+        const responses = mainResponses(main);
+        const at = lastKey === undefined ? -1 : responses.map((x) => x.key).lastIndexOf(lastKey);
+        if (at >= 0) {
+          const anchor = (responses[at] as { id: string }).id;
+          const from = (responses[at] as { last: number }).last + 1;
+          const nextResp = responses[at + 1];
+          const to = nextResp ? nextResp.first : main.length;
+          const pend = main.slice(from, to).filter((e) => !isAssistant(e) && isCarrier(e));
+          const a = attributeMessages(newMessages(r.body as never), pend);
+          if (a.messages.some((m) => m.ccEntries.some((c) => c.type === 'user'))) {
+            v = { ...v, main: true, retry: false, anchor, reason: `fallback: anchored on the body's last assistant message (${anchor}); select(): ${v.reason}` };
+            fallback = anchor;
+          }
+        }
+      }
+      if (served) {
+        unanchored.push({ file: r.file, ms: r.ms, reason: String(v.reason), fallback });
+      }
+      if (!v.main) {
+        return;
+      }
     }
     if (!v.retry) {
       accepted.push({ anchor: v.anchor, tail: flatTail(r.body as never) });
@@ -382,11 +431,17 @@ export interface Built {
   unshown: Rec[];
   mains: MainReq[];
   orderWarnings: string[];
+  unanchored: Unanchored[];
 }
 
-export function build(rec: Recording, option: Option): Built {
+// Claude Code's interrupt marker, as written after an interrupted tool
+// ("[Request interrupted by user]" in 2.1.282) or elsewhere.
+const isInterruptMarker = (e: Json): boolean => e.type === 'user' && /^\[Request interrupted by user/.test(blocksOf((e.message as Json | undefined)?.content).map((b) => String(b.text ?? '')).join(''));
+
+export function build(rec: Recording, option: Option, o: BuildOpts = {}): Built {
   const commits = assistantCommits(rec);
-  const mains = mainRequests(rec, commits);
+  const unanchored: Unanchored[] = [];
+  const mains = mainRequests(rec, commits, o, unanchored);
   const bySeq = seqOf(rec);
   const out: TMsg[] = [];
   const orderWarnings: string[] = [];
@@ -471,6 +526,23 @@ export function build(rec: Recording, option: Option): Built {
       at(ms, () => flushBefore(ms));
     }
   }
+  if (o.commitDangling && option === 'run') {
+    for (const r of carriers) {
+      if (!isInterruptMarker(r.entry)) {
+        continue;
+      }
+      at(r.ms, () => {
+        flushBefore(r.ms);
+        const last = out[out.length - 1];
+        if (!last || last.role !== 'assistant' || !last.content.some((b) => b.type === 'tool_use')) {
+          return;
+        }
+        for (const x of carriers.filter((c) => c.ms <= r.ms && !committed.has(String(c.entry.uuid)))) {
+          commit([entryForm(x, r.ms, 'dangling tool_use: held side as written, at the marker')]);
+        }
+      });
+    }
+  }
   if (option === 'run+last' || option === 'run+entry') {
     for (const q of rec.results) {
       at(q, () => {
@@ -519,7 +591,7 @@ export function build(rec: Recording, option: Option): Built {
     out.length = 0;
     out.push(...ordered);
   }
-  return { all: out, unshown, mains, orderWarnings };
+  return { all: out, unshown, mains, orderWarnings, unanchored };
 }
 
 // What the option holds at an instant.

@@ -37,8 +37,8 @@
 // overrides and dry serves for the checks; the endings' triggers (a say's
 // `ending` interrupts at that point, as proofs/reconcile/run.mts does).
 
-import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -47,9 +47,10 @@ import type { HarnessOptions, Run } from '../../src/harness.mts';
 import { startRun } from '../../src/harness.mts';
 import { load, type TowerBody } from '../reconcile/load.mts';
 import type { Rec } from '../reconcile/holding.mts';
-import { lastSeq, openTower, type Tower, towerMessages } from '../semantic/tower.mts';
+import { lastSeq, openTower, type Tower, towerHeld, towerMessages } from '../semantic/tower.mts';
+import { blocksOf } from '../semantic/form.mts';
 import { Committer, type PublishedLine } from './committer.mts';
-import { appendJsonl, clean, CONFIG_DIRS_ROOT, fileStamp, INTEGRATION_STATE, iso, type Json, type Known, Log2, procStat, signalChecked } from './lib.mts';
+import { appendJsonl, clean, CONFIG_DIRS_ROOT, fileStamp, HARNESS_STATE, INTEGRATION_STATE, iso, type Json, type Known, Log2, procStat, signalChecked } from './lib.mts';
 import { convRoot, currentLineage, entryId, Lineage, setCurrent } from './lineage.mts';
 import { instantOf, recordedResumeDirs, transcripts, union } from './recover.mts';
 import { Skills } from './skills.mts';
@@ -76,6 +77,22 @@ export interface Spec {
   // the API-error cell's API_TIMEOUT_MS).
   extraEnv?: Record<string, string>;
   stateRoot?: string;
+  // Part B's ways through, each TODO: undecided and none the settled rule:
+  //   load-unbacked    load() rebuilds a user-side block no entry backs (a
+  //                    synthetic tool_result tower committed as received) as
+  //                    an entry of its own
+  //   commit-dangling  the committer commits an interrupted tool's result and
+  //                    marker as written at the marker's append, when tower
+  //                    would otherwise end on a tool_use
+  //   cut-dangling     a resume from tower that ends on a dangling tool_use
+  //                    resumes at the entry before that response
+  //   held-carrier     the held user side rides on tower (changes.held) at
+  //                    each query's end, and load() adds it
+  //   anchor-fallback  the committer anchors a request select() can't
+  //   materialise      a serve from tower writes load()'s entries into the
+  //                    agent dir's transcript and resumes from it (load()
+  //                    null), so this machine's record lives in the agent dir
+  variants?: string[];
 }
 
 const specPath = process.argv[2];
@@ -99,6 +116,11 @@ mkdirSync(RUN, { recursive: true });
 mkdirSync(AGENT_STATE, { recursive: true });
 const instanceId = randomUUID();
 const me = procStat(process.pid);
+const VARIANTS = new Set(spec.variants ?? []);
+// Claude Code's project key for the harness's cwd (work/<agent>): the path
+// with every character but letters and digits made '-', as the agent dir's
+// projects/ shows.
+const PROJECT_KEY = join(HARNESS_STATE, 'work', AGENT).replace(/[^a-zA-Z0-9]/g, '-');
 
 // TODO: undecided. The private HOME's place and lifetime: one fresh dir per
 // participant process in the system temp dir (Stephen: "one per *process*
@@ -137,6 +159,9 @@ interface Conv {
   run: Run;
   busy: boolean;
   queryId: string;
+  sayText: string;
+  sayMs: number;
+  lastResultMs: number;
   interruptedByUs: boolean;
   ending?: Ending;
   step?: number;
@@ -162,26 +187,108 @@ function lastChain(entries: Json[]): string | undefined {
   return undefined;
 }
 
-// Tower's messages as the entries load() rebuilds, each with its seq.
-function fromTower(bodies: TowerBody[]): { entries: Json[]; lastChain: string | undefined; seqd: { seq: number; entry: Json }[] } {
+// A uuid-shaped id from a string (the load-unbacked variant's rebuilt
+// entries: the same block gets the same id on every load).
+function uuidFrom(s: string): string {
+  const h = createHash('sha256').update(s).digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+// Tower's messages as the entries load() rebuilds, each with its seq; with
+// the held-carrier variant, the held entries too; with load-unbacked, each
+// user-side block no entry backs as an entry of its own.
+function fromTower(bodies: TowerBody[], held: { seq: number; entry: Json }[] = []): { entries: Json[]; lastChain: string | undefined; seqd: { seq: number; entry: Json }[]; fabricated: string[] } {
   const unshown: Rec[] = [];
   for (const b of bodies) {
     for (const u of ((b as Json).ccUnshown as { seq: number; entry: Json }[] | undefined) ?? []) {
       unshown.push({ seq: u.seq, ms: 0, entry: u.entry });
     }
   }
-  const l = load(bodies, unshown);
+  for (const h of held) {
+    unshown.push({ seq: h.seq, ms: 0, entry: h.entry });
+  }
+  // TODO: undecided (Part B, way 1 for failure 1/2): load-unbacked.
+  const fabricated: Rec[] = [];
+  const reparent = new Map<string, string>(); // entry uuid -> new parent
+  if (VARIANTS.has('load-unbacked')) {
+    for (const b of bodies) {
+      if (b.role === 'assistant') {
+        continue;
+      }
+      const cc = [...(b.ccEntries ?? [])].sort((x, y) => x.seq - y.seq);
+      const covered = new Set(cc.flatMap((c) => c.spans.map((sp) => sp.block)));
+      b.content.forEach((block, bi) => {
+        if (covered.has(bi)) {
+          return;
+        }
+        // Placed before the first entry whose blocks come after it, and
+        // chained: that entry's parent becomes the rebuilt one.
+        const after = cc.find((c) => c.spans.some((sp) => sp.block > bi));
+        const base = (after ?? cc[cc.length - 1])?.entry as Json | undefined;
+        const uuid = uuidFrom(`${b.id}:${bi}`);
+        const e: Json = {
+          parentUuid: (base?.parentUuid as string | undefined) ?? null,
+          isSidechain: false,
+          ...Object.fromEntries(['userType', 'entrypoint', 'cwd', 'sessionId', 'version', 'gitBranch'].filter((k) => base && k in base).map((k) => [k, (base as Json)[k]])),
+          type: 'user',
+          message: { role: 'user', content: [block] },
+          uuid,
+          timestamp: b.ts,
+          rebuiltFromTower: { messageId: b.id, block: bi },
+        };
+        const seq = after ? after.seq - 0.5 : (cc[cc.length - 1]?.seq ?? 0) + 0.5;
+        fabricated.push({ seq, ms: 0, entry: e });
+        if (after) {
+          reparent.set(after.uuid, uuid);
+        }
+      });
+    }
+  }
+  const l = load(bodies, [...unshown, ...fabricated]);
+  const entries = l.entries.map((e) => (typeof e.uuid === 'string' && reparent.has(e.uuid) ? { ...e, parentUuid: reparent.get(e.uuid) } : e));
   const seqOf = new Map<string, number>();
   for (const b of bodies) {
     for (const c of b.ccEntries ?? []) {
       seqOf.set(`uuid:${c.uuid}`, c.seq);
     }
   }
-  for (const u of unshown) {
+  for (const u of [...unshown, ...fabricated]) {
     seqOf.set(entryId(u.entry), u.seq);
   }
-  const seqd = l.entries.map((e, i) => ({ seq: seqOf.get(entryId(e)) ?? 1_000_000 + i, entry: e }));
-  return { entries: l.entries, lastChain: l.lastChain, seqd };
+  const seqd = entries.map((e, i) => ({ seq: seqOf.get(entryId(e)) ?? 1_000_000 + i, entry: e }));
+  return { entries, lastChain: l.lastChain, seqd, fabricated: fabricated.map((f) => String(f.entry.uuid)) };
+}
+
+// TODO: undecided (Part B, way 3 for failure 1): cut-dangling. When what
+// tower gives ends on a response with a tool_use nothing answers, the resume
+// point is the last non-system entry before that response's first piece.
+function danglingCut(entries: Json[]): { cutAt: string; toolUse: string } | undefined {
+  const answered = new Set(entries.flatMap((e) => (e.type === 'user' ? blocksOf((e.message as Json | undefined)?.content).filter((b) => b.type === 'tool_result').map((b) => String(b.tool_use_id)) : [])));
+  let lastAssistant = -1;
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const e = entries[i] as Json;
+    if (e.type === 'assistant' && (e.message as Json | undefined)?.model !== '<synthetic>') {
+      lastAssistant = i;
+      break;
+    }
+  }
+  if (lastAssistant < 0) {
+    return undefined;
+  }
+  const msgId = ((entries[lastAssistant] as Json).message as Json).id;
+  const pieces = entries.map((e, i) => ({ e, i })).filter(({ e }) => e.type === 'assistant' && (e.message as Json | undefined)?.id === msgId);
+  const dangling = pieces.flatMap(({ e }) => blocksOf((e.message as Json).content).filter((b) => b.type === 'tool_use' && !answered.has(String(b.id))).map((b) => String(b.id)));
+  if (dangling.length === 0) {
+    return undefined;
+  }
+  const first = Math.min(...pieces.map((x) => x.i));
+  for (let i = first - 1; i >= 0; i -= 1) {
+    const e = entries[i] as Json;
+    if (typeof e.uuid === 'string' && e.type !== 'system' && e.type !== 'progress') {
+      return { cutAt: e.uuid, toolUse: dangling[0] as string };
+    }
+  }
+  return undefined;
 }
 
 function hooks(conv: () => Conv | undefined): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
@@ -302,7 +409,7 @@ async function serve(cmd: Json): Promise<void> {
       cur = dir;
     }
     const lin = Lineage.open(cur);
-    const committer = new Committer(lin, { convId: id, instanceId, dry: false, tower, log, onPublish: (p) => emit('published', { conv: label, ...pubSummary(p) }) });
+    const committer = new Committer(lin, { convId: id, instanceId, dry: false, tower, log, variants: [...VARIANTS], onPublish: (p) => emit('published', { conv: label, ...pubSummary(p) }) });
     committer.seedPublished(towerBodies.filter((b) => !committer.published.has(String(b.id))) as unknown as Json[]);
     const missing = local.filter((e) => !lin.has(e));
     let prev = Date.now();
@@ -321,8 +428,14 @@ async function serve(cmd: Json): Promise<void> {
   // 5. The lineage this serve records into.
   let lin: Lineage;
   let loaded: ReturnType<typeof fromTower> | undefined;
+  let held: { seq: number; entry: Json }[] = [];
   if (decision === 'tower') {
-    loaded = fromTower(towerBodies);
+    if (VARIANTS.has('held-carrier')) {
+      // The latest held record, less what tower's messages carry by now.
+      const last = (await towerHeld(tower, id, upto)).at(-1);
+      held = (((last?.body.entries as { seq: number; entry: Json }[] | undefined) ?? []).filter((h) => !towerCc.has(String(h.entry.uuid))));
+    }
+    loaded = fromTower(towerBodies, held);
   }
   if (dry) {
     const dir = join(root, `D${fileStamp()}-${typeof cmd.name === 'string' ? cmd.name : label}`);
@@ -348,16 +461,46 @@ async function serve(cmd: Json): Promise<void> {
   if (loaded && lin.rec.entries.length === 0) {
     lin.seed({ sessionId: id, seed: 'tower' }, loaded.seqd, Date.now() - 1);
   }
-  const committer = new Committer(lin, { convId: id, instanceId, dry, tower, log, onPublish: (p) => emit(dry ? 'would-publish' : 'published', { conv: label, ...pubSummary(p) }) });
+  const committer = new Committer(lin, { convId: id, instanceId, dry, tower, log, variants: [...VARIANTS], onPublish: (p) => emit(dry ? 'would-publish' : 'published', { conv: label, ...pubSummary(p) }) });
   if (decision === 'tower' || towerBodies.length > 0) {
     committer.seedPublished(towerBodies.filter((b) => !committer.published.has(String(b.id))) as unknown as Json[]);
+  }
+  // load-unbacked's rebuilt entries stand for blocks tower already holds.
+  for (const u of loaded?.fabricated ?? []) {
+    committer.carriedCc.add(u);
   }
 
   // 6. resumeSessionAt: the last non-system entry of what's loaded, from the
   // recording (the local record's mirror) or tower's entries; or the
   // driver's "as of" override.
   const recordEntries = decision === 'record' ? lin.rec.entries.map((r) => r.entry) : undefined;
-  const resumeAt = typeof cmd.resumeSessionAt === 'string' ? cmd.resumeSessionAt : decision === 'local' || decision === 'record' ? lastChain(lin.rec.entries.map((r) => r.entry)) : decision === 'tower' ? loaded?.lastChain : undefined;
+  let resumeAt = typeof cmd.resumeSessionAt === 'string' ? cmd.resumeSessionAt : decision === 'local' || decision === 'record' ? lastChain(lin.rec.entries.map((r) => r.entry)) : decision === 'tower' ? loaded?.lastChain : undefined;
+  const cut = decision === 'tower' && loaded && VARIANTS.has('cut-dangling') && typeof cmd.resumeSessionAt !== 'string' ? danglingCut(loaded.entries) : undefined;
+  if (cut) {
+    resumeAt = cut.cutAt;
+  }
+
+  // TODO: undecided (Part B, way (b) for failure 3): materialise. A serve
+  // from tower writes what load() gives into the agent dir's transcript (the
+  // file Claude Code itself would keep there; a transcript already there is
+  // copied to this agent's durable state first), then resumes from the agent
+  // dir with load() returning null, so Claude Code's record of every
+  // conversation this machine serves lives in the agent's reused config dir.
+  let materialised: Json | undefined;
+  if (decision === 'tower' && loaded && VARIANTS.has('materialise')) {
+    const dir = join(AGENT_DIR, 'projects', PROJECT_KEY);
+    const file = join(dir, `${id}.jsonl`);
+    mkdirSync(dir, { recursive: true });
+    let backup: string | null = null;
+    if (existsSync(file)) {
+      backup = join(AGENT_STATE, 'materialise-backups', `${fileStamp()}-${id}.jsonl`);
+      mkdirSync(join(AGENT_STATE, 'materialise-backups'), { recursive: true });
+      copyFileSync(file, backup);
+    }
+    writeFileSync(file, loaded.entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    materialised = { file, entries: loaded.entries.length, backup };
+    log(`serve ${label}: materialised ${loaded.entries.length} entries from tower into ${file}${backup ? ` (earlier transcript kept at ${backup})` : ''}`);
+  }
 
   const store: SessionStore = {
     async append(key: SessionKey, entries: SessionStoreEntry[]): Promise<void> {
@@ -371,8 +514,8 @@ async function serve(cmd: Json): Promise<void> {
         lin.event('store-load', { returned: recordEntries.length, from: 'record' });
         return recordEntries as SessionStoreEntry[];
       }
-      if (key.subpath || decision !== 'tower' || !loaded) {
-        lin.event('store-load', { subpath: key.subpath ?? null, returned: null });
+      if (key.subpath || decision !== 'tower' || !loaded || materialised) {
+        lin.event('store-load', { subpath: key.subpath ?? null, returned: null, materialised: materialised !== undefined });
         return null;
       }
       lin.event('store-load', { returned: loaded.entries.length });
@@ -442,6 +585,9 @@ async function serve(cmd: Json): Promise<void> {
     run,
     busy: false,
     queryId: '',
+    sayText: '',
+    sayMs: 0,
+    lastResultMs: Date.now(),
     interruptedByUs: false,
     fired: false,
     resultSeen: false,
@@ -451,10 +597,11 @@ async function serve(cmd: Json): Promise<void> {
   };
   convs.set(label, conv);
   const c = conv;
-  lin.event('serve', { instanceId, runDir: run.dir, decision, from, dry, movedOn, upto, resumeSessionAt: resumeAt ?? null, recovery, towerMessages: towerBodies.length, localEntries: local.length, inAgentDir });
+  const variantsInfo: Json = { variants: [...VARIANTS], ...(held.length ? { held: held.map((h) => String(h.entry.uuid)) } : {}), ...(loaded?.fabricated.length ? { fabricated: loaded.fabricated } : {}), ...(cut ? { cut } : {}), ...(materialised ? { materialised } : {}) };
+  lin.event('serve', { instanceId, runDir: run.dir, decision, from, dry, movedOn, upto, resumeSessionAt: resumeAt ?? null, recovery, towerMessages: towerBodies.length, localEntries: local.length, inAgentDir, ...variantsInfo });
   c.loop = messagesLoop(c);
   committer.poke();
-  emit('served', { conv: label, id, decision, dry, movedOn, lineage: lin.dir, harnessRun: run.dir, resumeSessionAt: resumeAt ?? null, towerUpto: upto, towerMessages: towerBodies.length, localEntries: local.length, inAgentDir, recovery });
+  emit('served', { conv: label, id, decision, dry, movedOn, lineage: lin.dir, harnessRun: run.dir, resumeSessionAt: resumeAt ?? null, towerUpto: upto, towerMessages: towerBodies.length, localEntries: local.length, inAgentDir, recovery, ...variantsInfo });
 }
 
 function pubSummary(p: PublishedLine): Json {
@@ -508,15 +655,46 @@ async function messagesLoop(c: Conv): Promise<void> {
       }
       if (m.type === 'result') {
         const ms = Date.now();
-        c.resultSeen = true;
-        c.busy = false;
-        clearInterval(c.firstByteTimer);
+        // Turns Claude Code starts itself (a background task's notification,
+        // one queued by a killed run and replayed on resume): the participant
+        // mints their queryId (design record, 26 Sep). A result is the say's
+        // only if the say's prompt was taken into a turn by then: Claude Code
+        // writes a queue-operation `enqueue` with the prompt's text when it
+        // takes it, mirrored to the store before the turn's result.
+        //
+        // TODO: undecided. How a turn Claude Code started itself is told
+        // apart: built as "the pending say's enqueue isn't in the recording
+        // at the result" (no wait: the prompt's own enqueue lands right after
+        // a replayed turn's result). Pros: uses only what Claude Code writes;
+        // no change to what is sent. Cons: relies on the mirror reaching the
+        // store before the result is read; a say whose text Claude Code
+        // rewrites in the enqueue would never match. Alternatives: a uuid on
+        // each sent message and Claude Code's command_lifecycle frames
+        // (@internal in 2.1.282, not emitted to this SDK stream as seen), or
+        // --replay-user-messages.
+        const ours = c.busy && sayTaken(c);
+        const self = !ours;
+        const queryId = self ? randomUUID() : c.queryId;
+        if (self) {
+          // Its entries (after the last boundary) take the minted id; the
+          // pending say's id resumes after this result.
+          const from = Math.max(c.lastResultMs, c.busy ? c.sayMs : 0) + 1;
+          c.lin.addTurn({ ms: from, queryId, text: '' }, { self: true, resultMs: ms });
+          if (c.busy) {
+            c.lin.addTurn({ ms: ms + 1, queryId: c.queryId, text: c.sayText }, { resumes: 'pending say' });
+          }
+        } else {
+          c.resultSeen = true;
+          c.busy = false;
+          clearInterval(c.firstByteTimer);
+        }
+        c.lastResultMs = ms;
         const subtype = String(m.subtype);
-        const reason = c.interruptedByUs ? 'cancelled' : subtype === 'success' ? 'completed' : 'aborted';
+        const reason = !self && c.interruptedByUs ? 'cancelled' : subtype === 'success' ? 'completed' : 'aborted';
         const text = typeof m.result === 'string' ? m.result : JSON.stringify(m.errors ?? null);
-        c.lin.addResult({ ms, queryId: c.queryId, subtype, reason }, { isError: m.is_error, step: c.step ?? null, stopReason: m.stop_reason ?? null, permissionDenials: m.permission_denials ?? null, usage: m.usage ?? null, text: String(text).slice(0, 400) });
+        c.lin.addResult({ ms, queryId, subtype, reason }, { isError: m.is_error, step: self ? null : (c.step ?? null), selfStarted: self, numTurns: m.num_turns ?? null, stopReason: m.stop_reason ?? null, permissionDenials: m.permission_denials ?? null, usage: m.usage ?? null, text: String(text).slice(0, 400) });
         c.committer.poke();
-        emit('result', { conv: c.label, queryId: c.queryId, step: c.step ?? null, subtype, reason, isError: m.is_error, text: String(text).slice(0, 300), permissionDenials: m.permission_denials ?? null, stopReason: m.stop_reason ?? null });
+        emit('result', { conv: c.label, queryId, step: self ? null : (c.step ?? null), selfStarted: self, subtype, reason, isError: m.is_error, numTurns: m.num_turns ?? null, text: String(text).slice(0, 300), permissionDenials: m.permission_denials ?? null, stopReason: m.stop_reason ?? null });
         if (m.is_error === true && USAGE_LIMIT.test(String(text))) {
           emit('usage-limit', { conv: c.label, text: String(text).slice(0, 300) });
         }
@@ -538,6 +716,13 @@ async function messagesLoop(c: Conv): Promise<void> {
   emit('query-ended', { conv: c.label, id: c.id });
 }
 
+// Whether Claude Code has taken the pending say's prompt into a turn: its
+// queue-operation enqueue (the prompt's text) is in the recording, appended
+// at or after the say.
+function sayTaken(c: Conv): boolean {
+  return c.lin.rec.entries.some((r) => r.ms >= c.sayMs - 5 && r.entry.type === 'queue-operation' && r.entry.operation === 'enqueue' && r.entry.content === c.sayText);
+}
+
 function say(cmd: Json): void {
   const c = convs.get(String(cmd.conv));
   if (!c || c.exited) {
@@ -550,6 +735,7 @@ function say(cmd: Json): void {
   }
   const text = String(cmd.text);
   c.queryId = randomUUID();
+  c.sayText = text;
   c.busy = true;
   c.interruptedByUs = false;
   c.fired = false;
@@ -558,6 +744,7 @@ function say(cmd: Json): void {
   c.step = typeof cmd.step === 'number' ? cmd.step : undefined;
   c.stream = { thinkingOpen: false, textChars: 0, inputChars: 0 };
   const ms = Date.now();
+  c.sayMs = ms;
   c.lin.addSay({ ms, queryId: c.queryId, text }, { step: c.step ?? null, ending: c.ending ?? null });
   if (c.ending === 'first-byte') {
     // The request file carrying the prompt: interrupt before any reply byte.
@@ -710,6 +897,19 @@ rl.on('line', (line) => {
         case 'end':
           await end(String(cmd.conv));
           break;
+        case 'flag': {
+          // Test-only: a cell's trigger changed live for one step, through
+          // Claude Code's session-scoped flag settings layer (the SDK's
+          // applyFlagSettings); e.g. {env: {CLAUDE_CODE_MAX_OUTPUT_TOKENS: '64'}}.
+          const c = convs.get(String(cmd.conv));
+          if (!c || c.exited) {
+            throw new Error(`conv ${String(cmd.conv)} is not served`);
+          }
+          await c.run.query.applyFlagSettings(cmd.settings as never);
+          c.lin.event('flag-settings', { settings: cmd.settings as Json });
+          emit('flagged', { conv: c.label, settings: cmd.settings as Json });
+          break;
+        }
         case 'skills':
           skills.set((cmd.declared as string[]) ?? [], 'live');
           emit('skills', { declared: skills.declared, linked: [...skills.linked] });
