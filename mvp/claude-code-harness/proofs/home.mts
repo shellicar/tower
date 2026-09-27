@@ -66,13 +66,26 @@ interface Opt {
   env: Record<string, string>;
   // Extra flag settings (switches under test).
   settings: Record<string, unknown>;
-  // bwrap mount masks, real path -> the fixture dir mounted over it.
+  // bwrap mount masks: each real path gets a fixture dir mounted over it.
   masks: string[];
+  // bwrap read-only binds of real paths onto themselves: the test's own
+  // guard, so a delete or write the housekeeping attempts there fails with
+  // EROFS (and shows in the trace) instead of changing Stephen's files.
+  guards: string[];
   // The MCP server's own env in its config (to put the real HOME back).
   mcpHome: 'inherit' | 'real';
 }
 
-const base: Opt = { what: '', userOpen: true, privateHome: false, secure: 'harness-empty', shellPrefix: false, dotLinks: [], env: {}, settings: {}, masks: [], mcpHome: 'inherit' };
+const base: Opt = { what: '', userOpen: true, privateHome: false, secure: 'harness-empty', shellPrefix: false, dotLinks: [], env: {}, settings: {}, masks: [], guards: [], mcpHome: 'inherit' };
+
+// What the real-HOME runs with the user source open guard: the paths proof 22
+// and this proof's reference run saw Claude Code list, prune or read for
+// cleanup. ~/.claude itself is not guarded: the login's credentials file and
+// its refresh lock live there, and a refresh that could not be written back
+// would leave Stephen's stored refresh token stale.
+const GUARDS = ['.claude/bridge-spawn', '.claude/state', '.claude.json', '.cache/claude', '.cache/claude-cli-nodejs', '.local/share/claude', '.local/state/claude'].map((r) => join(REAL_HOME, r));
+// What the mask option mounts private directories over.
+const MASKS = ['.claude/bridge-spawn', '.claude/state', '.cache/claude', '.cache/claude-cli-nodejs', '.local/share/claude', '.local/state/claude'].map((r) => join(REAL_HOME, r));
 
 // TODO: undecided (Stephen). Which dotfiles a private HOME links back is a
 // decision; the list below is the brief's examples and nothing more.
@@ -80,7 +93,8 @@ const DOTFILES = ['.gitconfig', '.config/gh', '.ssh', '.npmrc'];
 
 const OPTIONS: Record<string, Opt> = {
   'real-closed': { ...base, what: 'reference: the harness baseline, real HOME, user source closed', userOpen: false },
-  'real-open': { ...base, what: 'option 1 baseline: real HOME, user source open, nothing switched off' },
+  'real-open': { ...base, what: 'option 1 baseline: real HOME, user source open, nothing switched off (guarded read-only)', guards: GUARDS },
+  'real-open-mask': { ...base, what: 'option 1, avoid: real HOME, user source open, private directories mounted (bwrap) over the housekeeping paths', guards: GUARDS, masks: MASKS },
   'private-bare': { ...base, what: 'option 2: private HOME, login by absolute CLAUDE_SECURESTORAGE_CONFIG_DIR, nothing put back for commands', privateHome: true, secure: 'absolute-real' },
   'private-empty-secure': { ...base, what: 'option 2 control: private HOME with the harness\'s empty CLAUDE_SECURESTORAGE_CONFIG_DIR (login expected to be missing)', privateHome: true },
   'private-prefix': { ...base, what: 'option 2: private HOME, absolute secure storage, CLAUDE_CODE_SHELL_PREFIX restores HOME for commands, MCP config env restores HOME', privateHome: true, secure: 'absolute-real', shellPrefix: true, mcpHome: 'real' },
@@ -217,8 +231,9 @@ function spawnHook(tag: string): (o: SpawnOptions) => SpawnedProcess {
     if (opt?.secure === 'absolute-real') env.CLAUDE_SECURESTORAGE_CONFIG_DIR = join(REAL_HOME, '.claude');
     let command = o.command;
     let args = o.args;
-    if (opt && opt.masks.length > 0) {
+    if (opt && (opt.masks.length > 0 || opt.guards.length > 0)) {
       const b = ['--dev-bind', '/', '/'];
+      for (const real of opt.guards) b.push('--ro-bind-try', real, real);
       for (const real of opt.masks) b.push('--bind', maskDir(real), real);
       args = [...b, '--', command, ...args];
       command = 'bwrap';
@@ -228,7 +243,7 @@ function spawnHook(tag: string): (o: SpawnOptions) => SpawnedProcess {
       at: stamp(),
       configDir,
       command,
-      args: args.filter((a) => !a.startsWith('{')).slice(0, 40),
+      args: args.filter((a) => !a.startsWith('{')).slice(0, 60),
       env: {
         HOME: env.HOME,
         CLAUDE_CONFIG_DIR: env.CLAUDE_CONFIG_DIR,
