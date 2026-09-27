@@ -544,3 +544,13 @@ Nothing in the real home was changed.
 - Read and Write resolve `~` to the private HOME in every private option.
 - Links to the dotfiles fix gh and npm but not the git identity: its includes
   resolve under the private HOME.
+- Commands inherit whatever switches an option sets. In `real-open-all` the
+  Bash probe printed the private `XDG_CACHE_HOME`, `XDG_STATE_HOME`,
+  `XDG_DATA_HOME`, `XDG_RUNTIME_DIR` and `CLAUDE_CODE_TMPDIR`, and
+  `DISABLE_AUTOUPDATER=1`. In `private-full` it printed `CLAUDE_CODE_TMPDIR`
+  and `XDG_RUNTIME_DIR`. The prefix restores only `HOME`. git, gh and npm
+  still worked in both.
+- Code quotes behind the above (secure-storage dir, credential file, refresh
+  and write locks, the bridge-spawn sweep, the `cleanupPeriodDays` cutoff, and
+  the SDK's Keychain naming and store-resume copy) are collected, verbatim with
+  offsets, in `runs/p26-code-evidence.txt`.
