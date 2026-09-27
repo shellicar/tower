@@ -536,7 +536,10 @@ async function runResume(model: string, cell: Cell, sessionId: string, label: st
   let events: Events | undefined;
   const ev = { write: (s: string, k: string, d: Json = {}) => (events ? events.write(s, k, d) : pre.push([s, k, d])) } as Events;
   const store = new RecordingStore(ev, join(rawDir, 'store-appends.jsonl'), entries);
-  const options: HarnessOptions = { ...baseOptions(model, store, bodies, cell.resumeEnv ?? cell.env ?? {}, ev, () => {}), resume: sessionId };
+  // P24_RESUME_ENV (JSON) adds to the resumes' env only, e.g. to try
+  // CLAUDE_CODE_RESUME_TOLERATES_CONTEXT_APPENDS (undocumented).
+  const extra = JSON.parse(process.env.P24_RESUME_ENV ?? '{}') as Record<string, string>;
+  const options: HarnessOptions = { ...baseOptions(model, store, bodies, { ...(cell.resumeEnv ?? cell.env ?? {}), ...extra }, ev, () => {}), resume: sessionId };
   const bw = new BodiesWatch(bodies, ev);
   const run = startRun({ name: agentName(model), options });
   events = new Events(run.dir, rawDir);
