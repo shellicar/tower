@@ -45,7 +45,9 @@
 // EACCES 8 ms before its last thread exited, so its tag can't be seen in the
 // last moments of its exit. Built: the easiest, such a process is recorded
 // (ownUidUnreadable) and otherwise ignored. The alternative is to wait for
-// any unreadable same-uid process that wasn't unreadable at baseline.
+// any unreadable same-uid process that wasn't unreadable at baseline. From
+// r3 on, the scan first tries each of that process's other threads
+// (/proc/<pid>/task/<tid>/environ), and records pids that vanish mid-scan.
 //
 // "Exited" means every thread has exited: a zombie thread-group leader with
 // other threads still listed in /proc/<pid>/task is still running (gone()).
