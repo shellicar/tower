@@ -1,61 +1,96 @@
-// Proof 21: stopping an orphaned Claude Code, before serving and at the
-// source.
+// Proof 25: does tagging each Claude Code close proof 21's gap?
 //
-// Built on proof 17b's recovery proof (proofs/recovery.mts, brought in from
-// proof-17b-shared-dir): its store, its blind recovery check (check(), copied
-// here unchanged), its transcript keeper and its request scoring. What is new:
+// Built on proof 21 (proofs/orphans.mts, brought in from proof-21-orphans):
+// its participant, driver, store, layer 1 (setpriv --pdeathsig SIGINT), proof
+// 17's blind recovery check (check(), unchanged apart from also reporting
+// what the tag scan sees), its transcript keeper and its scoring.
 //
-// Layer 2 (stopLive): before serving a conversation the participant
-//   1. finds any live Claude Code on its session: a sessions/<pid>.json naming
-//      the session, in the agent's config dir or in any /tmp/claude-resume-*,
-//      whose pid is alive and whose procStart equals /proc/<pid>/stat field 22
-//   2. sends it SIGINT
-//   3. waits until it has exited
-//   4. runs proof 17's recovery check
-//   5. then serves.
+// Proof 21's layer 2 found a leftover Claude Code by its sessions/<pid>.json,
+// which Claude Code deletes 3-27 ms after SIGINT or SIGTERM while it runs on
+// for ~2.5 s. What is new here:
 //
-// Layer 1 (spawnWith, pdeathsig): each Claude Code is launched through
-// `setpriv --pdeathsig SIGINT -- <claude> <args>` from the SDK's
-// spawnClaudeCodeProcess hook, so the kernel sends it SIGINT when the
-// participant dies. setpriv execs, so the pid the SDK sees is Claude Code's.
+// The tag: every Claude Code the participant starts gets TOWER_AGENT=<agent
+// name> added to its environment in spawnClaudeCodeProcess (spawnWith). The
+// participant's own environment never carries it. /proc/<pid>/environ holds a
+// process's environment as it was at exec, readable for our own processes.
 //
-// Cases (store resume only, the path the participant uses; each fresh and
-// resumed; each serve holds one conversation mid-reply, R, and one mid-tool,
-// T, inside a 60 s `sleep`):
-//   stop       no layer 1; participant SIGKILLed; served again at once with
-//              layer 2.
-//   kill       no layer 1; participant SIGKILLed; not served until every
-//              orphan has exited on its own. Then served with layer 2.
-//   crash      no layer 1; participant throws an uncaught exception; as kill.
-//   pd-stop    layer 1; SIGKILL; served again at once with layer 2.
-//   pd-kill    layer 1; SIGKILL; as kill.
-//   pd-crash   layer 1; uncaught exception; as kill.
-//   crash-stop, pd-crash-stop
-//              an uncaught exception, served again at once with layer 2.
-// Every case then serves each conversation twice (serve 2 and serve 3), both
-// with layer 2, and scores each serve's first request against every
-// transcript line the driver saw.
+// The tag stop (stopTagged), before serving, in the participant:
+//   1. find every process whose environment holds exactly TOWER_AGENT=<name>
+//      and that this participant didn't start (scanTag)
+//   2. send SIGINT to each still running normally
+//   3. wait until every one found has exited; scan again, until a scan finds
+//      none
+//   4. run proof 17's recovery check
+//   5. serve.
 //
-// TODO: undecided. What to do if the orphan hasn't exited some time after
-// SIGINT: escalate (SIGTERM, then SIGKILL) or refuse the serve. Built: the
-// easiest, wait STOP_WAIT_MS (30 s, a value picked for this proof), then log
-// it and serve anyway, which is proof 17's orphan policy.
+// TODO: undecided. What "running normally" means (step 2). Built: the
+// easiest, its sessions/<pid>.json, in the CLAUDE_CONFIG_DIR its environment
+// names, exists and its procStart matches /proc. So a Claude Code already
+// shutting down is not signalled again, except one caught in the few ms
+// before it deletes its pid file (see the pd-double case for what a second
+// SIGINT does). The alternative is SIGINT to every tagged Claude Code.
 //
-// TODO: undecided. What happens when setpriv isn't available. Built: nothing;
-// the spawn fails (ENOENT) and that conversation's query errors.
+// TODO: undecided. What is signalled and what is waited for. Built: SIGINT
+// only to a tagged process with a live pid file (a Claude Code); the wait
+// covers every tagged process found, Claude Code's own children (tools)
+// included, since they inherit the tag.
 //
-// TODO: undecided. Where the store lives. Built: a file store, one JSONL
-// file per session key under STORE_DIR, as proofs 7 and 17.
+// TODO: undecided. How the participant tells its own tagged processes from
+// leftovers. Built: the easiest, it excludes each pid it spawned and every
+// descendant of one (a /proc ppid walk at scan time). The tag value names
+// the agent only. The alternative is a per-participant value alongside it.
 //
-// Proof-only safety gate (not the participant's design): layer 2 detection is
-// blind, but before it signals a pid the pid and its start time must be on
-// the `ours` list the driver passes in (the Claude Codes this proof started
-// in this case), and every signal the driver sends is checked against the
-// start time it recorded. Refusals are logged.
+// TODO: undecided (as proof 21). What happens if a leftover hasn't exited
+// long after SIGINT. Built: the easiest, wait STOP_WAIT_MS (30 s, a value
+// picked for this proof), then log it and serve anyway.
+//
+// TODO: undecided (as proof 21). What happens when setpriv isn't available.
+// Built: nothing; the spawn fails (ENOENT) and that conversation's query
+// errors. The tag doesn't depend on setpriv.
+//
+// TODO: undecided (as proof 21). Where the store lives. Built: a file store,
+// one JSONL file per session key under STORE_DIR.
+//
+// The scan reads every same-uid process's environment. It keeps nothing from
+// one that doesn't carry the tag; from one that does it keeps only
+// CLAUDE_CONFIG_DIR (a path), to find its pid file.
+//
+// Cases (store resume only; each fresh and resumed; each serve holds one
+// conversation mid-reply, R, and one mid-tool, T, inside a 60 s `sleep`):
+//   Proof 21's eight, with the tag stop in place of the pid-file stop:
+//   stop, kill, crash, pd-stop, pd-kill, pd-crash, crash-stop, pd-crash-stop
+//   (pd- = layer 1; kill = SIGKILL; crash = uncaught exception; -stop =
+//   served again at once by a participant started after the death, as proof
+//   21; otherwise served once every leftover has exited on its own).
+//   <case>-now, for the four -stop cases: the serve 2 participant is started
+//   before the death, with its modules loaded, and blocked on stdin; the
+//   driver writes GO the moment it sees the old participant exit. No startup
+//   delay to hide behind.
+//   pf-<case>-now, for pd-stop, crash-stop, pd-crash-stop: the same, with
+//   proof 21's pid-file stop (stopLive) instead of the tag stop. The control.
+//   pd-double: layer 1, SIGKILL, and the driver sends every held Claude Code a
+//   second SIGINT as soon as it sees the participant exit; served once they
+//   have exited. What a second SIGINT to one already shutting down does.
+// Every case serves each conversation twice (serve 2 and serve 3) and scores
+// each serve's first request against every transcript line the driver saw.
+//
+// The reset guard: the same tag scan, for an agent name, refusing while any
+// tagged process is alive (proofs/tag-guard.mts, read-only: it never
+// deletes). The driver samples it, and the harness's own guard
+// (liveClaudeCodes on config-dirs/<name>), side by side every 20 ms from
+// before the death until every process of the old participant's tree has
+// exited, and runs the standalone script (a process that is no ancestor of
+// the Claude Codes) every ~250 ms. Each case's clean start runs tag-guard and
+// then `pnpm reset-config-dir`.
+//
+// Proof-only safety gate (not the participant's design): before a SIGINT the
+// pid and its start time must be on the `ours` list the driver passes in (the
+// Claude Codes this proof started in this case), checked against /proc just
+// before sending. Refusals are logged.
 //
 // Modes (from mvp/claude-code-harness/):
 //   participant <spec.json>
-//   case <model> <stop|kill|crash|pd-stop|pd-kill|pd-crash|crash-stop|pd-crash-stop> <fresh|resumed>
+//   case <model> <case> <fresh|resumed>
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -66,7 +101,9 @@ import { fileURLToPath } from 'node:url';
 import { importSessionToStore, type SDKUserMessage, type SessionKey, type SessionStore, type SessionStoreEntry, type SpawnedProcess, type SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import type { HarnessOptions, Run } from '../src/harness.mts';
 import { startRun } from '../src/harness.mts';
+import { liveClaudeCodes } from '../src/harness.mts';
 import { LineRecorder, redact } from '../src/record.mts';
+import { scanTag, type TagScan } from './tag-scan.mts';
 
 // Wall clock, to the millisecond, in every process (proof 7: the harness's
 // stamp() drifts 140-170 ms from it on this machine).
@@ -80,17 +117,22 @@ const DEBUG_ROOT = join(STATE, 'debug');
 const BODIES_ROOT = join(STATE, 'api-bodies');
 
 // The participant's own config.
-const STORE_DIR = join(STATE, 'stores', 'proof-21-orphans');
+const STORE_DIR = join(STATE, 'stores', 'proof-25-orphan-tag');
 const CONFIG_DIRS_ROOT = join(STATE, 'config-dirs');
-const RUN_NAME = 'orphans-21';
+const RUN_NAME = 'orphans-25';
+// The tag: TAG_KEY=RUN_NAME in every Claude Code's environment.
+const TAG_KEY = 'TOWER_AGENT';
+const GUARD_SCRIPT = join(dirname(SCRIPT), 'tag-guard.mts');
 const AGENT_CONFIG_DIR = join(CONFIG_DIRS_ROOT, RUN_NAME);
 const WORK = join(STATE, 'work', RUN_NAME);
 
 const TOOL_SLEEP_S = 60;
 const REPLY_CHARS = 300;
 const TOOL_DELAY_MS = 500;
-// TODO: undecided (see the header): how long layer 2 waits after SIGINT.
+// TODO: undecided (see the header): how long the stop waits after SIGINT.
 const STOP_WAIT_MS = 30_000;
+// Scan, signal, wait, at most this many times before serving anyway.
+const STOP_ROUNDS = 5;
 
 type Json = Record<string, unknown>;
 
@@ -320,6 +362,9 @@ interface PidFile {
 export interface CheckReport {
   sessionId: string;
   startedAt: string;
+  endedAt: string;
+  tagAtStart: number[];
+  tagAtEnd: number[];
   ms: number;
   rootsSearched: number;
   transcripts: Transcript[];
@@ -335,6 +380,9 @@ export interface CheckReport {
 async function check(sessionId: string, log: (s: string) => void): Promise<CheckReport> {
   const startedAt = stamp();
   const t0 = performance.now();
+  // Proof 25: anything carrying the tag (not this participant's own) as the
+  // check starts, and again as it ends.
+  const tagAtStart = scanTag(RUN_NAME, ownRoots()).found.map((p) => p.pid);
   const roots = [...subdirs(CONFIG_DIRS_ROOT), ...resumeDirs()];
   const transcripts: Transcript[] = [];
   const pidFiles: PidFile[] = [];
@@ -454,9 +502,13 @@ async function check(sessionId: string, log: (s: string) => void): Promise<Check
     });
   }
   const transcriptsUnchanged = transcripts.every((t) => sha(t.file) === t.sha);
+  const tagAtEnd = scanTag(RUN_NAME, ownRoots()).found.map((p) => p.pid);
   const report: CheckReport = {
     sessionId,
     startedAt,
+    endedAt: stamp(),
+    tagAtStart,
+    tagAtEnd,
     ms: Math.round(performance.now() - t0),
     rootsSearched: roots.length,
     transcripts,
@@ -469,7 +521,7 @@ async function check(sessionId: string, log: (s: string) => void): Promise<Check
     orphanPolicy,
   };
   log(
-    `check ${sessionId}: ${roots.length} roots in ${report.ms} ms; ${transcripts.length} transcript(s) [${transcripts.map((t) => `${t.root.startsWith(tmpdir()) ? basename(t.root) : `config-dirs/${basename(t.root)}`} ${t.lines} lines${t.unparseable ? ` ${t.unparseable} unparseable` : ''} imported ${t.imported}`).join('; ')}]; pid files ${JSON.stringify(pidFiles.map((p) => ({ pid: p.pid, alive: p.pidAlive, same: p.sameProcess, status: p.status })))}; cmdline ${JSON.stringify(runningByCmdline)}; union ${unionEntries}; ${keys.map((k) => `store ${k.storeBefore} -> ${k.storeAfter} (+${k.missing})`).join(', ')}; orphan: ${orphanPolicy}`,
+    `check ${sessionId}: ${roots.length} roots in ${report.ms} ms; ${transcripts.length} transcript(s) [${transcripts.map((t) => `${t.root.startsWith(tmpdir()) ? basename(t.root) : `config-dirs/${basename(t.root)}`} ${t.lines} lines${t.unparseable ? ` ${t.unparseable} unparseable` : ''} imported ${t.imported}`).join('; ')}]; pid files ${JSON.stringify(pidFiles.map((p) => ({ pid: p.pid, alive: p.pidAlive, same: p.sameProcess, status: p.status })))}; cmdline ${JSON.stringify(runningByCmdline)}; tagged at start ${JSON.stringify(tagAtStart)} end ${JSON.stringify(tagAtEnd)}; union ${unionEntries}; ${keys.map((k) => `store ${k.storeBefore} -> ${k.storeAfter} (+${k.missing})`).join(', ')}; orphan: ${orphanPolicy}`,
   );
   return report;
 }
@@ -539,6 +591,8 @@ function spawnWith(pdeathsig: boolean): (o: SpawnOptions) => SpawnedProcess {
     const env = { ...o.env };
     delete env.HARNESS_CAPTURE_DIR;
     delete env.HARNESS_REAL_CLAUDE;
+    // The tag, on this Claude Code only (and so on whatever it starts).
+    env[TAG_KEY] = RUN_NAME;
     const dir = claimSpawnDir(captureRoot);
     const runId = basename(dirname(captureRoot));
     mkdirSync(DEBUG_ROOT, { recursive: true });
@@ -551,7 +605,7 @@ function spawnWith(pdeathsig: boolean): (o: SpawnOptions) => SpawnedProcess {
     const child = spawn(command, commandArgs, { cwd: o.cwd, env: env as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'pipe'], signal: o.signal, windowsHide: true });
     writeFileSync(
       join(dir, 'argv.json'),
-      `${JSON.stringify({ startedAt: stamp(), launcher: pdeathsig ? 'setpriv --pdeathsig SIGINT --' : null, realBinary: real, argv: args, cwd: o.cwd, pid: child.pid, hostPid: process.pid, configDir: env.CLAUDE_CONFIG_DIR, debugFile, envNames: Object.keys(env).sort() }, null, 2)}\n`,
+      `${JSON.stringify({ startedAt: stamp(), launcher: pdeathsig ? 'setpriv --pdeathsig SIGINT --' : null, tag: `${TAG_KEY}=${RUN_NAME}`, realBinary: real, argv: args, cwd: o.cwd, pid: child.pid, hostPid: process.pid, configDir: env.CLAUDE_CONFIG_DIR, debugFile, envNames: Object.keys(env).sort() }, null, 2)}\n`,
     );
     const stdinRec = new LineRecorder(createWriteStream(join(dir, 'stdin.txt')));
     const stdoutRec = new LineRecorder(createWriteStream(join(dir, 'stdout.txt')));
@@ -690,6 +744,122 @@ async function stopLive(sessionId: string, ours: Known[], log: (s: string) => vo
 }
 
 // ---------------------------------------------------------------------------
+// The tag stop: every leftover of this agent, whatever its session, before
+// serving.
+
+// Every pid this participant has spawned (its Claude Codes). The scan also
+// excludes their descendants. See the header's TODO.
+function ownRoots(): Set<number> {
+  return new Set([...spawned.values()].flat().map((s) => s.pid));
+}
+
+// What proof 21's finder would see at the same moment: every live
+// sessions/<pid>.json in the agent's config dir or a resume dir, any session.
+function pidFileView(): { file: string; pid: number; sessionId: unknown; live: boolean }[] {
+  const out: { file: string; pid: number; sessionId: unknown; live: boolean }[] = [];
+  for (const root of [AGENT_CONFIG_DIR, ...resumeDirs()]) {
+    let names: string[] = [];
+    try {
+      names = readdirSync(join(root, 'sessions')).filter((n) => /^\d+\.json$/.test(n));
+    } catch {}
+    for (const n of names) {
+      try {
+        const d = JSON.parse(readFileSync(join(root, 'sessions', n), 'utf8')) as Json;
+        const k = { pid: Number(d.pid), starttime: String(d.procStart) };
+        out.push({ file: join(root, 'sessions', n), pid: k.pid, sessionId: d.sessionId, live: Number.isInteger(k.pid) && k.pid > 0 && !gone(k) });
+      } catch {}
+    }
+  }
+  return out;
+}
+
+interface TagStopRound {
+  scan: TagScan;
+  pidFileView: ReturnType<typeof pidFileView>;
+  signalled: { pid: number; starttime: string; sentAt: string }[];
+  refused: { pid: number; starttime: string; why: string }[];
+  waited: { pid: number; starttime: string; cmd: string; pidFileLive: boolean; goneAt: string | null; msToGone: number | null }[];
+  waitEndedAt: string;
+}
+
+interface TagStopReport {
+  finder: 'tag';
+  name: string;
+  startedAt: string;
+  rounds: TagStopRound[];
+  endedAt: string;
+  ms: number;
+  outcome: string;
+}
+
+async function stopTagged(ours: Known[], log: (s: string) => void): Promise<TagStopReport> {
+  const startedAt = stamp();
+  const t0 = performance.now();
+  const rounds: TagStopRound[] = [];
+  let outcome = '';
+  for (let round = 1; round <= STOP_ROUNDS; round += 1) {
+    const scan = scanTag(RUN_NAME, ownRoots());
+    const pfv = pidFileView();
+    const r: TagStopRound = { scan, pidFileView: pfv, signalled: [], refused: [], waited: [], waitEndedAt: '' };
+    rounds.push(r);
+    log(
+      `tag stop round ${round}: scan ${scan.ms} ms over ${scan.scanned} environs; found ${JSON.stringify(scan.found.map((p) => [p.pid, p.pidFileLive ? 'live pid file' : 'no live pid file', p.cmd.slice(0, 30)]))}; excluded ${scan.excluded.length}; own-uid unreadable ${scan.ownUidUnreadable.length}; proof 21's finder would see live ${JSON.stringify(pfv.filter((x) => x.live).map((x) => x.pid))}`,
+    );
+    if (scan.found.length === 0) {
+      r.waitEndedAt = stamp();
+      outcome = round === 1 ? 'none found' : `all exited after ${round - 1} round(s)`;
+      break;
+    }
+    // TODO: undecided (see the header): SIGINT only to one still running
+    // normally, judged by its live pid file.
+    for (const p of scan.found.filter((x) => x.pidFileLive)) {
+      const k = { pid: p.pid, starttime: p.starttime };
+      if (!ours.some((o) => o.pid === k.pid && o.starttime === k.starttime)) {
+        r.refused.push({ ...k, why: 'not a Claude Code this proof started (proof safety gate)' });
+        log(`tag stop: ${k.pid} is not on this proof's list; not signalled`);
+        continue;
+      }
+      if (!signalChecked(k, 'SIGINT', log)) {
+        r.refused.push({ ...k, why: 'start time changed before the signal' });
+        continue;
+      }
+      r.signalled.push({ ...k, sentAt: stamp() });
+      log(`tag stop: SIGINT to ${k.pid}`);
+    }
+    // TODO: undecided (see the header): wait for every tagged process found.
+    const tw = performance.now();
+    r.waited = scan.found.map((p) => ({ pid: p.pid, starttime: p.starttime, cmd: p.cmd.slice(0, 60), pidFileLive: p.pidFileLive, goneAt: null, msToGone: null }));
+    const deadline = tw + STOP_WAIT_MS;
+    while (r.waited.some((w) => w.goneAt === null) && performance.now() < deadline) {
+      for (const w of r.waited) {
+        if (w.goneAt === null && gone(w)) {
+          w.goneAt = stamp();
+          w.msToGone = Math.round(performance.now() - tw);
+        }
+      }
+      if (r.waited.some((w) => w.goneAt === null)) {
+        await sleep(5);
+      }
+    }
+    r.waitEndedAt = stamp();
+    const left = r.waited.filter((w) => w.goneAt === null).map((w) => w.pid);
+    log(`tag stop round ${round}: waited ${JSON.stringify(r.waited.map((w) => [w.pid, w.msToGone]))}`);
+    if (left.length > 0) {
+      // TODO: undecided (see the header): a leftover still running long after
+      // SIGINT. Built: serve anyway.
+      outcome = `still running ${STOP_WAIT_MS} ms after round ${round}: ${JSON.stringify(left)}; served anyway (TODO: undecided)`;
+      break;
+    }
+    if (round === STOP_ROUNDS) {
+      outcome = `still finding tagged processes after ${STOP_ROUNDS} rounds; served anyway (TODO: undecided)`;
+    }
+  }
+  const report: TagStopReport = { finder: 'tag', name: RUN_NAME, startedAt, rounds, endedAt: stamp(), ms: Math.round(performance.now() - t0), outcome };
+  log(`tag stop: ${outcome}; ${report.ms} ms`);
+  return report;
+}
+
+// ---------------------------------------------------------------------------
 // The participant
 
 interface ConvSpec {
@@ -707,8 +877,12 @@ interface ParticipantSpec {
   apiBodies?: boolean;
   // Layer 1.
   pdeathsig: boolean;
-  // Layer 2.
+  // Layer 2: the stop before serving, by the tag (proof 25) or by pid file
+  // (proof 21's stopLive, the control).
   stopOrphans: boolean;
+  finder: 'tag' | 'pidfile';
+  // Start loaded, print ARMED, and wait for GO on stdin before anything.
+  waitGo?: boolean;
   // The proof's safety gate for layer 2: Claude Codes this proof started.
   ours: Known[];
   convs: ConvSpec[];
@@ -723,15 +897,40 @@ async function participant(specPath: string): Promise<void> {
   const out = spec.outDir;
   mkdirSync(out, { recursive: true });
   const log = makeLog(new Recorder(join(out, 'participant-log.txt')), `participant ${process.pid}: `);
-  log(`start; spec ${specPath}; layer 1 ${spec.pdeathsig}; layer 2 ${spec.stopOrphans}`);
+  log(`start; spec ${specPath}; layer 1 ${spec.pdeathsig}; layer 2 ${spec.stopOrphans} by ${spec.finder}`);
+  const timing: Json = {};
+  if (spec.waitGo) {
+    const go = new Promise<void>((resolve) => {
+      let buf = '';
+      process.stdin.on('data', (chunk: Buffer) => {
+        buf += chunk.toString('utf8');
+        if (buf.includes('GO\n')) {
+          process.stdin.destroy();
+          resolve();
+        }
+      });
+    });
+    log('armed; waiting for GO');
+    process.stdout.write('ARMED\n');
+    await go;
+    timing.goAt = stamp();
+    log('GO');
+  }
 
   // Before any Claude Code of this serve starts: layer 2 (stop, wait), then
-  // proof 17's check, twice (the second shows it adds nothing more). Stops
-  // run side by side; checks one at a time (check() swaps
+  // proof 17's check, twice (the second shows it adds nothing more). The tag
+  // stop runs once, for the whole agent; proof 21's stops run side by side,
+  // one per session. Checks one at a time (check() swaps
   // process.env.CLAUDE_CONFIG_DIR while it reads).
   const withSession = spec.convs.filter((c) => c.sessionId);
   const stops = new Map<string, StopReport>();
-  if (spec.stopOrphans) {
+  let tagStop: TagStopReport | undefined;
+  timing.stopStartedAt = stamp();
+  if (spec.stopOrphans && spec.finder === 'tag') {
+    tagStop = await stopTagged(spec.ours, log);
+    writeFileSync(join(out, 'stop.json'), `${redact(JSON.stringify(tagStop, null, 2)).text}\n`);
+  }
+  if (spec.stopOrphans && spec.finder === 'pidfile') {
     await Promise.all(
       withSession.map(async (c) => {
         const r = await stopLive(c.sessionId as string, spec.ours, (s) => log(`${c.tag}: ${s}`));
@@ -740,6 +939,7 @@ async function participant(specPath: string): Promise<void> {
       }),
     );
   }
+  timing.checksStartedAt = stamp();
   for (const c of withSession) {
     const first = await check(c.sessionId as string, (s) => log(`${c.tag}: ${s}`));
     const second = await check(c.sessionId as string, (s) => log(`${c.tag} (again): ${s}`));
@@ -758,7 +958,15 @@ async function participant(specPath: string): Promise<void> {
     done: Promise<void>;
   }
   const parts: Part[] = [];
-  const state: Json = { participantPid: process.pid, participantStarttime: procStat(process.pid)?.starttime ?? null, startedAt: stamp(), pdeathsig: spec.pdeathsig, convs: [] as Json[] };
+  timing.checksEndedAt = stamp();
+  const state: Json = { participantPid: process.pid, participantStarttime: procStat(process.pid)?.starttime ?? null, startedAt: stamp(), pdeathsig: spec.pdeathsig, finder: spec.finder, timing, tagStop: tagStop?.outcome ?? null, convs: [] as Json[] };
+  // The same scan with this participant's own Claude Codes (and their tools)
+  // up: it must exclude them all.
+  const ownScan = (when: string): void => {
+    const sc = scanTag(RUN_NAME, ownRoots());
+    writeFileSync(join(out, `own-scan-${when}.json`), `${JSON.stringify({ when, own: [...ownRoots()], ...sc }, null, 2)}\n`);
+    log(`own scan (${when}): found ${JSON.stringify(sc.found.map((p) => p.pid))}; excluded ${JSON.stringify(sc.excluded.map((p) => [p.pid, p.cmd.slice(0, 30)]))}`);
+  };
   const writeState = (): void => writeFileSync(join(out, 'participant-state.json'), `${JSON.stringify(state, null, 2)}\n`);
   for (const c of spec.convs) {
     const runStamp = stamp().replace(/[:.]/g, '');
@@ -882,6 +1090,7 @@ async function participant(specPath: string): Promise<void> {
 
   if (spec.ending === 'answer') {
     await Promise.all(pidsKnown);
+    ownScan('serving');
     writeState();
     for (const p of parts) {
       const answer = await Promise.race([p.result, later(180_000).then(() => '(no answer in 180 s)')]);
@@ -908,6 +1117,7 @@ async function participant(specPath: string): Promise<void> {
   });
   await Promise.all(parts.map((p) => p.ready));
   await Promise.all(pidsKnown);
+  ownScan('mid-turn');
   await Promise.race([Promise.all(parts.map((p) => p.sessionId)), later(3000)]);
   writeState();
   log('all mid-turn');
@@ -1127,6 +1337,8 @@ interface ParticipantHandle {
   starttime: string;
   dir: string;
   ready: Promise<boolean>;
+  armed: Promise<boolean>;
+  go: () => string;
   exited: Promise<{ at: string; t: number; code: number | null; signal: string | null }>;
 }
 
@@ -1135,12 +1347,16 @@ function startParticipant(caseDir: string, label: string, spec: Omit<Participant
   mkdirSync(dir, { recursive: true });
   const specPath = join(dir, 'spec.json');
   writeFileSync(specPath, `${JSON.stringify({ ...spec, outDir: dir }, null, 2)}\n`);
-  const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', SCRIPT, 'participant', specPath], { cwd: PACKAGE_ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', SCRIPT, 'participant', specPath], { cwd: PACKAGE_ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
   const outFile = createWriteStream(join(dir, 'participant-stdout.txt'));
   let buf = '';
   let readyR: (b: boolean) => void = () => {};
   const ready = new Promise<boolean>((r) => {
     readyR = r;
+  });
+  let armedR: (b: boolean) => void = () => {};
+  const armed = new Promise<boolean>((r) => {
+    armedR = r;
   });
   child.stdout.on('data', (chunk: Buffer) => {
     outFile.write(chunk);
@@ -1150,6 +1366,9 @@ function startParticipant(caseDir: string, label: string, spec: Omit<Participant
       if (buf.slice(0, at) === 'READY') {
         readyR(true);
       }
+      if (buf.slice(0, at) === 'ARMED') {
+        armedR(true);
+      }
       buf = buf.slice(at + 1);
       at = buf.indexOf('\n');
     }
@@ -1158,12 +1377,18 @@ function startParticipant(caseDir: string, label: string, spec: Omit<Participant
   const exited = new Promise<{ at: string; t: number; code: number | null; signal: string | null }>((r) =>
     child.once('exit', (code, signal) => {
       readyR(false);
+      armedR(false);
       r({ at: stamp(), t: Date.now(), code, signal });
     }),
   );
+  child.stdin.on('error', () => {});
+  const go = (): string => {
+    child.stdin.write('GO\n');
+    return stamp();
+  };
   const starttime = procStat(child.pid as number)?.starttime ?? '?';
   log(`${label}: participant pid ${child.pid} (start ${starttime}), dir ${relative(PACKAGE_ROOT, dir)}`);
-  return { pid: child.pid as number, starttime, dir, ready, exited };
+  return { pid: child.pid as number, starttime, dir, ready, armed, go, exited };
 }
 
 function pstate(h: ParticipantHandle): { convs: Json[] } {
@@ -1301,6 +1526,7 @@ interface Ctx {
   caseDir: string;
   model: string;
   pd: boolean;
+  finder: 'tag' | 'pidfile';
   sids: Record<string, string>;
   keeper: Keeper;
   ours: Known[];
@@ -1331,15 +1557,26 @@ function inWindow(e: Json, w: Window, tag: string): boolean {
 
 // One serve of every conversation, each asked about its previous turn. Layer 2
 // runs first in the participant, then proof 17's check.
-async function serveAgain(ctx: Ctx, label: string, windows: Window[]): Promise<{ rows: Json[]; sentAt: Record<string, string> }> {
+function serveSpec(ctx: Ctx, waitGo: boolean): Omit<ParticipantSpec, 'outDir'> {
+  const tags = Object.keys(ctx.sids);
+  return {
+    model: ctx.model,
+    ending: 'answer',
+    apiBodies: true,
+    pdeathsig: ctx.pd,
+    stopOrphans: true,
+    finder: ctx.finder,
+    waitGo,
+    ours: [...ctx.ours],
+    convs: tags.map((tag) => ({ tag, sessionId: ctx.sids[tag], say: QUESTIONS[tag] as string, trigger: 'none' as const })),
+  };
+}
+
+// `pre`: a serve participant already started (armed, then sent GO).
+async function serveAgain(ctx: Ctx, label: string, windows: Window[], pre?: ParticipantHandle): Promise<{ rows: Json[]; sentAt: Record<string, string> }> {
   const { keeper, log } = ctx;
   const tags = Object.keys(ctx.sids);
-  const h = startParticipant(
-    ctx.caseDir,
-    label,
-    { model: ctx.model, ending: 'answer', apiBodies: true, pdeathsig: ctx.pd, stopOrphans: true, ours: [...ctx.ours], convs: tags.map((tag) => ({ tag, sessionId: ctx.sids[tag], say: QUESTIONS[tag] as string, trigger: 'none' as const })) },
-    log,
-  );
+  const h = pre ?? startParticipant(ctx.caseDir, label, serveSpec(ctx, false), log);
   const ex = await Promise.race([h.exited, later(400_000).then(() => undefined)]);
   log(`${label}: participant exited ${JSON.stringify(ex)}`);
   ctx.note(h);
@@ -1352,7 +1589,9 @@ async function serveAgain(ctx: Ctx, label: string, windows: Window[]): Promise<{
     const sid = ctx.sids[tag] as string;
     const conv = st.convs.find((c) => c.tag === tag) as Json;
     sentAt[tag] = String(conv.sentAt);
-    const stop = readJson(join(h.dir, `stop-${tag}.json`)) as unknown as StopReport | undefined;
+    const stopPf = readJson(join(h.dir, `stop-${tag}.json`)) as unknown as StopReport | undefined;
+    const stopTag = readJson(join(h.dir, 'stop.json')) as unknown as TagStopReport | undefined;
+    const stop = stopPf ?? (stopTag ? { outcome: stopTag.outcome, ms: stopTag.ms, pidFiles: stopTag.rounds[0]?.pidFileView ?? [], signalled: stopTag.rounds.flatMap((r) => r.signalled), refused: stopTag.rounds.flatMap((r) => r.refused), found: stopTag.rounds.map((r) => r.scan.found.map((p) => p.pid)), waited: stopTag.rounds.flatMap((r) => r.waited) } : undefined);
     const checks = readJson(join(h.dir, `check-${tag}.json`)) as unknown as { first: CheckReport; second: CheckReport };
     const truth = [...keeper.truth(sid).values()].map((v) => v.entry);
     const bodyText = firstRequest(String(conv.bodies ?? ''));
@@ -1371,8 +1610,11 @@ async function serveAgain(ctx: Ctx, label: string, windows: Window[]): Promise<{
       serve: label,
       tag,
       sessionId: sid,
-      stop: stop ? { outcome: stop.outcome, ms: stop.ms, pidFiles: stop.pidFiles, signalled: stop.signalled, refused: stop.refused } : null,
+      stop: stop ? { finder: stopPf ? 'pidfile' : 'tag', ...stop } : null,
       check: {
+        startedAt: checks.first.startedAt,
+        tagAtStart: checks.first.tagAtStart,
+        tagAtEnd: checks.first.tagAtEnd,
         ms: checks.first.ms,
         transcripts: checks.first.transcripts.map((t) => ({ where: t.root.startsWith(tmpdir()) ? basename(t.root) : `config-dirs/${basename(t.root)}`, lines: t.lines, imported: t.imported })),
         stillRunningByPidFile: checks.first.runningBySessionPidFile,
@@ -1433,22 +1675,179 @@ function snapshot(ctx: Ctx, label: string, heldSentAt: Record<string, string>): 
   return out;
 }
 
-type CaseName = 'stop' | 'kill' | 'crash' | 'pd-stop' | 'pd-kill' | 'pd-crash' | 'crash-stop' | 'pd-crash-stop';
+const BASE_CASES = ['stop', 'kill', 'crash', 'pd-stop', 'pd-kill', 'pd-crash', 'crash-stop', 'pd-crash-stop'] as const;
+const NOW_CASES = ['stop-now', 'pd-stop-now', 'crash-stop-now', 'pd-crash-stop-now'] as const;
+const CONTROL_CASES = ['pf-pd-stop-now', 'pf-crash-stop-now', 'pf-pd-crash-stop-now'] as const;
+const CASES = [...BASE_CASES, ...NOW_CASES, ...CONTROL_CASES, 'pd-double'] as const;
+type CaseName = (typeof CASES)[number];
 type Variant = 'fresh' | 'resumed';
-const CASES: CaseName[] = ['stop', 'kill', 'crash', 'pd-stop', 'pd-kill', 'pd-crash', 'crash-stop', 'pd-crash-stop'];
+
+// The reset guard, sampled every 20 ms: the tag scan (for the agent name, no
+// exclusions, as tag-guard.mts runs it) and the harness's own guard,
+// liveClaudeCodes(config-dirs/<name>), at the same moment, against which of
+// the old participant's processes (tracked by ProcWatch) are alive just
+// before and just after the scan. Every ~250 ms it also runs
+// proofs/tag-guard.mts as a separate process, no ancestor of any Claude Code.
+class GuardSampler {
+  readonly samples: Json[] = [];
+  readonly scripts: Json[] = [];
+  phase = 'running normally';
+  timer: NodeJS.Timeout | undefined;
+  scriptTimer: NodeJS.Timeout | undefined;
+  readonly pending: Promise<void>[] = [];
+  readonly pw: ProcWatch;
+  constructor(pw: ProcWatch) {
+    this.pw = pw;
+  }
+  old(): Tracked[] {
+    return [...this.pw.tracked.values()].filter((t) => t.role !== 'participant');
+  }
+  sample(): void {
+    const old = this.old();
+    const before = new Set(old.filter((t) => !gone(t)).map((t) => t.pid));
+    const scan = scanTag(RUN_NAME);
+    const harness = liveClaudeCodes(AGENT_CONFIG_DIR).map((l) => l.pid);
+    const after = new Set(old.filter((t) => !gone(t)).map((t) => t.pid));
+    const found = new Set(scan.found.map((p) => p.pid));
+    const through = [...before].filter((p) => after.has(p));
+    const missed = through.filter((p) => !found.has(p)).map((p) => {
+      const st = procStat(p);
+      let environBytes: number | string;
+      try {
+        environBytes = readFileSync(`/proc/${p}/environ`).length;
+      } catch (err) {
+        environBytes = (err as NodeJS.ErrnoException).code ?? '?';
+      }
+      return { pid: p, role: this.pw.tracked.get(p)?.role, state: st?.state ?? null, environBytes };
+    });
+    const oldIds = new Set(old.map((t) => t.pid));
+    this.samples.push({
+      at: scan.at,
+      t: scan.t,
+      phase: this.phase,
+      scanMs: scan.ms,
+      oldAlive: through.map((p) => [p, this.pw.tracked.get(p)?.role]),
+      oldClaudeAlive: through.filter((p) => !String(this.pw.tracked.get(p)?.role).endsWith('descendant')),
+      tagFound: scan.found.map((p) => [p.pid, p.pidFileLive ? 'live pid file' : 'no live pid file']),
+      otherTagged: scan.found.filter((p) => !oldIds.has(p.pid)).map((p) => [p.pid, p.cmd.slice(0, 30)]),
+      tagRefuses: scan.found.length > 0,
+      harnessLive: harness,
+      harnessRefuses: harness.length > 0,
+      missed,
+      ownUidUnreadable: scan.ownUidUnreadable.map((u) => u.pid),
+    });
+  }
+  runScript(): void {
+    const startedAt = stamp();
+    const phase = this.phase;
+    const oldAliveAtStart = this.old()
+      .filter((t) => !gone(t))
+      .map((t) => t.pid);
+    const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', GUARD_SCRIPT, RUN_NAME], { cwd: PACKAGE_ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (c: Buffer) => {
+      out += c.toString('utf8');
+    });
+    child.stderr.on('data', (c: Buffer) => {
+      err += c.toString('utf8');
+    });
+    this.pending.push(
+      new Promise<void>((r) =>
+        child.once('exit', (code) => {
+          let parsed: Json | null = null;
+          try {
+            parsed = JSON.parse(out.trim()) as Json;
+          } catch {}
+          this.scripts.push({
+            phase,
+            startedAt,
+            endedAt: stamp(),
+            pid: child.pid,
+            exit: code,
+            refused: code === 1,
+            scanAt: parsed?.at ?? null,
+            found: ((parsed?.found as Json[] | undefined) ?? []).map((f) => [f.pid, f.pidFileLive]),
+            oldAliveAtStart,
+            oldAliveAtEnd: this.old()
+              .filter((t) => !gone(t))
+              .map((t) => t.pid),
+            stderr: err.trim().slice(0, 300),
+          });
+          r();
+        }),
+      ),
+    );
+  }
+  start(): void {
+    this.timer = setInterval(() => this.sample(), 20);
+    this.scriptTimer = setInterval(() => this.runScript(), 250);
+    this.sample();
+    this.runScript();
+  }
+  async stop(): Promise<void> {
+    this.sample();
+    if (this.timer) {
+      clearInterval(this.timer);
+    }
+    if (this.scriptTimer) {
+      clearInterval(this.scriptTimer);
+    }
+    await Promise.all(this.pending);
+  }
+  summary(): Json {
+    const ss = this.samples;
+    const withOld = ss.filter((x) => (x.oldAlive as unknown[]).length > 0);
+    const noneAlive = ss.filter((x) => (x.oldAlive as unknown[]).length === 0 && (x.otherTagged as unknown[]).length === 0);
+    const byPhase = (ph: string): Json => {
+      const p = withOld.filter((x) => x.phase === ph);
+      return {
+        samplesWithOldAlive: p.length,
+        tagRefused: p.filter((x) => x.tagRefuses).length,
+        harnessRefused: p.filter((x) => x.harnessRefuses).length,
+        samplesWithAMiss: p.filter((x) => (x.missed as unknown[]).length > 0).length,
+      };
+    };
+    const sc = this.scripts;
+    return {
+      samples: ss.length,
+      runningNormally: byPhase('running normally'),
+      afterDeath: byPhase('after death'),
+      samplesWithNoneAlive: noneAlive.length,
+      tagRefusedWithNoneAlive: noneAlive.filter((x) => x.tagRefuses).length,
+      misses: ss.filter((x) => (x.missed as unknown[]).length > 0).map((x) => ({ at: x.at, missed: x.missed })),
+      script: {
+        runs: sc.length,
+        withOldAliveThroughout: sc.filter((x) => (x.oldAliveAtStart as unknown[]).length > 0 && (x.oldAliveAtEnd as unknown[]).length > 0).length,
+        refusedOfThose: sc.filter((x) => (x.oldAliveAtStart as unknown[]).length > 0 && (x.oldAliveAtEnd as unknown[]).length > 0 && x.refused).length,
+        withNoneAliveThroughout: sc.filter((x) => (x.oldAliveAtStart as unknown[]).length === 0).length,
+        allowedOfThose: sc.filter((x) => (x.oldAliveAtStart as unknown[]).length === 0 && x.exit === 0).length,
+      },
+    };
+  }
+}
 
 async function runCase(model: string, name: CaseName, variant: Variant): Promise<void> {
-  const caseDir = join(RUNS, `${stamp().replace(/[:.]/g, '')}-orphans-${name}-${variant}`);
+  const caseDir = join(RUNS, `${stamp().replace(/[:.]/g, '')}-orphan-tag-${name}-${variant}`);
   mkdirSync(caseDir, { recursive: true });
   const log = makeLog(new Recorder(join(caseDir, 'driver-log.txt')), 'driver: ');
-  const pd = name.startsWith('pd-');
-  const how: 'kill' | 'crash' = name.includes('crash') ? 'crash' : 'kill';
-  const immediate = name.endsWith('stop');
-  log(`case ${name} ${variant}; layer 1 ${pd}; ending ${how}; served ${immediate ? 'at once' : 'after the orphans exit'}; dir ${caseDir}`);
+  const finder: 'tag' | 'pidfile' = name.startsWith('pf-') ? 'pidfile' : 'tag';
+  const base = name.replace(/^pf-/, '').replace(/-now$/, '');
+  const pd = base.startsWith('pd-');
+  const how: 'kill' | 'crash' = base.includes('crash') ? 'crash' : 'kill';
+  const immediate = base.endsWith('stop');
+  const now = name.endsWith('-now');
+  const double = name === 'pd-double';
+  log(`case ${name} ${variant}; layer 1 ${pd}; ending ${how}; stop by ${finder}; served ${now ? 'at once, by a participant started beforehand and sent GO on the death' : immediate ? 'at once, by a participant started after the death' : 'after the leftovers exit'}${double ? '; a second SIGINT from the driver on the death' : ''}; dir ${caseDir}`);
 
-  // A clean start for the agent, through the harness's script.
+  // A clean start: the tag guard, then the harness's own reset script.
+  const guard = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', GUARD_SCRIPT, RUN_NAME], { cwd: PACKAGE_ROOT, encoding: 'utf8' });
+  log(`tag-guard ${RUN_NAME}: exit ${guard.status}; ${guard.stdout.trim()}`);
+  if (guard.status !== 0) {
+    throw new Error(`tag-guard refused: ${guard.stderr}`);
+  }
   const reset = spawnSync('pnpm', ['reset-config-dir', RUN_NAME], { cwd: PACKAGE_ROOT, encoding: 'utf8' });
-  writeFileSync(join(caseDir, 'reset.json'), `${JSON.stringify({ status: reset.status, stdout: reset.stdout, stderr: reset.stderr }, null, 2)}\n`);
+  writeFileSync(join(caseDir, 'reset.json'), `${JSON.stringify({ guard: { status: guard.status, stdout: guard.stdout, stderr: guard.stderr }, status: reset.status, stdout: reset.stdout, stderr: reset.stderr }, null, 2)}\n`);
   log(`pnpm reset-config-dir ${RUN_NAME}: exit ${reset.status}; ${reset.stdout.trim().split('\n').at(-1)}`);
   if (reset.status !== 0) {
     throw new Error(`reset refused: ${reset.stderr}`);
@@ -1472,10 +1871,10 @@ async function runCase(model: string, name: CaseName, variant: Variant): Promise
       }
     }
   };
-  const ctx: Ctx = { caseDir, model, pd, sids, keeper, ours, log, note };
+  const ctx: Ctx = { caseDir, model, pd, finder, sids, keeper, ours, log, note };
 
   if (variant === 'resumed') {
-    const h = startParticipant(caseDir, '0-seed', { model, ending: 'answer', pdeathsig: pd, stopOrphans: true, ours: [...ours], convs: ['R', 'T'].map((tag) => ({ tag, say: PROMPTS.seed(WORDS[tag] as string), trigger: 'none' as const })) }, log);
+    const h = startParticipant(caseDir, '0-seed', { model, ending: 'answer', pdeathsig: pd, stopOrphans: true, finder, ours: [...ours], convs: ['R', 'T'].map((tag) => ({ tag, say: PROMPTS.seed(WORDS[tag] as string), trigger: 'none' as const })) }, log);
     const ex = await h.exited;
     note(h);
     log(`seed exited ${JSON.stringify(ex)}; sessions ${JSON.stringify(sids)}`);
@@ -1490,6 +1889,7 @@ async function runCase(model: string, name: CaseName, variant: Variant): Promise
       ending: 'hold',
       pdeathsig: pd,
       stopOrphans: true,
+      finder,
       ours: [...ours],
       convs: [
         { tag: 'R', say: PROMPTS.story, trigger: 'reply', ...(sids.R ? { sessionId: sids.R } : {}) },
@@ -1514,11 +1914,37 @@ async function runCase(model: string, name: CaseName, variant: Variant): Promise
   pw.start();
   log(`1-serve: READY; sessions ${JSON.stringify(sids)}; tracked ${JSON.stringify([...pw.tracked.values()].map((t) => [t.pid, t.role, t.cmd.slice(0, 50)]))}`);
 
+  // The serve 2 participant, for a -now case: started and loaded now, sent GO
+  // the moment the driver sees the old participant exit.
+  let pre: ParticipantHandle | undefined;
+  if (now) {
+    pre = startParticipant(caseDir, '2-serve', serveSpec(ctx, true), log);
+    const armed = await Promise.race([pre.armed, later(30_000).then(() => false)]);
+    if (!armed) {
+      throw new Error('2-serve: never armed');
+    }
+    log(`2-serve: ARMED (pid ${pre.pid})`);
+  }
+
+  const sampler = new GuardSampler(pw);
+  sampler.start();
+  await sleep(600);
+
   const endSentAt = stamp();
   const endT = Date.now();
+  let goSentAt: string | null = null;
+  // Registered before the signal, so GO goes out in the same turn of the
+  // event loop as the driver learns of the exit.
+  const exitSeen = h.exited.then((e) => {
+    if (pre) {
+      goSentAt = pre.go();
+    }
+    sampler.phase = 'after death';
+    return e;
+  });
   signalChecked({ pid: h.pid, starttime: h.starttime }, how === 'kill' ? 'SIGKILL' : 'SIGUSR2', log);
   log(`${how === 'kill' ? 'KILL: SIGKILL' : 'CRASH: SIGUSR2 (uncaught exception)'} to participant ${h.pid}`);
-  const pex = await Promise.race([h.exited, later(60_000).then(() => undefined)]);
+  const pex = await Promise.race([exitSeen, later(60_000).then(() => undefined)]);
   if (!pex) {
     throw new Error('participant still running 60 s after its ending');
   }
@@ -1527,16 +1953,47 @@ async function runCase(model: string, name: CaseName, variant: Variant): Promise
     variant,
     layer1: pd,
     how,
+    finder,
+    now,
     endSentAt,
     participantExit: pex,
+    goSentAt,
     msToParticipantExit: pex.t - endT,
     claudesAliveAtParticipantExit: pw.alive((t) => t.role.startsWith('claude')).map((t) => [t.pid, t.role]),
   };
-  log(`participant exit ${JSON.stringify(pex)}; alive then ${JSON.stringify(ending.claudesAliveAtParticipantExit)}`);
+  log(`participant exit ${JSON.stringify(pex)}; GO ${goSentAt}; alive then ${JSON.stringify(ending.claudesAliveAtParticipantExit)}`);
+
+  if (double) {
+    // A second SIGINT to every held Claude Code, as soon as the driver sees
+    // the death (layer 1 has sent the first).
+    const second: Json[] = [];
+    for (const c of held) {
+      const k = ours.find((o) => o.pid === Number(c.claudePid));
+      if (!k) {
+        continue;
+      }
+      const argv = readJson(join(String(c.runDir), 'claude', '1', 'argv.json'));
+      const pidFile = argv ? join(String(argv.configDir), 'sessions', `${k.pid}.json`) : null;
+      const pidFilePresent = pidFile ? existsSync(pidFile) : null;
+      const sent = signalChecked(k, 'SIGINT', log);
+      second.push({ tag: c.tag, pid: k.pid, sentAt: stamp(), sent, pidFilePresent });
+    }
+    ending.secondSigint = second;
+    log(`second SIGINT: ${JSON.stringify(second)}`);
+  }
+
+  const stopSampler = (async () => {
+    const deadline = Date.now() + 240_000;
+    while (!pw.allGone((t) => t.role !== 'participant') && Date.now() < deadline) {
+      await sleep(20);
+    }
+    await sleep(100);
+    await sampler.stop();
+  })();
 
   let serve2: { rows: Json[]; sentAt: Record<string, string> };
   if (immediate) {
-    serve2 = await serveAgain(ctx, '2-serve', [{ name: 'held turn', from: heldSentAt }]);
+    serve2 = await serveAgain(ctx, '2-serve', [{ name: 'held turn', from: heldSentAt }], pre);
   } else {
     const deadline = Date.now() + 240_000;
     while (!pw.allGone((t) => t.role !== 'participant') && Date.now() < deadline) {
@@ -1555,6 +2012,7 @@ async function runCase(model: string, name: CaseName, variant: Variant): Promise
     ending.snapshot = snapshot(ctx, 'after-orphans', heldSentAt);
     serve2 = await serveAgain(ctx, '2-serve', [{ name: 'held turn', from: heldSentAt }]);
   }
+  await stopSampler;
   const serve3 = await serveAgain(ctx, '3-serve', [
     { name: 'held turn', from: heldSentAt, to: serve2.sentAt },
     { name: 'serve 2 turn', from: serve2.sentAt, to: {} },
@@ -1567,12 +2025,16 @@ async function runCase(model: string, name: CaseName, variant: Variant): Promise
   }
   pw.stop();
   keeper.stop();
+  writeFileSync(join(caseDir, 'guard-samples.jsonl'), sampler.samples.map((x) => JSON.stringify(x)).join('\n') + '\n');
+  writeFileSync(join(caseDir, 'guard-scripts.jsonl'), sampler.scripts.map((x) => JSON.stringify(x)).join('\n') + '\n');
+  ending.guard = sampler.summary();
+  log(`guard: ${JSON.stringify(ending.guard)}`);
   const tool = {
     label: toolLabel,
     started: existsSync(join(WORK, `wait-${toolLabel}-started.txt`)) ? readFileSync(join(WORK, `wait-${toolLabel}-started.txt`), 'utf8').trim() : null,
     finished: existsSync(join(WORK, `wait-${toolLabel}-finished.txt`)) ? readFileSync(join(WORK, `wait-${toolLabel}-finished.txt`), 'utf8').trim() : null,
   };
-  const timings = [...pw.tracked.values()].map((t) => ({ pid: t.pid, role: t.role, cmd: t.cmd, goneAt: t.goneAt, msAfterParticipantExit: t.goneT === null ? null : t.goneT - pex.t, tids: t.tids }));
+  const timings = [...pw.tracked.values()].map((t) => ({ pid: t.pid, role: t.role, cmd: t.cmd, starttime: t.starttime, addedAt: t.addedAt, goneAt: t.goneAt, msAfterParticipantExit: t.goneT === null ? null : t.goneT - pex.t, tids: t.tids }));
   ending.stillAliveAtEnd = pw.alive().map((t) => [t.pid, t.role, t.cmd.slice(0, 60)]);
   log(`timings after participant exit (ms): ${JSON.stringify(timings.map((t) => [t.pid, t.role, t.cmd.slice(0, 30), t.msAfterParticipantExit]))}; tool ${JSON.stringify(tool)}`);
   writeFileSync(join(caseDir, 'result.json'), `${JSON.stringify({ ending, timings, tool, heldSentAt, ours, serve2: serve2.rows, serve3: serve3.rows }, null, 2)}\n`);
@@ -1584,7 +2046,7 @@ async function runCase(model: string, name: CaseName, variant: Variant): Promise
 const [mode, ...rest] = process.argv.slice(2);
 if (mode === 'participant' && rest[0]) {
   await participant(rest[0]);
-} else if (mode === 'case' && rest[0] && CASES.includes(rest[1] as CaseName) && ['fresh', 'resumed'].includes(rest[2] ?? '')) {
+} else if (mode === 'case' && rest[0] && (CASES as readonly string[]).includes(rest[1] ?? '') && ['fresh', 'resumed'].includes(rest[2] ?? '')) {
   await runCase(rest[0], rest[1] as CaseName, rest[2] as Variant);
 } else {
   process.stderr.write(`usage:\n  case <model> <${CASES.join('|')}> <fresh|resumed>\n  participant <spec.json>\n`);
