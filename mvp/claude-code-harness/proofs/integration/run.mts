@@ -29,7 +29,7 @@
 // runs can go at once under different --agent names (every agent name used
 // is derived from --agent).
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { toBodies } from '../reconcile/load.mts';
@@ -69,8 +69,18 @@ function parse(argv: string[]): Args {
   return a;
 }
 
+// The driver's own log (SIGKILL instants included), copied into the
+// evidence root of the scenario that is running.
+let logFile: string | undefined;
 const log = (s: string): void => {
-  process.stdout.write(`${iso()} ${s}\n`);
+  const line = `${iso()} ${s}\n`;
+  process.stdout.write(line);
+  if (logFile) {
+    appendFileSync(logFile, clean(line));
+  }
+};
+const useLog = (ev: Evidence): void => {
+  logFile = ev.path('driver.log');
 };
 
 class UsageLimit extends Error {}
@@ -176,6 +186,7 @@ async function prime(a: Args, agent: string, ev: Evidence): Promise<void> {
 async function smoke(a: Args): Promise<CheckRow[]> {
   const agent = a.agent ?? `int-${short(a.model)}-smoke`;
   const ev = new Evidence(`${short(a.model)}-smoke`);
+  useLog(ev);
   if (a.reset) resetAgent(agent, log);
   const p = start(specFor(agent, a.model, ev.path('p1')), a);
   await p.ready();
@@ -228,6 +239,13 @@ async function matrixCell(a: Args, cell: Cell, agent: string, towerAgent: string
   const lin = Lineage.open(lineage);
   lin.pollBodies();
   const end = ending(lin, cell, Number(say1?.ms ?? 0), step1Ms, triggered);
+  if (cell.ending === 'tool-exec') {
+    // Reached only if the command was running (the shell prefix logged it),
+    // not interrupted at a permission ask.
+    const ran = existsSync(ev.path('p1-live', 'prefix.log')) ? readFileSync(ev.path('p1-live', 'prefix.log'), 'utf8').split('\n').filter(Boolean).length : 0;
+    end.commandsRun = ran;
+    end.reached = end.reached === true && ran > 0;
+  }
   row('ending reached', end.reached === true, JSON.stringify(end), ev.path('p1-live'));
   const denials = r1.permissionDenials as unknown[] | null;
   if (Array.isArray(denials) && denials.length > 0) {
@@ -305,6 +323,7 @@ async function matrix(a: Args): Promise<CheckRow[]> {
   const agent = a.agent ?? `int-${short(a.model)}-m`;
   const towerAgent = `${agent}-t`;
   const root = new Evidence(`${short(a.model)}-matrix`);
+  useLog(root);
   if (a.reset) {
     resetAgent(agent, log);
     resetAgent(towerAgent, log);
@@ -384,6 +403,7 @@ async function killed(a: Args): Promise<CheckRow[]> {
   const agent = a.agent ?? `int-${short(a.model)}-k`;
   const creator = `${agent}-o`;
   const root = new Evidence(`${short(a.model)}-killed`);
+  useLog(root);
   if (a.reset) {
     resetAgent(agent, log);
     resetAgent(creator, log);
@@ -424,6 +444,7 @@ async function killed(a: Args): Promise<CheckRow[]> {
     // (TODO: undecided): load() returns this machine's own recording.
     const s2 = await p2.serve({ conv: 'c', id, ...(origin === 'tower-record' ? { from: 'record' } : {}) });
     const stop = p2.events.find((e) => e.ev === 'stopped');
+    const ranBeforeKill = existsSync(join(dir, 'p1-killed', 'prefix.log'));
     const stopReport = JSON.parse(readFileSync(join(dir, 'p2-served', 'stop-c.json'), 'utf8')) as Json;
     const foundAtStop = ((stopReport.rounds as Json[])[0]?.found as Json[] | undefined) ?? [];
     const r = await p2.say('c', PROBE, { step: 2 });
@@ -438,6 +459,7 @@ async function killed(a: Args): Promise<CheckRow[]> {
     const allWaited = leftClaudes.every((f) => waited.some((w) => w.pid === f.pid && w.goneAt !== null));
     const unclassified = foundAtStop.filter((f) => f.claudeCode !== true && p1.claudes.some((k) => k.pid === f.pid));
     row('leftover stopped before serving', /all exited|none found/.test(String(stop?.outcome)) && allWaited && unclassified.length === 0, `${String(stop?.outcome)}; found at the first scan ${JSON.stringify(foundAtStop.map((f) => [f.pid, f.claudeCode ? 'claude' : f.cmd]))}; signals ${JSON.stringify(stop?.signals)}; waited ${JSON.stringify(waited)}${unclassified.length ? `; P1's Claude Code not recognised: ${JSON.stringify(unclassified)}` : ''}`, join(dir, 'p2-served'));
+    row('killed while the command ran', ranBeforeKill, ranBeforeKill ? 'the shell prefix ran the command before the kill' : 'no command ran (a permission ask?)', join(dir, 'p1-killed'));
     row('decision', origin === 'fresh' ? s2.decision === 'local' : origin === 'tower' ? s2.decision === 'tower' : s2.decision === 'record', `decision ${String(s2.decision)}; recovery ${JSON.stringify(s2.recovery).slice(0, 300)}`, join(dir, 'served.json'));
     const f = forks(tower);
     row('nothing forks', f.length === 0, f.length ? JSON.stringify(f) : 'no two tower entries share a parent', join(dir, 'tower.json'));
@@ -467,6 +489,7 @@ async function movedOn(a: Args): Promise<CheckRow[]> {
   const agent = a.agent ?? `int-${short(a.model)}-mo`;
   const other = `${agent}-2`;
   const root = new Evidence(`${short(a.model)}-moved-on`);
+  useLog(root);
   if (a.reset) {
     resetAgent(agent, log);
     resetAgent(other, log);
@@ -528,6 +551,7 @@ async function origins(a: Args): Promise<CheckRow[]> {
   const agent = a.agent ?? `int-${short(a.model)}-or`;
   const creator = `${agent}-o`;
   const root = new Evidence(`${short(a.model)}-origins`);
+  useLog(root);
   if (a.reset) {
     resetAgent(agent, log);
     resetAgent(creator, log);
@@ -615,6 +639,7 @@ async function skills(a: Args): Promise<CheckRow[]> {
   const plain = `${agent}-plain`;
   const second = `${agent}-2`;
   const root = new Evidence(`${short(a.model)}-skills`);
+  useLog(root);
   for (const n of [agent, plain, second]) if (a.reset) resetAgent(n, log);
   const fix = join(INTEGRATION_STATE, 'fixtures', `${iso().replace(/[:.]/g, '')}-${agent}`);
   const declared = join(fix, 'declared');
@@ -692,6 +717,7 @@ async function two(a: Args): Promise<CheckRow[]> {
   const base = a.agent ?? `int-${short(a.model)}-two`;
   const names = [`${base}-a`, `${base}-b`];
   const root = new Evidence(`${short(a.model)}-two`);
+  useLog(root);
   for (const n of names) if (a.reset) resetAgent(n, log);
   const fix = join(INTEGRATION_STATE, 'fixtures', `${iso().replace(/[:.]/g, '')}-${base}`);
   const decl = names.map((n, i) => {
@@ -739,6 +765,7 @@ async function two(a: Args): Promise<CheckRow[]> {
 async function home(a: Args): Promise<CheckRow[]> {
   const agent = a.agent ?? `int-${short(a.model)}-home`;
   const root = new Evidence(`${short(a.model)}-home`);
+  useLog(root);
   if (a.reset) resetAgent(agent, log);
   const traced = { ...a, strace: true };
   const phases: { name: string; at: number }[] = [];

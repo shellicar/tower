@@ -54,6 +54,7 @@ export interface SpawnRecord {
 export interface SpawnContext {
   agent: string;
   privateHome: string;
+  prefixLog?: string;
   skills: Skills;
   // Called with each spawn (for the run record, the driver's safety list and
   // the durable list of resume dirs).
@@ -89,6 +90,11 @@ export function spawnHook(ctx: SpawnContext, conv: string): (o: SpawnOptions) =>
     env.CLAUDE_SECURESTORAGE_CONFIG_DIR = REAL_CLAUDE_DIR;
     env.CLAUDE_CODE_SHELL_PREFIX = SHELL_PREFIX;
     env.P26_REAL_HOME = REAL_HOME;
+    // Test-only evidence: the prefix script writes one line per command it
+    // runs (no command text), so a check can tell a command ran.
+    if (ctx.prefixLog) {
+      env.P26_PREFIX_LOG = ctx.prefixLog;
+    }
     const configDir = String(env.CLAUDE_CONFIG_DIR);
     const agentDir = dirname(configDir) === CONFIG_DIRS_ROOT && basename(configDir) === ctx.agent;
     // skills/ must exist before Claude Code starts (a new one isn't watched).

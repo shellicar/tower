@@ -406,6 +406,7 @@ async function serve(cmd: Json): Promise<void> {
       {
         agent: AGENT,
         privateHome,
+        prefixLog: join(RUN, 'prefix.log'),
         skills,
         log,
         onSpawn: (r) => {
@@ -580,7 +581,8 @@ function say(cmd: Json): void {
           continue;
         }
         seen.add(f);
-        if (String(body.model).startsWith(spec.model) && body.thinking !== undefined && JSON.stringify(body.messages ?? []).includes(want)) {
+        const mainLoop = (body.thread !== undefined && body.thread !== null) || (Array.isArray(body.tools) && body.tools.length > 0);
+        if (String(body.model).startsWith(spec.model) && body.thinking !== undefined && mainLoop && JSON.stringify(body.messages ?? []).includes(want)) {
           fire(c, `request file ${f}`);
         }
       }
@@ -631,7 +633,15 @@ async function graceful(why: string): Promise<void> {
     await end(c.label);
   }
   await tower.nc.drain();
-  emit('shutdown-done', { published: Object.fromEntries([...convs.values()].map((c) => [c.label, c.committer.order.length])) });
+  // Give the SDK time to remove the /tmp/claude-resume-* dirs it made (it
+  // does so once its Claude Code has exited); exiting at once cut that off.
+  const resumeDirs = spawned.filter((s) => !s.agentDir).map((s) => s.configDir);
+  const t0 = Date.now();
+  while (resumeDirs.some((d) => existsSync(d)) && Date.now() - t0 < 10_000) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  const left = resumeDirs.filter((d) => existsSync(d));
+  emit('shutdown-done', { published: Object.fromEntries([...convs.values()].map((c) => [c.label, c.committer.order.length])), resumeDirs: resumeDirs.length, resumeDirsLeft: left, waitedMs: Date.now() - t0 });
   process.exit(0);
 }
 
