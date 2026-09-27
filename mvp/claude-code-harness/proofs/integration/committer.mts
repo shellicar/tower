@@ -102,6 +102,8 @@ export class Committer {
   readonly suffix: string;
   readonly subjectId: string;
   shadow: Committer | undefined;
+  // Reply pieces waiting for the user side they answer to be on tower.
+  readonly waiting = new Map<string, string[]>();
   readonly instanceId: string;
   readonly dry: boolean;
   readonly tower: Tower | undefined;
@@ -231,6 +233,11 @@ export class Committer {
     while (this.running) {
       await this.running;
     }
+    // A reply still waiting once nothing is pending never goes out, and
+    // nothing after it does either (publishFrom stops at it): a hold, loud.
+    for (const [id, missing] of this.waiting) {
+      this.note('reply-held', id, { uuid: id, why: `still waiting at drain for the user side it answers (${missing.join(', ')}) to be on tower; nothing after it was published` });
+    }
     await this.shadow?.drain();
   }
 
@@ -308,9 +315,11 @@ export class Committer {
       // that user side first; if it isn't on tower, nothing after it goes.
       const answers = b.answers.get(m.id);
       if (m.role === 'assistant' && answers && !answers.every((u) => this.carriedCc.has(u))) {
+        this.waiting.set(m.id, answers.filter((u) => !this.carriedCc.has(u)));
         this.note('reply-waits', m.id, { id: m.id, missing: answers.filter((u) => !this.carriedCc.has(u)) });
         break;
       }
+      this.waiting.delete(m.id);
       const later = this.order.filter((id) => (pos.get(id) ?? -1) > i);
       if (later.length > 0) {
         this.note('late-insert', m.id, { id: m.id, role: m.role, before: later.slice(0, 5) });

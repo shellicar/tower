@@ -229,6 +229,13 @@ export interface BuildOpts {
   // Entries tower already holds before this recording's own commits (a
   // lineage seeded from tower): committed from the start, never committed
   // again in another form or under another message.
+  //
+  // TODO: undecided (integration attempt 3; not a decision Stephen made).
+  // Built because run+last and run+entry re-derived seeded entries at a query
+  // end, and a seeded message's id then collided with a new run's message,
+  // which the committer refused as a correction, losing the prompt. It
+  // follows "tower is the authority, a commit is a fact", but the design
+  // record doesn't say how a lineage resumed from tower counts what it loaded.
   alreadyCommitted?: Set<string>;
 }
 
