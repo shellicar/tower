@@ -182,6 +182,35 @@ never use the bridge test broker (`compose.test.yaml`, 31416) or
 `NATS_URL=nats://127.0.0.1:31417` explicitly, since an unset `NATS_URL`
 means the fleet's 4222.
 
+## The integration proof, attempt 3: state and the invariant check
+
+The third integration attempt (`proofs/integration/`) keeps its durable
+state in `~/.local/state/tower-claude-code-harness/integration-3/` and
+names every agent `i3-...` (`AGENT_PREFIX` in `lib.mts`; `run.mts`
+refuses an `--agent` without it), apart from the first attempt's
+`integration/` and `int-...` names, since the leftover stop and recovery
+act by agent name. Its evidence dirs are `runs/i3-<timestamp>-<label>/`.
+
+`proofs/integration/invariant.mts` checks the invariant over any run
+afterwards, from what persists: tower read back from the harness broker's
+JetStream, and every lineage of the conversation under the state dir (request
+and response bodies, serve/say/result events, store appends). It uses none of
+the committer's code. From `mvp/claude-code-harness/`, with
+`NATS_URL=nats://127.0.0.1:31417`:
+
+```sh
+node proofs/integration/invariant.mts --evidence runs/i3-<timestamp>-<label>   # every conversation the run names
+node proofs/integration/invariant.mts <convId>...
+node proofs/integration/invariant.mts --all
+```
+
+It writes `<convId>.md` and `.json` per conversation (default
+`runs/i3-<timestamp>-invariant/`, or `--out`) and exits 1 on any FAIL. The
+kinds of point, the truth each is judged against, the verdicts (PASS,
+ROUND-TRIP, UNCHECKED, FAIL, and a content verdict that sets shape-only
+divergences aside) and the check's own undecided assumptions are in the
+file's header.
+
 ## What a run records
 
 `runs/<timestamp>-<name>/` (gitignored):
