@@ -126,6 +126,9 @@ const AGENT = `p26-${optName}`;
 const START = stamp().replace(/[:.]/g, '');
 const FIX = join(STATE_ROOT, 'p26', `${START}-${optName}`);
 const OUT = join(PACKAGE_ROOT, 'runs', `${START}-p26-${optName}`);
+// TODO: undecided (Stephen). A private HOME's lifetime and place: built here
+// fresh per proof run and kept (easiest, and no rm). A participant could
+// instead keep one per agent and reuse it, like CLAUDE_CONFIG_DIR.
 const HOME_DIR = join(FIX, 'home');
 const PROBE_REL = join('.local', 'state', 'tower-claude-code-harness', 'p26-probe');
 const IDLE_MS = 30_000;
