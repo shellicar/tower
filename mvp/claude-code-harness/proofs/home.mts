@@ -84,6 +84,7 @@ const OPTIONS: Record<string, Opt> = {
   'private-bare': { ...base, what: 'option 2: private HOME, login by absolute CLAUDE_SECURESTORAGE_CONFIG_DIR, nothing put back for commands', privateHome: true, secure: 'absolute-real' },
   'private-empty-secure': { ...base, what: 'option 2 control: private HOME with the harness\'s empty CLAUDE_SECURESTORAGE_CONFIG_DIR (login expected to be missing)', privateHome: true },
   'private-prefix': { ...base, what: 'option 2: private HOME, absolute secure storage, CLAUDE_CODE_SHELL_PREFIX restores HOME for commands, MCP config env restores HOME', privateHome: true, secure: 'absolute-real', shellPrefix: true, mcpHome: 'real' },
+  'private-prefix-only': { ...base, what: 'option 2: private HOME, absolute secure storage, CLAUDE_CODE_SHELL_PREFIX only (the MCP config leaves HOME alone)', privateHome: true, secure: 'absolute-real', shellPrefix: true },
   'private-links': { ...base, what: 'option 2: private HOME, absolute secure storage, symlinks to real dotfiles in the private HOME', privateHome: true, secure: 'absolute-real', dotLinks: DOTFILES },
 };
 
