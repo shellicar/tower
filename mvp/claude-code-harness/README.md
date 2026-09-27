@@ -397,3 +397,150 @@ node proofs/skills-user-level-trace.mts runs/<stamp>-p22-pair-hook.strace
 - `get_hooks_listing` labels the agent dir's hook "User settings
   (~/.claude/settings.json)"; the hook log shows it ran from the agent dir
   and the resume dir, never from `~/.claude`.
+
+## Proof 26: keeping Claude Code's own machinery out of the user's home
+
+`proofs/home.mts <model> <option>` runs proof 22's pair (a fresh serve, then a
+resume of it through a session store) under the agent name `p26-<option>`,
+reset first. It uses proof 22's spawn hook, which links the declared skill
+`p26-seed` into whatever `CLAUDE_CONFIG_DIR` the SDK gives it. The `user`
+source is opened the way proof 22 did it, except in `real-closed`.
+
+Each serve runs these turns:
+
+1. A no-tool turn.
+2. A 30 s idle wait, so the housekeeping runs.
+3. `/p26-seed`.
+4. One Bash command of probes. It prints `HOME` and git's config origins and
+   identity inside this worktree, without values. It prints `gh auth status`'s
+   exit code, npm's userconfig path and whether that file exists, and
+   `ssh -G`'s identity files.
+5. Read and Write of `~/.local/state/tower-claude-code-harness/p26-probe/...`.
+   The same file sits in both homes with different markers.
+6. The stdio MCP server `proofs/home-mcp.mjs`, which reports its `HOME`.
+
+The resumed serve stops after the Bash probe. The agent dir's `settings.json`
+has a hook that logs the `HOME` it ran with.
+
+`sh proofs/home-run.sh <model> <option>` runs one option under
+`strace -f -y -ttt -s 0 -e trace=%file,%process,bind,connect`, which records
+paths and never contents. It then reads the trace:
+
+- `proofs/home-trace.mts` lists every access outside the run's own
+  directories. It covers the real home, `/run/user/<uid>`, `/tmp` and the
+  private HOME, labelled by process and by phase.
+- `proofs/home-trace-brief.py` condenses that listing.
+- `proofs/home-trace-machinery.py` keeps Claude Code's own accesses and every
+  write.
+
+Everything lands in `runs/<stamp>-p26-<option>/`.
+
+HOME is set through `options.env`. The harness forces
+`CLAUDE_SECURESTORAGE_CONFIG_DIR=""`, so the absolute value is set in the spawn
+hook, which is proof code. Options that keep the real HOME with the `user`
+source open run Claude Code inside bwrap with read-only binds of the real
+paths the housekeeping prunes: `~/.claude/bridge-spawn`, `~/.claude/state`,
+`~/.claude.json`, `~/.cache/claude`, `~/.cache/claude-cli-nodejs`,
+`~/.local/share/claude` and `~/.local/state/claude`. This is the test's
+guard: a delete there fails with `EROFS` and shows in the trace. `~/.claude`
+itself is not guarded, because the login and its refresh lock live there.
+
+Options:
+
+| Option | What |
+| --- | --- |
+| `real-closed` | reference: the harness today (real HOME, user closed) |
+| `real-open` | real HOME, user open, nothing switched off |
+| `real-open-env` | + `DISABLE_AUTOUPDATER=1`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`, `XDG_DATA_HOME`, `CLAUDE_CODE_TMPDIR`, `XDG_RUNTIME_DIR` to private dirs |
+| `real-open-cleanup0` | + flag setting `cleanupPeriodDays: 0` |
+| `real-open-all` | both of the above |
+| `real-open-mask` | bwrap binds private dirs over the housekeeping paths |
+| `private-bare` | private HOME, `CLAUDE_SECURESTORAGE_CONFIG_DIR=$REAL_HOME/.claude` |
+| `private-empty-secure` | private HOME with the harness's `""` (control) |
+| `private-prefix-only` | private-bare + `CLAUDE_CODE_SHELL_PREFIX=proofs/home-shell-prefix.sh` (runs `HOME=<real> bash -c "$1"`) |
+| `private-prefix` | + the MCP config's `env` sets `HOME` too |
+| `private-links` | private-bare + links to the real `.gitconfig`, `.config/gh`, `.ssh`, `.npmrc` |
+| `private-full` | private-prefix-only + `CLAUDE_CODE_TMPDIR`, `XDG_RUNTIME_DIR` to private dirs |
+
+Which dotfiles a private HOME links back is undecided (TODO in the file). The
+private HOME is fresh per proof run and kept under
+`~/.local/state/tower-claude-code-harness/p26/`. Whether a participant's is
+per agent and reused is undecided.
+
+### What the runs showed (Claude Code 2.1.282, SDK 0.3.282, claude-sonnet-5, 27 Sep)
+
+**Every option.**
+- The login worked, except in `private-empty-secure` ("Not logged in").
+- The only access to the credentials file was an `O_RDONLY` open of
+  `~/.claude/.credentials.json`.
+- No token refresh happened, so there was no lock and no write. From the
+  code, the refresh lock is `<secure-storage dir>/.oauth_refresh.lock`, beside
+  the file. The secure-storage dir is `$HOME/.claude` for `""` and the path
+  itself when absolute.
+- No `.credentials.json` appeared in the agent dir, the fixtures or any resume
+  dir.
+- Plain-named `/p26-seed` ran fresh and resumed in every option with the user
+  source open. With it closed, it was "not installed".
+
+**Real HOME with the user source closed** (the harness today):
+- Writes MCP logs to `~/.cache/claude-cli-nodejs/<project>/`.
+- The updater housekeeping reads `~/.local/share/claude/versions` and
+  `~/.local/state/claude/locks`, and stats `~/.cache/claude/staging`.
+- Reads `~/.gitconfig`, `~/.config/git/ignore`, `~/.config/anthropic/*` and
+  `~/.claude/state/unattended-serving-consent.json`.
+- Binds a socket in `/run/user/<uid>/cc-socks/`.
+
+**Real HOME with the user source open** also:
+- lists the real `~/.claude/bridge-spawn`. The code has a literal 1-day sweep
+  there, rooted at `homedir()`.
+- opens `~/.claude/state/served-calls`.
+- reads and tries to unlink `~/.claude/state/settings-review.json`. It was
+  absent, and the guard made the unlink `EROFS`.
+- walks every project's folder under the shared `/tmp/claude-1000/`, about 70
+  of them, for `<session>/images`.
+
+Nothing in the real home was changed.
+
+**The option 1 switches:**
+- `real-open-env`: the MCP logs, the updater paths and `/tmp/claude-1000` move
+  away. `cc-socks` goes to `/tmp/cc-socks-<uid>`, not to the private
+  `XDG_RUNTIME_DIR`. The bridge-spawn, served-calls and settings-review
+  accesses stay.
+- `real-open-cleanup0`: those three stop. The debug log says "Skipping
+  cleanup: settings have validation errors but cleanupPeriodDays was
+  explicitly set": `0` is invalid (the docs say so), and the invalid settings
+  are what skip the cleanup. In that run the claude.ai plugin sync wrote no
+  `plugins/synced/`. Hooks still ran and transcripts were still written.
+- `real-open-all`: nothing written to or deleted from the real home. Still
+  there: the reads above, the Read and Write tools' stat of
+  `~/.claude/state/settings-review.json`, and `/tmp/cc-socks-<uid>`.
+- `real-open-mask`: the housekeeping lands in the mask dirs. `/tmp/claude-1000`
+  and `/run/user/<uid>/cc-socks` are untouched by the mask. The 3-day-old
+  entries planted in the masks were not deleted, so there is no positive
+  deletion control. The listing is the evidence the cleanup ran.
+
+**Private HOME** (`private-*`):
+- The real home is reached only by the credentials read and by PATH lookups.
+- The housekeeping lands in the private HOME: bridge-spawn, served-calls,
+  settings-review, the updater dirs, `.cache/claude-cli-nodejs` and
+  `.config/anthropic`.
+- The CLAUDE.md-style ancestor walk no longer stops at the real home. It
+  stats the real `~/.claude/{skills,agents,commands,workflows,output-styles}`
+  as a project `.claude`. That is stat only; nothing was opened, and the
+  project source was closed.
+- `/tmp/claude-1000` and `cc-socks` stay shared unless moved (`private-full`).
+
+**Commands under a private HOME:**
+- Bash, hooks and the MCP server see the private HOME. The git identity fails
+  (exit 128), `gh auth status` fails, and npm's userconfig points at the
+  private HOME.
+- ssh is unaffected: it opened the real `~/.ssh/config`, taking home from the
+  passwd entry.
+- The shell snapshot sources no rc files. With the real HOME it sources
+  `~/.profile` and `~/.bashrc`.
+- `CLAUDE_CODE_SHELL_PREFIX` puts the real HOME back for Bash, hooks and
+  stdio MCP start-up (its log shows each). git, gh and npm then work. It does
+  not wrap the snapshot shell.
+- Read and Write resolve `~` to the private HOME in every private option.
+- Links to the dotfiles fix gh and npm but not the git identity: its includes
+  resolve under the private HOME.
