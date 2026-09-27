@@ -158,9 +158,68 @@ Things to know:
   binary; it can change with any Claude Code version.
 - `/logout` inside a run logs Stephen out everywhere (it revokes the shared
   refresh token), and `/login` inside a run replaces his login.
-- macOS: from the macOS build's code only, untested. There only the empty
-  string shares the login; a path, even `~/.claude`, names a different
-  Keychain item.
+- macOS: from the macOS build's code only (the darwin-arm64 binary of SDK
+  0.3.282), untested. There only the empty string shares the login; a path,
+  even `~/.claude`, names a different Keychain item. The check below tests
+  it on a Mac.
+
+## macOS: the Keychain check
+
+`proofs/macos-keychain.mts` checks, on a Mac, whether Claude Code finds the
+login when it runs with a private `HOME`. It runs the SDK's bundled binary
+directly, not through `startRun`, because the harness always sets
+`CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR=""` and this check
+varies both. Once, from the repo root, `pnpm install` (the lockfile has
+`claude-agent-sdk-darwin-arm64` and `-darwin-x64`, so the Mac gets its own
+binary). Then, from `mvp/claude-code-harness/`:
+
+```sh
+node proofs/macos-keychain.mts | tee runs/macos-keychain.log
+```
+
+Add `--with-real-home-baseline` to also run it once with the real `HOME`;
+Claude Code's housekeeping then runs in the real home, the same as when
+Stephen runs his own Claude Code. `--dry-run` works on any platform and only
+prints the Keychain names and directories each case would use.
+
+What it prints:
+
+- Step 0, before any Claude Code runs: with the real `HOME` and with an
+  empty private one, what `security` reports for the default keychain, the
+  keychain search list, whether the keychain is locked, and whether each
+  candidate Keychain entry exists. It shows the exit code only: 0 found, 44
+  not found, 36 locked, 37 or 50 no keychain. This shows whether a private
+  `HOME` hides the login keychain, before Claude Code is involved.
+- One block per case. Each case runs `claude auth status` with a private
+  `HOME`, with `CLAUDE_CONFIG_DIR` set or unset, and with
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR` unset, `""` or the absolute real
+  `~/.claude`. The block shows:
+  - the Keychain entry and directory the code says that case uses;
+  - `loggedIn` and `authMethod`;
+  - every `security` call Claude Code made: its subcommand, account,
+    service, the `HOME` it ran with, and the exit code;
+  - whether a `.credentials.json` appeared.
+
+  Case G repeats case B but runs `security` with the real `HOME`. It
+  separates "`HOME` hides the keychain" from other causes.
+- `CHECK PASS`/`CHECK FAIL` lines:
+  - no case wrote to the Keychain;
+  - no `.credentials.json` appeared;
+  - the hashed entries that were absent at the start are still absent.
+
+It never passes `-w` or `-g` to `security`, so no password is asked for or
+printed, and it never runs login, logout or setup-token. It checks that a
+`.credentials.json` exists with `lstat` only; it never opens one. From
+`auth status` it prints only `loggedIn`, `authMethod`, `apiProvider` and
+`configDirectory`. The `security` it puts first on `PATH` is a small shell
+script. It logs only the subcommand, `-a`, `-s`, `HOME` and the exit code,
+then runs `/usr/bin/security` with the same stdin and stdout, so the
+password never passes through it. Its temp directories are removed at the
+end.
+
+If a case hangs until its 60 s timeout, a Keychain access dialog is probably
+waiting on screen. Deny it; the case's `security` line then shows the exit
+code.
 
 ## What a run records
 
