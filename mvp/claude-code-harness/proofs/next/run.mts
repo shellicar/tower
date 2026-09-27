@@ -331,9 +331,12 @@ async function waysAtResult(sessionId: string, store: RecordingStore, sdkSteps: 
   // Options that reach the resume code: --reply-on-resume (extraArgs), and
   // resumeSessionAt the chain's last entry.
   out.push({ way: 'fold+errors,reply-on-resume', atMs: now() - resultMs, entries: fk.kept, resume: { extraArgs: { 'reply-on-resume': null } } });
-  const lastE = lastChainEntry(fk.kept);
-  if (lastE) {
-    out.push({ way: 'fold+errors,resumeSessionAt-last', atMs: now() - resultMs, entries: fk.kept, resume: { resumeSessionAt: lastE.uuid } });
+  // resumeSessionAt (documented): the chain's last entry, so nothing is cut.
+  for (const [name, entries] of [['fold+errors', fk.kept], ['fold', f.kept], ['store', snap]] as const) {
+    const lastE = lastChainEntry(entries);
+    if (lastE) {
+      out.push({ way: `${name},resumeSessionAt-last`, atMs: now() - resultMs, entries, resume: { resumeSessionAt: lastE.uuid } });
+    }
   }
 
   const r = await sdkReader(sessionId, snap);
