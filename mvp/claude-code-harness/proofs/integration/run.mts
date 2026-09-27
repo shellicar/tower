@@ -1135,7 +1135,200 @@ async function selfturn(a: Args): Promise<CheckRow[]> {
 
 // ---------------------------------------------------------------------------
 
-const SCENARIOS: Record<string, (a: Args) => Promise<CheckRow[]>> = { smoke, matrix, killed, 'moved-on': movedOn, origins, skills, two, home, selfturn };
+// ---------------------------------------------------------------------------
+// grid (attempt 3, stage 3): every ending, then every pickup path after it.
+//
+// Per ending x pickup, one fresh conversation:
+//   origin A (agent <base>): warm-up, then step 1 ended at the cell's ending
+//   (the matrix cells, plus `crash`: the participant SIGKILLed mid-tool);
+//   then one pickup, straight after the ending:
+//     own       A again, from its own record (the settled rule decides:
+//               local, since A's config dir holds the transcript)
+//     other     B (agent <base>-2, another machine) from tower; then B again,
+//               from its own record of a conversation it first resumed from
+//               tower (the first proof's failure 3; the rule decides)
+//     moved-on  B from tower, a say; then A again, tower having moved on
+//
+// TODO: undecided (attempt 3's test method, not Stephen's): truths for the
+// invariant check, arranged so nothing tested changes:
+//   - every process after the origin ends with a trailing say (LAST), whose
+//     next request is the truth for the process's previous quiet point; the
+//     trailing say's own end has no truth and stays UNCHECKED by design;
+//   - for other and moved-on, once the pickup path is done, a dry restart of
+//     A from its own record (from: local) "as of" the ending instant: its
+//     first request is the truth for tower at the ending and at the pickup
+//     (own has it live: A's restart is that restart).
+// Endings a cell didn't reach are retried (thinking-only, limit, api-error)
+// or reported as not reached, never run on as a pass.
+
+const LAST = 'Reply with the word LAST only.';
+const OTHER = 'Reply with the word OTHER only.';
+
+interface GridRow {
+  model: string;
+  live: string;
+  shadow: string | undefined;
+  cell: string;
+  pickup: string;
+  attempt: number;
+  reached: boolean;
+  ending: Json;
+  convId: string;
+  dir: string;
+  origin: string;
+  other: string;
+  endMs: number;
+  decisions: Json;
+  error?: string;
+}
+
+function gridCells(model: string): (Cell | { id: 'crash'; prompt: string })[] {
+  return [...cells(model), { id: 'crash', prompt: KILL_PROMPT }];
+}
+
+async function gridCell(a: Args, cell: Cell | { id: 'crash'; prompt: string }, pickup: string, A: string, B: string, root: Evidence, attempt: number): Promise<GridRow> {
+  const dir = root.path(`${cell.id}-${pickup}${attempt > 1 ? `-try${attempt}` : ''}`);
+  mkdirSync(dir, { recursive: true });
+  const cellOpts = 'effort' in cell && cell.effort ? { effort: cell.effort } : {};
+  const pA = start(specFor(A, a.model, join(dir, 'a1-origin'), cellOpts), a);
+  await pA.ready();
+  const sA = await pA.serve({ conv: 'c' });
+  const id = String(sA.id);
+  const row: GridRow = { model: a.model, live: a.commit, shadow: COMMIT_OPTIONS.find((o) => o !== a.commit), cell: cell.id, pickup, attempt, reached: false, ending: {}, convId: id, dir, origin: A, other: B, endMs: 0, decisions: { origin: sA.decision } };
+  await pA.say('c', WARM, { step: 0 });
+  checkUsageLimit();
+  if (cell.id === 'crash') {
+    await killAtTool(pA, 'c');
+    const appends = readJsonl(join(String(sA.lineage), 'store-appends.jsonl'));
+    // The kill state's instant: the last thing the participant recorded.
+    row.endMs = Math.max(...appends.map((x) => Number(x.ms)));
+    const ran = existsSync(join(dir, 'a1-origin', 'prefix.log'));
+    row.ending = { cell: 'crash', commandRan: ran, lastAppendMs: row.endMs };
+    row.reached = ran;
+  } else {
+    const sent1 = pA.events.length;
+    const r1 = await stepOne(pA, 'c', cell as Cell);
+    checkUsageLimit();
+    const say1 = pA.events.slice(sent1).find((e) => e.ev === 'sent');
+    const triggered = pA.events.slice(sent1).some((e) => e.ev === 'trigger');
+    row.endMs = Number(r1.ms);
+    const lin = Lineage.open(String(sA.lineage));
+    lin.pollBodies();
+    const end = ending(lin, cell as Cell, Number(say1?.ms ?? 0), row.endMs, triggered);
+    if ((cell as Cell).ending === 'tool-exec') {
+      const ran = existsSync(join(dir, 'a1-origin', 'prefix.log')) ? readFileSync(join(dir, 'a1-origin', 'prefix.log'), 'utf8').split('\n').filter(Boolean).length : 0;
+      end.commandsRun = ran;
+      end.reached = end.reached === true && ran > 0;
+    }
+    row.ending = { ...end, result: { subtype: r1.subtype, reason: r1.reason, isError: r1.isError, text: String(r1.text ?? '').slice(0, 60) } };
+    row.reached = end.reached === true;
+    await pA.shutdown();
+  }
+  await pA.claudesGone();
+  if (!row.reached) {
+    return row;
+  }
+  const trail = async (p: Participant, step: number): Promise<void> => {
+    await p.say('c', LAST, { step });
+    checkUsageLimit();
+  };
+  if (pickup === 'own') {
+    const p = start(specFor(A, a.model, join(dir, 'a2-own-record'), { ...cellOpts, ours: pA.claudes }), a);
+    await p.ready();
+    const s = await p.serve({ conv: 'c', id });
+    row.decisions = { ...row.decisions, own: s.decision, recovery: s.recovery };
+    await p.say('c', PROBE, { step: 2 });
+    checkUsageLimit();
+    await trail(p, 3);
+    await p.shutdown();
+  } else {
+    const pB = start(specFor(B, a.model, join(dir, 'b1-from-tower'), cellOpts), a);
+    await pB.ready();
+    const sB = await pB.serve({ conv: 'c', id });
+    row.decisions = { ...row.decisions, other: sB.decision };
+    await pB.say('c', OTHER, { step: 2 });
+    checkUsageLimit();
+    await trail(pB, 3);
+    await pB.shutdown();
+    await pB.claudesGone();
+    if (pickup === 'other') {
+      const pB2 = start(specFor(B, a.model, join(dir, 'b2-own-record'), { ...cellOpts, ours: pB.claudes }), a);
+      await pB2.ready();
+      const sB2 = await pB2.serve({ conv: 'c', id });
+      row.decisions = { ...row.decisions, otherAgain: sB2.decision };
+      await pB2.say('c', PROBE, { step: 4 });
+      checkUsageLimit();
+      await trail(pB2, 5);
+      await pB2.shutdown();
+    } else {
+      const pA2 = start(specFor(A, a.model, join(dir, 'a2-moved-on'), { ...cellOpts, ours: pA.claudes }), a);
+      await pA2.ready();
+      const s2 = await pA2.serve({ conv: 'c', id });
+      row.decisions = { ...row.decisions, originAgain: s2.decision, movedOn: s2.movedOn, recovery: s2.recovery };
+      await pA2.say('c', PROBE, { step: 4 });
+      checkUsageLimit();
+      await trail(pA2, 5);
+      await pA2.shutdown();
+    }
+    // The truth probe: A from its own record as of the ending (dry: nothing
+    // reaches tower).
+    const pT = start(specFor(A, a.model, join(dir, 'a9-truth'), { ...cellOpts, ours: pA.claudes }), a);
+    await pT.ready();
+    const sT = await pT.serve({ conv: 'truth', id, dry: true, from: 'local', asOfMs: row.endMs, name: 'truth-local' });
+    row.decisions = { ...row.decisions, truth: sT.decision };
+    await pT.say('truth', PROBE, { step: 9 });
+    checkUsageLimit();
+    await pT.shutdown();
+  }
+  return row;
+}
+
+async function grid(a: Args): Promise<CheckRow[]> {
+  const A = a.agent ?? `${AGENT_PREFIX}-${short(a.model)}-g${a.commit === 'run+last' ? 'L' : 'E'}`;
+  const B = `${A}-2`;
+  const root = new Evidence(`${short(a.model)}-grid-${a.commit}`);
+  useLog(root);
+  if (a.reset) {
+    resetAgent(A, log);
+    resetAgent(B, log);
+  }
+  await prime(a, A, root);
+  await prime(a, B, root);
+  const all = gridCells(a.model);
+  const chosen = a.cells ? a.cells.map((c) => all.find((x) => x.id === c) ?? (() => { throw new Error(`no cell ${c}`); })()) : all;
+  const pickups = (process.env.INT_PICKUPS ?? 'own,other,moved-on').split(',');
+  const rows: GridRow[] = [];
+  const index = (): void => {
+    writeFileSync(root.path('grid-index.json'), clean(JSON.stringify({ model: a.model, live: a.commit, origin: A, other: B, rows }, null, 2)));
+  };
+  for (const cell of chosen) {
+    for (const pickup of pickups) {
+      const attempts = ['thinking-only', 'limit', 'api-error'].includes(cell.id) ? Number(process.env.INT_GRID_TRIES ?? '3') : 1;
+      for (let t = 1; t <= attempts; t += 1) {
+        let r: GridRow;
+        try {
+          r = await gridCell(a, cell, pickup, A, B, root, t);
+        } catch (err) {
+          if (err instanceof UsageLimit) {
+            index();
+            throw err;
+          }
+          r = { model: a.model, live: a.commit, shadow: undefined, cell: cell.id, pickup, attempt: t, reached: false, ending: {}, convId: '', dir: root.dir, origin: A, other: B, endMs: 0, decisions: {}, error: err instanceof Error ? (err.stack ?? err.message).slice(0, 600) : String(err) };
+        }
+        rows.push(r);
+        index();
+        log(`GRID ${cell.id}/${pickup} try ${t}: reached ${r.reached} conv ${r.convId}${r.error ? ` error ${r.error.slice(0, 200)}` : ''}`);
+        if (r.reached || r.error) {
+          break;
+        }
+      }
+    }
+  }
+  index();
+  return rows.map((r) => ({ scenario: 'grid', cell: `${r.cell}/${r.pickup}${r.attempt > 1 ? `-try${r.attempt}` : ''}`, check: 'ending reached, pickup run', pass: r.reached && !r.error, reason: `${r.convId} ${JSON.stringify(r.decisions)}${r.error ? ` ${r.error}` : ''}`, evidence: r.dir }));
+}
+
+const SCENARIOS: Record<string, (a: Args) => Promise<CheckRow[]>> = { smoke, matrix, killed, 'moved-on': movedOn, origins, skills, two, home, selfturn, grid };
 
 async function main(): Promise<void> {
   const a = parse(process.argv.slice(2));

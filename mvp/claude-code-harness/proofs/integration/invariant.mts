@@ -100,7 +100,8 @@
 //   - New input at a quiet point, for each atom of the truth request beyond
 //     tower: new if it is the say's prompt or comes after it (Claude Code
 //     appends new input at the end), or if Claude Code wrote an entry
-//     carrying it at or after the say's instant (tool_result by tool_use_id,
+//     carrying it at or after the say's instant and before the lineage's next
+//     request (tool_result by tool_use_id,
 //     text by its text); old, so missing from tower, if it is the model's own
 //     output, a tool_result answering a tool_use tower already holds, or
 //     carried only by entries written before the say; unplaced (the point is
@@ -713,6 +714,7 @@ function sortRemainder(lin: Lin, rem: Prefix['remainder'], pointMs: number, reqM
   // can land a second or more after the query ended (auto mode), and nothing
   // written before the say is its input.
   const boundary = say ? Number(say.ms) : pointMs;
+  const untilMs = Math.min(...lin.events.filter((e) => e.src === 'bodies' && e.kind === 'request' && Number(e.ms) > reqMs).map((e) => Number(e.ms)), Number.POSITIVE_INFINITY);
   const onTowerToolUse = new Set(towerAtoms.filter((a) => a.key.startsWith('tool_use:')).map((a) => a.key.split(':')[1]));
   for (const [i, r] of rem.entries()) {
     if (r.key.startsWith('tool_result:') && onTowerToolUse.has(r.key.split(':')[1]) && i < from) {
@@ -728,7 +730,9 @@ function sortRemainder(lin: Lin, rem: Prefix['remainder'], pointMs: number, reqM
       out.missing.push(`${d} (the model's own output, from before this request)`);
       continue;
     }
-    const hits = lin.appends.filter((a) => a.ms <= reqMs && carries(a.entry, r));
+    // Entries written up to the lineage's next request: Claude Code mirrors
+    // a say's entries into the store ~80 ms after the request file.
+    const hits = lin.appends.filter((a) => a.ms < untilMs && carries(a.entry, r));
     if (hits.some((a) => a.ms >= boundary)) {
       out.newInput.push(d);
     } else if (hits.length > 0) {
@@ -897,8 +901,15 @@ export function judge(ev: Evidence, tower: TowerMsg[], suffix = ''): Report {
       // The previous Claude Code's own later requests (it kept running, or a
       // restart of it from its own record) are its truth after the pickup.
       const later = liveReqs.find((r) => r.ms > p.serveMs && r.proc.lineage === prev.proc.lineage && r.proc.decision !== 'tower');
+      // Or a dry restart of it from its own record "as of" an instant after
+      // its last query end and before this pickup (attempt 3's truth probe):
+      // its first request is what that Claude Code held then.
+      const lastEnd = results.filter((q) => q.proc === prev.proc && q.ms < p.serveMs).at(-1)?.ms ?? prev.proc.serveMs;
+      const dry = ev.reqs.find((r) => r.proc.dry && (r.proc.decision === 'local' || r.proc.decision === 'record') && r.proc.asOfMs !== null && r.proc.asOfMs >= lastEnd - 1 && r.proc.asOfMs <= p.serveMs && ev.lins.find((l) => l.dir === r.proc.lineage)?.meta.dryOf === prev.proc.lineage);
       if (later) {
         js.push(...quietJudgments(ev, T, p.upto ?? 0, before?.ms ?? p.serveMs, later.proc, [later]));
+      } else if (dry) {
+        js.push(...quietJudgments(ev, T, p.upto ?? 0, dry.proc.asOfMs as number, dry.proc, [dry], `a dry restart of ${prev.proc.key} from its own record as of ${new Date(dry.proc.asOfMs as number).toISOString()}`));
       } else {
         js.push({ truth: 'the Claude Code tower followed before', verdict: 'UNCHECKED', why: `${prev.proc.key} sent no request after this point and no restart of it from its own record did: its conversation at the pickup is not known from what the model received` });
       }
@@ -1032,7 +1043,7 @@ function holdJudgment(ev: Evidence, proc: Proc, T: Msg[], closeMs: number, tower
 // preference: the same Claude Code's next request; a restart of it from its
 // own local record (dry checks "as of" this point included); otherwise the
 // next request of a Claude Code resumed from tower (a round trip).
-function quietJudgments(ev: Evidence, T: Msg[], seq: number, pointMs: number, proc: Proc, liveReqs: Req[]): Judgment[] {
+function quietJudgments(ev: Evidence, T: Msg[], seq: number, pointMs: number, proc: Proc, liveReqs: Req[], sameLabel = 'the same Claude Code\'s next request'): Judgment[] {
   const js: Judgment[] = [];
   const same = liveReqs.find((r) => r.ms > pointMs && r.proc === proc);
   const localRestarts = ev.reqs.filter((r) => r.ms > pointMs && r.proc !== proc && (r.proc.decision === 'local' || r.proc.decision === 'record') && (r.proc.dry ? r.proc.asOfMs !== null && Math.abs(r.proc.asOfMs - pointMs) < 1 : r.proc.lineage === proc.lineage));
@@ -1040,7 +1051,7 @@ function quietJudgments(ev: Evidence, T: Msg[], seq: number, pointMs: number, pr
   for (const r of localRestarts) {
     if (!firstPerProc.has(r.proc)) firstPerProc.set(r.proc, r);
   }
-  const truths: [string, Req][] = [...(same ? [['the same Claude Code\'s next request', same] as [string, Req]] : []), ...[...firstPerProc.values()].map((r) => ['a restart from its own local record', r] as [string, Req])];
+  const truths: [string, Req][] = [...(same ? [[sameLabel, same] as [string, Req]] : []), ...[...firstPerProc.values()].map((r) => ['a restart from its own local record', r] as [string, Req])];
   for (const [label, r] of truths) {
     const h = history(ev, r.lineage, r.file);
     if ('error' in h) {
