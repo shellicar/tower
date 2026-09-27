@@ -1,10 +1,18 @@
-// Proof 21: one table over every case run, from each case's own records.
+// Proof 25: one table over every case run, from each case's own records.
 // Usage (from mvp/claude-code-harness/):
-//   node proofs/orphans-summary.mts runs/21-<case>-<variant>-<tag>.log ...
+//   node proofs/orphan-tag-summary.mts <out-prefix> runs/25-<case>-<variant>-<tag>.log ...
 // Reads, per run: the runner's log (for the case dir), its signal trace
 // (<log minus .log>.strace), and in the case dir result.json, keeper.jsonl,
-// each serve's participant-state.json, stop-*.json and check-*.json.
-// Writes runs/21-summary.json and prints one block per run.
+// guard-samples.jsonl, and serve 2's participant-state.json, stop*.json and
+// check-*.json. Writes <out-prefix>.json, prints one block per run, then the
+// table.
+//
+// The leftovers (ground truth, not the participant's view): every process of
+// the old participant's tree the driver tracked (each held Claude Code and
+// every descendant it saw), plus every tagged pid the driver's own 20 ms guard
+// samples saw that isn't a Claude Code of serve 2 or 3. A leftover was alive
+// at the serve 2 scan if the trace has its exit after the scan (or, with no
+// traced exit, the driver saw it gone after the scan).
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -63,10 +71,16 @@ function localDateOf(ms: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-const rel = (t: number | null | undefined, zero: number): number | null => (t === null || t === undefined || Number.isNaN(t) ? null : t - zero);
+const ms = (iso: unknown): number => new Date(String(iso)).getTime();
 
+const [prefix, ...logs] = process.argv.slice(2);
+if (!prefix) {
+  process.stderr.write('usage: node proofs/orphan-tag-summary.mts <out-prefix> <log>...\n');
+  process.exit(2);
+}
 const summaries: Json[] = [];
-for (const logPath of process.argv.slice(2)) {
+const table: string[] = [];
+for (const logPath of logs) {
   const log = readFileSync(logPath, 'utf8');
   const dirMatch = /driver: case .*; dir (.*)$/m.exec(log);
   if (!dirMatch) {
@@ -80,18 +94,81 @@ for (const logPath of process.argv.slice(2)) {
     continue;
   }
   const ending = result.ending as Json;
-  const death = (ending.participantExit as Json).t as number;
-  const trace = parseStrace(logPath.replace(/\.log$/, '.strace'), localDateOf(death));
-  const keeper = readJsonl(join(caseDir, 'keeper.jsonl'));
+  const pex = ending.participantExit as Json;
+  const trace = parseStrace(logPath.replace(/\.log$/, '.strace'), localDateOf(Number(pex.t)));
   const held = readJson(join(caseDir, '1-serve', 'participant-state.json')) as Json;
   const heldPid = Number(held.participantPid);
-  const serve2State = readJson(join(caseDir, '2-serve', 'participant-state.json')) as Json;
-  const serve2Pid = Number(serve2State.participantPid);
-  const who = (pid: number | undefined, self: number): string => (pid === heldPid ? 'participant' : pid === serve2Pid ? 'serve-2 participant' : pid === self ? 'self' : `pid ${pid}`);
+  // The death: the trace's exit of the old participant, else the driver's.
+  const deathTrace = trace.find((s) => s.pid === heldPid && s.kind === 'exit');
+  const death = deathTrace ? deathTrace.t : Number(pex.t);
+  const s2dir = join(caseDir, '2-serve');
+  const s2state = readJson(join(s2dir, 'participant-state.json')) as Json;
+  const s2Pid = Number(s2state.participantPid);
+  const s3state = readJson(join(caseDir, '3-serve', 'participant-state.json')) as Json;
+  const laterClaudes = new Set<number>([...((s2state.convs as Json[]) ?? []), ...((s3state?.convs as Json[]) ?? [])].map((c) => Number(c.claudePid)));
+  const who = (pid: number | undefined): string => (pid === heldPid ? 'old participant' : pid === s2Pid ? 'serve-2 participant' : `pid ${pid}`);
   const timings = result.timings as Json[];
-  const tool = result.tool as Json;
-  const serve2 = result.serve2 as Json[];
-  const serve3 = result.serve3 as Json[];
+  const keeper = readJsonl(join(caseDir, 'keeper.jsonl'));
+  const samples = readJsonl(join(caseDir, 'guard-samples.jsonl'));
+  const exitOf = (pid: number): number | null => trace.find((s) => s.pid === pid && s.kind === 'exit')?.t ?? null;
+
+  // Ground truth: the old tree's processes.
+  const ground = new Map<number, { pid: number; role: string; cmd: string; exitT: number | null; how: string }>();
+  for (const t of timings) {
+    if (t.role === 'participant') {
+      continue;
+    }
+    const pid = Number(t.pid);
+    ground.set(pid, { pid, role: String(t.role), cmd: String(t.cmd).slice(0, 40), exitT: exitOf(pid) ?? (t.goneAt ? ms(t.goneAt) : null), how: exitOf(pid) !== null ? 'trace' : 'driver' });
+  }
+  for (const sm of samples) {
+    for (const [pid] of sm.tagFound as [number, string][]) {
+      if (!ground.has(pid) && !laterClaudes.has(pid)) {
+        ground.set(pid, { pid, role: 'tagged (seen by the guard samples only)', cmd: '', exitT: exitOf(pid), how: exitOf(pid) !== null ? 'trace' : 'none' });
+      }
+    }
+  }
+  const lastExit = Math.max(...[...ground.values()].map((g) => g.exitT ?? 0));
+
+  // Serve 2's stop.
+  const tagStop = readJson(join(s2dir, 'stop.json'));
+  const finder = tagStop ? 'tag' : 'pidfile';
+  let scanT: number | null = null;
+  let foundPids: number[] = [];
+  let signalled: Json[] = [];
+  const stopRounds: Json[] = [];
+  if (tagStop) {
+    const r1 = (tagStop.rounds as Json[])[0] as Json;
+    const scan = r1.scan as Json;
+    scanT = ms(scan.at);
+    foundPids = (scan.found as Json[]).map((p) => Number(p.pid));
+    signalled = (tagStop.rounds as Json[]).flatMap((r) => (r.signalled as Json[]).map((x) => ({ ...x, round: stopRounds.length })));
+    for (const r of tagStop.rounds as Json[]) {
+      stopRounds.push({ at: (r.scan as Json).at, found: ((r.scan as Json).found as Json[]).map((p) => [p.pid, p.pidFileLive ? 'pid file' : 'no pid file']), waited: (r.waited as Json[]).map((w) => [w.pid, w.msToGone]) });
+    }
+  } else {
+    for (const tag of ['R', 'T']) {
+      const st = readJson(join(s2dir, `stop-${tag}.json`));
+      if (!st) {
+        continue;
+      }
+      scanT = Math.min(scanT ?? Number.POSITIVE_INFINITY, ms(st.startedAt));
+      foundPids.push(...(st.pidFiles as Json[]).filter((p) => p.live).map((p) => Number(p.pid)));
+      signalled.push(...(st.signalled as Json[]));
+      stopRounds.push({ tag, at: st.startedAt, pidFiles: (st.pidFiles as Json[]).map((p) => [p.pid, p.live]), outcome: st.outcome });
+    }
+  }
+  const aliveAtScan = scanT === null ? [] : [...ground.values()].filter((g) => g.exitT === null || g.exitT > (scanT as number));
+  const missedAtScan = aliveAtScan.filter((g) => !foundPids.includes(g.pid));
+  // A second SIGINT: the trace shows two or more SIGINTs delivered to one
+  // held Claude Code after the death.
+  const heldClaudes = (held.convs as Json[]).map((c) => ({ tag: String(c.tag), pid: Number(c.claudePid) }));
+  const sigintsTo = (pid: number): string[] => {
+    const tm = timings.find((x) => Number(x.pid) === pid);
+    const ids = new Set<number>([pid, ...((tm?.tids as number[] | undefined) ?? [])]);
+    return trace.filter((s) => ids.has(s.pid) && s.kind === 'signal' && s.signal !== 'SIGPIPE' && s.t >= death - 50).map((s) => `${s.signal} from ${who(s.from)} +${s.t - death}`);
+  };
+
   const out: Json = {
     log: logPath,
     caseDir,
@@ -99,76 +176,95 @@ for (const logPath of process.argv.slice(2)) {
     variant: ending.variant,
     layer1: ending.layer1,
     how: ending.how,
-    participantExit: ending.participantExit,
-    tool: { started: tool.started, finished: tool.finished },
+    finder,
+    now: ending.now,
+    deathFrom: deathTrace ? 'trace' : 'driver',
+    goMsAfterDeath: ending.goSentAt ? ms(ending.goSentAt) - death : null,
+    scanMsAfterDeath: scanT === null ? null : scanT - death,
+    lastLeftoverExitMsAfterDeath: lastExit - death,
+    leftovers: [...ground.values()].map((g) => ({ ...g, exitMsAfterDeath: g.exitT === null ? null : g.exitT - death, aliveAtScan: aliveAtScan.includes(g), found: foundPids.includes(g.pid) })),
+    aliveAtScan: aliveAtScan.map((g) => g.pid),
+    missedAtScan: missedAtScan.map((g) => [g.pid, g.role]),
+    stopRounds,
+    signalled,
+    secondSigint: ending.secondSigint ?? null,
+    guard: ending.guard,
     convs: {} as Json,
   };
-  for (const c of held.convs as Json[]) {
-    const tag = String(c.tag);
-    const pid = Number(c.claudePid);
-    const sid = String(c.sessionId);
-    const tm = timings.find((x) => x.pid === pid);
-    // Any of its threads (runs before the driver recorded thread ids have
-    // only the pid, and miss a signal delivered to another thread).
-    const ids = new Set<number>([pid, ...((tm?.tids as number[] | undefined) ?? [])]);
-    const sigs = trace.filter((s) => ids.has(s.pid) && s.t >= death - 50 && s.kind === 'signal' && s.signal !== 'SIGPIPE').map((s) => `${s.signal} from ${who(s.from, pid)} at +${s.t - death} ms${s.pid === pid ? '' : ` (thread ${s.pid})`}`);
-    const pipes = trace.filter((s) => ids.has(s.pid) && s.signal === 'SIGPIPE').length;
-    const exit = trace.find((s) => s.pid === pid && s.kind === 'exit');
-    // The orphan's transcript: in the CLAUDE_CONFIG_DIR its spawn was given
-    // (the agent's config dir when fresh, its resume dir when resumed), as its
-    // argv.json records.
-    const argv = readJson(join(String(c.runDir), 'claude', '1', 'argv.json'));
+  for (const hc of heldClaudes) {
+    const tag = hc.tag;
+    const sid = String(((held.convs as Json[]).find((c) => c.tag === tag) as Json).sessionId);
+    const s2 = (result.serve2 as Json[]).find((r) => r.tag === tag) as Json;
+    const s3 = (result.serve3 as Json[]).find((r) => r.tag === tag) as Json;
+    const check2 = readJson(join(s2dir, `check-${tag}.json`)) as Json;
+    const first = check2.first as Json;
+    const checkT = ms(first.startedAt);
+    const argv = readJson(join(String(((held.convs as Json[]).find((c) => c.tag === tag) as Json).runDir), 'claude', '1', 'argv.json'));
     const root = argv ? String(argv.configDir) : null;
-    const sizeOf = keeper.filter((k) => k.event === 'size' && String(k.file).endsWith(`/${sid}.jsonl`));
-    const heldFile = root ? sizeOf.find((k) => String(k.file).startsWith(`${root}/projects/`))?.file : undefined;
-    const pfGone = keeper.find((k) => k.event === 'pidfile-gone' && Number(k.pid) === pid);
-    const writes = sizeOf.filter((k) => k.file === heldFile);
-    const writesAfterDeath = writes.filter((k) => new Date(String(k.ts)).getTime() > death);
+    const sizes = keeper.filter((k) => k.event === 'size' && String(k.file).endsWith(`/${sid}.jsonl`) && root !== null && String(k.file).startsWith(`${root}/projects/`));
+    const writesAfterDeath = sizes.filter((k) => ms(k.ts) > death);
     const lastWrite = writesAfterDeath.at(-1);
-    const s2 = serve2.find((r) => r.tag === tag) as Json;
-    const s3 = serve3.find((r) => r.tag === tag) as Json;
-    const check2 = readJson(join(caseDir, '2-serve', `check-${tag}.json`)) as Json;
-    const check2At = new Date(String((check2.first as Json).startedAt)).getTime();
-    const stop2 = s2.stop as Json | null;
-    const tree = timings.filter((x) => String(x.role) === `claude-${tag}-descendant`).map((x) => `${String(x.cmd).slice(0, 24)} +${String(x.msAfterParticipantExit)} ms`);
-    const heldTurn = (((s2.windows as Json[]).find((w) => w.name === 'held turn') as Json).rows as Json[]).map((r) => `${String(r.what).slice(0, 70)}${r.stopReason !== undefined ? ` stop=${String(r.stopReason)}` : ''}${r.textChars ? ` chars=${String(r.textChars)}` : ''} carried=${String(r.carried)}`);
-    const snap = ending.snapshot ? ((ending.snapshot as Json)[tag] as Json) : undefined;
-    const branchCounts = (r: Json): Json => Object.fromEntries(Object.entries(r.branches as Record<string, unknown[]>).map(([k, v]) => [k, v.length]));
-    const inv = (r: Json): Json => Object.fromEntries(Object.entries(r.invented as Record<string, unknown[]>).map(([k, v]) => [k, v.length]));
-    (out.convs as Json)[tag] = {
-      claudePid: pid,
-      threadIdsKnown: ids.size - 1,
-      signalsAfterDeath: sigs,
-      sigpipes: pipes,
-      exit: exit ? `${exit.text} at +${exit.t - death} ms` : null,
-      goneMsAfterDeath: tm?.msAfterParticipantExit ?? null,
-      pidFileGoneMsAfterDeath: pfGone ? rel(new Date(String(pfGone.ts)).getTime(), death) : null,
-      transcriptRoot: root,
-      lastOrphanWriteMsAfterDeath: lastWrite ? rel(new Date(String(lastWrite.ts)).getTime(), death) : null,
-      orphanWroteAfterServe2Check: lastWrite ? new Date(String(lastWrite.ts)).getTime() > check2At : false,
-      serve2CheckMsAfterDeath: check2At - death,
-      toolTree: tree,
-      serve2Stop: stop2 ? { outcome: stop2.outcome, signalled: stop2.signalled, pidFiles: (stop2.pidFiles as Json[]).map((p) => ({ pid: p.pid, live: p.live, status: p.status })) } : null,
-      serve2CheckAdded: (s2.check as Json).added,
-      snapshotAfterOrphans: snap ? { storeEntries: snap.storeEntries, transcriptEntries: snap.transcriptEntries, inTranscriptsNotStore: (snap.inTranscriptsNotStore as unknown[]).length, heldTurn: (snap.heldTurn as Json[]).map((r) => `${String(r.what).slice(0, 70)} inStore=${String(r.inStore)}`) } : null,
-      heldTurnAsServe2Saw: heldTurn,
-      serve2: { priorEntries: s2.priorEntries, notCarried: (s2.priorNotCarried as unknown[]).length, branches: branchCounts(s2), invented: inv(s2), answer: String(s2.answer).slice(0, 160) },
-      serve3: { priorEntries: s3.priorEntries, notCarried: (s3.priorNotCarried as unknown[]).length, branches: branchCounts(s3), invented: inv(s3), answer: String(s3.answer).slice(0, 160) },
+    const pfGone = keeper.find((k) => k.event === 'pidfile-gone' && Number(k.pid) === hc.pid);
+    const branchCount = (r: Json): number => Object.values(r.branches as Record<string, unknown[]>).reduce((n, v) => n + v.length, 0);
+    const invCount = (r: Json): number => Object.values(r.invented as Record<string, unknown[]>).reduce((n, v) => n + v.length, 0);
+    const heldRows = (((s2.windows as Json[]).find((w) => w.name === 'held turn') as Json).rows as Json[]).map((r) => `${String(r.what).slice(0, 60)}${r.textChars ? ` chars=${String(r.textChars)}` : ''} carried=${String(r.carried)}`);
+    const s3held = (((s3.windows as Json[]).find((w) => w.name === 'held turn') as Json).rows as Json[]).filter((r) => r.carried === false).length;
+    const s3s2 = (((s3.windows as Json[]).find((w) => w.name === 'serve 2 turn') as Json).rows as Json[]).filter((r) => r.carried === false).length;
+    const c: Json = {
+      claudePid: hc.pid,
+      signals: sigintsTo(hc.pid),
+      pidFileGoneMsAfterDeath: pfGone ? ms(pfGone.ts) - death : null,
+      exitMsAfterDeath: ground.get(hc.pid)?.exitT ? (ground.get(hc.pid)?.exitT as number) - death : null,
+      lastOrphanWriteMsAfterDeath: lastWrite ? ms(lastWrite.ts) - death : null,
+      checkMsAfterDeath: checkT - death,
+      checkAfterLastLeftoverExitMs: checkT - lastExit,
+      orphanWroteAfterCheck: lastWrite ? ms(lastWrite.ts) > checkT : false,
+      tagAtCheckStart: first.tagAtStart,
+      tagAtCheckEnd: first.tagAtEnd,
+      checkAdded: (s2.check as Json).added,
+      heldTurn: heldRows,
+      serve2: { prior: s2.priorEntries, notCarried: (s2.priorNotCarried as unknown[]).length, branches: branchCount(s2), invented: invCount(s2), answer: String(s2.answer).slice(0, 120) },
+      serve3: { prior: s3.priorEntries, notCarried: (s3.priorNotCarried as unknown[]).length, heldNotCarried: s3held, serve2TurnNotCarried: s3s2, branches: branchCount(s3), invented: invCount(s3), answer: String(s3.answer).slice(0, 120) },
     };
+    (out.convs as Json)[tag] = c;
+    const found = missedAtScan.length === 0 ? 'yes' : `NO (missed ${missedAtScan.map((g) => g.pid).join(',')})`;
+    const waited = (c.checkAfterLastLeftoverExitMs as number) > 0 && !c.orphanWroteAfterCheck ? 'yes' : 'NO';
+    const noFork = branchCount(s2) === 0 && branchCount(s3) === 0 && invCount(s2) === 0 && invCount(s3) === 0 ? 'yes' : 'NO';
+    const complete = (s2.priorNotCarried as unknown[]).length === 0 && (s3.priorNotCarried as unknown[]).length === 0 ? 'yes' : 'NO';
+    table.push(
+      [
+        basename(logPath).replace(/^25-/, '').replace(/\.log$/, ''),
+        tag,
+        finder,
+        `alive@scan ${aliveAtScan.length}`,
+        `found ${found}`,
+        `waited ${waited}`,
+        `no fork ${noFork}`,
+        `complete ${complete}`,
+        `scan +${String(out.scanMsAfterDeath)}`,
+        `pidfile gone +${String(c.pidFileGoneMsAfterDeath)}`,
+        `last write +${String(c.lastOrphanWriteMsAfterDeath)}`,
+        `last exit +${String(out.lastLeftoverExitMsAfterDeath)}`,
+        `check +${String(c.checkMsAfterDeath)}`,
+        `signals [${(c.signals as string[]).join('; ')}]`,
+      ].join(' | '),
+    );
   }
   summaries.push(out);
-  process.stdout.write(`\n=== ${basename(logPath)}  (${String(ending.case)} ${String(ending.variant)}; layer 1 ${String(ending.layer1)}; ${String(ending.how)}; participant exit ${JSON.stringify(ending.participantExit)})\n`);
-  process.stdout.write(`    ${caseDir}\n    tool: started ${String(tool.started)}, finished ${String(tool.finished)}\n`);
+  process.stdout.write(`\n=== ${basename(logPath)}  (${String(ending.case)} ${String(ending.variant)}; layer 1 ${String(ending.layer1)}; ${String(ending.how)}; stop by ${finder}; now ${String(ending.now)})\n    ${caseDir}\n`);
+  process.stdout.write(`    GO +${String(out.goMsAfterDeath)} ms; scan +${String(out.scanMsAfterDeath)} ms; last leftover exit +${String(out.lastLeftoverExitMsAfterDeath)} ms (death from ${String(out.deathFrom)})\n`);
+  process.stdout.write(`    leftovers: ${JSON.stringify((out.leftovers as Json[]).map((g) => [g.pid, String(g.role).replace('-descendant', '-desc'), String(g.cmd).slice(0, 18), g.exitMsAfterDeath, g.aliveAtScan ? 'alive@scan' : '-', g.found ? 'found' : '-']))}\n`);
+  process.stdout.write(`    stop rounds: ${JSON.stringify(stopRounds)}\n    signalled: ${JSON.stringify(signalled)}\n`);
+  if (out.secondSigint) {
+    process.stdout.write(`    driver's second SIGINT: ${JSON.stringify(out.secondSigint)}\n`);
+  }
+  process.stdout.write(`    guard: ${JSON.stringify(out.guard)}\n`);
   for (const [tag, v] of Object.entries(out.convs as Json)) {
     const x = v as Json;
-    process.stdout.write(`  ${tag} claude ${String(x.claudePid)}: signals ${JSON.stringify(x.signalsAfterDeath)}; SIGPIPE x${String(x.sigpipes)}; pid file gone +${String(x.pidFileGoneMsAfterDeath)} ms; last orphan write +${String(x.lastOrphanWriteMsAfterDeath)} ms; gone +${String(x.goneMsAfterDeath)} ms; ${String(x.exit)}\n`);
-    process.stdout.write(`     tool tree: ${JSON.stringify(x.toolTree)}\n`);
-    process.stdout.write(`     serve 2 stop: ${JSON.stringify(x.serve2Stop)}; check at +${String(x.serve2CheckMsAfterDeath)} ms added ${JSON.stringify(x.serve2CheckAdded)}; orphan wrote after it: ${String(x.orphanWroteAfterServe2Check)}\n`);
-    if (x.snapshotAfterOrphans) {
-      process.stdout.write(`     after orphans, before any check: ${JSON.stringify(x.snapshotAfterOrphans)}\n`);
-    }
-    process.stdout.write(`     held turn as serve 2 saw it: ${JSON.stringify(x.heldTurnAsServe2Saw)}\n`);
-    process.stdout.write(`     serve 2: ${JSON.stringify(x.serve2)}\n     serve 3: ${JSON.stringify(x.serve3)}\n`);
+    process.stdout.write(`  ${tag} claude ${String(x.claudePid)}: signals ${JSON.stringify(x.signals)}; pid file gone +${String(x.pidFileGoneMsAfterDeath)}; last write +${String(x.lastOrphanWriteMsAfterDeath)}; exit +${String(x.exitMsAfterDeath)}; check +${String(x.checkMsAfterDeath)} (after last leftover exit by ${String(x.checkAfterLastLeftoverExitMs)} ms; tagged at check start ${JSON.stringify(x.tagAtCheckStart)} end ${JSON.stringify(x.tagAtCheckEnd)}); check added ${JSON.stringify(x.checkAdded)}; wrote after check ${String(x.orphanWroteAfterCheck)}\n`);
+    process.stdout.write(`     held turn as serve 2 saw it: ${JSON.stringify(x.heldTurn)}\n     serve 2: ${JSON.stringify(x.serve2)}\n     serve 3: ${JSON.stringify(x.serve3)}\n`);
   }
 }
-writeFileSync(join('runs', '21-summary.json'), `${JSON.stringify(summaries, null, 2)}\n`);
+process.stdout.write(`\n=== table\n${table.join('\n')}\n`);
+writeFileSync(`${prefix}.json`, `${JSON.stringify(summaries, null, 2)}\n`);
+writeFileSync(`${prefix}-table.txt`, `${table.join('\n')}\n`);
