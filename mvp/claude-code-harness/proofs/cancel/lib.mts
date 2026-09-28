@@ -77,7 +77,7 @@ export function contentBrief(content: unknown): unknown {
 export function entryBrief(e: Json): Json {
   const m = e.message as Json | undefined;
   const out: Json = { uuid: e.uuid, parentUuid: e.parentUuid, type: e.type };
-  for (const k of ['subtype', 'isMeta', 'isSidechain', 'isApiErrorMessage', 'isAbortedMidStream', 'isCompactSummary', 'promptId', 'requestId', 'timestamp', 'version', 'apiError', 'error', 'toolUseResult', 'logicalParentUuid', 'agentId', 'sourceToolAssistantUUID', 'interruptedMessageId']) {
+  for (const k of ['subtype', 'isMeta', 'isSidechain', 'isApiErrorMessage', 'isAbortedMidStream', 'isCompactSummary', 'promptId', 'requestId', 'timestamp', 'version', 'apiError', 'error', 'toolUseResult', 'logicalParentUuid', 'agentId', 'sourceToolAssistantUUID', 'interruptedMessageId', 'operation', 'reason']) {
     if (e[k] !== undefined) {
       out[k] = k === 'toolUseResult' ? JSON.stringify(e[k]).slice(0, 160) : e[k];
     }

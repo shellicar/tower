@@ -74,6 +74,9 @@ function entryLine(e: Json): string {
   if (e.attachment) {
     kind += `:${e.attachment}`;
   }
+  if (e.operation) {
+    kind += `:${e.operation}${e.reason ? `(${e.reason})` : ""}`;
+  }
   const body = META.has(String(e.type)) ? (e.type === 'queue-operation' && Array.isArray(e.content) ? blocks(e.content) : '') : blocks(e.content);
   return `${sid(e.uuid)} <- ${sid(e.parentUuid)}  ${kind}${flags.length ? ` [${flags.join(' ')}]` : ''} ${body}`.trimEnd();
 }

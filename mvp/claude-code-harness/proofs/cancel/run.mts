@@ -366,8 +366,11 @@ async function runOne(plan: RunPlan): Promise<RunOut> {
     if (pushedNext && plan.steps[stepIndex - 1]?.stop?.method === 'push') {
       // Sent already by the push; move on after its result.
       pushedNext = false;
+      // Its result has come by now (the quiet period follows the last
+      // result), so go straight on to the step after it.
       ev.write('proof', 'skip-pushed', { step: stepIndex });
       resultSeen = false;
+      send();
       return;
     }
     ev.write('proof', 'send', { step: stepIndex, text: step.text });
