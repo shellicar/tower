@@ -202,8 +202,10 @@ function scenarios(): Scenario[] {
   both('D1h', marked(PROMPTS.thinking, MARK.d1h), 'first-byte', { forward: [{ marker: MARK.d1h, action: 'hold', ms: 8000, times: 1 }] });
   // D2: while the model streams a tool call's input, with thinking before it
   // and with thinking disabled.
-  both('D2-think', PROMPTS.thinkThenWrite, 'tool-input');
-  both('D2-nothink', PROMPTS.writeTool, 'tool-input', { thinking: { type: 'disabled' } });
+  // Write only: with Bash offered too, the model sometimes wrote a short
+  // python command instead.
+  both('D2-think', PROMPTS.thinkThenWrite, 'tool-input', { tools: ['Write'] });
+  both('D2-nothink', PROMPTS.writeTool, 'tool-input', { thinking: { type: 'disabled' }, tools: ['Write'] });
   // D3: while canUseTool holds the permission (60 s).
   both('D3', PROMPTS.permission, 'permission', { holdPermissionMs: 60_000 });
   // D4: two Bash calls asked for in parallel, 2 s after the first finished.
@@ -870,6 +872,8 @@ async function main(): Promise<void> {
     return v;
   };
   const reps = Number(flag('--reps') ?? '1');
+  // Numbers these reps after earlier ones (labels -r<n>).
+  const repOffset = Number(flag('--rep-offset') ?? '0');
   const agent = flag('--agent') ?? 'cancel-sdk';
   const reset = args.includes('--reset');
   const [model, ...wanted] = args.filter((a) => a !== '--reset');
@@ -891,7 +895,7 @@ async function main(): Promise<void> {
   }
   const index: Json[] = [];
   const indexPath = join(PACKAGE, 'runs', `cancel-index-${agent}-${stamp().replace(/[:.]/g, '')}.json`);
-  for (let rep = 1; rep <= reps; rep += 1) {
+  for (let rep = 1 + repOffset; rep <= reps + repOffset; rep += 1) {
     for (const sc of chosen) {
       try {
         index.push(await runScenario(agent, model, sc, rep));
