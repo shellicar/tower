@@ -181,6 +181,11 @@ Not at all:
   launching Claude Code, the requests on NATS, shutdown, and leftovers and
   recovery. The publisher (what turns Claude Code's writes into `changes`)
   follows.
+- **Where it lives:** `mvp/apps/claude-code-participant`. Inside `mvp/`,
+  projects group by language: Rust in `crates/`, TypeScript apps in `apps/`
+  and TypeScript libraries in `packages/`, so each workspace file is a glob.
+  Nothing else moves now: "we wont move anything else yet, this is just
+  planning" (29 Sep).
 - **`@shellicar/core-di`,** its preview release: "if i decide it's overkill,
   it'll be easy to remove i think, easier than adding it retroactively later".
 - **Abstract classes (`abstract class IThing`) where something crosses a
