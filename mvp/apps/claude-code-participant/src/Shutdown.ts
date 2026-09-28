@@ -28,7 +28,7 @@ function describeError(err: unknown): string {
  *
  * 1. Graceful: interrupt every turn, close every conversation's input, and
  *    wait for everything to finish. The process then ends by itself.
- * 2. Teardown: kill every Claude Code with the commands it started, wait for
+ * 2. Teardown: kill every Claude Code (SIGTERM to its process group), wait for
  *    them to go, and exit.
  * 3. Exit at once.
  */
@@ -110,8 +110,15 @@ export class Shutdown {
       if (pid === undefined) {
         continue;
       }
-      // The whole group: Claude Code and the commands it started. Claude
-      // Code keeps no partial reply on SIGTERM, unlike an interrupt.
+      // Claude Code's whole process group. That doesn't hold the commands it
+      // starts: Claude Code runs each Bash command in a session and group of
+      // its own, and stops them itself when it gets SIGTERM. Claude Code
+      // keeps no partial reply on SIGTERM, unlike an interrupt.
+      // TODO: undecided: whether this stage also reaches the commands of a
+      // Claude Code that doesn't act on SIGTERM (hung or stopped), which
+      // otherwise keep running after the participant exits. Nothing short of
+      // walking its descendants, or finding them by the TOWER_AGENT tag they
+      // inherit, reaches them.
       try {
         this.processes.signalGroup(pid, 'SIGTERM');
         signalled.push(conversation);
