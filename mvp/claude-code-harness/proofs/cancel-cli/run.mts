@@ -770,6 +770,28 @@ SCENARIOS['F3-text-every'] = async (c) => {
   await c.exit(l);
 };
 
+// G: an Esc, then the process ends while idle (SIGTERM), then a resume and
+// a send: what a resume makes of what the Esc left as the file's last
+// entries.
+SCENARIOS['G-esc-thinking-then-kill'] = async (c) => {
+  const l = await c.launch([]);
+  await warm(c, l);
+  const s = await c.say(l, P.thinking);
+  await c.thinking(s.base);
+  await stopWith(c, l, 'esc');
+  await stopWith(c, l, 'SIGTERM');
+  await resumeAndSend(c, 'continue');
+};
+SCENARIOS['G-esc-text-then-kill'] = async (c) => {
+  const l = await c.launch([]);
+  await warm(c, l);
+  const s = await c.say(l, P.text);
+  await c.midText(s.base);
+  await stopWith(c, l, 'esc');
+  await stopWith(c, l, 'SIGTERM');
+  await resumeAndSend(c, 'continue');
+};
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   if (args.includes('--list')) {
