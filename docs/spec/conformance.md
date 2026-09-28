@@ -53,9 +53,11 @@ Three roles:
   one fails.
 - **Consumers**: replay the fixtures and assert **the specs' own folds** —
   latest revision per message, the reachable set from the tip, queries grouped
-  by `queryId` and closed by the `query` closure change on `changes` (a
-  telemetry-derived ending is observation, never authority —
-  conversation.md, Query closure), the approval outstanding set
+  by `queryId`, placed in the tree by the `parent` on `query.started` where
+  the publisher announced one, and closed by the closure change on
+  `changes`, `query.closed` or its old name `query` (a telemetry-derived
+  ending is observation, never authority — conversation.md, Query start and
+  closure), the approval outstanding set
   (raised + pulse = pending, silence = void, settled = done).
 - **Servicers**: scripted request/reply exchanges asserting the reply
   discipline — `say` accepted with an id; a stale premise rejected `stale`;

@@ -4,8 +4,8 @@ The conversation concern. Structure per `nats.md`; namespace `conv`. Every
 message here is *about* one conversation — traffic about anything else does not
 belong in this tree.
 
-v2 is the current tree. v1 — one flat subject per class, no `query` closure —
-is superseded but still spoken; the differences and the migration posture are
+v2 is the current tree. v1 (one flat subject per class, no `query` changes,
+neither start nor closure) is superseded but still spoken; the differences and the migration posture are
 at the end (The v1 tree).
 
 ## The entity
@@ -31,26 +31,34 @@ Its structure:
   that calls a tool, `end_turn` for one that stops — and that reason is
   observation: the model's own word for why it stopped, never the query's
   ending.
-- **query** — an ordered run of turns, closed by the `query` change on
-  `changes` (see Query closure) — plus its **parent**: the premise its `say`
-  was accepted against. The parent is the precondition made structural: the
-  tree is the record of accepted premises, and branching exists only where
-  queries attach. Within a query everything is linear, which is why
-  per-message parent pointers would carry no information.
+- **query** — an ordered run of turns, announced by the `query.started`
+  change and closed by the `query.closed` change on `changes` (see Query
+  start and closure) — plus its **parent**: the id of the message the query
+  attaches after, the premise its `say` was accepted against. The parent is
+  the precondition made structural: the tree is the record of accepted
+  premises, and branching exists only where queries attach. Within a query
+  everything is linear, which is why per-message parent pointers would carry
+  no information.
 
 **The conversation is a tree. Messages are its nodes; queries are its
 branches.** Within a query each message's parent is trivially the message
 before it — queries are linear segments, which is why per-message parent
 pointers carry no information. The one parent that carries information is the
 **query's**: where its segment attaches, which can be *any* message in the
-tree — the premise its `say` was accepted against (today a message id, the tip
-the sender saw; whether a parent may instead name a turn or a query is an open
-question below). A rewind-then-say is a new query attached mid-tree — changing "file X" to
+tree — the premise its `say` was accepted against, the tip the sender saw. It
+names a message, and it travels on `query.started`, stated when the query
+starts. A rewind-then-say is a new query attached mid-tree — changing "file X" to
 "file Y" is exactly that: rewind to the parent, then say the new message.
 There is no "edit" operation; the tree moving is a rewind and a say. The
 tree is not stored as extra structure and never travels as one — it is
-derivable by any consumer from the change stream: messages plus tip movements,
-the accumulated record of accepted premises.
+derivable by any consumer from the change stream: messages, query starts and
+tip movements, the accumulated record of accepted premises.
+
+**The parent belongs to the query, not to each message.** A parent on every
+message is only needed for a branch *inside* a query, and nothing observed
+needs one. Adding per-message parents later would be an extension: every
+record written with query parents stays valid, and the per-message parents it
+lacks follow from order. Taking them away later would not be.
 
 The store is a log: every message and revision ever minted, append-only. Ids
 are never invalidated; *unreachable is not deleted* (a log-structured table,
@@ -65,7 +73,7 @@ was kept.
 | Subject | Traffic | Carries |
 |---|---|---|
 | `conv.v2.{conversationId}.telemetry.>` | events | observation: turns, tools, usage — never authority |
-| `conv.v2.{conversationId}.changes.>` | events | the committal change stream: messages, revisions, tip movements, query closures |
+| `conv.v2.{conversationId}.changes.>` | events | the committal change stream: messages, revisions, tip movements, query starts and closures |
 | `conv.v2.{conversationId}.attachment.>` | events | who is serving this conversation, now — see Attachment |
 | `conv.v2.{conversationId}.deltas` | events | the in-progress message, chunk by chunk |
 | `conv.v2.{conversationId}.requests.>` | requests | inbound: address the conversation |
@@ -100,7 +108,9 @@ stays in the body there as a `type` field. The full map:
 | `message` | `conv.v2.{id}.changes.message` |
 | `revision` | `conv.v2.{id}.changes.revision` |
 | `tip_moved` | `conv.v2.{id}.changes.tip.moved` |
-| `query` | `conv.v2.{id}.changes.query` |
+| `query_started` | `conv.v2.{id}.changes.query.started` |
+| `query_closed` | `conv.v2.{id}.changes.query.closed` |
+| `query` | `conv.v2.{id}.changes.query`: the closure's old name, read and never published again (Query start and closure) |
 | `attached` | `conv.v2.{id}.attachment.attached` |
 | `moved` | `conv.v2.{id}.attachment.moved` |
 | `detached` | `conv.v2.{id}.attachment.detached` |
@@ -145,7 +155,7 @@ compute, never something it must.
 | Event | Fields | Notes |
 |---|---|---|
 | `turn_started` | `queryId`, `turnId`, `service`, `model`, `thinking`, `effort`, `maxTokens` | a message begins; fires every round of the loop. Carries the request's inputs as asked — `usage` later carries what was reported back; if they differ (model fallback), the record shows it. `service` names what was called — e.g. the Anthropic Messages API — not which model answered |
-| `turn_ended` | `queryId`, `turnId`, `stopReason` | the model stopped its message; fires every round — mid-loop rounds end `tool_use`, a closing round ends `end_turn`. That is the model's own word for why it stopped, never the query's ending: closure is the `query` change on `changes` (this spec, Query closure), and reading an ending off this event is lawful observation, never authority. `stopReason` is the service's own value, passed through verbatim — never synthesised: a turn that was cancelled or failed did not *end*, and gets its own event below |
+| `turn_ended` | `queryId`, `turnId`, `stopReason` | the model stopped its message; fires every round — mid-loop rounds end `tool_use`, a closing round ends `end_turn`. That is the model's own word for why it stopped, never the query's ending: closure is the `query.closed` change on `changes` (this spec, Query start and closure), and reading an ending off this event is lawful observation, never authority. `stopReason` is the service's own value, passed through verbatim — never synthesised: a turn that was cancelled or failed did not *end*, and gets its own event below |
 | `turn_cancelled` | `queryId`, `turnId` | the turn was terminated intentionally — a `cancel` was accepted; someone decided |
 | `turn_aborted` | `queryId`, `turnId` | the attempt failed — service error, broken stream; potentially transient. Distinct from `turn_cancelled` because the two imply different follow-ups |
 | `tool_use` | `queryId`, `turnId`, `id`, `name`, `input` | `id` is the opaque tool-use id (`toolu_…`); `input` included — the action is unreviewable without the payload |
@@ -169,14 +179,17 @@ where consequences land, not what owns the thing.
 Four kinds of change — a closed set of kinds, an open set of operations
 within them. A change that cannot be expressed as one of these is the signal
 something genuinely new needs the argument (the fourth, `query`, arrived by
-exactly that argument):
+exactly that argument). The query kind has two operations, its start and its
+closure, each on its own leaf under `changes.query`:
 
 | Change | Fields | Notes |
 |---|---|---|
 | `message` | `id`, `queryId`, `turnId`, `role`, `from`?, `content` | **utterance** — the dialogue grew. `id` is the message's stable id; `role` is an open set whose known values the `message` schema lists (see Message schemas); `from` says who wrote the message: a human, an agent or an orchestrator (something outside the conversation that acts on it), as `{ kind: human \| agent \| orchestrator }` + id, so two `role: user` messages written by different authors read apart. A message nobody wrote, one the harness generated, has no `from`: a tool result, a system message, a reminder (context the harness adds in the user role, not something the user said). Nothing is fabricated to fill the slot (correction, 19 Jul 2026: a tool result previously carried `from: {kind: agent}`, wrongly); `content` is content blocks |
 | `revision` | `messageId`, `content` | **revision** — the content under a stable id changed: a trim, a resize, or the words themselves rewritten. Carries the resulting content, never the why — the record carries effects, never reasons |
 | `tip_moved` | `to` (a message id) | **tip movement** — the tip pointer moved: rewind, fast-forward. The reflog, as events |
-| `query` | `queryId`, `reason` | **query closure** — the query will grow no further; the record now contains everything it will ever contain. `reason` is the system's own vocabulary, an open set under add-only: `completed` (the servicer ran its last round and chose not to run another), `cancelled` (a `cancel` was accepted), `aborted` (the attempt failed and the servicer gave the query up). Committal like every change: published after the closing fact is in the record, never speculatively |
+| `query_started` | `queryId`, `parent`? | **query start**: a query has begun, and its messages attach after `parent`. `parent` is the id of the message the query attaches after. For a query a `say` opened, it is the message that say's premise names (its `precondition.tip`). `parent` is optional: a start without one means the query follows the tip. Published before any of the query's messages, so a consumer can place each message as it streams. Optional: a publisher that never announces a start stays compliant, and a query with no `query_started` follows the tip, as every query did before this change existed (Query start and closure) |
+| `query_closed` | `queryId`, `reason` | **query closure** — the query will grow no further; the record now contains everything it will ever contain. `reason` is the system's own vocabulary, an open set under add-only: `completed` (the servicer ran its last round and chose not to run another), `cancelled` (a `cancel` was accepted), `aborted` (the attempt failed and the servicer gave the query up). Committal like every change: published after the closing fact is in the record, never speculatively |
+| `query` | `queryId`, `reason` | the closure's old name, the same fields and meaning as `query_closed`. Consumers read it; publishers never publish it again (Query start and closure) |
 
 **Envelope provenance: `instanceId` rides beside `from`, never inside it.**
 Every change event carries the publishing instance's id as envelope
@@ -207,17 +220,56 @@ The folds:
   folds composed. Live watchers folding as they go and late joiners asking for
   a snapshot converge on the same state, by construction.
 
-### Query closure — why it is a change
+### Query start and closure
 
-Whether a query is finished is a fact only the state owner holds: it decides
-not to run another round, or accepts the cancel, or gives the attempt up.
-Consumers could previously only *derive* closure from telemetry — branching
-on a verbatim, open-set `stopReason`, on the observation plane, with no
-signal at all on the cancelled and aborted paths. The `query` change is that
-fact published once, where the answer already lives: a sender that said
-something and wants the reply subscribes `changes.>`, collects its query's
-messages, and is done when the closure arrives — one subscription, every
-ending covered.
+**Why the closure is a change.** Whether a query is finished is a fact only
+the state owner holds: it decides not to run another round, or accepts the
+cancel, or gives the attempt up. Consumers could previously only *derive*
+closure from telemetry — branching on a verbatim, open-set `stopReason`, on
+the observation plane, with no signal at all on the cancelled and aborted
+paths. The `query.closed` change is that fact published once, where the
+answer already lives: a sender that said something and wants the reply
+subscribes `changes.>`, collects its query's messages, and is done when the
+closure arrives — one subscription, every ending covered.
+
+**Why the start is a change.** Without it, the parent is implicit: no
+committed change says where a query attaches, only the `say`'s
+`precondition.tip` does, and a request is not the record. A consumer could
+not tell a query that continues the conversation from one that branches off
+an earlier point. The closure alone comes too late to carry the parent: by
+the time it arrives, the query's messages have already streamed with nothing
+to place them. So the parent is announced when the query starts, on its own
+change, before any of the query's messages. `tip_moved` keeps its own job, a
+move of the tip on its own, such as a rewind.
+
+A query with no `query.started` follows the tip: its first message attaches
+after whatever the tip is when that message commits, which is how every
+query attached before `query.started` existed. That keeps publishers that
+never announce a start compliant, and every record they left readable.
+`parent` is an optional field of `query.started`: a start without one means
+the query follows the tip, the same as a query with no start.
+
+What a consumer does with a `parent` naming a message it does not hold, and
+whether a start whose `parent` is not the current tip moves the tip, are not
+yet specified (Open questions).
+
+**The closure's old name.** The closure was published as `changes.query`
+before the start existed. That leaf stays in v2 as the closure's old name:
+consumers read it forever, because stored history and publishers not yet
+updated carry it, and fold it exactly as `query.closed`. It is never
+published again. A consumer that predates the rename skips `query.closed` as
+an unknown leaf (tolerance), so it sees no closure from a publisher that has
+moved to the new name. A subscriber to exactly `changes.query`, rather than
+`changes.>`, likewise sees none.
+
+```json
+// conv.v2.conv-abc.changes.query.started
+{ "ts": "2026-07-07T21:00:00+10:00", "instanceId": "inst-1a2f", "queryId": "q2", "parent": "m4" }
+// conv.v2.conv-abc.changes.query.closed
+{ "ts": "2026-07-07T21:00:30+10:00", "instanceId": "inst-1a2f", "queryId": "q2", "reason": "completed" }
+// conv.v2.conv-abc.changes.query.started, no parent: the query follows the tip
+{ "ts": "2026-07-07T21:01:00+10:00", "instanceId": "inst-1a2f", "queryId": "q3" }
+```
 
 **Revision and tip movement are two orthogonal mechanisms, not two
 categories the spec assigns.** `revision` changes the content under a stable
@@ -249,8 +301,8 @@ tip under them, so the released premise is no longer the tip they knew.
 Scenario 2's fixture captures the recommended shape for the user-role half,
 with no assistant commit; scenario 2c's captures an implementation that
 commits the partial assistant message. The *query* it ended, though, closed
-— and closure is committal: a `query` change with reason `cancelled` records
-it.
+— and closure is committal: a `query.closed` change with reason `cancelled`
+records it.
 
 | Event | Subject | Fields | Notes |
 |---|---|---|---|
@@ -498,7 +550,8 @@ while a query runs is rejected (that premise has a live acceptance); cancel
 the query and the premise frees. Queueing, if ever wanted, arrives as a new
 premise kind under add-only — a real design pass, not a side effect.
 
-An accepted premise does not evaporate: it becomes the new query's **parent**.
+An accepted premise does not evaporate: it becomes the new query's **parent**,
+stated on the record by the query's `query.started` (The change stream).
 The tree is the accumulation of accepted premises.
 
 Acceptance creates state, and state gets an id: every `accepted` reply carries
@@ -511,7 +564,8 @@ Every request owes a reply; an implementation that does not support an
 operation replies `rejected` with reason `unsupported` — compliance is
 answering, not implementing. The reply confirms acceptance, never outcome. A
 sender that wants the answer subscribes to the change stream — one mechanism
-for every reader; the `query` closure says when the answer is complete.
+for every reader; the `query.closed` closure says when the answer is
+complete.
 
 ## What consumers may assume
 
@@ -523,10 +577,14 @@ for every reader; the `query` closure says when the answer is complete.
   subscriber is silently blind to leaves added later.
 - **No ordering across classes**: telemetry and commits interleave without
   guarantee; a consumer must never infer state from their relative arrival.
-- The query fold groups by `queryId`; its committal end is the `query`
-  closure on `changes`. Deriving an ending from telemetry (`turn_ended` +
-  verbatim `stopReason`) remains lawful observation, never authority. Idle is
-  derived — quiet since the last event — never declared.
+- The query fold groups by `queryId`; its committal end is the
+  `query.closed` closure on `changes`, or `query` from a publisher that
+  predates the rename. When the publisher announced the start with a
+  `parent`, `query.started` places the query in the tree by it; when it
+  announced no start, or a start without a `parent`, the query follows the
+  tip. Deriving an ending from telemetry
+  (`turn_ended` + verbatim `stopReason`) remains lawful observation, never
+  authority. Idle is derived — quiet since the last event — never declared.
 
 ## Implementation details — deliberately not contract
 
@@ -620,13 +678,22 @@ export const conversationTelemetry = {
   }),
 };
 
+/** The query's closure. One shape under two leaves: `query.closed`, and
+ *  `query`, its old name, which consumers read and publishers never publish
+ *  again. */
+const queryClosure = z.looseObject({ ts, instanceId: z.string().optional(), queryId: z.string(), reason: openEnum(['completed', 'cancelled', 'aborted']) });
+
 // conv.v2.{conversationId}.changes.> — instanceId is envelope metadata
 // (beside from, never inside it): which agent instance published the change.
 export const conversationChange = {
   'message': z.looseObject({ ts, instanceId: z.string().optional(), id: z.string(), ...turnRef, role: openEnum(['user', 'assistant', 'system']), from: sender.optional(), content: contentBlocks }),
   'revision': z.looseObject({ ts, instanceId: z.string().optional(), messageId: z.string(), content: contentBlocks }),
   'tip.moved': z.looseObject({ ts, instanceId: z.string().optional(), to: z.string() }),
-  'query': z.looseObject({ ts, instanceId: z.string().optional(), queryId: z.string(), reason: openEnum(['completed', 'cancelled', 'aborted']) }),
+  // The parent is the message the query attaches after. An absent parent
+  // means the query follows the tip, as does a query with no start at all.
+  'query.started': z.looseObject({ ts, instanceId: z.string().optional(), queryId: z.string(), parent: z.string().optional() }),
+  'query.closed': queryClosure,
+  'query': queryClosure,
 };
 
 // conv.v2.{conversationId}.attachment.> — the wire shape of the model
@@ -720,8 +787,8 @@ None of this is implied by the spec landing. Each is separate, later work.
 
 v1 differs in shape, not vocabulary: one flat subject per class
 (`conv.v1.{id}.changes`, `.telemetry`, `.deltas`, `.requests`), routing by
-the payload's `type` alone, and no `query` closure change. Every other
-message shape is identical to v2.
+the payload's `type` alone, and no `query` changes, neither start nor
+closure. Every other message shape is identical to v2.
 
 v1 speakers remain lawful for as long as they exist — a breaking change is a
 new tree and migration is unhurried (nats.md, Evolution). Skew is absorbed
@@ -748,12 +815,16 @@ retires — they retire with v1, not with v2's arrival.
   to the record, or fix the record (a tip movement, a revision) to where you
   actually are. Both are lawful today; the grain only changes how large the
   gap can grow. Resolve when a parallel-tool implementation forces it.
-- **The parent's wire type.** A follow-up after an interrupted query could
-  anchor on a message (an exact node — but revisable, and possibly the interior
-  of an incomplete turn), a turn (an outcome — but a cancelled turn's outcome
-  may be nothing), or a query (the episode — surviving its internal changes). They
-  differ exactly when things change, which is why the type is real data; wire
-  encoding unruled.
+- **A parent the consumer does not hold.** A `query.started` can name, as its
+  `parent`, a message the consumer has not seen: one committed before the
+  consumer began reading, or one never published on this conversation's
+  change stream. What the consumer does with that query and its messages is
+  not yet specified.
+- **A start away from the tip.** A `query.started` whose `parent` is not the
+  current tip, with no `tip_moved` before it, is not yet specified: whether
+  the start itself moves the tip to its parent, or a `tip_moved` has to come
+  first. Where a rewind comes first (scenario 9), the parent is the tip and
+  the question does not arise.
 
 Authority is settled in `core.md`: connection is authority; `from` is
 provenance, never enforcement.

@@ -25,6 +25,7 @@ wrong, and the fix lands twice.
 | 6 — approval, both endings | `fixtures/scenario-6a.jsonl`, `fixtures/scenario-6b.jsonl` |
 | 7 — the block stream | `fixtures/scenario-7.jsonl` |
 | 8 — the attachment, both endings | `fixtures/scenario-8a.jsonl`, `fixtures/scenario-8b.jsonl` |
+| 9: the query's parent | `fixtures/v2/scenario-9.jsonl` |
 
 Each template lists the **required** entries: a producer's capture must contain
 them as a subsequence per subject, extras allowed (add-only honoured).
@@ -33,12 +34,23 @@ them as a subsequence per subject, extras allowed (add-only honoured).
 
 `fixtures/v2/` carries the conversation scenarios in the v2 tree
 (conversation.md, Subjects): leaf subjects spelling each type, and a
-`query` closure change wherever a query closes — completed in scenarios 1,
-2b, and 3; cancelled in scenarios 2 and 2c. Scenario 5's second query never
+query closure change wherever a query closes — completed in scenarios 1,
+2b, 3 and 9; cancelled in scenarios 2 and 2c. Scenario 5's second query never
 closes (still live when the fixture ends), scenario 7 is one turn's stream
 mid-query, and scenario 8b never opens a query at all (rejected before
 acceptance), so none of the three carries a closure. Scenario 6 is
 approval-concern traffic and has no v2 form.
+
+The closures in scenarios 1, 2, 2b, 2c and 3 carry the closure's old name,
+`changes.query`, and none of scenarios 1 to 8 announces a `query.started`:
+the record a publisher leaves that predates the start (conversation.md,
+Query start and closure). Agent scenario a17's closure carries the old name
+too. A consumer reads that record forever, so these fixtures stay its test
+surface. A producer that follows the spec now publishes `query.closed` and
+never `query`, so its capture cannot contain these fixtures' closure lines.
+Whether these fixtures move to the new names is not yet decided. Scenario 9
+is the only fixture with the new names; it has no v1 form, since v1 has no
+query changes.
 
 Every v2 change line carries the envelope `instanceId` — required of every
 compliant publisher, optional in the schema only for producers that predate
@@ -76,8 +88,9 @@ closing round (ends `end_turn`).
   agent or an orchestrator), absent on the `tool_result`, which the harness
   generated.
 - Asserts: the baseline schemas; the query fold grouping by `queryId` and
-  closed by the `query` closure change on `changes` — carried by the v2 twin,
-  since v1 has no closure change (conversation.md, The v1 tree). An ending
+  closed by the query closure change on `changes` (`query`, the closure's old
+  name, in this fixture) — carried by the v2 twin, since v1 has no closure
+  change (conversation.md, The v1 tree). An ending
   read off `turn_ended` and its verbatim `stopReason` is lawful observation,
   never the fold's authority.
 
@@ -160,6 +173,10 @@ Fixture: `fixtures/scenario-3.jsonl`.
 
 After the first `tip_moved`, `m2`–`m4` are unreachable but present; after the
 fast-forward, `m5`–`m6` are the unreachable branch. Both remain in the log.
+
+The query's parent is implicit here: the fixture announces no
+`query.started`, so `q2` follows the tip the rewind left at `m1`. Scenario 9
+states the parent on the record.
 
 ## 4. Revision
 
@@ -274,6 +291,29 @@ at all must validate them the same way — accept-with-verbatim-block or
 reject-outright are the only two compliant outcomes for a resolvable-or-not
 block. A servicer that has never implemented attachment support simply never
 exercises this fixture (declared capability, per the two-branches rule).
+
+## 9. The query's parent
+
+Three queries, each announced by `query.started` before its messages and
+closed by `query.closed`. `q1` opens an empty conversation, so its start
+carries no `parent` and it follows the tip; `q2` continues from `m2`; a
+rewind moves the tip back to `m2`, and `q3` attaches there too. v2 only.
+
+- Exercises: the new names, `query.started` and `query.closed`;
+  `query.started` without a `parent` and with one.
+- Asserts: where the `say` that opened a query names a message in its
+  `precondition.tip`, the query's `parent` is that message (`q2`, `q3`);
+  where it states `{ "tip": null }`, the start carries no `parent` (`q1`);
+  each start precedes its query's first message.
+
+Fixture: `fixtures/v2/scenario-9.jsonl`.
+
+The rewind comes before `q3` on purpose: every parent stated here is the tip
+when its query starts, so a consumer that ignores `query.started` folds the same
+tree from the messages and the `tip_moved`. This fixture does not check
+placement by parent. A start whose parent is not the current tip, with no
+`tip_moved` before it, is an open question (conversation.md, Open
+questions), and no fixture takes a side on it.
 
 ## Agent scenarios
 
