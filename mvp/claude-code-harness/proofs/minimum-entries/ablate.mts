@@ -22,6 +22,8 @@
 //   -system/b|r       every system entry left out
 //   conv/b|r          only user and assistant entries kept
 //   keep:<k+k>/b|r    only user, assistant and the named kinds kept
+//   keep:<k+k>+compactrefs/b|r  (--keep-refs) the same, and every entry a
+//                     compact boundary's compactMetadata names by uuid
 //                     (--keep k1+k2,k3 adds one such variant per set)
 //
 // resumeSessionAt is always the uuid of the last main entry the reduced
@@ -30,7 +32,7 @@
 // the entries Claude Code gets are the same either way.
 //
 //   node proofs/minimum-entries/ablate.mts <source-plan-dir> <out-dir>
-//        [--pickups scen/point,...] [--only-live] [--variants base,-kind/b,...]
+//        [--pickups [model/]scen/point,...] [--only-live] [--variants base,-kind/b,...]
 //        [--keep k1+k2,k3] [--no-singles]
 
 import { createHash } from 'node:crypto';
@@ -119,10 +121,12 @@ function main(): void {
   const onlyVariants = opt('--variants') ? new Set(String(opt('--variants')).split(',')) : undefined;
   const keeps = opt('--keep') ? String(opt('--keep')).split(',') : [];
   const singles = !args.includes('--no-singles');
+  const keepRefs = args.includes('--keep-refs');
 
   let pickups = JSON.parse(readFileSync(join(src, 'pickups.json'), 'utf8')) as Pickup[];
   if (want) {
-    pickups = pickups.filter((p) => want.has(`${p.scenario}/${p.point}`));
+    // scen/point, or model/scen/point for one model's.
+    pickups = pickups.filter((p) => want.has(`${p.scenario}/${p.point}`) || want.has(`${String(p.options.model ?? 'claude-sonnet-5')}/${p.scenario}/${p.point}`));
   }
   if (onlyLive) {
     pickups = pickups.filter((p) => p.refs.some((r) => r.kind === 'live'));
@@ -173,15 +177,33 @@ function main(): void {
         vs[`${name}/r`] = variant(base, d, true);
       }
     }
+    // The uuids a compact boundary names (its preserved segment and
+    // preserved messages): with --keep-refs, a keep set also keeps these.
+    const refs = new Set<string>();
+    for (const e of entries) {
+      const m = e.compactMetadata as Json | undefined;
+      const seg = (m?.preservedSegment ?? {}) as Json;
+      const pm = (m?.preservedMessages ?? {}) as Json;
+      for (const u of [seg.headUuid, seg.anchorUuid, seg.tailUuid, pm.anchorUuid, ...((pm.uuids ?? []) as unknown[]), ...((pm.allUuids ?? []) as unknown[])]) {
+        if (typeof u === 'string') {
+          refs.add(u);
+        }
+      }
+    }
     for (const set of keeps) {
       const keep = new Set([...CONV, ...set.split('+').filter((x) => x !== '')]);
       const d = (e: Json): boolean => !keep.has(kindOf(e));
       vs[`keep:${set}/b`] = variant(base, d, false);
       vs[`keep:${set}/r`] = variant(base, d, true);
+      if (keepRefs && refs.size > 0) {
+        const dr = (e: Json): boolean => d(e) && !(typeof e.uuid === 'string' && refs.has(e.uuid));
+        vs[`keep:${set}+compactrefs/b`] = variant(base, dr, false);
+        vs[`keep:${set}+compactrefs/r`] = variant(base, dr, true);
+      }
     }
     const holdings: Record<string, string> = {};
     for (const [name, h] of Object.entries(vs)) {
-      if (onlyVariants && name !== 'base' && !onlyVariants.has(name)) {
+      if (onlyVariants && name !== 'base' && !name.startsWith('keep:') && !onlyVariants.has(name)) {
         continue;
       }
       holdings[name] = save(h);

@@ -6,7 +6,7 @@
 // variant's request adds, loses or changes, and where (message index, role).
 // Differences with the same description are one class (M<n>).
 //
-//   node proofs/minimum-entries/compare.mts <plan-dir>
+//   node proofs/minimum-entries/compare.mts <plan-dir> [--out <folder>]
 //
 // Writes compare.json, matrix.txt (pickup by variant), classes.txt (each
 // class in full, and where it occurs).
@@ -41,6 +41,23 @@ interface Block {
   where: string;
   sig: string;
   text: string;
+  raw: string;
+}
+
+// Where two versions of one block differ: the changed middle, with a little
+// context on each side.
+function changed(a: string, b: string): string {
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) {
+    i += 1;
+  }
+  let e = 0;
+  while (e < a.length - i && e < b.length - i && a[a.length - 1 - e] === b[b.length - 1 - e]) {
+    e += 1;
+  }
+  const ctx = 30;
+  const mid = (x: string): string => JSON.stringify(x.slice(Math.max(0, i - ctx), x.length - e + ctx).replace(/\s+/g, ' ').slice(0, 220));
+  return `${mid(a)} => ${mid(b)}`;
 }
 
 function textOf(b: Json): string {
@@ -69,7 +86,7 @@ function blocksOf(body: Json): Block[] {
     const bs = typeof c === 'string' ? [{ type: 'text', text: c } as Json] : ((c ?? []) as Json[]);
     for (const [j, b] of bs.entries()) {
       const cc = b.cache_control ? '+cc' : '';
-      out.push({ where: `m${i}.${String(m.role)}[${j}]`, sig: JSON.stringify(b), text: `${String(b.type)}${cc} ${snip(textOf(b))}` });
+      out.push({ where: `m${i}.${String(m.role)}[${j}]`, sig: JSON.stringify(b), text: `${String(b.type)}${cc} ${snip(textOf(b))}`, raw: `${String(b.type)}${cc} ${textOf(b)}` });
     }
   }
   return out;
@@ -102,6 +119,27 @@ function blockDiff(a: Json, b: Json): string[] {
       i += 1;
     }
   }
+  // A block removed and one added at the same place (same message index,
+  // role and block index, same type) is one changed block.
+  const minus = new Map<string, number>();
+  const plus = new Map<string, number>();
+  for (const [k, l] of out.entries()) {
+    (l.startsWith('- ') ? minus : plus).set(l.split(' ')[1] as string, k);
+  }
+  const pairOf = new Map<number, string>();
+  const drop = new Set<number>();
+  for (const [w, pk] of plus) {
+    const mk = minus.get(w);
+    const bi = B.find((x) => x.where === w);
+    const ai = A.find((x) => x.where === w);
+    if (mk !== undefined && ai && bi && ai.raw.split(' ')[0] === bi.raw.split(' ')[0]) {
+      pairOf.set(Math.min(pk, mk), `~ ${w} ${changed(ai.raw, bi.raw)}`);
+      drop.add(Math.max(pk, mk));
+    }
+  }
+  const merged = out.flatMap((l, k) => (drop.has(k) ? [] : [pairOf.get(k) ?? l]));
+  out.length = 0;
+  out.push(...merged);
   // Message structure (roles) when it differs.
   const roles = (x: Json): string => ((x.messages ?? []) as Json[]).map((mm) => String(mm.role)[0]).join('');
   if (roles(a) !== roles(b)) {
@@ -148,6 +186,10 @@ function classKey(lines: string[]): string {
 
 function main(): void {
   const planDir = resolve(process.argv[2] ?? '');
+  // --out <folder>: compare a second run's requests (run.mts CR_OUT); the
+  // written files get the folder's name as a suffix.
+  const outName = process.argv.includes('--out') ? String(process.argv[process.argv.indexOf('--out') + 1]) : 'out';
+  const sfx = outName === 'out' ? '' : `-${outName}`;
   const pickups = JSON.parse(readFileSync(join(planDir, 'pickups.json'), 'utf8')) as Json[];
   const jobs = JSON.parse(readFileSync(join(planDir, 'jobs.json'), 'utf8')) as Json[];
   const jobOf = new Map<string, Json>();
@@ -184,7 +226,7 @@ function main(): void {
     const liveBody = liveContinue ? undefined : liveParsed;
     const reqOf = (h: string): { req?: { file: string; body: Json }; error?: string; ran: boolean; job: string } => {
       const j = jobOf.get(`${h}|${probe}|${JSON.stringify(p.options)}|${String(p.sessionId)}`);
-      const outDir = join(planDir, 'out', String(j?.id));
+      const outDir = join(planDir, outName, String(j?.id));
       const ran = existsSync(join(outDir, 'job.json'));
       const jr = ran ? (JSON.parse(readFileSync(join(outDir, 'job.json'), 'utf8')) as Json) : {};
       return { req: ran ? requestOf(outDir, probe) : undefined, error: jr.error ? String(jr.error) : undefined, ran, job: String(j?.id) };
@@ -213,7 +255,7 @@ function main(): void {
       let detail: string[] | null = null;
       if (vsBase === 'diff' && base.req) {
         detail = blockDiff(norm(base.req.body), norm(g.req.body));
-        cls = classOf(detail, `${String(p.scenario)} ${String(p.point)} ${name}`);
+        cls = classOf(detail, `${String((p.options as Json).model ?? "claude-sonnet-5").replace("claude-", "")} ${String(p.scenario)} ${String(p.point)} ${name}`);
       }
       let liveDetail: string[] | null = null;
       if (name === 'base' && vsLive === 'diff' && liveBody) {
@@ -223,7 +265,7 @@ function main(): void {
     }
     rows.push({ liveContinue, scenario: p.scenario, point: p.point, probe, model: (p.options as Json).model ?? 'claude-sonnet-5', live: live?.file ?? null, kinds: p.kinds, cells });
   }
-  writeFileSync(join(planDir, 'compare.json'), `${JSON.stringify(rows, null, 1)}\n`);
+  writeFileSync(join(planDir, `compare${sfx}.json`), `${JSON.stringify(rows, null, 1)}\n`);
   // Matrix: one line per pickup and variant that differs from base or live.
   const out: string[] = [];
   out.push('Cell: B= same as base, B~c same as base apart from the compaction summary, M<n> differs from base (classes.txt);');
@@ -250,14 +292,14 @@ function main(): void {
       out.push(`   ${name.padEnd(40)} ${bpart}${lpart}`);
     }
   }
-  writeFileSync(join(planDir, 'matrix.txt'), `${out.join('\n')}\n`);
+  writeFileSync(join(planDir, `matrix${sfx}.txt`), `${out.join('\n')}\n`);
   const cl: string[] = [];
   for (const c of classes.values()) {
     cl.push(`### ${c.id} (${c.where.length})`);
     cl.push(...c.lines.map((l) => `    ${l}`));
     cl.push(...c.where.map((w) => `  at ${w}`));
   }
-  writeFileSync(join(planDir, 'classes.txt'), `${cl.join('\n')}\n`);
+  writeFileSync(join(planDir, `classes${sfx}.txt`), `${cl.join('\n')}\n`);
   process.stdout.write(`${rows.length} pickups, ${classes.size} classes -> ${planDir}\n`);
 }
 

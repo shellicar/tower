@@ -33,6 +33,9 @@ type Json = Record<string, unknown>;
 const AGENT = process.env.CR_AGENT ?? 'commit-resume';
 const MODEL = 'claude-sonnet-5';
 const TZ = process.env.CR_TZ ?? 'UTC';
+// CR_OUT: the plan's output folder (default out/), for a second run of
+// the same jobs beside the first.
+const OUT = process.env.CR_OUT ?? 'out';
 const JOB_TIMEOUT_MS = 90_000;
 const CWD = join(homedir(), '.local', 'state', 'tower-claude-code-harness', 'work', AGENT);
 
@@ -52,7 +55,14 @@ interface Job {
 // answers /v1/messages and forwards the rest over HTTPS.
 // TODO: undecided, a harness choice; the alternative is the fake as the
 // base URL (the store proof's route).
+// CR_REAL_API=1: no fake at all; the resume's request goes to the model
+// (live calls, for what only the real API path shows: claude.ai connectors
+// together with the first-party features).
+const REAL_API = process.env.CR_REAL_API === '1';
 function baseUrl(fakeUrl: string): Record<string, string> {
+  if (REAL_API) {
+    return {};
+  }
   if (process.env.CR_FIRST_PARTY === '1') {
     return { ANTHROPIC_BASE_URL: 'http://api.anthropic.com', HTTP_PROXY: fakeUrl, http_proxy: fakeUrl };
   }
@@ -105,14 +115,16 @@ function lastUserText(body: Json): string {
 }
 
 async function runJob(planDir: string, job: Job): Promise<Json> {
-  const outDir = join(planDir, 'out', job.id);
+  const outDir = join(planDir, OUT, job.id);
   // A rerun starts from an empty output directory (this proof's own files).
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(join(outDir, 'otel'), { recursive: true });
   const holding = JSON.parse(readFileSync(join(planDir, 'holdings', `${job.holding}.json`), 'utf8')) as { appends: { key: SessionKey; entries: Json[] }[]; resumeSessionAt: string | null };
   const store = new HoldingStore(holding, join(outDir, 'store-appends.jsonl'));
   const fakeEvents: Json[] = [];
-  const fake = await startFakeApi({ upstream: process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com', dir: outDir, onEvent: (e) => fakeEvents.push({ wall: Date.now(), ...e }) });
+  const fake = REAL_API
+    ? { url: '', requests: [] as { n: number; file: string; body: Json; wall: number }[], close: async () => {} }
+    : await startFakeApi({ upstream: process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com', dir: outDir, onEvent: (e) => fakeEvents.push({ wall: Date.now(), ...e }) });
   const sdk: Json[] = [];
   const noEvents = { write: () => {} } as unknown as Events;
   const started = Date.now();
@@ -212,7 +224,7 @@ async function main(): Promise<void> {
   // --workers N: N jobs at a time, never two of one session at once (each
   // resumes the recorded session id in the one config directory).
   const workers = args.includes('--workers') ? Number(args[args.indexOf('--workers') + 1]) : 1;
-  const todo = jobs.filter((j) => redo || !existsSync(join(planDir, 'out', j.id, 'job.json'))).slice(0, limit);
+  const todo = jobs.filter((j) => redo || !existsSync(join(planDir, OUT, j.id, 'job.json'))).slice(0, limit);
   const busy = new Set<string>();
   let n = 0;
   const next = (): Job | undefined => {

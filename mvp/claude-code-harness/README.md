@@ -745,3 +745,40 @@ model is called.
   pickup table.
 - `prompt-uuid.mts <dir>`: whether a `uuid` set on the sent `SDKUserMessage`
   becomes the prompt entry's `uuid` in the store.
+
+`run.mts` also takes, for other proofs reusing it: `CR_AGENT` (agent name,
+so its config and working directory), `CR_TZ` (the clock's zone, default
+UTC), `CR_OUT` (output folder, for a second run of the same jobs),
+`--workers N` (N jobs at once, never two of one session), a job's
+`options.model`, `options.mcpWait` and `options.extra` (more `query()`
+options), `CR_FIRST_PARTY=1` (Claude Code gets `http://api.anthropic.com` as
+its base URL and the fake as its HTTP proxy: the features Claude Code keeps
+to the first-party API stay on, but the claude.ai connectors don't load) and
+`CR_REAL_API=1` (no fake: the resume's request goes to the model). `plan.mts`
+takes `CR_INDEX_DIRS` and `CR_INDEX_PREFIX` for another proof's recordings.
+
+## Minimum entries
+
+`proofs/minimum-entries/` asks which entry kinds tower must hold for a
+resume from tower to send the same request: each pickup's full holding
+(commit-resume's `R0@`) against variants with kinds left out.
+
+- `ablate.mts <source-plan> <out>`: the variants, as a plan `run.mts` runs.
+  Per kind `-<kind>` (off the chain), `-<kind>/b` (on the chain, links left
+  broken) and `-<kind>/r` (children re-pointed to the nearest kept
+  ancestor); groups (`-offchain`, `-attach`, `-system`, `conv`); `--keep`
+  sets (only user, assistant and the named kinds), `--keep-refs` (a keep
+  set plus the entries a compact boundary names). `resumeSessionAt` is the
+  last main entry the variant still has.
+- `p24-plan.mts <out> --date D`: proof 24's recordings (four models, nine
+  endings) as a source plan. Rewrites the `date` attachment and its
+  rendered reminder to D (undecided, see the file).
+- `compare.mts <plan> [--out out2]`: each variant against the base's request
+  and the live one, block by block; `matrix.txt`, `classes.txt`.
+- `summary.mts <file> <plan...>`: variant by model.
+
+Which API route a plan needs follows how its recordings ran: the cancel
+recordings went through a local forwarder (the fake as the base URL
+matches them), proof 24's through the real API with connectors off
+(`CR_FIRST_PARTY=1`), recordings with connectors on through the real API
+(`CR_REAL_API=1`).
