@@ -1,0 +1,105 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true,
+    "root": "../../.."
+  },
+  "files": {
+    "ignoreUnknown": false,
+    "includes": ["**"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "lineWidth": 320,
+    "indentWidth": 2,
+    "lineEnding": "lf",
+    "attributePosition": "auto"
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "domains": {
+      "project": "recommended"
+    },
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error",
+        "noUnusedFunctionParameters": "error",
+        "noUnusedPrivateClassMembers": "error",
+        "noUndeclaredDependencies": "error"
+      },
+      "performance": {
+        "noBarrelFile": "error",
+        "noReExportAll": "error"
+      },
+      "suspicious": {
+        "noImportCycles": "error",
+        "noExplicitAny": "warn",
+        "noConsole": {
+          "level": "error",
+          "options": {
+            "allow": ["error"]
+          }
+        },
+        "noDebugger": "error"
+      },
+      "style": {
+        "noInferrableTypes": "error",
+        "useImportType": "error",
+        "noNonNullAssertion": "error",
+        "noYodaExpression": "error",
+        "useBlockStatements": "error",
+        "noSubstr": "error",
+        "useNodejsImportProtocol": "error",
+        "useConsistentMemberAccessibility": {
+          "level": "error",
+          "options": {
+            "accessibility": "explicit"
+          }
+        },
+        "useConst": "error"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["scripts/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": {
+              "level": "off"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "javascript": {
+    "parser": {
+      "unsafeParameterDecoratorsEnabled": true
+    },
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "always",
+      "arrowParentheses": "always",
+      "bracketSpacing": true,
+      "bracketSameLine": true,
+      "trailingCommas": "all",
+      "quoteProperties": "asNeeded",
+      "attributePosition": "auto"
+    }
+  }
+}

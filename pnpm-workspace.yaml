@@ -1,4 +1,5 @@
 packages:
+  - mvp/apps/*
   - mvp/frontend-svelte
   - mvp/scripts
   - scripts
