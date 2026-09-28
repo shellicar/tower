@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+/// <reference types="vitest/jsdom" />
 // jsdom for localStorage alone: View reads the persisted active tab in a
 // field initialiser, so constructing one needs a browser storage to exist.
 import { describe, expect, it } from 'vitest';
@@ -11,7 +12,7 @@ import { View } from './view.svelte';
 // a window key that already exists on the global unless it's on vitest's own
 // list, which `localStorage` isn't. Point the global at jsdom's storage.
 Object.defineProperty(globalThis, 'localStorage', {
-  value: (globalThis as unknown as { jsdom: { window: Window } }).jsdom.window.localStorage,
+  value: jsdom.window.localStorage,
   configurable: true,
 });
 
