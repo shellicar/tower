@@ -156,7 +156,7 @@ function renderRun(title: string, dir: string, probe: string | undefined): strin
   for (const e of ev) {
     const k = `${e.src}:${e.kind}`;
     if (k === 'proof:send' || k === 'proof:push') {
-      out.push(`${rel(e)} ${e.kind.toString().toUpperCase()} step ${e.step}: "${String(e.text).slice(0, 60)}"`);
+      out.push(`${rel(e)} ${String(e.kind).toUpperCase()} step ${e.step}: "${String(e.text).slice(0, 60)}"`);
     } else if (k === 'proof:stop') {
       out.push(`${rel(e)} STOP ${e.method} at ${e.at} (${e.how})`);
     } else if (k === 'proof:kill') {
@@ -181,7 +181,7 @@ function renderRun(title: string, dir: string, probe: string | undefined): strin
       const where = f.includes('/subagents/') ? ` [${f.slice(f.indexOf('/subagents/') + 1)}]` : '';
       out.push(`${rel(e)}   T${s}${e.kind === 'preexisting' ? ' pre' : ''} ${entryLine(x)}${where}`);
     } else if (k === 'sdk:result') {
-      out.push(`${rel(e)} result ${e.subtype} stop=${e.stop_reason ?? null} "${String(e.result ?? '').slice(0, 40)}"${e.errors ? ` errors=${JSON.stringify(e.errors).slice(0, 120)}` : ''}`);
+      out.push(`${rel(e)} result ${e.subtype} stop=${e.stop_reason ?? null} "${String(e.result ?? '').replace(/\s+/g, ' ').slice(0, 40)}"${e.errors ? ` errors=${JSON.stringify(e.errors).slice(0, 120)}` : ''}`);
     } else if (k === 'sdk:stream:message_start') {
       out.push(`${rel(e)} stream message_start ${String(e.id).slice(0, 12)}${e.parent ? ` (sub ${e.parent})` : ''}`);
     } else if (k === 'sdk:stream:content_block_start' && e.parent === null) {
@@ -222,6 +222,50 @@ function renderRun(title: string, dir: string, probe: string | undefined): strin
   return out;
 }
 
+// The short form: from the first stopped (or, in a resume, the first) step
+// on, the stop, the process's end, every conversation entry written
+// (preexisting lines and the Stop hook's bookkeeping left out), and the
+// next request's history after the warm-up turn.
+const QUIET_KINDS = new Set(['system:stop_hook_summary', 'attachment:prompt_snapshot', 'mode']);
+function digest(title: string, dir: string, probe: string | undefined): string[] {
+  const full = renderRun(title, dir, probe);
+  const out: string[] = [full[0] ?? '', full[1] ?? ''];
+  const ev = readEvents(dir);
+  const stop = ev.find((e) => e.src === 'proof' && e.kind === 'stop');
+  const stoppedStep = stop ? Number(stop.step) : 0;
+  let on = false;
+  let inReq = false;
+  let afterWarm = false;
+  for (const line of full.slice(2)) {
+    if (/ SEND step (\d+)/.test(line) && Number(/ SEND step (\d+)/.exec(line)?.[1]) >= stoppedStep) {
+      on = true;
+    }
+    if (line.startsWith('next request')) {
+      inReq = true;
+      afterWarm = false;
+      out.push(line);
+      continue;
+    }
+    if (inReq) {
+      if (afterWarm) {
+        out.push(line);
+      } else if (/assistant +text\(5ch "READY"\)/.test(line)) {
+        afterWarm = true;
+      }
+      continue;
+    }
+    if (!on || line.includes(' pre ') || line.includes('T pre') || / T \(/.test(line) || line.includes('stream block_start') || line.includes('stream message_start') || line.includes('request generate_session_title') || line.includes('queue-operation') || line.includes(':returned')) {
+      continue;
+    }
+    const kind = /\s{2}(\S+)(?: \[| )/.exec(line.replace(/^.*?<- \S+\s+/, '  '))?.[1];
+    if (kind && QUIET_KINDS.has(kind)) {
+      continue;
+    }
+    out.push(line);
+  }
+  return out;
+}
+
 const PROBES = ['Reply with the word NEXT only.', 'Reply with the word AGAIN only.'];
 
 function probeFor(dir: string): string | undefined {
@@ -233,7 +277,8 @@ function probeFor(dir: string): string | undefined {
   return plan.steps.map((s) => s.text).find((t) => PROBES.includes(t));
 }
 
-for (const indexPath of process.argv.slice(2)) {
+const DIGEST = process.argv.includes("--digest");
+for (const indexPath of process.argv.slice(2).filter((a) => a !== "--digest")) {
   const index = JSON.parse(readFileSync(indexPath, 'utf8')) as Json[];
   process.stdout.write(`# ${indexPath}\n\n`);
   for (const row of index) {
@@ -242,7 +287,7 @@ for (const indexPath of process.argv.slice(2)) {
       continue;
     }
     process.stdout.write(`session ${row.sessionId}; main error: ${row.mainError ?? 'none'}\n`);
-    process.stdout.write(`${renderRun('main', String(row.main), probeFor(String(row.main))).join('\n')}\n\n`);
+    process.stdout.write(`${(DIGEST ? digest : renderRun)('main', String(row.main), probeFor(String(row.main))).join('\n')}\n\n`);
     for (const r of (row.resumes as Json[]) ?? []) {
       if (r.skipped) {
         process.stdout.write(`### resume ${r.label}: skipped (${r.skipped})\n\n`);
@@ -250,7 +295,7 @@ for (const indexPath of process.argv.slice(2)) {
       }
       const at = r.atEntry as Json | null;
       const title = `resume ${r.label} (source ${r.source}${r.resumeSessionAt ? `, resumeSessionAt ${sid(r.resumeSessionAt)} = ${at ? entryLine(at) : '?'}` : ''})${r.error ? ` error: ${r.error}` : ''}`;
-      process.stdout.write(`${renderRun(title, String(r.dir), probeFor(String(r.dir))).join('\n')}\n\n`);
+      process.stdout.write(`${(DIGEST ? digest : renderRun)(title, String(r.dir), probeFor(String(r.dir))).join('\n')}\n\n`);
     }
   }
 }
