@@ -162,8 +162,10 @@ export function startForwarder(args: { port: number; upstream: string; rules: Ru
         }
         res.end();
       });
-      req.on('close', () => {
-        if (!res.writableEnded) {
+      // The client going away (not the request body ending, which is what
+      // req's own 'close' means).
+      res.on('close', () => {
+        if (!res.writableFinished) {
           emit({ ts: new Date().toISOString(), wall: Date.now(), id, kind: 'client-closed' });
           up.destroy();
         }
