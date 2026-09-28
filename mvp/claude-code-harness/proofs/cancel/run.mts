@@ -124,7 +124,9 @@ export const PROMPTS = {
   // D scenarios (cancel-sdk-d).
   writeTool: 'Use the Write tool to create the file numbers.txt containing the numbers one to eighty written in words, one per line. Then reply with the word DONE only.',
   thinkThenWrite: 'First work out, carefully and step by step, how many integers from 1 to 300 are divisible by 3 or by 5 but not by 7. Then use the Write tool to create the file result.txt containing that number on the first line, followed by the numbers one to forty written in words, one per line. Then reply with the word DONE only.',
-  permission: 'Run this exact Bash command, once: `echo PERMITTED`. Then reply with its output only.',
+  // A command that writes a file, so it asks for permission (echo alone is
+  // read-only and never reached canUseTool).
+  permission: 'Run this exact Bash command, once: `touch permitted.txt && echo PERMITTED`. Then reply with its output only.',
   parallel: 'In one single message, make these two Bash tool calls in parallel (both at once, not one after the other): `sleep 3; echo FAST` and `sleep 25; echo SLOW`. Then reply with both outputs only.',
   subagent: 'Use the Agent tool once, with subagent_type "general-purpose" and this prompt for the subagent: "Run this exact Bash command, once: `sleep 20; echo SUB`. Then reply with its output only." Then reply with what the subagent returned, only.',
   stopHook: 'Reply with the word STOPHOOK only.',
@@ -496,7 +498,8 @@ async function runOne(plan: RunPlan): Promise<RunOut> {
     env: { ...process.env, ...(plan.scenario.env ?? {}), OTEL_LOG_RAW_API_BODIES: `file:${bodies}` },
     ...(plan.scenario.pdeathsig ? { spawnClaudeCodeProcess: pdeathsigSpawn } : {}),
   };
-  const forwarder = plan.scenario.forward ? await startForwarder({ port: 0, upstream: process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com', rules: plan.scenario.forward, onEvent: (e) => ev.write('fwd', String(e.kind), e) }) : undefined;
+  // Main runs only: a resume's merged user message can carry the marker too.
+  const forwarder = plan.scenario.forward && !plan.resume ? await startForwarder({ port: 0, upstream: process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com', rules: plan.scenario.forward, onEvent: (e) => ev.write('fwd', String(e.kind), e) }) : undefined;
   if (forwarder) {
     (options.env as Record<string, string>).ANTHROPIC_BASE_URL = forwarder.url;
     ev.write('fwd', 'listening', { url: forwarder.url, upstream: process.env.ANTHROPIC_BASE_URL ?? null, rules: plan.scenario.forward as unknown as Json });

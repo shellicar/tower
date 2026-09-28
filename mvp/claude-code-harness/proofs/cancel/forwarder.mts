@@ -147,7 +147,7 @@ export function startForwarder(args: { port: number; upstream: string; rules: Ru
             upRes.resume();
           };
           if (rule?.action === 'hold') {
-            emit({ ts: new Date().toISOString(), wall: Date.now(), id, kind: 'hold', ms: rule.ms ?? 0 });
+            emit({ ts: new Date().toISOString(), wall: Date.now(), id, kind: 'hold', holdMs: rule.ms ?? 0 });
             upRes.pause();
             setTimeout(pass, rule.ms ?? 0);
           } else {
