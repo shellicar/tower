@@ -558,11 +558,13 @@ separately, they can go in this branch" (26 Sep).
       "but yes it's a potential issue". Bridge's adopt replays in stream
       order, which is where overlapping writers would be mixed (inferred
       from code, not observed).
-  - **Optional** (29 Sep, Stephen): conv stays v2, and an absent parent means
-    "follows the tip", so publishers that never announce a start keep
-    working.
+  - **The `parent` field is optional** (29 Sep, Stephen: "no, the field is
+    optional"): an absent `parent` on `query.started` means the query follows
+    the tip. Conv stays v2. Separately, publishers that never send a start
+    (claude-sdk-cli, bridge until updated) keep working.
   - **The shape** (29 Sep; Stephen: "as long as it's *a good* solution, im
-    happy"): `changes.query.started` carries `queryId` and `parent`; the
+    happy"): `changes.query.started` carries `queryId` and `parent`
+    (optional); the
     closure is renamed `changes.query.closed`; `changes.query` stays in v2 as
     the closure's old name, read forever and never published again.
   - **In progress:** the spec text, on branch `docs/query-parent`.
