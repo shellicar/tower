@@ -19,10 +19,15 @@ export type Json = Record<string, unknown>;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
 export const clean = (text: string): string => redact(text).text.replace(EMAIL, '[email redacted]');
 export const now = (): number => performance.timeOrigin + performance.now();
+// CLOCK_MONOTONIC in ms: the one clock two processes (a hosted run's SDK
+// host and its recording parent) share. `ms` is this process's own
+// timeOrigin plus its monotonic time, and timeOrigins drift apart when the
+// wall clock is adjusted between two processes' starts (seen: 12.5 s).
+export const mono = (): number => Number(process.hrtime.bigint() / 1000n) / 1000;
 export const POLL_MS = 5;
 
-// ms is monotonic (timeOrigin + now()); wall is Date.now(), the clock file
-// mtimes are on.
+// ms is monotonic (timeOrigin + now()); mono is CLOCK_MONOTONIC (shared
+// across processes); wall is Date.now(), the clock file mtimes are on.
 export class Events {
   readonly path: string;
   readonly raw: string;
@@ -31,7 +36,7 @@ export class Events {
     this.raw = join(rawDir, 'cancel-events.jsonl');
   }
   write(src: string, kind: string, detail: Json = {}): void {
-    const line = JSON.stringify({ ts: stamp(), ms: now(), wall: Date.now(), src, kind, ...detail });
+    const line = JSON.stringify({ ts: stamp(), ms: now(), mono: mono(), wall: Date.now(), src, kind, ...detail });
     appendFileSync(this.raw, `${line}\n`);
     appendFileSync(this.path, `${clean(line)}\n`);
   }

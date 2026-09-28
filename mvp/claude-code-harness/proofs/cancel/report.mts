@@ -22,7 +22,9 @@ function readEvents(dir: string): Json[] {
     .split('\n')
     .filter((l) => l.trim() !== '')
     .map((l) => JSON.parse(l) as Json)
-    .map((e) => (typeof e.bufferedMs === 'number' ? { ...e, ms: e.bufferedMs } : e))
+    .map((e) => (typeof e.bufferedMs === 'number' ? { ...e, ms: e.bufferedMs, mono: e.bufferedMono } : e))
+    // mono (CLOCK_MONOTONIC) is shared across processes; ms is per process.
+    .map((e) => (typeof e.mono === 'number' ? { ...e, ms: e.mono } : e))
     .sort((a, b) => Number(a.ms) - Number(b.ms));
 }
 
@@ -177,7 +179,7 @@ function renderRun(title: string, dir: string, probe: string | undefined): strin
     } else if (k === 'proof:host-exit') {
       out.push(`${rel(e)} SDK host exit: code=${e.code} signal=${e.signal}`);
     } else if (k === 'proof:claude-gone') {
-      out.push(`${rel({ ms: e.goneMs })} Claude Code pid ${e.pid} gone`);
+      out.push(`${rel(e)} Claude Code pid ${e.pid} gone`);
     } else if (k === 'proof:canUseTool' || k === 'proof:permission-aborted' || k === 'proof:permission-released') {
       out.push(`${rel(e)} ${e.kind} ${e.toolName}${e.agentID ? ` (agent ${e.agentID})` : ''}`);
     } else if (e.src === 'fwd' && e.kind !== 'listening') {

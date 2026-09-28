@@ -54,7 +54,7 @@ import type { HarnessOptions, Run } from '../../src/harness.mts';
 import { startRun } from '../../src/harness.mts';
 import { stamp } from '../../src/record.mts';
 import { type Rule, startForwarder } from './forwarder.mts';
-import { BodiesWatch, ClaudeFinder, clean, Events, entryBrief, hooks, type Json, loadAppends, now, procStat, RecordingStore, sdkBrief, TranscriptWatch } from './lib.mts';
+import { BodiesWatch, ClaudeFinder, clean, Events, entryBrief, hooks, type Json, loadAppends, mono, now, procStat, RecordingStore, sdkBrief, TranscriptWatch } from './lib.mts';
 
 const HARNESS_STATE = join(homedir(), '.local', 'state', 'tower-claude-code-harness');
 const STATE = join(HARNESS_STATE, 'cancel');
@@ -122,12 +122,15 @@ export const PROMPTS = {
   text: `Write the numbers one to sixty in words, one per line, nothing else. ${NO_TOOLS}`,
   toolExec: 'Run this exact Bash command, once: `sleep 20; echo DONE`. Then reply with its output only.',
   // D scenarios (cancel-sdk-d).
-  writeTool: 'Use the Write tool to create the file numbers.txt containing the numbers one to eighty written in words, one per line. Then reply with the word DONE only.',
-  thinkThenWrite: 'First work out, carefully and step by step, how many integers from 1 to 300 are divisible by 3 or by 5 but not by 7. Then use the Write tool to create the file result.txt containing that number on the first line, followed by the numbers one to forty written in words, one per line. Then reply with the word DONE only.',
+  // Long tool input: Claude Code had received a 516-character input whole
+  // before the SDK's stream events reached 100 characters, so the input is
+  // long enough to still be streaming when the stop lands.
+  writeTool: 'Use the Write tool to create the file numbers.txt containing the numbers one to three hundred written in words, one per line. Then reply with the word DONE only.',
+  thinkThenWrite: 'First work out, carefully and step by step, how many integers from 1 to 300 are divisible by 3 or by 5 but not by 7. Then use the Write tool to create the file result.txt containing that number on the first line, followed by the numbers one to three hundred written in words, one per line. Then reply with the word DONE only.',
   // A command that writes a file, so it asks for permission (echo alone is
   // read-only and never reached canUseTool).
   permission: 'Run this exact Bash command, once: `touch permitted.txt && echo PERMITTED`. Then reply with its output only.',
-  parallel: 'In one single message, make these two Bash tool calls in parallel (both at once, not one after the other): `sleep 3; echo FAST` and `sleep 25; echo SLOW`. Then reply with both outputs only.',
+  parallel: 'In one single message, make these two Bash tool calls in parallel (both at once, not one after the other): `sleep 3; echo FAST` and `sleep 20; echo SLOW`. Then reply with both outputs only.',
   subagent: 'Use the Agent tool once, with subagent_type "general-purpose" and this prompt for the subagent: "Run this exact Bash command, once: `sleep 20; echo SUB`. Then reply with its output only." Then reply with what the subagent returned, only.',
   stopHook: 'Reply with the word STOPHOOK only.',
   // Enough text for a small auto-compact window to be crossed.
@@ -381,7 +384,7 @@ async function runOne(plan: RunPlan): Promise<RunOut> {
       if (events) {
         events.write(src, kind, detail);
       } else {
-        pre.push([src, kind, { ...detail, bufferedAt: stamp(), bufferedMs: now() }]);
+        pre.push([src, kind, { ...detail, bufferedAt: stamp(), bufferedMs: now(), bufferedMono: mono() }]);
       }
     },
   } as Events;
@@ -700,7 +703,7 @@ async function runHosted(plan: RunPlan): Promise<RunOut> {
       if (events) {
         events.write(src, kind, detail);
       } else {
-        pre.push([src, kind, { ...detail, bufferedAt: stamp(), bufferedMs: now() }]);
+        pre.push([src, kind, { ...detail, bufferedAt: stamp(), bufferedMs: now(), bufferedMono: mono() }]);
       }
     },
   } as Events;
