@@ -1,10 +1,20 @@
 // @vitest-environment jsdom
+/// <reference types="vitest/jsdom" />
 // jsdom for localStorage alone: View reads the persisted active tab in a
 // field initialiser, so constructing one needs a browser storage to exist.
 import { describe, expect, it } from 'vitest';
 import type { Transport } from '../core/transport.svelte';
 import type { Conversations } from './conversation.svelte';
 import { View } from './view.svelte';
+
+// Node 25+ defines its own `localStorage` global (undefined unless
+// --localstorage-file is given), and vitest's jsdom environment doesn't copy
+// a window key that already exists on the global unless it's on vitest's own
+// list, which `localStorage` isn't. Point the global at jsdom's storage.
+Object.defineProperty(globalThis, 'localStorage', {
+  value: jsdom.window.localStorage,
+  configurable: true,
+});
 
 // Fakes for the two collaborators View only ever calls a handful of methods
 // on; cast past the nominal types, the same discipline rail.test.ts uses.
