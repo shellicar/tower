@@ -48,7 +48,13 @@ export function startFakeApi(args: { upstream: string; dir: string; onEvent?: (e
     req.on('data', (c: Buffer) => chunks.push(c));
     req.on('end', () => {
       const raw = Buffer.concat(chunks);
-      const path = (req.url ?? '').split('?')[0];
+      // As an HTTP proxy (run.mts CR_FIRST_PARTY) a request names its
+      // absolute URL; as the base URL, only its path.
+      const rel = /^https?:\/\//.test(req.url ?? '') ? (() => {
+        const u = new URL(req.url as string);
+        return `${u.pathname}${u.search}`;
+      })() : (req.url ?? '');
+      const path = rel.split('?')[0];
       if (req.method === 'POST' && path === '/v1/messages') {
         n += 1;
         let body: Json = {};
@@ -78,7 +84,7 @@ export function startFakeApi(args: { upstream: string; dir: string; onEvent?: (e
       delete headers['accept-encoding'];
       const send = upstream.protocol === 'https:' ? httpsRequest : httpRequest;
       const up = send(
-        { protocol: upstream.protocol, hostname: upstream.hostname, port: upstream.port || (upstream.protocol === 'https:' ? 443 : 80), method: req.method, path: `${upstream.pathname.replace(/\/$/, '')}${req.url ?? ''}`, headers: headers as Record<string, string> },
+        { protocol: upstream.protocol, hostname: upstream.hostname, port: upstream.port || (upstream.protocol === 'https:' ? 443 : 80), method: req.method, path: `${upstream.pathname.replace(/\/$/, '')}${rel}`, headers: headers as Record<string, string> },
         (upRes) => {
           emit({ kind: 'forward-response', path: req.url, status: upRes.statusCode });
           res.writeHead(upRes.statusCode ?? 502, upRes.headers);

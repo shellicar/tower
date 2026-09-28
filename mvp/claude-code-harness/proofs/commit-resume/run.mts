@@ -11,11 +11,12 @@
 // first result, or after 90 s.
 //
 // Choices made for these runs, not decisions (TODO: undecided): the timeout;
-// one job at a time; TZ=UTC, so Claude Code's local date is still the
+// one job at a time by default (--workers N, one per session at once); TZ=UTC
+// (CR_TZ overrides), so Claude Code's local date is still the
 // recordings' date (28 Sep) after midnight in Brisbane and no "the date has
 // changed" reminder is added; entries' cwd rewritten (HoldingStore.load).
 //
-//   node proofs/commit-resume/run.mts <plan-dir> [--only <job id,...>] [--limit N]
+//   node proofs/commit-resume/run.mts <plan-dir> [--only <job id,...>] [--limit N] [--workers N]
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -27,8 +28,11 @@ import { type Events, hooks } from '../cancel/lib.mts';
 import { startFakeApi } from './fake-api.mts';
 
 type Json = Record<string, unknown>;
-const AGENT = 'commit-resume';
+// CR_AGENT: another proof reusing this runner under its own agent name
+// (its own config and working directory); CR_TZ: the clock's zone.
+const AGENT = process.env.CR_AGENT ?? 'commit-resume';
 const MODEL = 'claude-sonnet-5';
+const TZ = process.env.CR_TZ ?? 'UTC';
 const JOB_TIMEOUT_MS = 90_000;
 const CWD = join(homedir(), '.local', 'state', 'tower-claude-code-harness', 'work', AGENT);
 
@@ -36,9 +40,23 @@ interface Job {
   id: string;
   holding: string;
   probe: string;
-  options: { thinking: Json; tools: string[]; env: Record<string, string> };
+  options: { thinking: Json; tools: string[]; env: Record<string, string>; model?: string; mcpWait?: boolean; extra?: Json };
   sessionId: string;
   first: string;
+}
+
+// CR_FIRST_PARTY=1: Claude Code is given the API's own host over plain
+// HTTP (http://api.anthropic.com) and the fake as its HTTP proxy, so it
+// treats the API as first party (features it keeps to api.anthropic.com
+// stay on: with the fake as the base URL they are off); the fake still
+// answers /v1/messages and forwards the rest over HTTPS.
+// TODO: undecided, a harness choice; the alternative is the fake as the
+// base URL (the store proof's route).
+function baseUrl(fakeUrl: string): Record<string, string> {
+  if (process.env.CR_FIRST_PARTY === '1') {
+    return { ANTHROPIC_BASE_URL: 'http://api.anthropic.com', HTTP_PROXY: fakeUrl, http_proxy: fakeUrl };
+  }
+  return { ANTHROPIC_BASE_URL: fakeUrl };
 }
 
 class HoldingStore implements SessionStore {
@@ -64,7 +82,7 @@ class HoldingStore implements SessionStore {
     // snapshot). A participant resumes where the conversation ran, so every
     // occurrence of the recording's path is replaced with this run's: the
     // test harness's doing, applied to every rule and to OWN alike.
-    const text = JSON.stringify(e).replace(/\/home\/stephen\/\.local\/state\/tower-claude-code-harness\/work\/cancel-sdk(-d)?(?![A-Za-z0-9_-])/g, CWD);
+    const text = JSON.stringify(e).replace(/\/home\/stephen\/\.local\/state\/tower-claude-code-harness\/work\/[A-Za-z0-9_-]+(?![A-Za-z0-9_-])/g, CWD);
     return JSON.parse(text) as SessionStoreEntry[];
   }
   async listSubkeys(): Promise<string[]> {
@@ -104,7 +122,8 @@ async function runJob(planDir: string, job: Job): Promise<Json> {
     const run = startRun({
       name: AGENT,
       options: {
-        model: MODEL,
+        ...(job.options.extra ?? {}),
+        model: job.options.model ?? MODEL,
         thinking: job.options.thinking as never,
         includePartialMessages: true,
         tools: job.options.tools,
@@ -114,7 +133,7 @@ async function runJob(planDir: string, job: Job): Promise<Json> {
         sessionStoreFlush: 'eager',
         resume: job.sessionId,
         ...(holding.resumeSessionAt ? { resumeSessionAt: holding.resumeSessionAt } : {}),
-        env: { ...process.env, ...job.options.env, ANTHROPIC_BASE_URL: fake.url, OTEL_LOG_RAW_API_BODIES: `file:${join(outDir, 'otel')}`, TZ: 'UTC' },
+        env: { ...process.env, ...job.options.env, ...baseUrl(fake.url), OTEL_LOG_RAW_API_BODIES: `file:${join(outDir, 'otel')}`, TZ },
       },
     });
     runDir = run.dir;
@@ -122,7 +141,7 @@ async function runJob(planDir: string, job: Job): Promise<Json> {
     // request sent before they do carries 2 tools instead of 10 (seen in the
     // recorded store-at-last resume of D1-SIGTERM r2 too). Wait until none
     // is pending (at most 20 s), so the tools list isn't a timing race.
-    const until = Date.now() + 20_000;
+    const until = Date.now() + (job.options.mcpWait === false ? 0 : 20_000);
     let statuses: Json[] = [];
     while (Date.now() < until) {
       statuses = (await run.query.mcpServerStatus()) as unknown as Json[];
@@ -190,18 +209,34 @@ async function main(): Promise<void> {
   if (only) {
     jobs = jobs.filter((j) => only.has(j.id));
   }
+  // --workers N: N jobs at a time, never two of one session at once (each
+  // resumes the recorded session id in the one config directory).
+  const workers = args.includes('--workers') ? Number(args[args.indexOf('--workers') + 1]) : 1;
+  const todo = jobs.filter((j) => redo || !existsSync(join(planDir, 'out', j.id, 'job.json'))).slice(0, limit);
+  const busy = new Set<string>();
   let n = 0;
-  for (const job of jobs) {
-    if (n >= limit) {
-      break;
+  const next = (): Job | undefined => {
+    const i = todo.findIndex((j) => !busy.has(j.sessionId));
+    return i < 0 ? undefined : todo.splice(i, 1)[0];
+  };
+  const worker = async (): Promise<void> => {
+    while (todo.length > 0) {
+      const job = next();
+      if (!job) {
+        await new Promise((r) => setTimeout(r, 200));
+        continue;
+      }
+      busy.add(job.sessionId);
+      try {
+        const r = await runJob(planDir, job);
+        n += 1;
+        process.stdout.write(`${stamp()} ${n}/${jobs.length} ${job.id} ${job.first} ${r.ms}ms wire=${r.wire ? 'yes' : 'NO'}${r.error ? ` error=${String(r.error).slice(0, 120)}` : ''}\n`);
+      } finally {
+        busy.delete(job.sessionId);
+      }
     }
-    if (!redo && existsSync(join(planDir, 'out', job.id, 'job.json'))) {
-      continue;
-    }
-    n += 1;
-    const r = await runJob(planDir, job);
-    process.stdout.write(`${stamp()} ${n}/${jobs.length} ${job.id} ${job.first} ${r.ms}ms wire=${r.wire ? 'yes' : 'NO'}${r.error ? ` error=${String(r.error).slice(0, 120)}` : ''}\n`);
-  }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, workers) }, () => worker()));
 }
 
 // A resume Claude Code refuses (for example a resumeSessionAt it can't

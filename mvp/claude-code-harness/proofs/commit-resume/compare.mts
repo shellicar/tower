@@ -16,6 +16,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 type Json = Record<string, unknown>;
 
@@ -29,7 +30,7 @@ function lastUserText(body: Json): string {
   return Array.isArray(c) ? (c as Json[]).map((b) => (typeof b.text === 'string' ? b.text : '')).join('\n') : '';
 }
 
-function norm(body: Json): Json {
+export function norm(body: Json): Json {
   const s = JSON.stringify(body).replace(/tower-claude-code-harness\/work\/[A-Za-z0-9_-]+/g, 'tower-claude-code-harness/work/<AGENT>');
   const b = JSON.parse(s) as Json;
   const md = b.metadata as Json | undefined;
@@ -46,7 +47,7 @@ function norm(body: Json): Json {
 }
 
 const CONTINUED = 'This session is being continued from a previous conversation';
-function maskCompaction(body: Json): Json | undefined {
+export function maskCompaction(body: Json): Json | undefined {
   const b = structuredClone(body);
   const m0 = ((b.messages ?? []) as Json[])[0];
   const blocks = Array.isArray(m0?.content) ? (m0?.content as Json[]) : [];
@@ -111,7 +112,7 @@ export function diff(ref: Json, got: Json): string[] {
   return out;
 }
 
-function requestOf(outDir: string, probe: string): { file: string; body: Json } | undefined {
+export function requestOf(outDir: string, probe: string): { file: string; body: Json } | undefined {
   const d = join(outDir, 'otel');
   if (!existsSync(d)) {
     return undefined;
@@ -214,4 +215,7 @@ function main(): void {
   process.stdout.write(`${rows.length} pickups -> ${join(planDir, 'compare.txt')}\n`);
 }
 
-main();
+// Imported for diff() by proofs/minimum-entries: run only as a script.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}

@@ -70,11 +70,14 @@ interface Send {
 }
 
 const WT = '/home/stephen/repos/@shellicar/tower/.claude/worktrees';
-const INDEX_DIRS = [`${WT}/cancel-scenarios/mvp/claude-code-harness/runs`, `${WT}/cancel-sdk-d/mvp/claude-code-harness/runs`];
+// CR_INDEX_DIRS (colon-separated) and CR_INDEX_PREFIX: another proof's
+// recordings (its own runs/ and index file names) planned the same way.
+const INDEX_DIRS = process.env.CR_INDEX_DIRS ? process.env.CR_INDEX_DIRS.split(':') : [`${WT}/cancel-scenarios/mvp/claude-code-harness/runs`, `${WT}/cancel-sdk-d/mvp/claude-code-harness/runs`];
+const INDEX_PREFIX = process.env.CR_INDEX_PREFIX ?? 'cancel-index-';
 const AGAIN = 'Reply with the word AGAIN only.';
 
 // Per-scenario options the main runs used (cancel run.mts, scenarios()).
-function scenarioOptions(id: string, runDir: string): { thinking: Json; tools: string[]; env: Record<string, string> } {
+function scenarioOptions(id: string, runDir: string): { thinking: Json; tools: string[]; env: Record<string, string>; model?: string } {
   // Model options as the main run passed them (its run.json); env values
   // are not recorded there, only names, so they come from scenarios().
   const o = (JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf8')) as Json).options as Json;
@@ -90,7 +93,10 @@ function scenarioOptions(id: string, runDir: string): { thinking: Json; tools: s
   if (id.startsWith('F2-') || id.startsWith('F3-')) {
     env = { CLAUDE_CODE_MAX_RETRIES: '2' };
   }
-  return { thinking, tools, env };
+  // The model only when it isn't the runner's default, so the store
+  // proof's own jobs keep their ids.
+  const model = typeof o.model === 'string' && o.model !== 'claude-sonnet-5' ? { model: o.model } : {};
+  return { thinking, tools, env, ...model };
 }
 
 const lines = (p: string): Json[] =>
@@ -317,7 +323,7 @@ interface Row {
 function pickRows(): Row[] {
   const idx: { file: string; rows: Row[] }[] = [];
   for (const d of INDEX_DIRS) {
-    for (const f of readdirSync(d).filter((x) => x.startsWith('cancel-index-') && x.endsWith('.json'))) {
+    for (const f of readdirSync(d).filter((x) => x.startsWith(INDEX_PREFIX) && x.endsWith('.json'))) {
       idx.push({ file: f.replace(/^cancel-index-cancel-sdk(-d)?-/, ''), rows: JSON.parse(readFileSync(join(d, f), 'utf8')) as Row[] });
     }
   }
@@ -326,9 +332,11 @@ function pickRows(): Row[] {
   for (const { rows } of idx) {
     for (const r of rows) {
       // Later indexes win among rep 1; another rep only while no rep 1.
-      const cur = best.get(r.scenario);
+      // Per model and scenario: one index dir can hold several models' runs.
+      const key = `${String((r as Row & { model?: string }).model ?? '')}/${r.scenario}`;
+      const cur = best.get(key);
       if (!cur || r.rep === 1 || (cur.rep !== 1 && r.rep <= cur.rep)) {
-        best.set(r.scenario, r);
+        best.set(key, r);
       }
     }
   }
