@@ -1,8 +1,8 @@
 import { join } from 'node:path';
-import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
+import type { SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import { dependsOn } from '@shellicar/core-di';
 import { ParticipantConfig } from './ParticipantConfig.js';
-import { IProcessSpawner } from './ProcessSpawner.js';
+import { type ChildProcessHandle, IProcessSpawner } from './ProcessSpawner.js';
 
 /**
  * The tag every Claude Code carries, set to the config dir, so a later run on
@@ -24,7 +24,7 @@ export class ClaudeCodeSpawner {
   @dependsOn(IProcessSpawner) private readonly processes!: IProcessSpawner;
   @dependsOn(ParticipantConfig) private readonly config!: ParticipantConfig;
 
-  public spawn(options: SpawnOptions): SpawnedProcess {
+  public spawn(options: SpawnOptions): ChildProcessHandle {
     const env: Record<string, string | undefined> = {
       ...options.env,
       [PARTICIPANT_TAG]: this.config.configDir,
