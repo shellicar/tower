@@ -2,16 +2,19 @@
 # Classify every access under the real home by Claude Code's own processes
 # (the bundled claude binary and every descendant not started through the
 # shell prefix), from an `strace -f -y -ttt -s 0` trace (paths only).
-#   home-classify.py <trace> <agent> <private-home>
+#   home-classify.py <trace> <agent> <private-home> [<durable state root>]
 import re, sys, collections, os
 trace, agent, phome = sys.argv[1:4]
 HOME = os.path.expanduser('~')
 ST = f'{HOME}/.local/state/tower-claude-code-harness'
+# The participant's durable state root (lib.mts INTEGRATION_STATE); the first
+# attempt's by default.
+STATE = sys.argv[4] if len(sys.argv) > 4 else f'{ST}/integration'
 classes = [
     ('login', lambda p: p.startswith(f'{HOME}/.claude/.credentials') or p.startswith(f'{HOME}/.claude/.lock') or re.match(re.escape(f'{HOME}/.claude/') + r'.*lock', p) is not None),
     ('declared: agent config dir', lambda p: p == f'{ST}/config-dirs/{agent}' or p.startswith(f'{ST}/config-dirs/{agent}/')),
     ('declared: work dir', lambda p: p == f'{ST}/work/{agent}' or p.startswith(f'{ST}/work/{agent}/')),
-    ('declared: durable state', lambda p: p == f'{ST}/integration/{agent}' or p.startswith(f'{ST}/integration/{agent}/')),
+    ('declared: durable state', lambda p: p == f'{STATE}/{agent}' or p.startswith(f'{STATE}/{agent}/')),
 ]
 MUT = re.compile(r'^(unlink|unlinkat|rename|renameat2?|rmdir|mkdir|mkdirat|symlink|symlinkat|link|linkat|chmod|fchmodat|fchownat|chown|truncate|utimensat|bind|setxattr|removexattr)$')
 lines = open(trace, errors='replace').read().split('\n')

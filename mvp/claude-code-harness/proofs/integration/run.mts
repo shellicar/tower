@@ -1079,7 +1079,7 @@ async function home(a: Args): Promise<CheckRow[]> {
     // started without the shell prefix) must write nothing in "else".
     // Commands through the shell prefix use the real home by design and
     // aren't counted. /run/user is not the home (round 1 counted it).
-    const hc = spawnSync('python3', [join(HERE, 'home-classify.py'), String(x.tracePath), agent, privateHome], { encoding: 'utf8', maxBuffer: 1 << 28 });
+    const hc = spawnSync('python3', [join(HERE, 'home-classify.py'), String(x.tracePath), agent, privateHome, INTEGRATION_STATE], { encoding: 'utf8', maxBuffer: 1 << 28 });
     const cp = root.write(`home-classify-${n}.txt`, hc.stdout);
     const groups = Object.fromEntries([...hc.stdout.matchAll(/^== (.+?): (\d+) accesses, (\d+) mutating$/gm)].map((m) => [m[1], { accesses: Number(m[2]), mutating: Number(m[3]) }])) as Record<string, { accesses: number; mutating: number }>;
     const elseW = hc.stdout.slice(hc.stdout.indexOf('== else')).split('\n').filter((l) => /^\s+W /.test(l));
