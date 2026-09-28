@@ -717,3 +717,31 @@ Nothing in the real home was changed.
   and write locks, the bridge-spawn sweep, the `cleanupPeriodDays` cutoff, and
   the SDK's Keychain naming and store-resume copy) are collected, verbatim with
   offsets, in `runs/p26-code-evidence.txt`.
+
+## Store commit against resume from tower
+
+`proofs/commit-resume/` asks whether committing Claude Code's conversation
+from the store appends and resuming Claude Code from what tower holds fit
+together: resumed at a pickup and sent the prompt the live run sent next,
+does Claude Code send the live run's request? It replays the cancel
+scenarios' recordings (branches `cancel-scenarios`, `cancel-sdk-d`); no
+model is called.
+
+- `plan.mts <dir>`: per scenario (latest rep 1), per pickup (before each
+  later send, and the scenario's end), what each commit rule would hold,
+  deduplicated into jobs. Rules and the choices inside them (marked
+  undecided) are at the top of the file. `OWN`/`OWN@` are Claude Code's own
+  transcript cut at the pickup, as a reference, not a rule.
+- `run.mts <dir>`: each job resumes a fresh Claude Code (agent
+  `commit-resume`) through a `sessionStore` whose `load()` returns the
+  holding, sends the probe, and keeps the request. The Messages API is
+  `fake-api.mts` (a canned "OK"; every other call passes through). It waits
+  for the account's connectors before sending, runs with `TZ=UTC` and
+  rewrites the recordings' working directory to its own: all three keep
+  timing, date and directory out of the comparison.
+- `compare.mts <dir>` and `matrix.mts <dir>`: each request against the live
+  request (Claude Code's own body log on both sides), the recorded resumes and
+  `OWN`/`OWN@`; `compare.txt` has every difference, `matrix.txt` the rule by
+  pickup table.
+- `prompt-uuid.mts <dir>`: whether a `uuid` set on the sent `SDKUserMessage`
+  becomes the prompt entry's `uuid` in the store.

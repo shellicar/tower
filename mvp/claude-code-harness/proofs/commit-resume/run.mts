@@ -204,4 +204,10 @@ async function main(): Promise<void> {
   }
 }
 
+// A resume Claude Code refuses (for example a resumeSessionAt it can't
+// find) also rejects a promise inside the SDK that nothing awaits; the job
+// has recorded the error by then, so the batch goes on.
+process.on('unhandledRejection', (err) => {
+  process.stderr.write(`${stamp()} unhandled rejection (job continues): ${err instanceof Error ? err.message : String(err)}\n`);
+});
 await main();

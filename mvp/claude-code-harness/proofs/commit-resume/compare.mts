@@ -6,7 +6,10 @@
 //   - metadata.user_id's device_id (a store resume runs in a fresh temporary
 //     config dir, which gets its own device id)
 //   - the agent's working directory path (work/<agent>)
-// Everything else, cache_control included, is compared as sent.
+// Everything else, cache_control included, is compared as sent. Where both
+// requests open with a compaction continuation ("This session is being
+// continued ..."), the difference is also given with that one text block
+// masked (the summary is the model's output: the fake API's is "OK").
 //
 //   node proofs/commit-resume/compare.mts <plan-dir> [--rules R0,R0@,...]
 
@@ -39,6 +42,19 @@ function norm(body: Json): Json {
       // not JSON: left as is
     }
   }
+  return b;
+}
+
+const CONTINUED = 'This session is being continued from a previous conversation';
+function maskCompaction(body: Json): Json | undefined {
+  const b = structuredClone(body);
+  const m0 = ((b.messages ?? []) as Json[])[0];
+  const blocks = Array.isArray(m0?.content) ? (m0?.content as Json[]) : [];
+  const i = blocks.findIndex((x) => typeof x.text === 'string' && x.text.startsWith(CONTINUED));
+  if (i < 0) {
+    return undefined;
+  }
+  (blocks[i] as Json).text = '<compaction summary>';
   return b;
 }
 
@@ -130,6 +146,7 @@ function main(): void {
       got[rule] = { job: id, req: ran ? requestOf(outDir, String(p.probe)) : undefined, error: jr.error ? String(jr.error) : undefined, ran };
     }
     const own = got.OWN?.req;
+    const ownAt = got['OWN@']?.req;
     const cells: Json = {};
     for (const [rule, g] of Object.entries(got)) {
       const vs: Json = {};
@@ -142,12 +159,28 @@ function main(): void {
         continue;
       }
       for (const r of refs) {
-        const d = diff(JSON.parse(readFileSync(r.file, 'utf8')) as Json, g.req.body);
+        const ref = JSON.parse(readFileSync(r.file, 'utf8')) as Json;
+        const d = diff(ref, g.req.body);
         vs[r.kind] = d.length === 0 ? 'same' : d;
+        const a = maskCompaction(ref);
+        const b = maskCompaction(g.req.body);
+        if (d.length > 0 && a && b) {
+          const dm = diff(a, b);
+          vs[`${r.kind}~masked`] = dm.length === 0 ? 'same' : dm;
+        }
       }
-      if (own && rule !== 'OWN') {
-        const d = diff(own.body, g.req.body);
-        vs.OWN = d.length === 0 ? 'same' : d;
+      for (const [name, o] of [['OWN', own], ['OWN@', ownAt]] as const) {
+        if (!o || rule === name) {
+          continue;
+        }
+        const d = diff(o.body, g.req.body);
+        vs[name] = d.length === 0 ? 'same' : d;
+        const a = maskCompaction(o.body);
+        const b = maskCompaction(g.req.body);
+        if (d.length > 0 && a && b) {
+          const dm = diff(a, b);
+          vs[`${name}~masked`] = dm.length === 0 ? 'same' : dm;
+        }
       }
       cells[rule] = { job: g.job, request: g.req.file, hash: createHash('sha256').update(JSON.stringify(norm(g.req.body))).digest('hex').slice(0, 10), vs };
     }

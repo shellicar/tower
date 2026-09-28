@@ -29,7 +29,10 @@
 //          while a prompt is still held, the held entries stay off the live
 //          chain (a branch) and the next query attaches after the last
 //          committed entry, beside the cancelled prompt.
-//   H@ Hp@ with resumeSessionAt as R0@.
+//   Hl     Hp, and the next query's first entry that names a branched entry
+//          as its parentUuid is given the uuid of its tower parent (added
+//          after Hp lost the history before the branch: A-thinking end).
+//   H@ Hp@ Hl@ with resumeSessionAt as R0@.
 //   OWN    not a rule: Claude Code's own transcript, cut at the pickup.
 //   OWN@   OWN with resumeSessionAt as R0@.
 //
@@ -38,7 +41,10 @@
 //   - H's "prompt": a main user entry whose text is one the run sent;
 //     "non-thinking": any content block type other than thinking and
 //     redacted_thinking. Subagent (subpath) appends pass through every rule.
-//   - Query boundary for Hp: the next send.
+//   - Query boundary for Hp: the next send; a pushed prompt (E3) joins the
+//     running query and is not a boundary.
+//   - Model options (thinking, tools) from the main run's run.json; env
+//     values (not recorded) from the cancel scenarios' definitions.
 //
 //   node proofs/commit-resume/plan.mts <out-dir>
 
@@ -68,19 +74,13 @@ const INDEX_DIRS = [`${WT}/cancel-scenarios/mvp/claude-code-harness/runs`, `${WT
 const AGAIN = 'Reply with the word AGAIN only.';
 
 // Per-scenario options the main runs used (cancel run.mts, scenarios()).
-function scenarioOptions(id: string): { thinking: Json; tools: string[]; env: Record<string, string> } {
-  let thinking: Json = { type: 'adaptive', display: 'summarized' };
-  let tools = ['Bash', 'Write'];
+function scenarioOptions(id: string, runDir: string): { thinking: Json; tools: string[]; env: Record<string, string> } {
+  // Model options as the main run passed them (its run.json); env values
+  // are not recorded there, only names, so they come from scenarios().
+  const o = (JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf8')) as Json).options as Json;
+  const thinking = o.thinking as Json;
+  const tools = o.tools as string[];
   let env: Record<string, string> = {};
-  if (id.startsWith('D2-')) {
-    tools = ['Write'];
-  }
-  if (id.startsWith('D2-nothink')) {
-    thinking = { type: 'disabled' };
-  }
-  if (id.startsWith('D5-')) {
-    tools = ['Agent', 'Bash'];
-  }
   if (id.startsWith('D10-')) {
     env = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '100000', CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '15' };
   }
@@ -117,11 +117,14 @@ function lastUserText(body: Json): string {
   return last ? textOfContent(last.content) : '';
 }
 
-// The first main-query request after `after` whose last user message carries
-// `probe` (tools present: not the title request).
-function findRequest(rawDir: string, after: number, probe: string): string | undefined {
+// The first main-query request after `after` (and before the next send)
+// whose last user message carries `probe` (tools present: not the title
+// request). A step whose own request never went out (D10-interrupt's NEXT,
+// stopped during compaction) has none: the next step's request carries the
+// same text merged.
+function findRequest(rawDir: string, after: number, probe: string, before = Number.POSITIVE_INFINITY): string | undefined {
   for (const e of lines(join(rawDir, 'cancel-events.jsonl'))) {
-    if (e.src !== 'bodies' || e.kind !== 'request' || Number(e.ms) < after || Number(e.tools ?? 0) === 0) {
+    if (e.src !== 'bodies' || e.kind !== 'request' || Number(e.ms) < after || Number(e.ms) >= before || Number(e.tools ?? 0) === 0) {
       continue;
     }
     const file = join(rawDir, 'api-bodies', String(e.file));
@@ -185,12 +188,25 @@ function r0(appends: Append[], cutoff: number): Holding {
   return { appends: appends.filter((a) => a.ms < cutoff).map((a) => ({ key: a.key, entries: a.entries })) };
 }
 
-function hold(appends: Append[], sends: Send[], cutoff: number, parent: boolean): Holding {
+function hold(appends: Append[], sends: Send[], cutoff: number, parent: boolean, link = false): Holding {
   const texts = new Set(sends.map((s) => s.text));
   const out: Holding['appends'] = [];
   const branched: string[] = [];
+  const branchedIds = new Set<string>();
+  let lastMainUuid: string | undefined;
   let held: { key: Key; entry: Json }[] | null = null;
-  const commit = (key: Key, entry: Json): void => {
+  const commit = (key: Key, e: Json): void => {
+    let entry = e;
+    if (isMain(key)) {
+      // Hl: an entry whose parentUuid names a branched entry is given the
+      // uuid of the entry it now attaches after in tower (its tower parent).
+      if (link && typeof entry.parentUuid === 'string' && branchedIds.has(entry.parentUuid)) {
+        entry = { ...entry, parentUuid: lastMainUuid ?? null };
+      }
+      if (typeof entry.uuid === 'string') {
+        lastMainUuid = entry.uuid;
+      }
+    }
     const last = out[out.length - 1];
     if (last && last.key.sessionId === key.sessionId && last.key.subpath === key.subpath) {
       last.entries.push(entry);
@@ -198,7 +214,8 @@ function hold(appends: Append[], sends: Send[], cutoff: number, parent: boolean)
       out.push({ key, entries: [entry] });
     }
   };
-  const boundaries = sends.filter((s) => s.ms < cutoff).map((s) => s.ms);
+  // A pushed prompt joins the running query: only a send starts one.
+  const boundaries = sends.filter((s) => s.ms < cutoff && (s as Send & { kind?: string }).kind !== 'push').map((s) => s.ms);
   let bi = 0;
   for (const a of appends.filter((x) => x.ms < cutoff)) {
     // A query started since the last append: with the parent, what is still
@@ -206,6 +223,11 @@ function hold(appends: Append[], sends: Send[], cutoff: number, parent: boolean)
     while (bi < boundaries.length && (boundaries[bi] as number) <= a.ms) {
       if (parent && held) {
         branched.push(...held.map((h) => brief(h.entry)));
+        for (const h of held) {
+          if (typeof h.entry.uuid === 'string') {
+            branchedIds.add(h.entry.uuid);
+          }
+        }
         held = null;
       }
       bi += 1;
@@ -238,7 +260,8 @@ function hold(appends: Append[], sends: Send[], cutoff: number, parent: boolean)
 }
 
 // Claude Code's own transcript for the main session, cut at the pickup: the
-// first n lines, n = the last line the run's transcript watch saw before it.
+// first n lines, n = how many of its lines the run's transcript watch saw
+// before it.
 function own(rawDir: string, sessionId: string, cutoff: number): Holding | undefined {
   const ev = lines(join(rawDir, 'cancel-events.jsonl'));
   const fileEv = ev.find((e) => e.src === 'transcript' && e.kind === 'file' && String(e.file).endsWith(`${sessionId}.jsonl`));
@@ -246,14 +269,37 @@ function own(rawDir: string, sessionId: string, cutoff: number): Holding | undef
     return undefined;
   }
   const rel = `${sessionId}.jsonl`;
-  const n = Math.max(0, ...ev.filter((e) => e.src === 'transcript' && e.kind === 'line' && String(e.file).endsWith(rel) && Number(e.ms) < cutoff).map((e) => Number(e.n)));
+  // The watch numbers lines across all files it watches; a file's own line
+  // count is how many of its lines it saw.
+  const n = ev.filter((e) => e.src === 'transcript' && e.kind === 'line' && String(e.file).endsWith(rel) && Number(e.ms) < cutoff).length;
   const path = String(fileEv.file);
   if (!existsSync(path) || n === 0) {
     return undefined;
   }
-  const all = readFileSync(path, 'utf8').split('\n').filter((l) => l.trim() !== '');
-  const entries = all.slice(0, n).map((l) => JSON.parse(l) as Json);
-  return { appends: [{ key: { projectKey: 'own', sessionId }, entries }] };
+  const cut = (p: string, k: number): Json[] =>
+    readFileSync(p, 'utf8')
+      .split('\n')
+      .filter((l) => l.trim() !== '')
+      .slice(0, k)
+      .map((l) => JSON.parse(l) as Json);
+  const appends: Holding['appends'] = [{ key: { projectKey: 'own', sessionId }, entries: cut(path, n) }];
+  // Subagent transcripts: <session>/subagents/agent-*.jsonl, the store's
+  // subpath "subagents/agent-*".
+  const subDir = join(path.replace(/\.jsonl$/, ''), 'subagents');
+  const subs = new Map<string, number>();
+  for (const e of ev) {
+    const m = /\/subagents\/(agent-[^/]+)\.jsonl$/.exec(String(e.file));
+    if (e.src === 'transcript' && e.kind === 'line' && String(e.file).includes(`${sessionId}/subagents/`) && m && Number(e.ms) < cutoff) {
+      subs.set(m[1] as string, (subs.get(m[1] as string) ?? 0) + 1);
+    }
+  }
+  for (const [name, k] of subs) {
+    const p = join(subDir, `${name}.jsonl`);
+    if (existsSync(p) && k > 0) {
+      appends.push({ key: { projectKey: 'own', sessionId, subpath: `subagents/${name}` }, entries: cut(p, k) });
+    }
+  }
+  return { appends };
 }
 
 // ---------------------------------------------------------------------------
@@ -341,7 +387,7 @@ function main(): void {
   const addPickup = (row: Row, point: string, probe: string, appends: Append[], sends: Send[], cutoff: number, refs: { kind: string; file: string }[], ownH: Holding | undefined): void => {
     const holdings: Record<string, string> = {};
     const notCommitted: Record<string, string[]> = {};
-    const base: Record<string, Holding> = { R0: r0(appends, cutoff), H: hold(appends, sends, cutoff, false), Hp: hold(appends, sends, cutoff, true) };
+    const base: Record<string, Holding> = { R0: r0(appends, cutoff), H: hold(appends, sends, cutoff, false), Hp: hold(appends, sends, cutoff, true), Hl: hold(appends, sends, cutoff, true, true) };
     for (const [name, h] of Object.entries(base)) {
       holdings[name] = save(h);
       holdings[`${name}@`] = save({ ...h, resumeSessionAt: lastUuid(h) });
@@ -353,7 +399,7 @@ function main(): void {
       holdings.OWN = save(ownH);
       holdings['OWN@'] = save({ ...ownH, resumeSessionAt: lastUuid(ownH) });
     }
-    pickups.push({ scenario: row.scenario, rep: row.rep, sessionId: row.sessionId, point, probe, options: scenarioOptions(row.scenario), refs, holdings, notCommitted });
+    pickups.push({ scenario: row.scenario, rep: row.rep, sessionId: row.sessionId, point, probe, options: scenarioOptions(row.scenario, row.main), refs, holdings, notCommitted });
   };
 
   for (const row of pickRows()) {
@@ -364,8 +410,10 @@ function main(): void {
     const appends = appendsOf(row.mainRaw).filter((a) => a.key.sessionId === row.sessionId);
     const sends = sendsOf(row.mainRaw);
     // P<s>
-    for (const s of sends.filter((x) => x.step >= 1 && (x as Send & { kind?: string }).kind === 'send')) {
-      const live = findRequest(row.mainRaw, s.ms, s.text);
+    const realSends = sends.filter((x) => (x as Send & { kind?: string }).kind === 'send');
+    for (const s of realSends.filter((x) => x.step >= 1)) {
+      const next = realSends.find((x) => x.ms > s.ms);
+      const live = findRequest(row.mainRaw, s.ms, s.text, next?.ms);
       addPickup(row, `P${s.step}`, s.text, appends, sends, s.ms, live ? [{ kind: 'live', file: live }] : [], own(row.mainRaw, row.sessionId, s.ms));
     }
     // end
