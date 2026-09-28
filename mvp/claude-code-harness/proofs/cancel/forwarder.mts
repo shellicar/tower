@@ -1,8 +1,8 @@
 // A local forwarder for the cancel scenarios' API-error and network endings
 // (F2, F3) and a held response (D1): ANTHROPIC_BASE_URL points at it for a
 // run, it forwards every request to the upstream (the shell's own
-// ANTHROPIC_BASE_URL, or api.anthropic.com), and on a request whose LAST
-// user message contains a marker it does one of:
+// ANTHROPIC_BASE_URL, or api.anthropic.com), and on a request whose last
+// user-role message contains a marker it does one of:
 //   status   answer with an injected error status and an Anthropic-shaped
 //            error body instead of forwarding (the upstream never sees it)
 //   cut      forward, pass the response through, and destroy the client
@@ -49,13 +49,15 @@ type Json = Record<string, unknown>;
 
 const ERROR_TYPES: Record<number, string> = { 429: 'rate_limit_error', 529: 'overloaded_error', 500: 'api_error', 502: 'api_error', 503: 'api_error', 504: 'api_error' };
 
+// The last user-role message: Claude Code 2.1.282 can end the messages
+// array with a role "system" message (an MCP instructions reminder).
 function lastUserText(body: Json): string {
   const msgs = body.messages;
   if (!Array.isArray(msgs) || msgs.length === 0) {
     return '';
   }
-  const last = msgs[msgs.length - 1] as Json;
-  if (last.role !== 'user') {
+  const last = [...(msgs as Json[])].reverse().find((m) => m.role === 'user');
+  if (!last) {
     return '';
   }
   const c = last.content;

@@ -265,11 +265,14 @@ function scenarios(): Scenario[] {
   // requests), CLAUDE_CODE_MAX_RETRIES 2 (proof 23's value).
   const retries = { CLAUDE_CODE_MAX_RETRIES: '2' };
   out.push({ id: 'F2-429-once', env: retries, forward: [{ marker: MARK.f2a, action: 'status', status: 429, retryAfter: 1, times: 1 }], steps: [{ text: WARM }, { text: marked(PROMPTS.thinking, MARK.f2a) }, { text: NEXT }], resumes: [] });
-  out.push({ id: 'F2-529-always', env: retries, forward: [{ marker: MARK.f2b, action: 'status', status: 529 }], steps: [{ text: WARM }, { text: marked(PROMPTS.thinking, MARK.f2b) }, { text: NEXT }], resumes: [] });
-  out.push({ id: 'F2-500-always', env: retries, forward: [{ marker: MARK.f2c, action: 'status', status: 500 }], steps: [{ text: WARM }, { text: marked(PROMPTS.thinking, MARK.f2c) }, { text: NEXT }], resumes: [] });
+  // "always": every attempt of that one request (3 = CLAUDE_CODE_MAX_RETRIES
+  // 2 plus the first), so the next step's request, whose user message can
+  // carry the marker too, gets through.
+  out.push({ id: 'F2-529-always', env: retries, forward: [{ marker: MARK.f2b, action: 'status', status: 529, times: 3 }], steps: [{ text: WARM }, { text: marked(PROMPTS.thinking, MARK.f2b) }, { text: NEXT }], resumes: [] });
+  out.push({ id: 'F2-500-always', env: retries, forward: [{ marker: MARK.f2c, action: 'status', status: 500, times: 3 }], steps: [{ text: WARM }, { text: marked(PROMPTS.thinking, MARK.f2c) }, { text: NEXT }], resumes: [] });
   // F3: the connection cut after 5 content_block_delta events (injected).
   out.push({ id: 'F3-cut-once', env: retries, forward: [{ marker: MARK.f3a, action: 'cut', afterDeltas: 5, times: 1 }], steps: [{ text: WARM }, { text: marked(PROMPTS.thinking, MARK.f3a) }, { text: NEXT }], resumes: [] });
-  out.push({ id: 'F3-cut-always', env: retries, forward: [{ marker: MARK.f3b, action: 'cut', afterDeltas: 5 }], steps: [{ text: WARM }, { text: marked(PROMPTS.thinking, MARK.f3b) }, { text: NEXT }], resumes: [] });
+  out.push({ id: 'F3-cut-always', env: retries, forward: [{ marker: MARK.f3b, action: 'cut', afterDeltas: 5, times: 3 }], steps: [{ text: WARM }, { text: marked(PROMPTS.thinking, MARK.f3b) }, { text: NEXT }], resumes: [] });
   return out;
 }
 
