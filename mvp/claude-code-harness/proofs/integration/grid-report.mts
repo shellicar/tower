@@ -156,14 +156,14 @@ for (const m of models) {
 }
 
 L.push('## Live and shadow differences', '');
-const diffs = summaries.filter((s) => s.shadowSame && !s.shadowSame.same);
+const diffs = summaries.filter((s) => !s.supersededBy && s.shadowSame && !s.shadowSame.same);
 if (diffs.length === 0) L.push('- none: in every cell the shadow variant holds exactly what tower holds.');
 for (const s of diffs) {
   L.push(`- ${s.row.model}, ${s.row.live} live, ${s.row.cell} then ${s.row.pickup} (${s.row.convId}): first difference at message ${String(s.shadowSame?.at)}; tower ${String(s.shadowSame?.live)}; shadow ${String(s.shadowSame?.shadow)}`);
 }
 
 L.push('', '## Content divergences', '', 'Every FAIL whose divergence is in content, or that names atoms missing from tower. The shadow is listed only where it differs from tower.', '');
-for (const s of summaries) {
+for (const s of summaries.filter((x) => !x.supersededBy)) {
   for (const [which, r] of [['tower', s.live], ['shadow', s.shadowSame && !s.shadowSame.same ? s.shadow : undefined]] as const) {
     if (!r) continue;
     const items = r.points.flatMap((p) => p.judgments.filter((j) => j.contentVerdict === 'FAIL').map((j) => ({ p, j })));
@@ -183,7 +183,7 @@ for (const s of summaries) {
 
 L.push('## Shape-only divergences, by kind', '');
 const shapes = new Map<string, Set<string>>();
-for (const s of summaries) {
+for (const s of summaries.filter((x) => !x.supersededBy)) {
   for (const p of s.live?.points ?? []) {
     for (const j of p.judgments) {
       if (j.verdict === 'FAIL' && j.contentVerdict !== 'FAIL' && j.divergence) {
@@ -203,7 +203,7 @@ for (const [k, set] of [...shapes].sort((a, b) => b[1].size - a[1].size)) {
 
 L.push('', '## UNCHECKED points, by reason', '', 'A point whose content verdict is UNCHECKED: no truth independent of tower reached it.', '');
 const unchecked = new Map<string, string[]>();
-for (const s of summaries) {
+for (const s of summaries.filter((x) => !x.supersededBy)) {
   for (const p of s.live?.points ?? []) {
     if (p.contentVerdict !== 'UNCHECKED') continue;
     const why = p.judgments.map((j) => norm(`${j.truth}: ${j.why}`)).join(' / ');
