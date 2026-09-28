@@ -3,7 +3,7 @@
 Claude Code joining tower's bus as one more participant, through the Agent
 SDK.
 
-This is the decision record. Nothing is built yet. Every decision here is
+This is the decision record. Nothing is built yet; how it will be built is under How it's built. Every decision here is
 Stephen's, with the date he made it and, where it matters, his words. Open
 questions are listed under [Open](#open). Evidence comes from proofs run on
 26 and 27 Sep, each on its own branch (listed under [Evidence](#evidence)).
@@ -23,16 +23,35 @@ questions are listed under [Open](#open). Evidence comes from proofs run on
   using claude code again" (26 Sep).
 - Summarised thinking is make or break (26 Sep). It works end to end on
   Sonnet 5, Opus 5.5, Fable 5.1 and Haiku 4.5 when declared (proof 1).
+- **The purpose is a seam between interface and harness** (29 Sep): "it's
+  being able to separate the ui/interface from the harness, but still *get*
+  claude code's features / not thta tower's ui is amazing / but it means that i
+  can then focus on the presentation rather than the harness tooling". Claude
+  Code is the harness; tower is the interface; the bus is the seam. Earlier
+  (27 Sep): "the *reason* i want to use claude code is to not have to try to
+  play catch up on their features while developing my own".
 
 ## Scope of v0
 
 In:
 
-- Seeing a conversation in tower and saying into it.
+- Seeing a conversation in tower and saying into it, fully usable from
+  tower's UI: "v0 is making claude code addressable from the bus" and it
+  "needs to be fully usable from tower's ui, because there wont *be* a
+  terminal to use" (29 Sep).
 - Auto mode.
 - Images sent with a `say` (26 Sep).
 
 Out of v0:
+
+- **Resuming from tower on another machine** (29 Sep): "the whole resume
+  perfectly thing doesnt need to be in v0". In v0 a conversation resumes from
+  Claude Code's own local record (its transcript in the agent's config dir);
+  what is published only has to render correctly in tower's UI. What a resume
+  from tower would need is in the minimum entries proof (Evidence).
+- **Windows** (29 Sep): "its not a v0 thing, possibly v1 if its not too
+  difficult". It matters because a friend of Stephen's uses Windows; tower and
+  bridge already work there.
 
 - **Approvals.** "anything that cannot be auto approved by automode, can be
   droped, ie AskUserQuestion" (26 Sep). When they come, each ask only has to
@@ -44,7 +63,9 @@ Out of v0:
 - **Addressable subagents.** Not needed, though they'd be nice. They "likely
   needs first class support on the bus". They could be conversations of
   their own, "but then they would show up as well, and havign them *not*
-  show up as independent conversation is the v0 goal" (26 Sep).
+  show up as independent conversation is the v0 goal" (26 Sep). Their
+  entries don't go onto the bus: "they arent addressable, so they dont go
+  onto the bus" (29 Sep).
 - **Showing a conversation's shells and subagents.** "its not needed for v0,
   but highly desirable, it is for v1" (26 Sep). What Claude Code can send
   about them is mapped in proof 5.
@@ -137,11 +158,59 @@ Not at all:
   conversation / what happens right now if claude loads a secret? it goes
   onto my disk in the transcript / in this case, it goes onto nats / either
   way, its \"published\" on this machine" (26 Sep).
+- **What is committed follows Claude Code** (29 Sep): "for now, i think
+  allowing claude code to just keep the published messages whatever it
+  publishes on the store is fine". Over the SDK, Claude Code keeps a cancelled
+  prompt in a straight line (prompt, marker, next prompt) and sends it merged
+  with the next prompt, so it is committed like anything else (the store
+  proof; the committer options report, §6). Which entry kinds reach tower is
+  not settled: "i dont want a "here's where to put all your shit" / in that
+  case i'd prefer to just drop it when resuming from tower, it can remain
+  *internal*". The minimum entries proof measured what a resume from tower
+  needs; that is post-v0. Host death is the known gap: it loses the end only
+  with no transcript to recover from as well, and "this is for the 99% of
+  cases".
+
+## How it's built (29 Sep)
+
+- **Fresh, not from the proof code:** "i dont need speed, i need
+  correctness". The proofs are reference; the review of the third integration
+  attempt's code (Evidence) lists what a builder needs to know from them and
+  what they decided without Stephen.
+- **Everything but the publisher first:** the process and its configuration,
+  launching Claude Code, the requests on NATS, shutdown, and leftovers and
+  recovery. The publisher (what turns Claude Code's writes into `changes`)
+  follows.
+- **`@shellicar/core-di`,** its preview release: "if i decide it's overkill,
+  it'll be easy to remove i think, easier than adding it retroactively later".
+- **Abstract classes (`abstract class IThing`) where something crosses a
+  boundary,** and only there: "abstract what makes sense / anything that
+  crosses a boundary, the store is a good one because it would write into nats
+  / anything that writes/reads from a file could be another / i dont think we
+  need an abstraction for claude, unless it makes sense for testing". The
+  session store hands entries to an abstract publisher, which does nothing
+  until the publisher is built.
+- **Tooling:** no build step (the `.mts` files run on Node); type checking,
+  Biome and knip from the start. Biome's rules: `claude-cli`'s config plus
+  `noUnusedFunctionParameters`, `noUnusedPrivateClassMembers` and
+  `noUndeclaredDependencies`; `noExplicitAny` stays a warning, because `any`
+  is needed as a generic constraint. Biome against Oxlint and Oxfmt is being
+  compared, and the linter or formatter may change with it.
 
 ## Configuration
 
 ### The principle
 
+- **Why no ambient config** (29 Sep): so what a session gets is controlled.
+  "if skills are ambient, i cannot control things, i cannot A/B test in
+  different sessions / and the config became maintenance nightmare in
+  claude-sdk-cli / yes we need to configure, but not having any defaults is
+  quite liberating / the lack of having to worry about hot reload (if you
+  want to change it just... send it onver stdio, and update "your" config
+  file)". What it drops is config files at conventional paths, rarely needed
+  "because launching the session or changing *that* session can be done
+  remotely anyway". "it also means i dont have to decide, what's the default?
+  is it opt in? opt out? etc".
 - **No ambient configuration:** "it shouldnt use ~/.claude unless the user
   explicitly allows that" (25 Sep). The participant runs Claude Code with a
   launcher-chosen `CLAUDE_CONFIG_DIR` and `settingSources: []`, which blocks
@@ -206,7 +275,11 @@ because otherwise we'd be using a resolved value" (26 Sep).
 
 - **Required, named fields:** model, max tokens, thinking type and display,
   effort, system prompt, permission mode.
-- **A generic `settings` fallback** for everything else, in Claude Code's own
+- **The control lines are named `settings` and `claudeSettings`** (29 Sep).
+  `claudeSettings` is the generic fallback below; `settings` reads back
+  everything the participant holds. Every other line is named after what it
+  sets, so the fallback is named after whose settings it carries.
+- **A generic fallback (`claudeSettings`)** for everything else, in Claude Code's own
   settings.json shape, applied as-is (proof 4: `applyFlagSettings` takes
   arbitrary keys, validated only for nesting depth). Per-model values use
   Claude Code's own `modelSettings` (for example
@@ -385,6 +458,20 @@ because otherwise we'd be using a resolved value" (26 Sep).
   exit, not what exactly happens in each ... it should be *obvious*".
 - **SIGINT, SIGTERM, SIGHUP and stdin closing all start it** (26 Sep). Bridge
   also exits when stdin closes.
+- **Each Claude Code runs in its own process group** (29 Sep), so every
+  trigger goes through the participant's one path, a terminal's Ctrl-C
+  included: "having a single path where we're in control makes the most sense
+  *but* we still need to tolerate an error on interrupt, someone (me) could
+  have signalled the process directly". An `interrupt()` that fails against a
+  Claude Code already stopping or gone is expected. The spawn uses Node's
+  `detached: true` (its own group and session on Linux and macOS) with
+  `windowsHide: true` (its own hidden console on Windows); the shutdown build
+  tests it by signalling the process group directly.
+- **The leftover scan is Linux only in v0,** behind an abstract class, so the
+  macOS one can be written on a Mac: "lets get it working, i can then
+  actually imeplement the macos part *on* my macbook". It reads each
+  process's environment from `/proc`. On macOS in v0, nothing stops a leftover
+  from forking a conversation that is served again while it still writes.
 - **Running as a service comes later:** "telling it if it's a service or know
   so it knows how to *interpret* SIGHUP would be something when we look at
   service-fying it" (26 Sep).
@@ -444,10 +531,14 @@ separately, they can go in this branch" (26 Sep).
     `/tmp/branch-analysis/`): a single Claude Code never branches inside a
     query in what it sends. Each observed behaviour, and how the query's
     parent expresses it:
-    - Esc during thinking, then a new prompt: the cancelled prompt isn't
-      committed (the spec's recommendation), so the new query's parent is
-      the tip. A harness that did commit it would give two queries with the
-      same parent, side by side.
+    - Esc during thinking, then a new prompt: in Stephen's CLI transcripts
+      the cancelled prompt is left as a dead end the new prompt branches
+      around, so the new query's parent is the tip. Over the SDK (2.1.282)
+      the chain is straight instead: prompt, marker, next prompt, sent merged
+      into one user message (the committer options report, §6, observed).
+      Whether the difference is the version or the interactive Esc against
+      `interrupt()` isn't settled. Either way the new query's parent is the
+      tip.
     - `/rewind`, or a resume from an earlier point: the new query's parent
       is the earlier message.
     - Kill, then recovery ("123", then Claude Code's own "No response
@@ -467,9 +558,14 @@ separately, they can go in this branch" (26 Sep).
       "but yes it's a potential issue". Bridge's adopt replays in stream
       order, which is where overlapping writers would be mixed (inferred
       from code, not observed).
-  - **Still open:** whether the parent is required (a new conv version) or
-    optional (stays conv v2, where an absent parent means "follows the
-    tip"), and the exact shape of the query-start change.
+  - **Optional** (29 Sep, Stephen): conv stays v2, and an absent parent means
+    "follows the tip", so publishers that never announce a start keep
+    working.
+  - **The shape** (29 Sep; Stephen: "as long as it's *a good* solution, im
+    happy"): `changes.query.started` carries `queryId` and `parent`; the
+    closure is renamed `changes.query.closed`; `changes.query` stays in v2 as
+    the closure's old name, read forever and never published again.
+  - **In progress:** the spec text, on branch `docs/query-parent`.
 - **Owed, if chosen:** a `shutdown` query reason. "i'd rather say its on the
   table, then let the agent who has to implement this \"decide\"" (26 Sep).
   The build brief says so, and the agent reports what it chose and why.
@@ -494,12 +590,13 @@ separately, they can go in this branch" (26 Sep).
 
 ## Open
 
-- **What the invariant means** (28 Sep): conversation correctness, not a byte copy of each request. "*if* you send the *same prompt*, then it should be the same": from tower, the same prompt gives the same request. A query becomes conversation when something non-thinking comes back (a full or partial reply); the prompt and what came back are committed together. A prompt nothing came back for is local state: "thats the very definition of *not* committed, because it's still local"; "whatever is commited is now part of the conversation"; "the transcript is not the same as the conversation, because the conversation is *published* / they are almost the same". Observed live the same day: an Esc during thinking leaves the prompt in the transcript as a dead leaf the next prompt branches around; a kill leaves it, and on restart Claude Code adds its own "No response requested." (model `<synthetic>`) under it. The spec already makes both the implementation's declaration. The third integration attempt (branch `integration-participant-3`) was briefed with R1 restated by Claude as "commit only once the final shape is known", which is not Stephen's; its shape-only failures and its "everything written is on tower" check are measured against that wording, not this one.
+- **What the invariant means** (28 Sep): conversation correctness, not a byte copy of each request. "*if* you send the *same prompt*, then it should be the same": from tower, the same prompt gives the same request. A query becomes conversation when something non-thinking comes back (a full or partial reply); the prompt and what came back are committed together. A prompt nothing came back for is local state: "thats the very definition of *not* committed, because it's still local"; "whatever is commited is now part of the conversation"; "the transcript is not the same as the conversation, because the conversation is *published* / they are almost the same". Revisited 29 Sep: the spec had been written on the belief that Claude Code keeps only what was responded to, but it keeps everything and reparents around aborted messages, so "the harness has some leeway / either we allow claude code to do what it does with the transcript, and publish the query then abort it / or it only published *once* there's a response". For now the first (How it runs, "What is committed follows Claude Code"). Observed live the same day: an Esc during thinking leaves the prompt in the transcript as a dead leaf the next prompt branches around; a kill leaves it, and on restart Claude Code adds its own "No response requested." (model `<synthetic>`) under it. The spec already makes both the implementation's declaration. The third integration attempt (branch `integration-participant-3`) was briefed with R1 restated by Claude as "commit only once the final shape is known", which is not Stephen's; its shape-only failures and its "everything written is on tower" check are measured against that wording, not this one.
 - **API response logging** (28 Sep): "we should modify it to log responses then / whether its the full response, or not, i leave to you, we just need a way to enable/disable it when/if i actually start using it". Not through a proxy: "claude code knows theres a proxy and can modify its behaviour / and since its literally just logging, i'd rather not do it in an intrusive way". The route found in the bundle: `ANTHROPIC_LOG=debug` with `--debug-to-stderr` logs every response's status and headers (credentials masked), confirmed on real traffic. Not built. Open: whether the switch defaults on or off.
 - **Transient errors** (28 Sep): "i would imagine this is telemetry / its not intrinsic to the conversation". `turn_aborted` says an attempt failed, not what failed (a usage limit, the network, a server error).
 - **What tower holds, and when** (the reconcile, `.claude/tasks/reconcile-tower-holding.md`, done): Claude Code's pieces as saved, or the messages as the model received them carrying their pieces, and at what moment each is committed. R1 (commit once known persisted), R2 (exactly what Claude Code builds its next query on), placement is semantic. Proof 24 (`proof-24-next-query.md`) found a rule meeting R1 and R2 on pieces; proofs 16 and 20 built the as-received form. Stephen leaning (28 Sep) to committing a message once its reply is kept: "i 'think' this is okay if its more accurate". This settles the old grain, as-received form and typed-object carrier questions together.
+- **Settled for now (29 Sep) by "What is committed follows Claude Code"** (How it runs), for both of the next two items: the as-received form and the integration rerun are set aside. The store proof found committing every store entry unchanged, and resuming with `resumeSessionAt` at the last committed entry, sent the live request at every pickup (an agent's report, not re-checked).
 - **The hybrid store, confirmed end to end:** local record first, tower's tip checked before use, tower for a conversation this machine never had, exact against the live next query, alongside the private HOME, the orphan tag and recovery. First run as one thing in the third integration attempt (28 Sep, branch `integration-participant-3`), judged by a check built on the wrong wording (see What the invariant means); a rerun waits on that check.
-- **Skills:** the route proven (proofs 22, 26) is the `user` source over the agent's config dir, with the spawn hook linking each declared skill folder into whichever config dir each Claude Code gets, skipping folders that carry `.claude-plugin`, and `reloadSkills()` when the declared set changes; the private HOME keeps the housekeeping it turns on out of the real home. Proposed by Claude, not yet confirmed by Stephen.
+- **Skills:** the route proven (proofs 22, 26) is the `user` source over the agent's config dir, with the spawn hook linking each declared skill folder into whichever config dir each Claude Code gets, skipping folders that carry `.claude-plugin`, and `reloadSkills()` when the declared set changes; the private HOME keeps the housekeeping it turns on out of the real home. Proposed by Claude, not yet confirmed by Stephen. The review of the third attempt found its code opening the `user` source unconditionally (`extraArgs`), undoing `settingSources: []`. Skills are their own later piece (29 Sep); the question there is declaring a skills directory without opening Claude Code's whole `user` source (CLAUDE.md, hooks, permissions, MCP).
 - **Later, not v0:** the `tools` line; queueing (v1); showing shells and subagents (v1).
 
 ## Evidence
@@ -525,9 +622,24 @@ branches off `proof-14-pure-resume`, and proof 17 off `proof-7-stopped`.
 | 13 | Resuming after a cwd change, cache | `proof-13-resume-cwd` | done |
 | 14 | Whether a resume from tower is pure | `proof-14-pure-resume` | done |
 | 15 | Which messages Claude Code writes itself | `proof-15-machine-messages` (37d0176) | done |
-| 16 | Publishing as the model received it, and resuming | `proof-16-semantic-form` | running (sent 27 Sep) |
-| 17 | Recovering blind, whatever ended the last run | `proof-17-recovery` | running (sent 27 Sep) |
+| 16 | Publishing as the model received it, and resuming | `proof-16-semantic-form` | done |
+| 17 | Recovering blind, whatever ended the last run | `proof-17-recovery` | done |
+| 17b | Two processes on one session | `proof-17b-shared-dir` | done |
 | 18 | Keeping the account's connectors out | `proof-18-connectors` | done |
+| 19 | Skills from config-declared directories, without a prefix | `proof-19-skills-plain` | done |
+| 20 | Copying the conversation from the request body | `proof-20-body-copy` | done |
+| 21 | Stopping an orphaned Claude Code | `proof-21-orphans` | done |
+| 22 | Plain-named skills through the user level | `proof-22-skills-user-level` | done |
+| 23 | When Claude Code commits | `proof-23-commit-timing` | done |
+| 24 | Committing the conversation Claude Code builds on | `proof-24-next-query` | done |
+| 25 | Tagging each Claude Code to find leftovers | `proof-25-orphan-tag` | done |
+| 26 | Keeping Claude Code out of the user's home | `proof-26-home` | done |
+| | The third integration attempt | `integration-participant-3` | done; judged by the wrong wording of R1 |
+| | Cancel and kill, over the SDK and the CLI | `cancel-scenarios`, `cancel-sdk-d`, `cancel-cli` | done |
+| | Committer sources and options | report in `/tmp/committer-options/final-report.md` | done |
+| | Store commit and resume | `proof-store-commit-resume` | done |
+| | Minimum entries for a resume from tower (post-v0) | `proof-minimum-entries` | done |
+| | Review of the third attempt's code, for the fresh build | `.claude/tasks/integration-review.md` | done |
 
 The harness every proof runs on is isolated: each run gets a config
 directory of its own, "isolated" (26 Sep), and credentials may still be read
