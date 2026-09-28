@@ -72,8 +72,9 @@ closing round (ends `end_turn`).
 
 - Exercises: `turn_started` with request inputs, `turn_ended` with verbatim
   `stopReason`, `tool_use` with full payload, `usage` per round, message
-  commits on `changes`, `from` on every message that is an utterance — absent
-  on the `tool_result`, which nobody sent.
+  commits on `changes`, `from` on every message someone wrote (a human, an
+  agent or an orchestrator), absent on the `tool_result`, which the harness
+  generated.
 - Asserts: the baseline schemas; the query fold grouping by `queryId` and
   closed by the `query` closure change on `changes` — carried by the v2 twin,
   since v1 has no closure change (conversation.md, The v1 tree). An ending

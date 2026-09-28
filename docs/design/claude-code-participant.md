@@ -101,8 +101,8 @@ Not at all:
   API response (proof 9 rebuilt replies from it).
 - **Claude Code's `role: "system"` messages are published on
   `changes.message` as sent** (26 Sep): "add role to changes.message DONE".
-  The schema's role is already open (conversation.md:615); the prose gets
-  `system` named (see [Spec changes owed](#spec-changes-owed)).
+  The schema's role is an open set (conversation.md, Message schemas), and
+  it now lists `system` (see [Spec changes owed](#spec-changes-owed)).
 - **Where a reminder sits in what the model received is semantic, not
   presentation** (27 Sep): "yes semantic". Publishing Claude Code's entries
   as written "records a conversation that never happened" (Stephen:
@@ -335,9 +335,9 @@ because otherwise we'd be using a resolved value" (26 Sep).
   rules decide it within a world (agent.md:217-226).
 - **`service` without an id** is rejected `invalid` (agent.md:214).
 - **A `say` while a query runs** is rejected; the flow is cancel, then say
-  (conversation.md:461-491). "it's by design that queueing isnt supported,
+  (conversation.md, Preconditions). "it's by design that queueing isnt supported,
   because i built the nats spec for multiple users" (26 Sep).
-- **Cancel** names a query id (conversation.md:496-500). What reaches
+- **Cancel** names a query id (conversation.md, Preconditions). What reaches
   `changes` afterwards is whatever Claude Code kept.
 - **Where bridge is off the spec, the participant follows the spec,**
   because "the doc wins where code and doc disagree" (CLAUDE.md):
@@ -399,17 +399,26 @@ separately, they can go in this branch" (26 Sep).
 - **Done:** `turn.started.maxTokens` optional, with wire and helm accepting a missing value; no conformance
   fixture exercises it yet, and CLAUDE.md says "Fix lands twice: code +
   fixture". agent.md:214 says the agent's own defaults.
-- **Owed:** name `system` as a `changes.message` role alongside user and
-  assistant (26 Sep).
-- **Done:** a cancelled turn's partial reply is the implementation's declaration, with no recommendation (fixture `v2/scenario-2c.jsonl`, wire test). Earlier: conversation.md:235-237 says
+- **Done:** `system` named as a `changes.message` role alongside user and
+  assistant (26 Sep). The `message` schema lists the roles; the message
+  definition and the change table refer to it rather than listing them.
+- **Done:** `from` defined by authorship: it says who wrote the message, a
+  human, an agent or an orchestrator (29 Sep). A message the harness
+  generated (a tool result, a system message, a reminder) has no `from`.
+- **Done:** a turn defined as one API round, what was sent to the API and
+  what came back, with every message belonging to the one turn it first
+  appears in (29 Sep): "a turn is about what goes to the API and what gets
+  returned from the API / there is no such thing as a message that isnt part
+  of a turn".
+- **Done:** a cancelled turn's partial reply is the implementation's declaration, with no recommendation (fixture `v2/scenario-2c.jsonl`, wire test). Earlier: conversation.md (The change stream) said
   a cancelled turn's assistant message never commits; Claude Code keeps it
   and the model sees it (proof 2). "this is a description though, what the
   harness decides to commit is actually up to it, this is a case of me
   overfitting the spec to my harness / so its a temporary amendment or just
   an amendment to the spec in this feature" (26 Sep).
 - **Done:** `busy` as a known `chdir` rejection reason beside `unsupported`
-  (conversation.md:351), for a `chdir` while a query runs (27 Sep;
-  fixture `agent/scenario-a17.jsonl`, wire test).
+  (conversation.md, the `chdir` row under Requests), for a `chdir` while a
+  query runs (27 Sep; fixture `agent/scenario-a17.jsonl`, wire test).
 - **Owed: the parent belongs to the query, and names a message** (decided
   28 Sep). Today no committed change carries a parent: `message` and
   `query` have none, only `say.precondition.tip` does, so a consumer can't

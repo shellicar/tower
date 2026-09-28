@@ -18,12 +18,16 @@ is not this spec's concern.
 
 Its structure:
 
-- **message** — one user-role or assistant message; the atomic unit. A
-  message's id is stable and names the *occurrence in the dialogue*, not the
-  bytes: content is revisable (see the change stream). "User-role" covers both
-  what a sender said and tool results — which is why every API round is a pair.
-- **turn** — one API round: a user-role message in, an assistant message out.
-  `turnId` groups the pair. A turn ends with a reason — `tool_use` for a round
+- **message** — one message, in a role the `message` schema names (an open
+  set; see Message schemas); the atomic unit. A message's id is stable and
+  names the *occurrence in the dialogue*, not the bytes: content is revisable
+  (see the change stream). The user role holds both what a sender said and
+  what the harness adds there, such as tool results and reminders.
+- **turn** — one API round: what was sent to the API and what came back.
+  Every message belongs to one turn, the round it first appears in: sent new
+  in it, or returned by it. What is sent new is the user-role messages and
+  any system message; what comes back is the assistant's reply. `turnId`
+  groups them. A turn ends with a reason — `tool_use` for a round
   that calls a tool, `end_turn` for one that stops — and that reason is
   observation: the model's own word for why it stopped, never the query's
   ending.
@@ -169,7 +173,7 @@ exactly that argument):
 
 | Change | Fields | Notes |
 |---|---|---|
-| `message` | `id`, `queryId`, `turnId`, `role`, `from`?, `content` | **utterance** — the dialogue grew. `id` is the message's stable id; `role` is `user` or `assistant`; `from` is the sender identity (`{ kind: human \| agent \| orchestrator }` + id) so two `role: user` messages from different senders read apart — **absent for a `tool_result`**: it is the mechanical delivery of a tool's output, not an utterance, and nobody sent it, so nothing is fabricated to fill the slot (correction, 19 Jul 2026 — it previously carried `from: {kind: agent}`, wrongly); `content` is content blocks |
+| `message` | `id`, `queryId`, `turnId`, `role`, `from`?, `content` | **utterance** — the dialogue grew. `id` is the message's stable id; `role` is an open set whose known values the `message` schema lists (see Message schemas); `from` says who wrote the message: a human, an agent or an orchestrator (something outside the conversation that acts on it), as `{ kind: human \| agent \| orchestrator }` + id, so two `role: user` messages written by different authors read apart. A message nobody wrote, one the harness generated, has no `from`: a tool result, a system message, a reminder (context the harness adds in the user role, not something the user said). Nothing is fabricated to fill the slot (correction, 19 Jul 2026: a tool result previously carried `from: {kind: agent}`, wrongly); `content` is content blocks |
 | `revision` | `messageId`, `content` | **revision** — the content under a stable id changed: a trim, a resize, or the words themselves rewritten. Carries the resulting content, never the why — the record carries effects, never reasons |
 | `tip_moved` | `to` (a message id) | **tip movement** — the tip pointer moved: rewind, fast-forward. The reflog, as events |
 | `query` | `queryId`, `reason` | **query closure** — the query will grow no further; the record now contains everything it will ever contain. `reason` is the system's own vocabulary, an open set under add-only: `completed` (the servicer ran its last round and chose not to run another), `cancelled` (a `cancel` was accepted), `aborted` (the attempt failed and the servicer gave the query up). Committal like every change: published after the closing fact is in the record, never speculatively |
@@ -619,7 +623,7 @@ export const conversationTelemetry = {
 // conv.v2.{conversationId}.changes.> — instanceId is envelope metadata
 // (beside from, never inside it): which agent instance published the change.
 export const conversationChange = {
-  'message': z.looseObject({ ts, instanceId: z.string().optional(), id: z.string(), ...turnRef, role: openEnum(['user', 'assistant']), from: sender.optional(), content: contentBlocks }),
+  'message': z.looseObject({ ts, instanceId: z.string().optional(), id: z.string(), ...turnRef, role: openEnum(['user', 'assistant', 'system']), from: sender.optional(), content: contentBlocks }),
   'revision': z.looseObject({ ts, instanceId: z.string().optional(), messageId: z.string(), content: contentBlocks }),
   'tip.moved': z.looseObject({ ts, instanceId: z.string().optional(), to: z.string() }),
   'query': z.looseObject({ ts, instanceId: z.string().optional(), queryId: z.string(), reason: openEnum(['completed', 'cancelled', 'aborted']) }),
