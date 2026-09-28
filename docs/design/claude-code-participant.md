@@ -195,7 +195,13 @@ Not at all:
   need an abstraction for claude, unless it makes sense for testing". The
   session store hands entries to an abstract publisher, which does nothing
   until the publisher is built.
-- **Tooling:** no build step (the `.mts` files run on Node); type checking,
+- **Runs through `tsx`** (29 Sep): core-di uses TC39 decorators, which Node
+  can't run from `.mts` (type stripping doesn't transform them; a decorated
+  field is a `SyntaxError` on Node 26.3.1). "no build step doesnt really buy
+  anything for me, but we can try with tsx". Tests on vitest 4, which runs
+  core-di's decorators in `claude-cli`; vitest 5 waits until it's checked
+  with core-di.
+- **Tooling:** type checking,
   Biome and knip from the start. Biome's rules: `claude-cli`'s config plus
   `noUnusedFunctionParameters`, `noUnusedPrivateClassMembers` and
   `noUndeclaredDependencies`; `noExplicitAny` stays a warning, because `any`
