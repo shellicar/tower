@@ -184,6 +184,51 @@ describe('control lines', () => {
     });
   });
 
+  describe('shutdown', () => {
+    it('starts with 30 s for stage 1 and 10 s for stage 2', () => {
+      const [reply] = testServices().control({ settings: {} });
+      expect((reply as ReadBack).settings.shutdown).toEqual({ gracefulMs: 30000, teardownMs: 10000 });
+    });
+
+    it('answers with the deadlines it set', () => {
+      expect(testServices().control({ shutdown: { gracefulMs: 5000, teardownMs: 2000 } })).toEqual([{ shutdown: { gracefulMs: 5000, teardownMs: 2000 } }]);
+    });
+
+    it('reads back the deadlines it set', () => {
+      const [, reply] = testServices().control({ shutdown: { gracefulMs: 5000, teardownMs: 2000 } }, { settings: {} });
+      expect((reply as ReadBack).settings.shutdown).toEqual({ gracefulMs: 5000, teardownMs: 2000 });
+    });
+
+    it('requires both deadlines', () => {
+      expect(testServices().control({ shutdown: { gracefulMs: 5000 } })).toEqual([{ error: 'invalid shutdown: teardownMs: Invalid input: expected number, received undefined' }]);
+    });
+
+    it('keeps the deadlines it had when a line is rejected', () => {
+      const [, reply] = testServices().control({ shutdown: { gracefulMs: 5000 } }, { settings: {} });
+      expect((reply as ReadBack).settings.shutdown).toEqual({ gracefulMs: 30000, teardownMs: 10000 });
+    });
+
+    it('rejects a key it does not know', () => {
+      expect(testServices().control({ shutdown: { gracefulMs: 5000, teardownMs: 2000, killMs: 1 } })).toEqual([{ error: 'invalid shutdown: Unrecognized key: "killMs"' }]);
+    });
+
+    it('rejects a deadline below 1 ms', () => {
+      expect(testServices().control({ shutdown: { gracefulMs: 0, teardownMs: 2000 } })).toEqual([{ error: 'invalid shutdown: gracefulMs: Too small: expected number to be >=1' }]);
+    });
+
+    it('rejects a deadline that is not a whole number of milliseconds', () => {
+      expect(testServices().control({ shutdown: { gracefulMs: 5000, teardownMs: 1.5 } })).toEqual([{ error: 'invalid shutdown: teardownMs: Invalid input: expected int, received number' }]);
+    });
+
+    it('rejects a deadline longer than a timer can wait', () => {
+      expect(testServices().control({ shutdown: { gracefulMs: 2147483648, teardownMs: 2000 } })).toEqual([{ error: 'invalid shutdown: gracefulMs: Too big: expected number to be <=2147483647' }]);
+    });
+
+    it('rejects null', () => {
+      expect(testServices().control({ shutdown: null })).toEqual([{ error: 'invalid shutdown: Invalid input: expected object, received null' }]);
+    });
+  });
+
   describe('settings', () => {
     it('rejects a key in its body', () => {
       expect(testServices().control({ settings: { include: ['system'] } })).toEqual([{ error: 'invalid settings: Unrecognized key: "include"' }]);
@@ -208,6 +253,7 @@ describe('control lines', () => {
           permissionMode: 'auto',
           context: 'ctx',
           claudeSettings: { advisorModel: 'm' },
+          shutdown: { gracefulMs: 30000, teardownMs: 10000 },
           missing: [],
           configDir: '/agents/alpha/config',
           privateHome: '/tmp/tower-participant-home-abc123',

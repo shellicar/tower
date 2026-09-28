@@ -48,10 +48,19 @@ export type LaunchSettings = {
 
 export type Readiness = { ready: true; settings: LaunchSettings } | { ready: false; missing: string[] };
 
+/** How long each shutdown stage may take before it escalates on its own. */
+export type ShutdownDeadlines = {
+  /** Stage 1: interrupt everything, then wait for it all to finish. */
+  gracefulMs: number;
+  /** Stage 2: kill every Claude Code, then wait for them to go. */
+  teardownMs: number;
+};
+
 /**
- * What the control lines set. Nothing has a default: the process starts with
- * every cell empty and refuses to launch a conversation until the required
- * ones are set.
+ * What the control lines set. Nothing a conversation is launched with has a
+ * default: the process starts with those cells empty and refuses to launch a
+ * conversation until the required ones are set. The shutdown deadlines are
+ * the exception: shutdown has to work whatever was or wasn't configured.
  */
 export class ParticipantSettings {
   public model: ModelCell = {};
@@ -59,6 +68,7 @@ export class ParticipantSettings {
   public permissionMode: PermissionMode | undefined;
   public context: string | undefined;
   public claudeSettings: ClaudeSettings | undefined;
+  public shutdown: ShutdownDeadlines = { gracefulMs: 30_000, teardownMs: 10_000 };
 
   /** The values a conversation launched now would get, or what's missing. */
   public readiness(): Readiness {

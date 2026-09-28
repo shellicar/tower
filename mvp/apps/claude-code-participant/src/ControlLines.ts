@@ -41,6 +41,14 @@ const claudeSettingsLine = z
   })
   .nullable();
 
+// setTimeout's longest delay: Node fires a longer one after 1 ms instead, so
+// a deadline above it would escalate at once.
+const LONGEST_DEADLINE_MS = 2_147_483_647;
+const deadline = z.number().int().min(1).max(LONGEST_DEADLINE_MS);
+
+/** The shutdown line replaces both deadlines at once. */
+const shutdownLine = z.strictObject({ gracefulMs: deadline, teardownMs: deadline });
+
 const settingsLine = z.strictObject({});
 
 function explain(error: z.ZodError): string {
@@ -66,6 +74,7 @@ export class ControlLines {
     permissionMode: (value) => this.permissionMode(value),
     context: (value) => this.context(value),
     claudeSettings: (value) => this.claudeSettings(value),
+    shutdown: (value) => this.shutdown(value),
     settings: (value) => this.readBack(value),
   };
 
@@ -147,6 +156,16 @@ export class ControlLines {
     return { claudeSettings: value === null ? 'cleared' : 'set' };
   }
 
+  /** Reaches the next stage to start: a stage already under way keeps the deadline it started with. */
+  private shutdown(value: unknown): Reply {
+    const line = shutdownLine.safeParse(value);
+    if (!line.success) {
+      return { error: `invalid shutdown: ${explain(line.error)}` };
+    }
+    this.settings.shutdown = { ...line.data };
+    return { shutdown: this.settings.shutdown };
+  }
+
   private readBack(value: unknown): Reply {
     const line = settingsLine.safeParse(value);
     if (!line.success) {
@@ -160,6 +179,7 @@ export class ControlLines {
         permissionMode: this.settings.permissionMode ?? null,
         context: this.settings.context ?? null,
         claudeSettings: this.settings.claudeSettings ?? null,
+        shutdown: this.settings.shutdown,
         missing: readiness.ready ? [] : readiness.missing,
         configDir: this.config.configDir,
         privateHome: this.config.privateHome,
