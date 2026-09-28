@@ -1314,9 +1314,17 @@ async function grid(a: Args): Promise<CheckRow[]> {
       const attempts = ['thinking-only', 'limit', 'api-error', 'tool-exec', 'crash'].includes(cell.id) ? Number(process.env.INT_GRID_TRIES ?? '3') : 1;
       for (let t = 1; t <= attempts; t += 1) {
         let r: GridRow;
+        const before = started.length;
         try {
           r = await gridCell(a, cell, pickup, A, B, root, t);
         } catch (err) {
+          // A cell that failed shuts down every participant it started, so
+          // the next cell's serve doesn't meet them as leftovers.
+          for (const p of started.slice(before)) {
+            if (!p.exitInfo) {
+              await p.shutdown(60_000).catch(() => p.kill9());
+            }
+          }
           if (!(err instanceof UsageLimit)) {
             // A cell that failed because the account hit its limit stops the grid.
             try {
