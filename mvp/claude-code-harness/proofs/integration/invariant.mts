@@ -477,12 +477,18 @@ function segments(text: string): string[] {
   return out;
 }
 
+// Paragraphs: Claude Code joins reminders (wrapped or, on Opus and Fable,
+// unwrapped) into one text block with blank lines between, where tower may
+// hold them as blocks of their own; splitting at blank lines on both sides
+// makes that a difference of shape, not of content.
+const paras = (s: string): string[] => s.split(/\n[ \t]*\n/).map((x) => x.trim()).filter(Boolean);
+
 function atoms(ms: Msg[]): Atom[] {
   const out: Atom[] = [];
   for (const m of ms) {
     for (const b of m.blocks) {
       if (b.key.startsWith('text:')) {
-        for (const s of segments(b.key.slice(5))) {
+        for (const s of segments(b.key.slice(5)).flatMap(paras)) {
           out.push({ role: m.role, key: `text:${s}`, show: `text ${cut(s)}`, text: s, from: m.from });
         }
       } else {
@@ -1024,7 +1030,7 @@ function holdJudgment(ev: Evidence, proc: Proc, T: Msg[], closeMs: number, tower
     const e = a.entry;
     if (a.how === 'seed' || a.ms < proc.serveMs || a.ms >= closeMs || e.type !== 'user' || e.isSidechain === true) continue;
     for (const b of listOf((e.message as Json | undefined)?.content)) {
-      const parts: ['result' | 'text', string][] = b.type === 'tool_result' ? [['result', blk(b).nl]] : b.type === 'text' ? segments(String(b.text ?? '')).map((x) => ['text', x] as ['text', string]) : [];
+      const parts: ['result' | 'text', string][] = b.type === 'tool_result' ? [['result', blk(b).nl]] : b.type === 'text' ? segments(String(b.text ?? '')).flatMap(paras).map((x) => ['text', x] as ['text', string]) : [];
       for (const [kind, v] of parts) {
         if (!carried(ta, kind, v)) {
           const id = String(b.tool_use_id);
@@ -1046,7 +1052,11 @@ function holdJudgment(ev: Evidence, proc: Proc, T: Msg[], closeMs: number, tower
 function quietJudgments(ev: Evidence, T: Msg[], seq: number, pointMs: number, proc: Proc, liveReqs: Req[], sameLabel = 'the same Claude Code\'s next request'): Judgment[] {
   const js: Judgment[] = [];
   const same = liveReqs.find((r) => r.ms > pointMs && r.proc === proc);
-  const localRestarts = ev.reqs.filter((r) => r.ms > pointMs && r.proc !== proc && (r.proc.decision === 'local' || r.proc.decision === 'record') && (r.proc.dry ? r.proc.asOfMs !== null && Math.abs(r.proc.asOfMs - pointMs) < 1 : r.proc.lineage === proc.lineage));
+  // A live restart stands for the point only when it is the next thing to
+  // happen after it (no other live request in between); a dry one "as of"
+  // the point stands for it by construction.
+  const nextLive = liveReqs.find((r) => r.ms > pointMs) ?? ev.reqs.filter((r) => !r.proc.dry).find((r) => r.ms > pointMs);
+  const localRestarts = ev.reqs.filter((r) => r.ms > pointMs && r.proc !== proc && (r.proc.decision === 'local' || r.proc.decision === 'record') && (r.proc.dry ? r.proc.asOfMs !== null && Math.abs(r.proc.asOfMs - pointMs) < 1 : r.proc.lineage === proc.lineage && r === nextLive));
   const firstPerProc = new Map<Proc, Req>();
   for (const r of localRestarts) {
     if (!firstPerProc.has(r.proc)) firstPerProc.set(r.proc, r);

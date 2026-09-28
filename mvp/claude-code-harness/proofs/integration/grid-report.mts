@@ -162,24 +162,30 @@ for (const s of diffs) {
   L.push(`- ${s.row.model}, ${s.row.live} live, ${s.row.cell} then ${s.row.pickup} (${s.row.convId}): first difference at message ${String(s.shadowSame?.at)}; tower ${String(s.shadowSame?.live)}; shadow ${String(s.shadowSame?.shadow)}`);
 }
 
-L.push('', '## Content divergences', '', 'Every FAIL whose divergence is in content, or that names atoms missing from tower. The shadow is listed only where it differs from tower.', '');
+L.push('', '## Content divergences', '', 'Every judgment whose divergence is in content (or that names atoms missing from tower). First, each cell\'s first content divergence: the exact point, what tower held there and what Claude Code built on. Then every one, grouped by pattern, with every cell it occurs in. Each conversation\'s full list, commit by commit, is in its own report beside this file. The shadow is included only where it differs from tower.', '', '### Each cell\'s first content divergence', '');
+const patterns = new Map<string, Set<string>>();
 for (const s of summaries.filter((x) => !x.supersededBy)) {
   for (const [which, r] of [['tower', s.live], ['shadow', s.shadowSame && !s.shadowSame.same ? s.shadow : undefined]] as const) {
     if (!r) continue;
     const items = r.points.flatMap((p) => p.judgments.filter((j) => j.contentVerdict === 'FAIL').map((j) => ({ p, j })));
     if (items.length === 0) continue;
-    L.push(`### ${s.row.model}, ${s.row.live} live, ${s.row.cell} then ${s.row.pickup} (${which}; conversation ${s.row.convId})`, '');
+    const cell = `${s.row.model}/${s.row.live}/${s.row.cell}-${s.row.pickup}${which === 'shadow' ? ' (shadow)' : ''}`;
+    const first = items[0] as { p: (typeof items)[number]['p']; j: (typeof items)[number]['j'] };
+    const at = (d: typeof first.j.divergence): string => (d?.contentAt ? `tower ${(d.towerAtoms ?? []).find((x) => x.startsWith('>'))?.slice(2) ?? '(nothing)'} / Claude Code ${(d.truthAtoms ?? []).find((x) => x.startsWith('>'))?.slice(2) ?? '(nothing)'}` : '');
+    L.push(`- ${cell} (${s.row.convId}, ${items.length} content judgment(s)): ${first.p.kind} ${cut(first.p.label, 140)}; against ${first.j.truth}: ${cut(first.j.why, 160)}${first.j.divergence?.contentAt ? `; ${cut(at(first.j.divergence), 400)}` : ''}${first.j.missing?.length ? `; missing ${cut(first.j.missing.join('; '), 300)}` : ''}`);
     for (const { p, j } of items) {
-      L.push(`- **${p.kind}** ${cut(p.label, 200)}`);
-      L.push(`  - against ${j.truth}${j.request ? ` (${j.request})` : ''}: ${cut(j.why, 300)}`);
-      if (j.divergence?.contentAt) {
-        L.push(`  - first content difference at ${j.divergence.contentAt}; tower: ${(j.divergence.towerAtoms ?? []).find((x) => x.startsWith('>')) ?? '(none)'}; Claude Code: ${(j.divergence.truthAtoms ?? []).find((x) => x.startsWith('>')) ?? '(none)'}`);
-      }
-      if (j.missing?.length) L.push(`  - missing from tower: ${j.missing.map((x) => cut(x, 140)).join('; ')}`);
+      const k = norm(`${p.kind} against ${j.truth.replace(/ of .*from its own record as of.*/, ' (dry restart)')}: ${j.divergence?.contentAt ? at(j.divergence) : ''}${j.missing?.length ? ` missing ${j.missing.map((x) => x.replace(/\(.*$/, '').trim()).join('; ')}` : ''}`).replace(/\(seq N\)|\([0-9a-f]{8} msg \d+\)|\(req_\w+ response\)/g, '').replace(/\s+/g, ' ');
+      const set = patterns.get(k) ?? new Set<string>();
+      set.add(cell);
+      patterns.set(k, set);
     }
-    L.push('');
   }
 }
+L.push('', '### Content divergences by pattern', '');
+for (const [k, set] of [...patterns].sort((a, b) => b[1].size - a[1].size)) {
+  L.push(`- ${cut(k, 600)}: in ${set.size} cell(s): ${[...set].join(', ')}`);
+}
+L.push('');
 
 L.push('## Shape-only divergences, by kind', '');
 const shapes = new Map<string, Set<string>>();
