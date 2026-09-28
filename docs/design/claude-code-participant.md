@@ -578,7 +578,12 @@ separately, they can go in this branch" (26 Sep).
     (optional); the
     closure is renamed `changes.query.closed`; `changes.query` stays in v2 as
     the closure's old name, read forever and never published again.
-  - **In progress:** the spec text, on branch `docs/query-parent`.
+  - **Done (29 Sep):** the spec text (`docs/spec/conversation.md`, scenario
+    9). `parent` is a message id or absent, never `null`. The rename stays
+    inside v2 with no exception sentence: "the consumer is tower, i decided
+    this". Owed before the code branch: what happens to the old fixtures that
+    use `changes.query`, and whether a start away from the tip moves the tip.
+    The code (wire, towerd, bridge) follows in its own branch.
 - **Owed, if chosen:** a `shutdown` query reason. "i'd rather say its on the
   table, then let the agent who has to implement this \"decide\"" (26 Sep).
   The build brief says so, and the agent reports what it chose and why.
