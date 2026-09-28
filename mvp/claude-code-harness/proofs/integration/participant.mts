@@ -307,7 +307,26 @@ function hooks(conv: () => Conv | undefined): Partial<Record<HookEvent, HookCall
             if (c) {
               emit('tool-started', { conv: c.label, tool: i.tool_name });
               if (c.ending === 'tool-exec' && i.tool_name === 'Bash') {
-                setTimeout(() => fire(c, '2 s after PreToolUse for Bash'), 2000);
+                // Fired once the command is running (the shell prefix logged
+                // it), then 1 s more; under auto mode the permission check
+                // can take longer than a fixed 2 s after PreToolUse, and an
+                // interrupt then lands in the check, not the execution.
+                // Test-only trigger (attempt 3, stage 3); 60 s cap.
+                const log = join(RUN, 'prefix.log');
+                const lines = (): number => (existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean).length : 0);
+                const before = lines();
+                const t0 = Date.now();
+                const poll = (): void => {
+                  if (c.fired || c.resultSeen) return;
+                  if (lines() > before) {
+                    setTimeout(() => fire(c, '1 s after the shell prefix logged the command'), 1000);
+                  } else if (Date.now() - t0 < 60_000) {
+                    setTimeout(poll, 100);
+                  } else {
+                    c.lin.event('trigger-missed', { why: 'the command never ran within 60 s of PreToolUse' });
+                  }
+                };
+                poll();
               }
             }
             return { continue: true };

@@ -459,7 +459,15 @@ async function killAtTool(p: Participant, conv: string): Promise<void> {
   if (t.ev === 'result') {
     throw new Error(`the kill turn ended before any tool started: ${JSON.stringify(t).slice(0, 300)}`);
   }
-  await sleep(2000);
+  // Killed once the command is running (the shell prefix logged it), then
+  // 1 s more: a fixed 2 s after PreToolUse can land in auto mode's permission
+  // check. Up to 60 s, then killed anyway (reported as not reached).
+  const prefix = join(p.spec.runDir, 'prefix.log');
+  const t0 = Date.now();
+  while (!existsSync(prefix) && Date.now() - t0 < 60_000) {
+    await sleep(100);
+  }
+  await sleep(1000);
   log(`SIGKILL participant ${p.me?.pid} (${p.spec.agent}) during ${String(t.tool)}`);
   p.kill9();
   await p.exited;
