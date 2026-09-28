@@ -35,6 +35,7 @@ interface Row {
   convId: string;
   dir: string;
   decisions: Json;
+  origin: string;
   error?: string;
 }
 
@@ -55,7 +56,25 @@ const cut = (s: string, n = 160): string => (s.length > n ? `${s.slice(0, n)}...
 // A reason with process and file names taken out, so like reasons group.
 const norm = (s: string): string => s.replace(/i3-[\w-]+\/[LD]\d{4}-[\w-]+#\d+/g, '<process>').replace(/[0-9a-f]{8}-[0-9a-f-]{27}\.request\.json/g, '<request>').replace(/\d{4}-\d{2}-\d{2}T[\d:.]+Z/g, '<time>').replace(/seq \d+/g, 'seq N');
 
+// The account's usage limit answering a say: every result in any lineage of
+// the conversation whose text is the limit's.
+const LIMIT = /hit your (weekly |daily |session )?limit|weekly limit|usage limit/i;
+function limitHits(convId: string): string[] {
+  const out: string[] = [];
+  for (const lin of gather(convId).lins) {
+    for (const e of lin.events.filter((x) => x.src === 'sdk' && x.kind === 'result' && LIMIT.test(String(x.text ?? '')))) {
+      out.push(`${lin.agent} ${String(lin.meta.name)} step ${String(e.step)} at ${new Date(Number(e.ms)).toISOString()}`);
+    }
+  }
+  return out;
+}
+
 interface Summary {
+  limit?: string[];
+  // The usage limit answered the origin's warm-up or step 1: the cell's
+  // intended ending never happened.
+  limitEnding?: boolean;
+  supersededBy?: string;
   row: Row;
   live?: Report;
   shadow?: Report;
@@ -68,6 +87,10 @@ for (const g of grids) {
   for (const row of idx.rows) {
     const s: Summary = { row };
     summaries.push(s);
+    if (row.convId) {
+      s.limit = limitHits(row.convId);
+      s.limitEnding = s.limit.some((x) => x.startsWith(`${row.origin} c step 0 `) || x.startsWith(`${row.origin} c step 1 `));
+    }
     if (!row.reached || !row.convId) {
       continue;
     }
@@ -85,6 +108,16 @@ for (const g of grids) {
       s.shadowSame = compareShadow(live, shadow) as unknown as Json;
     }
     process.stdout.write(`${row.model} ${row.live} ${row.cell}/${row.pickup}: live FAIL ${s.live.contentCounts.FAIL} content, ${s.live.counts.FAIL - s.live.contentCounts.FAIL} shape only; shadow ${s.shadowSame ? (s.shadowSame.same ? 'same' : 'DIFFERS') : 'none'}\n`);
+  }
+}
+
+// A try that didn't reach its ending, where a later try of the same model,
+// live variant, ending and pickup did.
+const key = (r: Row): string => `${r.model}|${r.live}|${r.cell}|${r.pickup}`;
+for (const s of summaries) {
+  if (!s.row.reached || s.limitEnding) {
+    const later = summaries.find((x) => x !== s && key(x.row) === key(s.row) && x.row.reached && !x.limitEnding);
+    if (later) s.supersededBy = `${later.row.dir}${later.row.attempt > 1 ? ` (try ${later.row.attempt})` : ''}`;
   }
 }
 
@@ -111,10 +144,12 @@ for (const m of models) {
   for (const v of [...new Set(summaries.filter((s) => s.row.model === m).map((s) => s.row.live))]) {
     L.push(`## ${m}, ${v} live (shadow ${v === 'run+last' ? 'run+entry' : 'run+last'})`, '');
     L.push('| ending | pickup | reached | decisions | content FAIL | shape-only FAIL | ROUND-TRIP | UNCHECKED | PASS | shadow |', '|---|---|---|---|---|---|---|---|---|---|');
-    for (const s of summaries.filter((x) => x.row.model === m && x.row.live === v)) {
+    for (const s of summaries.filter((x) => x.row.model === m && x.row.live === v && !x.supersededBy)) {
       const r = s.live;
       const d = Object.entries(s.row.decisions ?? {}).filter(([k]) => k !== 'recovery').map(([k, x]) => `${k} ${String(x)}`).join(', ');
-      L.push(`| ${s.row.cell}${s.row.attempt > 1 ? ` (try ${s.row.attempt})` : ''} | ${s.row.pickup} | ${s.row.error ? 'error' : s.row.reached ? 'yes' : '**not reached**'} | ${d} | ${r ? r.contentCounts.FAIL : '-'} | ${r ? r.counts.FAIL - r.contentCounts.FAIL : '-'} | ${r ? r.contentCounts['ROUND-TRIP'] : '-'} | ${r ? r.contentCounts.UNCHECKED : '-'} | ${r ? r.contentCounts.PASS : '-'} | ${s.shadowSame ? (s.shadowSame.same ? 'same' : `**differs at message ${String(s.shadowSame.at)}**`) : '-'} |`);
+      // The origin's step 1 is the ending; any other say is the pickup's.
+      const lim = s.limit?.length ? (s.limitEnding ? ' (ending: the usage limit, not the cell\'s)' : ' (usage limit in the pickup)') : '';
+      L.push(`| ${s.row.cell}${s.row.attempt > 1 ? ` (try ${s.row.attempt})` : ''} | ${s.row.pickup} | ${s.row.error ? 'error' : s.row.reached ? 'yes' : '**not reached**'}${lim} | ${d} | ${r ? r.contentCounts.FAIL : '-'} | ${r ? r.counts.FAIL - r.contentCounts.FAIL : '-'} | ${r ? r.contentCounts['ROUND-TRIP'] : '-'} | ${r ? r.contentCounts.UNCHECKED : '-'} | ${r ? r.contentCounts.PASS : '-'} | ${s.shadowSame ? (s.shadowSame.same ? 'same' : `**differs at message ${String(s.shadowSame.at)}**`) : '-'} |`);
     }
     L.push('');
   }
@@ -181,9 +216,14 @@ for (const [k, v] of [...unchecked].sort((a, b) => b[1].length - a[1].length)) {
   for (const x of v) L.push(`  - ${x}`);
 }
 
+L.push('', '## The usage limit inside recorded conversations', '', 'Conversations where the account\'s usage limit answered a say (the model call returned the limit error at once). Judged by the check like any API-error ending; listed so they read as what they are.', '');
+for (const s of summaries.filter((x) => x.limit?.length)) {
+  L.push(`- ${s.row.model}, ${s.row.live}, ${s.row.cell} then ${s.row.pickup}, try ${s.row.attempt} (${s.row.reached ? 'ending reached' : 'not reached'}${s.supersededBy ? '; rerun' : ''}): ${s.limit?.join('; ')}`);
+}
+
 L.push('', '## Endings not reached, and errors', '');
-for (const s of summaries.filter((x) => !x.row.reached || x.row.error)) {
-  L.push(`- ${s.row.model}, ${s.row.live}, ${s.row.cell} then ${s.row.pickup}, try ${s.row.attempt}: ${s.row.error ? `error ${cut(s.row.error, 300)}` : `not reached ${cut(JSON.stringify(s.row.ending), 300)}`}`);
+for (const s of summaries.filter((x) => !x.row.reached || x.row.error || x.limitEnding)) {
+  L.push(`- ${s.row.model}, ${s.row.live}, ${s.row.cell} then ${s.row.pickup}, try ${s.row.attempt}: ${s.supersededBy ? `superseded by a later try (${s.supersededBy.replace(/.*\/runs\//, 'runs/')}); ` : ''}${s.row.error ? `error ${cut(s.row.error, 300)}` : s.limitEnding ? `the usage limit answered the origin (${(s.limit ?? []).filter((x) => x.startsWith(s.row.origin)).slice(0, 2).join('; ')}), so the cell's own ending never happened` : `not reached ${cut(JSON.stringify(s.row.ending), 300)}`}`);
 }
 
 L.push('', '## The leftover stop', '');
