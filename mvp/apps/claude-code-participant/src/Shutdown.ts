@@ -72,9 +72,9 @@ export class Shutdown {
     // Stdin stays open and read, so closing it still escalates, but it no
     // longer keeps the process alive: once everything below is done, the
     // process ends when nothing else runs. That includes work nobody can
-    // await, such as the SDK removing a resumed conversation's temporary
-    // copy after its Claude Code exits. The deadline stays armed (it holds
-    // nothing open) in case something never finishes.
+    // await, such as the SDK's own clean-up once a Claude Code has exited,
+    // which it starts and never hands back. The deadline stays armed (it
+    // holds nothing open) in case something never finishes.
     this.host.letEnd();
     // A conversation launched after this point isn't stopped here: refusing
     // new work during shutdown belongs with the requests that bring it.

@@ -6,7 +6,7 @@
 // commands Claude Code starts, and the messages that come back.
 //
 //   NATS_URL=... PARTICIPANT_CONFIG_DIR=... \
-//     node --import tsx scripts/shutdown-check.ts <cwd> <control-lines-file> <prompt>
+//     node --import tsx scripts/shutdown-check.ts <cwd> <control-lines-file> <prompt> [<id to resume>]
 //
 // The control lines in the file are applied before the launch. The config
 // dir is then locked and scanned for leftovers, and stdin served, exactly as
@@ -27,9 +27,9 @@ import { participantServices } from '../src/container.js';
 import type { ChildProcessHandle } from '../src/ProcessSpawner.js';
 import { runParticipant } from '../src/run.js';
 
-const [cwd, linesFile, prompt] = process.argv.slice(2);
+const [cwd, linesFile, prompt, resumeId] = process.argv.slice(2);
 if (cwd === undefined || linesFile === undefined || prompt === undefined) {
-  console.error('usage: shutdown-check.ts <cwd> <control-lines-file> <prompt>');
+  console.error('usage: shutdown-check.ts <cwd> <control-lines-file> <prompt> [<id to resume>]');
   process.exit(2);
 }
 
@@ -103,7 +103,9 @@ function descendants(root: number): { pid: number; pgid: string; sid: string; co
 void (async () => {
   // Launching waits for the leftover scan, so it isn't a top-level await: a
   // shutdown before the scan ends would leave that pending.
-  const conversation = await provider.resolve(ConversationLauncher).launch({ id: randomUUID(), cwd, additionalDirectories: [], resume: false });
+  const id = resumeId ?? randomUUID();
+  const conversation = await provider.resolve(ConversationLauncher).launch({ id, cwd, additionalDirectories: [], resume: resumeId !== undefined });
+  show('conversation', { id, resume: resumeId !== undefined });
   conversation.send(prompt);
   let shown = false;
   for await (const message of conversation.messages) {
