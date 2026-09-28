@@ -47,6 +47,8 @@ const P = {
   thinking: `Work out, carefully and step by step, how many integers from 1 to 5000 are divisible by 3, 5 or 7 but by neither 11 nor 13. Reply with the number only. ${NO_TOOLS}`,
   thinking2: `Work out, carefully and step by step, how many integers from 1 to 6000 are divisible by 4, 6 or 9 but by neither 7 nor 17. Reply with the number only. ${NO_TOOLS}`,
   text: `Write the numbers one to sixty in words, one per line, nothing else. ${NO_TOOLS}`,
+  // Thinking, then a long reply: the plain text prompt never thought.
+  thinkText: `Work out, carefully and step by step, how many integers from 1 to 5000 are divisible by 3, 5 or 7 but by neither 11 nor 13. Then write the numbers one to sixty in words, one per line. ${NO_TOOLS}`,
   // The outputs can't be guessed, so the model has to run them (with `echo
   // DONE` it once replied DONE without calling the tool).
   tool: 'Use the Bash tool to run this exact command, once: `sleep 20; date +%s%N`. Then reply with its output only.',
@@ -790,6 +792,25 @@ SCENARIOS['G-esc-text-then-kill'] = async (c) => {
   await stopWith(c, l, 'esc');
   await stopWith(c, l, 'SIGTERM');
   await resumeAndSend(c, 'continue');
+};
+
+// A and C with a thinking block before the reply's text.
+SCENARIOS['A-thinktext'] = async (c) => {
+  const l = await c.launch([]);
+  await warm(c, l);
+  const s = await c.say(l, P.thinkText);
+  await c.midText(s.base);
+  await stopWith(c, l, 'esc');
+  await next(c, l);
+  await c.exit(l);
+};
+SCENARIOS['C-thinktext-SIGTERM'] = async (c) => {
+  const l = await c.launch([]);
+  await warm(c, l);
+  const s = await c.say(l, P.thinkText);
+  await c.midText(s.base);
+  await stopWith(c, l, 'SIGTERM');
+  await afterStop(c, l, 'SIGTERM', 'continue');
 };
 
 async function main(): Promise<void> {
