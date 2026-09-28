@@ -13,9 +13,9 @@
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@tailwindcss/vite": "^4.3.2",
     "@types/jsdom": "^30.0.0",
-    "@types/node": "^26.1.1",
+    "@types/node": "^24.13.6",
     "jsdom": "^29.1.1",
-    "svelte": "^5.56.9",
+    "svelte": "^5.56.10",
     "svelte-check": "^4.7.6",
     "tailwindcss": "^4.3.2",
     "typescript": "^5.6.0",
@@ -23,8 +23,8 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
-    "@chenglou/pretext": "^0.0.8",
-    "dompurify": "^3.4.13",
-    "marked": "^18.0.10"
+    "@chenglou/pretext": "^0.0.9",
+    "dompurify": "^3.4.16",
+    "marked": "^18.0.14"
   }
 }
