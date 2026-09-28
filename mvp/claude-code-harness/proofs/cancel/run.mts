@@ -66,7 +66,7 @@ const STEP_TIMEOUT_MS = 240_000;
 // ---------------------------------------------------------------------------
 // Scenarios
 
-type Point = 'thinking' | 'mid-text' | 'tool-exec' | 'first-byte' | 'tool-input' | 'immediate' | 'stop-hook' | 'permission' | 'tool-partial' | 'subagent-tool' | 'compact';
+type Point = 'thinking' | 'mid-text' | 'tool-exec' | 'first-byte' | 'tool-input' | 'immediate' | 'stop-hook' | 'permission' | 'tool-partial' | 'subagent-tool' | 'compact' | 'proc-found' | 'prompt-submit';
 type Sig = 'SIGTERM' | 'SIGHUP' | 'SIGINT' | 'SIGKILL';
 // kill:<SIG> goes to Claude Code; host:<SIG> is the SDK's host (the process
 // running query()) signalling itself, for a scenario run with host: true.
@@ -240,7 +240,13 @@ function scenarios(): Scenario[] {
         ];
   const d9main: Step[] = [{ text: WARM }, { text: PROMPTS.thinking, stop: { at: 'thinking', method: 'kill:SIGTERM' } }];
   out.push({ id: 'D9-store-thinking', steps: d9main, resumes: d9('store-killed', 'store', { at: 'thinking', method: 'kill:SIGTERM' }) });
+  // (immediate fired before the SDK had started Claude Code: nothing to kill.)
   out.push({ id: 'D9-store-immediate', steps: d9main, resumes: d9('store-killed', 'store', { at: 'immediate', method: 'kill:SIGTERM', delayMs: 0 }) });
+  // Early in the resume: 300 ms after its process appears (loading), and at
+  // its UserPromptSubmit hook (just before it writes what the resume adds).
+  out.push({ id: 'D9-store-loading', steps: d9main, resumes: d9('store-killed', 'store', { at: 'proc-found', method: 'kill:SIGTERM', delayMs: 300 }) });
+  out.push({ id: 'D9-store-submit', steps: d9main, resumes: d9('store-killed', 'store', { at: 'prompt-submit', method: 'kill:SIGTERM', delayMs: 0 }) });
+  out.push({ id: 'D9-transcript-submit', steps: d9main, resumes: d9('transcript-killed', 'transcript', { at: 'prompt-submit', method: 'kill:SIGTERM', delayMs: 0 }) });
   out.push({ id: 'D9-transcript-thinking', steps: d9main, resumes: d9('transcript-killed', 'transcript', { at: 'thinking', method: 'kill:SIGTERM' }) });
   // D10: a kill (and an interrupt) during auto-compaction, 1 s after
   // PreCompact. The window env values are the easiest that might trigger it
@@ -453,6 +459,14 @@ async function runOne(plan: RunPlan): Promise<RunOut> {
     if (h === 'SubagentStart' && s?.at === 'subagent-tool') {
       setTimeout(() => fire('6 s after SubagentStart (fallback)'), 6000);
     }
+    if (h === 'UserPromptSubmit' && s?.at === 'prompt-submit') {
+      const d = s.delayMs ?? 0;
+      if (d === 0) {
+        fire('at UserPromptSubmit');
+      } else {
+        setTimeout(() => fire(`${d} ms after UserPromptSubmit`), d);
+      }
+    }
     if (h === 'PreCompact' && s?.at === 'compact') {
       const d = s.delayMs ?? 1000;
       setTimeout(() => fire(`${d} ms after PreCompact`), d);
@@ -537,6 +551,11 @@ async function runOne(plan: RunPlan): Promise<RunOut> {
   finder.onFound = (p) => {
     if (p.configDir && p.configDir !== configDir) {
       transcripts.addLive(join(p.configDir, 'projects'));
+    }
+    const s = stopOf();
+    if (s?.at === 'proc-found') {
+      const d = s.delayMs ?? 0;
+      setTimeout(() => fire(`${d} ms after Claude Code's process was found`), d);
     }
   };
   if (plan.hostMode) {
