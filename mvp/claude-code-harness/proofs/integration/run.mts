@@ -1309,6 +1309,15 @@ async function grid(a: Args): Promise<CheckRow[]> {
         try {
           r = await gridCell(a, cell, pickup, A, B, root, t);
         } catch (err) {
+          if (!(err instanceof UsageLimit)) {
+            // A cell that failed because the account hit its limit stops the grid.
+            try {
+              checkUsageLimit();
+            } catch (limit) {
+              index();
+              throw limit;
+            }
+          }
           if (err instanceof UsageLimit) {
             index();
             throw err;
@@ -1317,6 +1326,7 @@ async function grid(a: Args): Promise<CheckRow[]> {
         }
         rows.push(r);
         index();
+        checkUsageLimit();
         log(`GRID ${cell.id}/${pickup} try ${t}: reached ${r.reached} conv ${r.convId}${r.error ? ` error ${r.error.slice(0, 200)}` : ''}`);
         if (r.reached || r.error) {
           break;

@@ -644,7 +644,7 @@ function pubSummary(p: PublishedLine): Json {
   return { kind: p.kind, seq: p.seq, id: p.id, commitMs: p.commitMs, queryId: p.queryId, index: p.index ?? null };
 }
 
-const USAGE_LIMIT = /usage limit|rate[_ ]limit|429/i;
+const USAGE_LIMIT = /usage limit|rate[_ ]limit|429|hit your (weekly |daily |session )?limit|weekly limit/i;
 
 async function messagesLoop(c: Conv): Promise<void> {
   try {
