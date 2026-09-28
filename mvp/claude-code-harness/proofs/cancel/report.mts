@@ -11,6 +11,8 @@ type Json = Record<string, unknown>;
 
 const sid = (u: unknown): string => (typeof u === 'string' ? u.slice(0, 8) : u === null ? 'null    ' : '-       ');
 
+// A hosted run's file has two writers (the SDK host and the recording
+// parent): sort by time. Buffered events carry the time they happened.
 function readEvents(dir: string): Json[] {
   const p = join(dir, 'cancel-events.jsonl');
   if (!existsSync(p)) {
@@ -19,7 +21,9 @@ function readEvents(dir: string): Json[] {
   return readFileSync(p, 'utf8')
     .split('\n')
     .filter((l) => l.trim() !== '')
-    .map((l) => JSON.parse(l) as Json);
+    .map((l) => JSON.parse(l) as Json)
+    .map((e) => (typeof e.bufferedMs === 'number' ? { ...e, ms: e.bufferedMs } : e))
+    .sort((a, b) => Number(a.ms) - Number(b.ms));
 }
 
 function blocks(content: unknown): string {
@@ -156,7 +160,7 @@ function renderRun(title: string, dir: string, probe: string | undefined): strin
   for (const e of ev) {
     const k = `${e.src}:${e.kind}`;
     if (k === 'proof:send' || k === 'proof:push') {
-      out.push(`${rel(e)} ${e.kind.toString().toUpperCase()} step ${e.step}: "${String(e.text).slice(0, 60)}"`);
+      out.push(`${rel(e)} ${String(e.kind).toUpperCase()} step ${e.step}: "${String(e.text).slice(0, 60)}"`);
     } else if (k === 'proof:stop') {
       out.push(`${rel(e)} STOP ${e.method} at ${e.at} (${e.how})`);
     } else if (k === 'proof:kill') {
@@ -168,6 +172,16 @@ function renderRun(title: string, dir: string, probe: string | undefined): strin
       out.push(`${rel(e)} Claude Code exit: code=${x?.code ?? null} signal=${x?.signal ?? null}`);
     } else if (k === 'proc:found') {
       out.push(`${rel(e)} Claude Code pid ${e.pid}${e.configDir && !String(e.configDir).includes('/config-dirs/') ? ` (config dir ${e.configDir})` : ''}`);
+    } else if (k === 'proof:host-kill') {
+      out.push(`${rel(e)} HOST KILL ${e.signal} (the SDK host, pid ${e.pid}, signals itself)`);
+    } else if (k === 'proof:host-exit') {
+      out.push(`${rel(e)} SDK host exit: code=${e.code} signal=${e.signal}`);
+    } else if (k === 'proof:claude-gone') {
+      out.push(`${rel({ ms: e.goneMs })} Claude Code pid ${e.pid} gone`);
+    } else if (k === 'proof:canUseTool' || k === 'proof:permission-aborted' || k === 'proof:permission-released') {
+      out.push(`${rel(e)} ${e.kind} ${e.toolName}${e.agentID ? ` (agent ${e.agentID})` : ''}`);
+    } else if (e.src === 'fwd' && e.kind !== 'listening') {
+      out.push(`${rel(e)} forwarder #${e.id} ${e.kind}${e.rule ? ` rule=${JSON.stringify(e.rule)}` : ''}${e.status ? ` status=${e.status}` : ''}${e.deltas ? ` after ${e.deltas} deltas` : ''}${e.error ? ` ${e.error}` : ''}${e.kind === 'request' && !e.rule ? ` ${e.model}` : ''}`);
     } else if (k === 'proof:interrupt-returned' || k === 'proof:abort-called' || k === 'proof:trigger-missed' || k === 'proof:end' || k === 'proof:end-idle' || k === 'proof:run-done' || k === 'proof:skip-pushed') {
       out.push(`${rel(e)} ${e.kind}${e.error ? ` (${e.error})` : ''}${e.why ? ` (${e.why})` : ''}`);
     } else if (e.src === 'transcript' && (e.kind === 'line' || e.kind === 'preexisting')) {
@@ -190,6 +204,12 @@ function renderRun(title: string, dir: string, probe: string | undefined): strin
       out.push(`${rel(e)} request ${e.query_source} -> ${e.request_file}`);
     } else if (e.src === 'hook' && !String(e.kind).endsWith(':returned')) {
       out.push(`${rel(e)} hook ${e.kind}${e.tool_name ? ` ${e.tool_name}` : ''}${e.reason ? ` reason=${e.reason}` : ''}`);
+    } else if (k === 'sdk:assistant' && (e.error || (Array.isArray(e.content) && (e.content as Json[]).some((b) => String(b.text ?? '').startsWith('API Error'))))) {
+      out.push(`${rel(e)} sdk assistant error=${JSON.stringify(e.error ?? null)} ${blocks(e.content)}`);
+    } else if (k === 'sdk:system:status') {
+      if (e.status) {
+        out.push(`${rel(e)} system:status ${e.status}`);
+      }
     } else if (k === 'sdk:system:api_retry' || k === 'sdk:system:compact_boundary') {
       out.push(`${rel(e)} ${e.kind} ${JSON.stringify(e).slice(0, 160)}`);
     }

@@ -301,17 +301,18 @@ export class BodiesWatch {
   }
 }
 
-// Records every append (raw, outside the repo); load() returns what a chosen
-// earlier run appended, for a store resume.
+// Records every append (raw, outside the repo); load() returns what the
+// chosen earlier runs appended (in order), for a store resume: the main
+// transcript and, by subpath, subagent transcripts (listSubkeys names them).
 export class RecordingStore implements SessionStore {
   readonly events: Events;
   readonly rawPath: string;
-  readonly loadFrom: string | undefined;
+  readonly loadFrom: string[];
   readonly all: Json[] = [];
-  constructor(events: Events, rawPath: string, loadFrom?: string) {
+  constructor(events: Events, rawPath: string, loadFrom?: string | string[]) {
     this.events = events;
     this.rawPath = rawPath;
-    this.loadFrom = loadFrom;
+    this.loadFrom = loadFrom === undefined ? [] : Array.isArray(loadFrom) ? loadFrom : [loadFrom];
   }
   async append(key: SessionKey, entries: SessionStoreEntry[]): Promise<void> {
     appendFileSync(this.rawPath, `${JSON.stringify({ ts: stamp(), ms: now(), key, entries })}\n`);
@@ -321,25 +322,40 @@ export class RecordingStore implements SessionStore {
     this.events.write('store', 'append', { key, count: entries.length, entries: (entries as Json[]).map(entryBrief) });
   }
   async load(key: SessionKey): Promise<SessionStoreEntry[] | null> {
-    if (!this.loadFrom || key.subpath) {
+    if (this.loadFrom.length === 0) {
       this.events.write('store', 'load', { key, returned: null });
       return null;
     }
-    const entries = loadAppends(this.loadFrom, key.sessionId);
+    const entries = loadAppends(this.loadFrom, key.sessionId, key.subpath);
     this.events.write('store', 'load', { key, returned: entries.length, entries: entries.map(entryBrief) });
-    return entries as SessionStoreEntry[];
+    return entries.length === 0 && key.subpath ? null : (entries as SessionStoreEntry[]);
+  }
+  async listSubkeys(key: { projectKey: string; sessionId: string }): Promise<string[]> {
+    const subs = new Set<string>();
+    for (const a of readAppends(this.loadFrom)) {
+      if (a.key.sessionId === key.sessionId && a.key.subpath) {
+        subs.add(a.key.subpath);
+      }
+    }
+    this.events.write('store', 'listSubkeys', { key, returned: [...subs] });
+    return [...subs];
   }
 }
 
-export function loadAppends(path: string, sessionId: string): Json[] {
-  if (!existsSync(path)) {
-    return [];
-  }
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter((l) => l.trim() !== '')
-    .map((l) => JSON.parse(l) as { key: SessionKey; entries: Json[] })
-    .filter((a) => !a.key.subpath && a.key.sessionId === sessionId)
+function readAppends(paths: string[]): { key: SessionKey; entries: Json[] }[] {
+  return paths
+    .filter((p) => existsSync(p))
+    .flatMap((p) =>
+      readFileSync(p, 'utf8')
+        .split('\n')
+        .filter((l) => l.trim() !== '')
+        .map((l) => JSON.parse(l) as { key: SessionKey; entries: Json[] }),
+    );
+}
+
+export function loadAppends(paths: string | string[], sessionId: string, subpath?: string): Json[] {
+  return readAppends(Array.isArray(paths) ? paths : [paths])
+    .filter((a) => (a.key.subpath ?? undefined) === (subpath ?? undefined) && a.key.sessionId === sessionId)
     .flatMap((a) => a.entries);
 }
 
@@ -479,7 +495,7 @@ export class ClaudeFinder {
   }
 }
 
-const HOOKS: HookEvent[] = ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'StopFailure', 'SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop', 'PreCompact'];
+const HOOKS: HookEvent[] = ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'StopFailure', 'SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop', 'PreCompact', 'PostCompact', 'PostToolBatch'];
 
 export function hooks(events: Events, on: (event: HookEvent, input: HookInput) => Promise<void> | void): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
   const out: Partial<Record<HookEvent, HookCallbackMatcher[]>> = {};

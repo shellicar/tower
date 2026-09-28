@@ -44,16 +44,17 @@
 // Raw bodies and store appends stay outside the repo; the run directory
 // gets copies with tokens and email addresses redacted.
 
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
+import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { HookEvent, HookInput, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { HookEvent, HookInput, SDKMessage, SDKUserMessage, SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import type { HarnessOptions, Run } from '../../src/harness.mts';
 import { startRun } from '../../src/harness.mts';
 import { stamp } from '../../src/record.mts';
-import { BodiesWatch, ClaudeFinder, clean, Events, entryBrief, hooks, type Json, loadAppends, now, RecordingStore, sdkBrief, TranscriptWatch } from './lib.mts';
+import { type Rule, startForwarder } from './forwarder.mts';
+import { BodiesWatch, ClaudeFinder, clean, Events, entryBrief, hooks, type Json, loadAppends, now, procStat, RecordingStore, sdkBrief, TranscriptWatch } from './lib.mts';
 
 const HARNESS_STATE = join(homedir(), '.local', 'state', 'tower-claude-code-harness');
 const STATE = join(HARNESS_STATE, 'cancel');
@@ -65,8 +66,11 @@ const STEP_TIMEOUT_MS = 240_000;
 // ---------------------------------------------------------------------------
 // Scenarios
 
-type Point = 'thinking' | 'mid-text' | 'tool-exec' | 'first-byte' | 'tool-input' | 'immediate' | 'stop-hook';
-type Method = 'interrupt' | 'abort' | 'push' | `kill:${'SIGTERM' | 'SIGHUP' | 'SIGINT' | 'SIGKILL'}`;
+type Point = 'thinking' | 'mid-text' | 'tool-exec' | 'first-byte' | 'tool-input' | 'immediate' | 'stop-hook' | 'permission' | 'tool-partial' | 'subagent-tool' | 'compact';
+type Sig = 'SIGTERM' | 'SIGHUP' | 'SIGINT' | 'SIGKILL';
+// kill:<SIG> goes to Claude Code; host:<SIG> is the SDK's host (the process
+// running query()) signalling itself, for a scenario run with host: true.
+type Method = 'interrupt' | 'abort' | 'push' | `kill:${Sig}` | `host:${Sig}`;
 
 interface Step {
   text: string;
@@ -80,6 +84,9 @@ interface Resume {
   steps: Step[];
   // With no steps: how long to wait before ending the input.
   idleMs?: number;
+  // A store resume that also loads what an earlier resume (by label) of this
+  // scenario appended: a resume of a resume.
+  chain?: string;
 }
 
 interface Scenario {
@@ -90,6 +97,18 @@ interface Scenario {
   tools?: string[];
   thinking?: HarnessOptions['thinking'];
   stopHookHoldMs?: number;
+  // canUseTool holds this long when the step stops at 'permission'.
+  holdPermissionMs?: number;
+  // A local forwarder (forwarder.mts) in front of the API for every run of
+  // the scenario; ANTHROPIC_BASE_URL points at it.
+  forward?: Rule[];
+  // Claude Code started as `setpriv --pdeathsig SIGINT -- <claude>` from
+  // spawnClaudeCodeProcess (the integration participant's launch), instead
+  // of through the capture wrapper.
+  pdeathsig?: boolean;
+  // The main run's SDK host is a child process of this one, so a host:<SIG>
+  // stop can kill it while this process keeps recording.
+  host?: boolean;
 }
 
 const WARM = 'Reply with the word READY only.';
@@ -102,7 +121,21 @@ export const PROMPTS = {
   thinking2: 'Work out, carefully and step by step, how many integers from 1 to 400 are divisible by 4 or by 6 but not by 9. Reply with the number only. Answer in your reply itself; do not use any tools.',
   text: `Write the numbers one to sixty in words, one per line, nothing else. ${NO_TOOLS}`,
   toolExec: 'Run this exact Bash command, once: `sleep 20; echo DONE`. Then reply with its output only.',
+  // D scenarios (cancel-sdk-d).
+  writeTool: 'Use the Write tool to create the file numbers.txt containing the numbers one to eighty written in words, one per line. Then reply with the word DONE only.',
+  thinkThenWrite: 'First work out, carefully and step by step, how many integers from 1 to 300 are divisible by 3 or by 5 but not by 7. Then use the Write tool to create the file result.txt containing that number on the first line, followed by the numbers one to forty written in words, one per line. Then reply with the word DONE only.',
+  permission: 'Run this exact Bash command, once: `echo PERMITTED`. Then reply with its output only.',
+  parallel: 'In one single message, make these two Bash tool calls in parallel (both at once, not one after the other): `sleep 3; echo FAST` and `sleep 25; echo SLOW`. Then reply with both outputs only.',
+  subagent: 'Use the Agent tool once, with subagent_type "general-purpose" and this prompt for the subagent: "Run this exact Bash command, once: `sleep 20; echo SUB`. Then reply with its output only." Then reply with what the subagent returned, only.',
+  stopHook: 'Reply with the word STOPHOOK only.',
+  // Enough text for a small auto-compact window to be crossed.
+  compactFill: `Here is some filler text to read; reply with the word FILLED only. ${'The quick brown fox jumps over the lazy dog. '.repeat(400)}`,
 };
+
+// F2/F3: the forwarder acts on requests whose last user message carries one
+// of these markers.
+const MARK = { f2a: 'ref ZXF2A', f2b: 'ref ZXF2B', f2c: 'ref ZXF2C', f3a: 'ref ZXF3A', f3b: 'ref ZXF3B', d1h: 'ref ZXD1H' };
+const marked = (text: string, m: string): string => `${text} (${m})`;
 
 const STORE_RESUMES = (steps: Step[]): Resume[] => [
   { label: 'store', source: 'store', steps },
@@ -149,6 +182,83 @@ function scenarios(): Scenario[] {
   // E3: a message pushed into a running query.
   out.push({ id: 'E3-thinking', steps: [{ text: WARM }, { text: PROMPTS.thinking, stop: { at: 'thinking', method: 'push' } }, { text: NEXT }], resumes: [] });
   out.push({ id: 'E3-tool', steps: [{ text: WARM }, { text: PROMPTS.toolExec, stop: { at: 'tool-exec', method: 'push' } }, { text: NEXT }], resumes: [] });
+
+  // D scenarios. For each: -interrupt (same process, then NEXT) and a kill
+  // of Claude Code (SIGTERM; store and transcript resumes, then NEXT).
+  const both = (id: string, text: string, at: Point, extra: Partial<Scenario> = {}): void => {
+    out.push({ id: `${id}-interrupt`, steps: [{ text: WARM }, { text, stop: { at, method: 'interrupt' } }, { text: NEXT }], resumes: [], ...extra });
+    out.push({ id: `${id}-SIGTERM`, steps: [{ text: WARM }, { text, stop: { at, method: 'kill:SIGTERM' } }], resumes: STORE_RESUMES([{ text: NEXT }]), ...extra });
+  };
+  // D1: request sent, nothing back yet (fires when the step's main request
+  // body file appears; the first byte came about 1 s later in earlier runs).
+  both('D1', PROMPTS.thinking, 'first-byte');
+  // D1h: the same with the response held 8 s by the forwarder (injected
+  // delay), so the stop is certain to land before the first byte.
+  both('D1h', marked(PROMPTS.thinking, MARK.d1h), 'first-byte', { forward: [{ marker: MARK.d1h, action: 'hold', ms: 8000, times: 1 }] });
+  // D2: while the model streams a tool call's input, with thinking before it
+  // and with thinking disabled.
+  both('D2-think', PROMPTS.thinkThenWrite, 'tool-input');
+  both('D2-nothink', PROMPTS.writeTool, 'tool-input', { thinking: { type: 'disabled' } });
+  // D3: while canUseTool holds the permission (60 s).
+  both('D3', PROMPTS.permission, 'permission', { holdPermissionMs: 60_000 });
+  // D4: two Bash calls asked for in parallel, 2 s after the first finished.
+  both('D4', PROMPTS.parallel, 'tool-partial');
+  // D5: a subagent running a 20 s Bash command, 3 s into it.
+  both('D5', PROMPTS.subagent, 'subagent-tool', { tools: ['Agent', 'Bash'] });
+  // D6: 1 s into a Stop hook held 10 s.
+  both('D6', PROMPTS.stopHook, 'stop-hook', { stopHookHoldMs: 10_000 });
+  // D7: the SDK's host dies 700 ms into thinking; Claude Code is not
+  // signalled by this runner. Plain (capture wrapper: Claude Code sees stdin
+  // EOF) and pdeathsig (setpriv --pdeathsig SIGINT, the integration
+  // participant's launch).
+  for (const sig of ['SIGKILL', 'SIGTERM'] as const) {
+    out.push({ id: `D7-plain-host${sig}`, host: true, steps: [{ text: WARM }, { text: PROMPTS.thinking, stop: { at: 'thinking', method: `host:${sig}` } }], resumes: STORE_RESUMES([{ text: NEXT }]) });
+    out.push({ id: `D7-pdeathsig-host${sig}`, host: true, pdeathsig: true, steps: [{ text: WARM }, { text: PROMPTS.thinking, stop: { at: 'thinking', method: `host:${sig}` } }], resumes: STORE_RESUMES([{ text: NEXT }]) });
+  }
+  // D8: a kill N ms after the send.
+  for (const [sig, d] of [['SIGTERM', 0], ['SIGTERM', 20], ['SIGTERM', 60], ['SIGTERM', 150], ['SIGTERM', 400], ['SIGKILL', 0], ['SIGKILL', 60], ['SIGKILL', 150]] as const) {
+    out.push({ id: `D8-${sig}-${d}ms`, steps: [{ text: WARM }, { text: PROMPTS.thinking, stop: { at: 'immediate', method: `kill:${sig}`, delayMs: d } }], resumes: STORE_RESUMES([{ text: NEXT }]) });
+  }
+  // D9: a kill during a resume. Main: killed in thinking. Resume 1 is killed
+  // (in its first reply's thinking, or right after its send); resume 2
+  // resumes what the main run and resume 1 left, and sends NEXT.
+  const d9 = (label: string, source: 'store' | 'transcript', stop: Step['stop']): Resume[] =>
+    source === 'store'
+      ? [
+          { label, source, steps: [{ text: PROMPTS.thinking2, stop }] },
+          { label: `${label}-then-store`, source: 'store', chain: label, steps: [{ text: NEXT }] },
+          { label: `${label}-then-store-at-last`, source: 'store', chain: label, at: 'last', steps: [{ text: NEXT }] },
+        ]
+      : [
+          { label, source, steps: [{ text: PROMPTS.thinking2, stop }] },
+          { label: `${label}-then-transcript`, source: 'transcript', steps: [{ text: NEXT }] },
+        ];
+  const d9main: Step[] = [{ text: WARM }, { text: PROMPTS.thinking, stop: { at: 'thinking', method: 'kill:SIGTERM' } }];
+  out.push({ id: 'D9-store-thinking', steps: d9main, resumes: d9('store-killed', 'store', { at: 'thinking', method: 'kill:SIGTERM' }) });
+  out.push({ id: 'D9-store-immediate', steps: d9main, resumes: d9('store-killed', 'store', { at: 'immediate', method: 'kill:SIGTERM', delayMs: 0 }) });
+  out.push({ id: 'D9-transcript-thinking', steps: d9main, resumes: d9('transcript-killed', 'transcript', { at: 'thinking', method: 'kill:SIGTERM' }) });
+  // D10: a kill (and an interrupt) during auto-compaction, 1 s after
+  // PreCompact. The window env values are the easiest that might trigger it
+  // (probe first: D10-probe).
+  const compactEnv = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: process.env.CANCEL_COMPACT_WINDOW ?? '100000', CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: process.env.CANCEL_COMPACT_PCT ?? '15' };
+  out.push({ id: 'D10-probe', env: compactEnv, steps: [{ text: WARM }, { text: PROMPTS.compactFill }, { text: NEXT }], resumes: [] });
+  // Auto-compaction is checked before a request, against the previous
+  // turn's usage: the step after the filler is the one that compacts.
+  out.push({ id: 'D10-interrupt', env: compactEnv, steps: [{ text: WARM }, { text: PROMPTS.compactFill }, { text: NEXT, stop: { at: 'compact', method: 'interrupt', delayMs: 1000 } }, { text: AGAIN }], resumes: [] });
+  out.push({ id: 'D10-SIGTERM', env: compactEnv, steps: [{ text: WARM }, { text: PROMPTS.compactFill }, { text: NEXT, stop: { at: 'compact', method: 'kill:SIGTERM', delayMs: 1000 } }], resumes: STORE_RESUMES([{ text: AGAIN }]) });
+
+  // F1: the output limit (CLAUDE_CODE_MAX_OUTPUT_TOKENS 64, proof 23's
+  // value), then NEXT in the same process.
+  out.push({ id: 'F1', env: { CLAUDE_CODE_MAX_OUTPUT_TOKENS: '64' }, steps: [{ text: WARM }, { text: PROMPTS.thinking }, { text: NEXT }], resumes: [] });
+  // F2: injected API errors (forwarder; the real API never sees these
+  // requests), CLAUDE_CODE_MAX_RETRIES 2 (proof 23's value).
+  const retries = { CLAUDE_CODE_MAX_RETRIES: '2' };
+  out.push({ id: 'F2-429-once', env: retries, forward: [{ marker: MARK.f2a, action: 'status', status: 429, retryAfter: 1, times: 1 }], steps: [{ text: WARM }, { text: marked(PROMPTS.thinking, MARK.f2a) }, { text: NEXT }], resumes: [] });
+  out.push({ id: 'F2-529-always', env: retries, forward: [{ marker: MARK.f2b, action: 'status', status: 529 }], steps: [{ text: WARM }, { text: marked(PROMPTS.thinking, MARK.f2b) }, { text: NEXT }], resumes: [] });
+  out.push({ id: 'F2-500-always', env: retries, forward: [{ marker: MARK.f2c, action: 'status', status: 500 }], steps: [{ text: WARM }, { text: marked(PROMPTS.thinking, MARK.f2c) }, { text: NEXT }], resumes: [] });
+  // F3: the connection cut after 5 content_block_delta events (injected).
+  out.push({ id: 'F3-cut-once', env: retries, forward: [{ marker: MARK.f3a, action: 'cut', afterDeltas: 5, times: 1 }], steps: [{ text: WARM }, { text: marked(PROMPTS.thinking, MARK.f3a) }, { text: NEXT }], resumes: [] });
+  out.push({ id: 'F3-cut-always', env: retries, forward: [{ marker: MARK.f3b, action: 'cut', afterDeltas: 5 }], steps: [{ text: WARM }, { text: marked(PROMPTS.thinking, MARK.f3b) }, { text: NEXT }], resumes: [] });
   return out;
 }
 
@@ -198,6 +308,42 @@ function copyBodies(from: string, runDir: string): void {
   }
 }
 
+function claimSpawnDir(root: string): string {
+  mkdirSync(root, { recursive: true });
+  for (let n = 1; ; n += 1) {
+    const dir = join(root, String(n));
+    try {
+      mkdirSync(dir);
+      return dir;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw err;
+      }
+    }
+  }
+}
+
+// The integration participant's launch (proofs/integration/spawn.mts, which
+// can't be reused as is: it also sets the participant's HOME, login and
+// shell prefix): setpriv execs Claude Code in place, so the kernel sends it
+// SIGINT when this process dies. The capture dir gets argv.json (wrapperPid
+// is this process, so ClaudeFinder finds the real binary as its child),
+// stderr and exit.json; stdin and stdout are not captured.
+function pdeathsigSpawn(o: SpawnOptions): SpawnedProcess {
+  const captureRoot = String(o.env.HARNESS_CAPTURE_DIR);
+  const real = String(o.env.HARNESS_REAL_CLAUDE);
+  const env: Record<string, string | undefined> = { ...o.env };
+  delete env.HARNESS_CAPTURE_DIR;
+  delete env.HARNESS_REAL_CLAUDE;
+  const dir = claimSpawnDir(captureRoot);
+  const child: ChildProcess = spawn('setpriv', ['--pdeathsig', 'SIGINT', '--', real, ...o.args], { cwd: o.cwd, env: env as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'pipe'], signal: o.signal });
+  writeFileSync(join(dir, 'argv.json'), `${JSON.stringify({ startedAt: stamp(), realBinary: real, launcher: 'setpriv --pdeathsig SIGINT --', argv: o.args, cwd: o.cwd, wrapperPid: process.pid, childPid: child.pid ?? null }, null, 2)}\n`);
+  const err = createWriteStream(join(dir, 'stderr.txt'));
+  child.stderr?.on('data', (c: Buffer) => err.write(c));
+  child.on('exit', (code, signal) => writeFileSync(join(dir, 'exit.json'), `${JSON.stringify({ at: stamp(), code, signal })}\n`));
+  return child as unknown as SpawnedProcess;
+}
+
 interface RunPlan {
   agent: string;
   label: string;
@@ -205,7 +351,10 @@ interface RunPlan {
   scenario: Scenario;
   steps: Step[];
   idleMs?: number;
-  resume?: { sessionId: string; source: 'store' | 'transcript'; loadFrom?: string; resumeSessionAt?: string };
+  resume?: { sessionId: string; source: 'store' | 'transcript'; loadFrom?: string[]; resumeSessionAt?: string };
+  // Run as the SDK host child of a recording parent: no transcript watch or
+  // process finder here (the parent does them); print the run dir.
+  hostMode?: boolean;
 }
 
 interface RunOut {
@@ -269,6 +418,10 @@ async function runOne(plan: RunPlan): Promise<RunOut> {
         ev.write('proof', 'push', { step: stepIndex + 1, text: next.text });
         run.send(user(next.text));
       }
+    } else if (s.method.startsWith('host:')) {
+      const sig = s.method.slice('host:'.length) as NodeJS.Signals;
+      ev.write('proof', 'host-kill', { pid: process.pid, signal: sig, ms: now(), wall: Date.now() });
+      process.kill(process.pid, sig);
     } else {
       const sig = s.method.slice('kill:'.length) as NodeJS.Signals;
       const k = finder?.kill(sig) ?? { sent: false, why: 'no finder' };
@@ -283,8 +436,21 @@ async function runOne(plan: RunPlan): Promise<RunOut> {
   const onHook = async (h: HookEvent, input: HookInput): Promise<void> => {
     const i = input as Json;
     const s = stopOf();
-    if (h === 'PreToolUse' && s?.at === 'tool-exec' && i.tool_name === 'Bash') {
+    if (h === 'PreToolUse' && s?.at === 'tool-exec' && i.tool_name === 'Bash' && i.agent_id === undefined) {
       setTimeout(() => fire('2 s after PreToolUse for Bash'), 2000);
+    }
+    if (h === 'PostToolUse' && s?.at === 'tool-partial' && i.agent_id === undefined) {
+      setTimeout(() => fire('1 s after the first PostToolUse'), 1000);
+    }
+    if (h === 'PreToolUse' && s?.at === 'subagent-tool' && i.tool_name === 'Bash' && i.agent_id !== undefined) {
+      setTimeout(() => fire("3 s after the subagent's PreToolUse for Bash"), 3000);
+    }
+    if (h === 'SubagentStart' && s?.at === 'subagent-tool') {
+      setTimeout(() => fire('6 s after SubagentStart (fallback)'), 6000);
+    }
+    if (h === 'PreCompact' && s?.at === 'compact') {
+      const d = s.delayMs ?? 1000;
+      setTimeout(() => fire(`${d} ms after PreCompact`), d);
     }
     if (h === 'Stop' && plan.scenario.stopHookHoldMs) {
       if (s?.at === 'stop-hook') {
@@ -300,8 +466,26 @@ async function runOne(plan: RunPlan): Promise<RunOut> {
     thinking: plan.scenario.thinking ?? { type: 'adaptive', display: 'summarized' },
     includePartialMessages: true,
     tools: plan.scenario.tools ?? ['Bash', 'Write'],
-    canUseTool: async (toolName, input) => {
-      ev.write('proof', 'canUseTool', { toolName });
+    canUseTool: async (toolName, input, opts) => {
+      ev.write('proof', 'canUseTool', { toolName, agentID: (opts as Json).agentID ?? null });
+      const hold = plan.scenario.holdPermissionMs;
+      if (hold && stopOf()?.at === 'permission' && !fired.has(stepIndex)) {
+        setTimeout(() => fire('1 s into a held permission request'), 1000);
+        // Aborted: left pending (nothing is answered); otherwise allowed
+        // after the hold.
+        const aborted = await new Promise<boolean>((res) => {
+          const t = setTimeout(() => res(false), hold);
+          opts.signal.addEventListener('abort', () => {
+            clearTimeout(t);
+            ev.write('proof', 'permission-aborted', { toolName });
+            res(true);
+          });
+        });
+        if (aborted) {
+          await new Promise(() => {});
+        }
+        ev.write('proof', 'permission-released', { toolName });
+      }
       return { behavior: 'allow', updatedInput: input };
     },
     hooks: hooks(ev, onHook),
@@ -310,7 +494,13 @@ async function runOne(plan: RunPlan): Promise<RunOut> {
     ...(plan.resume ? { resume: plan.resume.sessionId } : {}),
     ...(plan.resume?.resumeSessionAt ? { resumeSessionAt: plan.resume.resumeSessionAt } : {}),
     env: { ...process.env, ...(plan.scenario.env ?? {}), OTEL_LOG_RAW_API_BODIES: `file:${bodies}` },
+    ...(plan.scenario.pdeathsig ? { spawnClaudeCodeProcess: pdeathsigSpawn } : {}),
   };
+  const forwarder = plan.scenario.forward ? await startForwarder({ port: 0, upstream: process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com', rules: plan.scenario.forward, onEvent: (e) => ev.write('fwd', String(e.kind), e) }) : undefined;
+  if (forwarder) {
+    (options.env as Record<string, string>).ANTHROPIC_BASE_URL = forwarder.url;
+    ev.write('fwd', 'listening', { url: forwarder.url, upstream: process.env.ANTHROPIC_BASE_URL ?? null, rules: plan.scenario.forward as unknown as Json });
+  }
 
   const configDir = join(HARNESS_STATE, 'config-dirs', plan.agent);
   const transcripts = new TranscriptWatch(ev);
@@ -343,11 +533,16 @@ async function runOne(plan: RunPlan): Promise<RunOut> {
       transcripts.addLive(join(p.configDir, 'projects'));
     }
   };
+  if (plan.hostMode) {
+    process.stdout.write(`HOSTRUN ${JSON.stringify({ dir: run.dir, rawDir, realBinary, pid: process.pid })}\n`);
+  }
   writeFileSync(join(run.dir, 'cancel-plan.json'), `${JSON.stringify({ label: plan.label, agent: plan.agent, model: plan.model, scenario: plan.scenario.id, steps: plan.steps, idleMs: plan.idleMs ?? null, resume: plan.resume ? { sessionId: plan.resume.sessionId, source: plan.resume.source, resumeSessionAt: plan.resume.resumeSessionAt ?? null } : null, rawDir }, null, 2)}\n`);
   process.stdout.write(`${stamp()} ${plan.label}: run ${run.dir}\n`);
-  transcripts.start();
+  if (!plan.hostMode) {
+    transcripts.start();
+    finder.start();
+  }
   bodiesWatch.start();
-  finder.start();
 
   // Drive.
   let sessionId: string | undefined;
@@ -470,9 +665,12 @@ async function runOne(plan: RunPlan): Promise<RunOut> {
   ev.write('proof', 'run-done', { error: error ?? null });
   // Late writes.
   await new Promise((res) => setTimeout(res, 3000));
-  transcripts.stop();
+  await forwarder?.close();
+  if (!plan.hostMode) {
+    transcripts.stop();
+    finder.stop();
+  }
   bodiesWatch.stop();
-  finder.stop();
   const still = finder.current();
   if (still) {
     ev.write('proof', 'still-running', { pid: still.pid });
@@ -486,16 +684,117 @@ async function runOne(plan: RunPlan): Promise<RunOut> {
   return { dir: r.dir, rawDir, sessionId, rawAppends, error, stops };
 }
 
+// The main run with its SDK host as a child process (`--host`), so the host
+// can die (a host:<SIG> stop) while this process keeps recording: the
+// transcripts, Claude Code's process, and whatever the host's store and
+// bodies recorders wrote before it died.
+async function runHosted(plan: RunPlan): Promise<RunOut> {
+  const configDir = join(HARNESS_STATE, 'config-dirs', plan.agent);
+  const pre: [string, string, Json][] = [];
+  let events: Events | undefined;
+  const ev = {
+    write: (src: string, kind: string, detail: Json = {}): void => {
+      if (events) {
+        events.write(src, kind, detail);
+      } else {
+        pre.push([src, kind, { ...detail, bufferedAt: stamp(), bufferedMs: now() }]);
+      }
+    },
+  } as Events;
+  const transcripts = new TranscriptWatch(ev);
+  transcripts.prime(join(configDir, 'projects'));
+  transcripts.start();
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--host', JSON.stringify({ agent: plan.agent, label: plan.label, model: plan.model, scenario: plan.scenario.id })], { stdio: ['ignore', 'pipe', 'inherit'] });
+  let info: { dir: string; rawDir: string; realBinary: string; pid: number } | undefined;
+  let finder: ClaudeFinder | undefined;
+  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((res) => child.on('exit', (code, signal) => res({ code, signal })));
+  let buf = '';
+  child.stdout?.on('data', (c: Buffer) => {
+    buf += c.toString('utf8');
+    for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      process.stdout.write(`[host ${child.pid}] ${line}\n`);
+      if (line.startsWith('HOSTRUN ') && !info) {
+        info = JSON.parse(line.slice('HOSTRUN '.length)) as { dir: string; rawDir: string; realBinary: string; pid: number };
+        events = new Events(info.dir, info.rawDir);
+        for (const [s, k, d] of pre.splice(0)) {
+          events.write(s, k, d);
+        }
+        events.write('parent', 'host', { hostPid: child.pid });
+        finder = new ClaudeFinder(join(info.dir, 'claude'), info.realBinary, events);
+        finder.onFound = (p) => {
+          if (p.configDir && p.configDir !== configDir) {
+            transcripts.addLive(join(p.configDir, 'projects'));
+          }
+        };
+        finder.start();
+      }
+    }
+  });
+  // A heartbeat: shows whether this process kept up (its own event loop)
+  // while the host died.
+  const tick = setInterval(() => ev.write('parent', 'tick', {}), 100);
+  const x = await exited;
+  ev.write('proof', 'host-exit', { pid: child.pid ?? null, code: x.code, signal: x.signal, ms: now() });
+  // Claude Code can outlive its host: wait for each one found to go.
+  for (const p of finder ? [...finder.found.values()] : []) {
+    const gone = await finder?.waitGone(p.pid, p.starttime, 60_000);
+    if (gone === undefined) {
+      const st = procStat(p.pid);
+      ev.write('proof', 'claude-outlived-wait', { pid: p.pid });
+      if (st && st.starttime === p.starttime) {
+        process.kill(p.pid, 'SIGKILL');
+        ev.write('proof', 'claude-killed-cleanup', { pid: p.pid });
+      }
+    } else {
+      ev.write('proof', 'claude-gone', { pid: p.pid, goneMs: gone });
+    }
+  }
+  await new Promise((res) => setTimeout(res, 3000));
+  clearInterval(tick);
+  transcripts.stop();
+  finder?.stop();
+  if (!info) {
+    throw new Error(`host ${child.pid} exited (${x.code ?? x.signal}) before starting a run`);
+  }
+  const lines = existsSync(join(info.dir, 'cancel-events.jsonl'))
+    ? readFileSync(join(info.dir, 'cancel-events.jsonl'), 'utf8')
+        .split('\n')
+        .filter((l) => l.trim() !== '')
+        .map((l) => JSON.parse(l) as Json)
+    : [];
+  const init = lines.find((e) => e.src === 'sdk' && e.kind === 'system:init');
+  const sessionId = typeof init?.session_id === 'string' ? init.session_id : undefined;
+  const rawAppends = join(info.rawDir, 'store-appends.jsonl');
+  if (x.code !== 0) {
+    // The host died before copying its records into the run dir.
+    copyBodies(join(info.rawDir, 'api-bodies'), info.dir);
+    if (existsSync(rawAppends)) {
+      writeFileSync(join(info.dir, 'store-appends.jsonl'), clean(readFileSync(rawAppends, 'utf8')));
+    }
+  }
+  ev.write('proof', 'finished', { sessionId: sessionId ?? null });
+  return { dir: info.dir, rawDir: info.rawDir, sessionId, rawAppends, error: x.code === 0 ? undefined : `host exited code=${x.code} signal=${x.signal}`, stops: lines.filter((e) => e.src === 'proof' && e.kind === 'stop') };
+}
+
 async function runScenario(agent: string, model: string, sc: Scenario, rep: number): Promise<Json> {
   const label = `${sc.id}-r${rep}`;
-  const main = await runOne({ agent, label, model, scenario: sc, steps: sc.steps });
+  const main = sc.host ? await runHosted({ agent, label, model, scenario: sc, steps: sc.steps }) : await runOne({ agent, label, model, scenario: sc, steps: sc.steps });
   const row: Json = { scenario: sc.id, rep, model, main: main.dir, mainRaw: main.rawDir, sessionId: main.sessionId ?? null, mainError: main.error ?? null, stops: main.stops, resumes: [] as Json[] };
   if (!main.sessionId) {
     return row;
   }
-  const loaded = loadAppends(main.rawAppends, main.sessionId);
   const stopped = sc.steps.find((s) => s.stop);
+  const outs = new Map<string, RunOut>();
   for (const res of sc.resumes) {
+    const chained = res.chain ? outs.get(res.chain) : undefined;
+    if (res.chain && !chained) {
+      (row.resumes as Json[]).push({ label: res.label, skipped: `no resume ${res.chain} to chain from` });
+      continue;
+    }
+    const loadFrom = [main.rawAppends, ...(chained ? [chained.rawAppends] : [])];
+    const loaded = loadAppends(loadFrom, main.sessionId);
     let at: string | undefined;
     if (res.at === 'last') {
       at = lastChain(loaded);
@@ -514,15 +813,25 @@ async function runScenario(agent: string, model: string, sc: Scenario, rep: numb
       scenario: sc,
       steps: res.steps,
       idleMs: res.idleMs,
-      resume: { sessionId: main.sessionId, source: res.source, loadFrom: res.source === 'store' ? main.rawAppends : undefined, resumeSessionAt: at },
+      resume: { sessionId: main.sessionId, source: res.source, loadFrom: res.source === 'store' ? loadFrom : undefined, resumeSessionAt: at },
     });
-    (row.resumes as Json[]).push({ label: res.label, source: res.source, at: res.at ?? null, resumeSessionAt: at ?? null, atEntry: at ? entryBrief(loaded.find((e) => e.uuid === at) ?? {}) : null, dir: out.dir, raw: out.rawDir, sessionId: out.sessionId ?? null, error: out.error ?? null });
+    outs.set(res.label, out);
+    (row.resumes as Json[]).push({ label: res.label, chain: res.chain ?? null, source: res.source, at: res.at ?? null, resumeSessionAt: at ?? null, atEntry: at ? entryBrief(loaded.find((e) => e.uuid === at) ?? {}) : null, dir: out.dir, raw: out.rawDir, sessionId: out.sessionId ?? null, error: out.error ?? null });
   }
   return row;
 }
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+  if (args[0] === '--host') {
+    const h = JSON.parse(args[1] ?? '{}') as { agent: string; label: string; model: string; scenario: string };
+    const sc = scenarios().find((x) => x.id === h.scenario);
+    if (!sc) {
+      throw new Error(`--host: no scenario ${h.scenario}`);
+    }
+    await runOne({ agent: h.agent, label: h.label, model: h.model, scenario: sc, steps: sc.steps, hostMode: true });
+    return;
+  }
   const flag = (n: string): string | undefined => {
     const i = args.indexOf(n);
     if (i < 0) {
