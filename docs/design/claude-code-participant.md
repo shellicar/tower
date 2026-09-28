@@ -476,12 +476,21 @@ separately, they can go in this branch" (26 Sep).
 
 ## Frontend work owed
 
-- **Messages with no `from` get a generic "system" label, not "tool", in
-  both frontends** (27 Sep). Both frontends label every message without
-  `from` as "tool" (`MessageView.svelte:9-11`, `ui/conversation.rs:477-485`).
-  Stephen: "we can change this to create *generic* category or something to
-  show 'system'". A message with no `from` and no tool result gets "system".
-  This is owed in both `frontend-svelte` and `frontend-leptos`.
+- **Done:** messages with no `from` get a generic "system" label, not "tool",
+  in both frontends (27 Sep). Both frontends labelled every message without
+  `from` as "tool". Stephen: "we can change this to create *generic* category
+  or something to show 'system'". A message with no `from` and no tool result
+  gets "system". The label is decided on the message, not its blocks: "it's
+  tool result, system reminder is *text* in a tool result / an isolated
+  message of *role* system is system / this is what i mean, it's on the
+  *message*, not the *content*". The label now lives in `sender_label`
+  (`mvp/frontend-leptos/src/concerns/conversation.rs`, called from
+  `ui/conversation.rs`) and `senderLabel`
+  (`mvp/frontend-svelte/src/lib/core/sender.ts`, called from
+  `MessageView.svelte`). `from` says who wrote a message (a human, an agent,
+  or an orchestrator); anything the harness generated has none
+  (`mvp/docs/tower-ws-spec.md` for the browser, `docs/spec/conversation.md`
+  for the wire).
 
 ## Open
 

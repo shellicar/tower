@@ -34,7 +34,7 @@ use wasm_bindgen::closure::Closure;
 use ws_types::WsMessage;
 
 use crate::concerns::approvals::{Approvals, ask_input, ask_label};
-use crate::concerns::conversation::{ConversationState, QueryState};
+use crate::concerns::conversation::{ConversationState, QueryState, sender_label};
 use crate::concerns::rail::Rail;
 use crate::concerns::usage::Usage;
 use crate::pricing::{format_tokens, format_usd, parse_model_name, price_usage};
@@ -472,18 +472,7 @@ pub fn ConversationView(
                             "assistant" => "assistant",
                             _ => "other",
                         };
-                        // Absent `from` is real: a tool_result carries no sender
-                        // (a mechanical delivery, not an utterance — nothing is
-                        // fabricated to fill the slot).
-                        let who = match &m.from {
-                            Some(from) => from
-                                .get("userId")
-                                .and_then(Value::as_str)
-                                .or_else(|| from.get("kind").and_then(Value::as_str))
-                                .unwrap_or(&m.role)
-                                .to_owned(),
-                            None => "tool".to_owned(),
-                        };
+                        let who = sender_label(&m);
                         let time = format_time(m.ts);
                         let blocks: Vec<AnyView> = m.content.iter().map(|b| render_block(b, &m.role)).collect();
                         let row_id = m.id.clone();

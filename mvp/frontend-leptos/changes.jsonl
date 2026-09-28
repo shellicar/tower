@@ -2,3 +2,4 @@
 {"type":"change","category":"added","description":"A conversation's panel shows the directory its agent is working in."}
 {"type":"change","category":"fixed","description":"An agent whose claim omits its world reads as alive on the rail."}
 {"type":"change","category":"added","description":"A conversation's id can be searched for in the rail and copied from its panel."}
+{"type":"change","category":"changed","description":"A message with no sender is labelled system instead of tool, unless it carries tool results."}

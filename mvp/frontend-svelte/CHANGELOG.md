@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A conversation's panel shows the directory its agent is working in.
 - A conversation's id can be searched for in the rail and copied from its panel.
 
+### Changed
+
+- A message with no sender is labelled system instead of tool, unless it carries tool results.
+
 ### Fixed
 
 - An agent whose claim omits its world reads as alive on the rail.

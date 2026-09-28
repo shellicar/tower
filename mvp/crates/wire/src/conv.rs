@@ -186,10 +186,7 @@ pub struct Message {
     #[serde(rename = "turnId")]
     pub turn_id: TurnId,
     pub role: String,
-    /// Provenance, verbatim — forwarded, stored, never interpreted. Absent
-    /// for a tool_result: it is a mechanical delivery, not an utterance, and
-    /// nobody "sent" it — stamping it with a sender was a category error
-    /// (fixed 19 Jul 2026; see docs/spec/conversation.md).
+    /// See docs/spec/conversation.md, The change stream — `changes`.
     #[serde(default)]
     pub from: Option<Value>,
     pub content: Vec<Value>,

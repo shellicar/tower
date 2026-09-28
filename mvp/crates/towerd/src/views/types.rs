@@ -179,8 +179,7 @@ pub struct ConversationMessage {
     pub query: QueryId,
     pub turn: TurnId,
     pub role: String,
-    /// Absent for a tool_result — it carries no sender (conversation.md:
-    /// a mechanical delivery is not an utterance).
+    /// See mvp/docs/tower-ws-spec.md, `conversation`: response to `open`.
     pub from: Option<Value>,
     pub content: Vec<Value>,
     pub ts: i64,

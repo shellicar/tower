@@ -297,8 +297,7 @@ pub struct WsMessage {
     pub query: String,
     pub turn: String,
     pub role: String,
-    /// Absent for a tool_result — it carries no sender (conversation.md:
-    /// a mechanical delivery is not an utterance).
+    /// See mvp/docs/tower-ws-spec.md, `conversation`: response to `open`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub from: Option<Value>,
     pub content: Vec<Value>,
