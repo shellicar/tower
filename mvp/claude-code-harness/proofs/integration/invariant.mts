@@ -169,6 +169,9 @@ export async function readTower(convId: string): Promise<TowerMsg[]> {
       }
     }
     await messages.close();
+    // Deleted at once: many reads in a row (the grid report) would otherwise
+    // leave ordered consumers behind faster than the server expires them.
+    await consumer.delete().catch(() => false);
     return out;
   } finally {
     await nc.close();

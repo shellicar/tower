@@ -79,6 +79,9 @@ async function readStream(tower: Tower, filter: string, upto?: number): Promise<
     }
   }
   await messages.close();
+  // Deleted at once rather than left to expire (5 min idle): a run of many
+  // reads would otherwise reach the server's limit of 1000 consumers.
+  await consumer.delete().catch(() => false);
   return out;
 }
 
