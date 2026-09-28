@@ -1311,7 +1311,7 @@ async function grid(a: Args): Promise<CheckRow[]> {
   };
   for (const cell of chosen) {
     for (const pickup of pickups) {
-      const attempts = ['thinking-only', 'limit', 'api-error'].includes(cell.id) ? Number(process.env.INT_GRID_TRIES ?? '3') : 1;
+      const attempts = ['thinking-only', 'limit', 'api-error', 'tool-exec', 'crash'].includes(cell.id) ? Number(process.env.INT_GRID_TRIES ?? '3') : 1;
       for (let t = 1; t <= attempts; t += 1) {
         let r: GridRow;
         try {
