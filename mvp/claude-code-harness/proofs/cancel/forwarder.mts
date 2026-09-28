@@ -142,6 +142,9 @@ export function startForwarder(args: { port: number; upstream: string; rules: Ru
               }
             });
             upRes.on('error', (err) => emit({ ts: new Date().toISOString(), wall: Date.now(), id, kind: 'upstream-error', error: String(err) }));
+            // A stream paused explicitly (hold) does not flow again when a
+            // data listener is added.
+            upRes.resume();
           };
           if (rule?.action === 'hold') {
             emit({ ts: new Date().toISOString(), wall: Date.now(), id, kind: 'hold', ms: rule.ms ?? 0 });
