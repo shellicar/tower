@@ -50,7 +50,7 @@ class CountingPublisher implements IPublisher {
   }
 }
 
-const config = composeConfig(process.env, tmpdir());
+const config = composeConfig(process.env, tmpdir(), process.getuid?.());
 const services = participantServices(config);
 services.register(RecordingSpawner).as(IProcessSpawner);
 services.register(CountingPublisher).as(IPublisher);

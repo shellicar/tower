@@ -8,7 +8,7 @@ import { StartupError } from './startup.js';
 
 let provider: IServiceProvider;
 try {
-  provider = participantServices(composeConfig(process.env, tmpdir())).buildProvider();
+  provider = participantServices(composeConfig(process.env, tmpdir(), process.getuid?.())).buildProvider();
   // TODO: undecided: nothing on stdin is read until this finishes, which with
   // a leftover that won't stop takes the SIGINT and SIGTERM waits in full.
   // Reading control lines meanwhile and holding only launches back would
