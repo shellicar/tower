@@ -22,7 +22,4 @@ try {
 }
 
 await runControlLines(process.stdin, process.stdout, provider.resolve(ControlLines));
-// Stdin closing is one of shutdown's triggers, and shutdown isn't built yet:
-// for now it stops a scan still under way and, with nothing else holding the
-// process open, the process ends.
 shutdown.abort();

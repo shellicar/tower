@@ -44,7 +44,6 @@ async function holdInAnotherProcess(configDir: string): Promise<ChildProcess> {
 }
 
 afterEach(async () => {
-  // Only the process this test started, by its handle.
   if (holder !== undefined && holder.exitCode === null && holder.signalCode === null) {
     holder.kill('SIGKILL');
     await once(holder, 'exit');

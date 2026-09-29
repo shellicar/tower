@@ -4,10 +4,6 @@ import { ParticipantConfig } from './ParticipantConfig.js';
 import { IProcessTable, type TaggedProcess } from './ProcessTable.js';
 import { ITimer } from './Timer.js';
 
-// The waits belong to the scan, not to this process's own shutdown: the
-// leftovers are an earlier process's. Interrupted Claude Codes have been seen
-// to exit 2.4 to 2.9 s after SIGINT, and orphaned commands within
-// milliseconds; a Claude Code sent SIGTERM exits in under a second.
 const SIGINT_WAIT_MS = 5_000;
 const SIGTERM_WAIT_MS = 5_000;
 /** SIGKILL can't be refused; this only gives the kernel time to take the process down before what's left is reported. */
@@ -42,8 +38,7 @@ function listed(processes: readonly TaggedProcess[]): string {
  * so a command outlives a Claude Code killed without stopping it, and once
  * its parent is gone only the tag ties it to this config dir.
  *
- * Run once, at start, after the lock is taken: this process tracks what it
- * starts itself, so leftovers can only come from an earlier one.
+ * Run once, at start, after the lock is taken.
  */
 export class Leftovers {
   @dependsOn(ParticipantConfig) private readonly config!: ParticipantConfig;
@@ -52,10 +47,7 @@ export class Leftovers {
 
   /**
    * SIGINT, wait, SIGTERM, wait, SIGKILL; each stage reaches every tagged
-   * process there at the time, one that appeared since included. What is
-   * still there after SIGKILL is served past: a process that has received
-   * SIGKILL can't run its own code again, so at most a write it was already
-   * inside finishes.
+   * process there at the time, one that appeared since included.
    *
    * @param shutdown aborted when shutdown begins, which stops the scan where it is.
    */

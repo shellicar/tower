@@ -222,7 +222,6 @@ describe.skipIf(process.platform !== 'linux')('LinuxProcessTable on the real /pr
   }
 
   afterEach(async () => {
-    // Only the child this test started, by its handle.
     if (child !== undefined && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL');
       await once(child, 'exit');

@@ -20,8 +20,7 @@ function isBusy(err: unknown): boolean {
  * The lock is an exclusive transaction on a small sqlite database in the
  * config dir, opened at start and never finished. sqlite holds it as an
  * operating-system file lock, which the kernel releases when the holder
- * exits, however it exits: there is never a dead holder to detect or take
- * over, so two participants starting together can't both end up holding it.
+ * exits, however it exits.
  *
  * Nothing else in this process may open the lock file: POSIX drops every lock
  * a process holds on a file when any descriptor it has for that file closes.

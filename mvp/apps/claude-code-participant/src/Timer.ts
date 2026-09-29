@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
-/** Time: the edge that lets a test run a 30 s wait at once. */
+/** Time: the edge that lets a test run a wait at once. */
 export abstract class ITimer {
   /** Milliseconds, for measuring how long something took. */
   public abstract now(): number;

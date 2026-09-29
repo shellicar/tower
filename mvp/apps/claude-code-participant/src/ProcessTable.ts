@@ -18,8 +18,7 @@ export type TaggedProcess = ProcessIdentity & {
 
 /**
  * The processes running on this machine: the edge between the participant
- * and the OS's process list. An abstract class because each OS reads its
- * process list its own way; v0 has Linux only.
+ * and the OS's process list. v0 has Linux only.
  */
 export abstract class IProcessTable {
   /** Every running process whose environment holds `entry` exactly, other than this process, its ancestors and its descendants. */
@@ -145,7 +144,6 @@ export class LinuxProcessTable implements IProcessTable {
     return [];
   }
 
-  /** Read in full: a copy cut short once hid the bundled Claude Code's path. */
   private commandLine(pid: number): string {
     return this.entries(join(this.root, String(pid), 'cmdline')).join(' ');
   }
