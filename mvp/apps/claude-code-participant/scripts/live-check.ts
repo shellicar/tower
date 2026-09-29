@@ -3,7 +3,7 @@
 // started with. Launching has no trigger of its own until the `service`
 // request exists, so this script is that trigger.
 //
-//   printf '%s\n' '<control line>' ... | NATS_URL=... PARTICIPANT_CONFIG_DIR=... PARTICIPANT_AGENT=... \
+//   printf '%s\n' '<control line>' ... | NATS_URL=... PARTICIPANT_CONFIG_DIR=... \
 //     pnpm exec tsx scripts/live-check.ts <cwd> <prompt>
 //
 // It reads control lines from stdin (answering each on stdout) until stdin
@@ -79,7 +79,7 @@ function evidence(pid: number): Record<string, unknown> {
     ownSid,
     ownGroup: pgid === String(pid),
     HOME: value('HOME'),
-    TOWER_AGENT: value('TOWER_AGENT'),
+    TOWER_PARTICIPANT: value('TOWER_PARTICIPANT'),
     CLAUDE_CONFIG_DIR: value('CLAUDE_CONFIG_DIR'),
     CLAUDE_SECURESTORAGE_CONFIG_DIR: value('CLAUDE_SECURESTORAGE_CONFIG_DIR'),
     CLAUDE_CODE_SHELL_PREFIX: value('CLAUDE_CODE_SHELL_PREFIX'),

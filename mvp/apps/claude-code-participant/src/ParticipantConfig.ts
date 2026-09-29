@@ -4,7 +4,6 @@ import type { Startup } from './startup.js';
 export class ParticipantConfig {
   public readonly natsUrl: string;
   public readonly configDir: string;
-  public readonly agent: string;
   public readonly realHome: string;
   public readonly inheritedEnv: Readonly<Record<string, string>>;
   /** Claude Code's machinery gets this as HOME: one per process, never removed. */
@@ -17,7 +16,6 @@ export class ParticipantConfig {
   public constructor(startup: Startup, privateHome: string, setpriv: string | null, shellPrefix: string) {
     this.natsUrl = startup.natsUrl;
     this.configDir = startup.configDir;
-    this.agent = startup.agent;
     this.realHome = startup.realHome;
     this.inheritedEnv = startup.inheritedEnv;
     this.privateHome = privateHome;

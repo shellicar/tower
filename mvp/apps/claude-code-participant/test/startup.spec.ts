@@ -4,7 +4,6 @@ import { readStartup, StartupError } from '../src/startup.js';
 const complete = {
   NATS_URL: 'nats://127.0.0.1:31416',
   PARTICIPANT_CONFIG_DIR: '/agents/alpha/config',
-  PARTICIPANT_AGENT: 'alpha',
   HOME: '/home/someone',
   PATH: '/usr/bin',
 };
@@ -37,17 +36,6 @@ describe('readStartup', () => {
 
     it('is the config dir', () => {
       expect(readStartup(complete).configDir).toBe('/agents/alpha/config');
-    });
-  });
-
-  describe('PARTICIPANT_AGENT', () => {
-    it('refuses to start without it', () => {
-      const { PARTICIPANT_AGENT: _, ...env } = complete;
-      expect(() => readStartup(env)).toThrow('PARTICIPANT_AGENT is required');
-    });
-
-    it('is the agent', () => {
-      expect(readStartup(complete).agent).toBe('alpha');
     });
   });
 

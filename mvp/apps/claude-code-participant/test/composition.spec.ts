@@ -33,7 +33,7 @@ describe('findOnPath', () => {
 });
 
 describe('composeConfig', () => {
-  const env = { NATS_URL: 'nats://127.0.0.1:31416', PARTICIPANT_CONFIG_DIR: '/agents/alpha', PARTICIPANT_AGENT: 'alpha', HOME: '/home/someone', PATH: withTool };
+  const env = { NATS_URL: 'nats://127.0.0.1:31416', PARTICIPANT_CONFIG_DIR: '/agents/alpha', HOME: '/home/someone', PATH: withTool };
 
   it('makes a private home in the temp dir', () => {
     expect(composeConfig(env, scratch).privateHome.startsWith(join(scratch, 'tower-participant-home-'))).toBe(true);

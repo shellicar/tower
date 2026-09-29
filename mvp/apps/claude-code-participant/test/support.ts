@@ -12,7 +12,6 @@ export function testConfig(overrides: { setpriv?: string | null } = {}): Partici
     {
       natsUrl: 'nats://127.0.0.1:31416',
       configDir: '/agents/alpha/config',
-      agent: 'alpha',
       realHome: '/home/someone',
       inheritedEnv: { PATH: '/usr/bin', LANG: 'C.UTF-8' },
     },

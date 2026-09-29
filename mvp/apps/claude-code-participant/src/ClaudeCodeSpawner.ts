@@ -4,8 +4,13 @@ import { dependsOn } from '@shellicar/core-di';
 import { ParticipantConfig } from './ParticipantConfig.js';
 import { IProcessSpawner } from './ProcessSpawner.js';
 
-/** The tag every Claude Code carries, so a later run can find its leftovers. */
-export const AGENT_TAG = 'TOWER_AGENT';
+/**
+ * The tag every Claude Code carries, set to the config dir, so a later run on
+ * that config dir can find its leftovers. The commands a Claude Code starts
+ * inherit it, which is what still ties one to the config dir once the Claude
+ * Code that started it is gone.
+ */
+export const PARTICIPANT_TAG = 'TOWER_PARTICIPANT';
 
 /** The real home, for the shell prefix to hand back to commands. */
 export const REAL_HOME_VARIABLE = 'TOWER_REAL_HOME';
@@ -22,7 +27,7 @@ export class ClaudeCodeSpawner {
   public spawn(options: SpawnOptions): SpawnedProcess {
     const env: Record<string, string | undefined> = {
       ...options.env,
-      [AGENT_TAG]: this.config.agent,
+      [PARTICIPANT_TAG]: this.config.configDir,
       // Claude Code's own housekeeping, caches and logs land in a private
       // home, never the real one.
       HOME: this.config.privateHome,
