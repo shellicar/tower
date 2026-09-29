@@ -71,7 +71,7 @@ describe('Leftovers', () => {
     expect(sigtermAt).toBe(5_000);
   });
 
-  it('sends SIGKILL 2 s after SIGTERM', async () => {
+  it('sends SIGKILL 5 s after SIGTERM', async () => {
     const { stop, processTable, timer } = setUp();
     processTable.add(200, TAG, ['SIGKILL']);
     let sigkillAt: number | undefined;
@@ -83,7 +83,7 @@ describe('Leftovers', () => {
       return signal(process, sent);
     };
     await stop();
-    expect(sigkillAt).toBe(7_000);
+    expect(sigkillAt).toBe(10_000);
   });
 
   it('stops waiting as soon as everything has gone', async () => {

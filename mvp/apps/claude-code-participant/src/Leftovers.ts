@@ -9,7 +9,7 @@ import { ITimer } from './Timer.js';
 // to exit 2.4 to 2.9 s after SIGINT, and orphaned commands within
 // milliseconds; a Claude Code sent SIGTERM exits in under a second.
 const SIGINT_WAIT_MS = 5_000;
-const SIGTERM_WAIT_MS = 2_000;
+const SIGTERM_WAIT_MS = 5_000;
 /** SIGKILL can't be refused; this only gives the kernel time to take the process down before what's left is reported. */
 const SIGKILL_WAIT_MS = 1_000;
 const POLL_MS = 50;
