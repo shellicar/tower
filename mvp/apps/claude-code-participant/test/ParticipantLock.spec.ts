@@ -1,7 +1,9 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { type ChildProcess, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { LOCK_FILE, ParticipantLock } from '../src/ParticipantLock.js';
 import { StartupError } from '../src/startup.js';
 import { testConfig, testServices } from './support.js';
@@ -10,105 +12,80 @@ const scratch = mkdtempSync(join(tmpdir(), 'participant-lock-test-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 let dirs = 0;
-/** A fresh config dir, with the lock file already holding `held` when given. */
-function setUp(held?: string) {
-  const configDir = mkdtempSync(join(scratch, `config-${dirs++}-`));
-  if (held !== undefined) {
-    writeFileSync(join(configDir, LOCK_FILE), held);
-  }
-  const services = testServices(testConfig({ configDir }));
-  const lockText = () => readFileSync(join(configDir, LOCK_FILE), 'utf8');
-  return { ...services, configDir, lockText, acquire: () => services.provider.resolve(ParticipantLock).acquire() };
+function freshConfigDir(): string {
+  return mkdtempSync(join(scratch, `config-${dirs++}-`));
 }
 
-const OWN = JSON.stringify({ pid: 100, startTime: '500' });
-
-/** Runs an acquire expected to refuse, for a test that checks what the refusal left behind. */
-function refused(acquire: () => void): void {
-  try {
-    acquire();
-  } catch {
-    return;
-  }
-  throw new Error('it did not refuse');
+/** A participant's lock on `configDir`, as a separate participant in this process would take it. */
+function lockOn(configDir: string): () => void {
+  const lock = testServices(testConfig({ configDir })).provider.resolve(ParticipantLock);
+  return () => lock.acquire();
 }
+
+// Another process holding the lock the same way the participant does.
+const HOLDER = `
+import { DatabaseSync } from 'node:sqlite';
+const db = new DatabaseSync(process.argv[1], { timeout: 0 });
+db.exec('BEGIN EXCLUSIVE');
+console.log('held');
+setInterval(() => {}, 1000);
+`;
+
+let holder: ChildProcess | undefined;
+
+async function holdInAnotherProcess(configDir: string): Promise<ChildProcess> {
+  const child = spawn(process.execPath, ['--input-type=module', '-e', HOLDER, join(configDir, LOCK_FILE)], { stdio: ['ignore', 'pipe', 'inherit'] });
+  holder = child;
+  const [chunk] = (await once(child.stdout, 'data')) as [Buffer];
+  if (chunk.toString().trim() !== 'held') {
+    throw new Error('the other process did not take the lock');
+  }
+  return child;
+}
+
+afterEach(async () => {
+  // Only the process this test started, by its handle.
+  if (holder !== undefined && holder.exitCode === null && holder.signalCode === null) {
+    holder.kill('SIGKILL');
+    await once(holder, 'exit');
+  }
+  holder = undefined;
+});
 
 describe('ParticipantLock', () => {
-  it('takes a lock nobody holds', () => {
-    const { acquire, lockText } = setUp();
+  it('takes the lock on a config dir nobody holds', () => {
+    expect(lockOn(freshConfigDir())).not.toThrow();
+  });
+
+  it('refuses while another participant in this process holds it', () => {
+    const configDir = freshConfigDir();
+    lockOn(configDir)();
+    expect(lockOn(configDir)).toThrow(StartupError);
+  });
+
+  it('names the config dir when it refuses', () => {
+    const configDir = freshConfigDir();
+    lockOn(configDir)();
+    expect(lockOn(configDir)).toThrow(`another participant is running on ${configDir}`);
+  });
+
+  it('refuses while another process holds it', async () => {
+    const configDir = freshConfigDir();
+    await holdInAnotherProcess(configDir);
+    expect(lockOn(configDir)).toThrow(StartupError);
+  });
+
+  it('takes the lock once the process holding it has been killed', async () => {
+    const configDir = freshConfigDir();
+    const child = await holdInAnotherProcess(configDir);
+    child.kill('SIGKILL');
+    await once(child, 'exit');
+    expect(lockOn(configDir)).not.toThrow();
+  });
+
+  it('takes it again from the same participant without refusing itself', () => {
+    const acquire = lockOn(freshConfigDir());
     acquire();
-    expect(lockText()).toBe(OWN);
-  });
-
-  it('refuses while another participant runs on the config dir', () => {
-    const { acquire, processTable } = setUp(JSON.stringify({ pid: 200, startTime: '2000' }));
-    processTable.add(200, 'untagged');
-    expect(acquire).toThrow(StartupError);
-  });
-
-  it('names the running holder when it refuses', () => {
-    const { acquire, processTable } = setUp(JSON.stringify({ pid: 200, startTime: '2000' }));
-    processTable.add(200, 'untagged');
-    expect(acquire).toThrow('another participant (pid 200) is running on');
-  });
-
-  it('leaves a running holder its lock', () => {
-    const held = JSON.stringify({ pid: 200, startTime: '2000' });
-    const { acquire, processTable, lockText } = setUp(held);
-    processTable.add(200, 'untagged');
-    refused(acquire);
-    expect(lockText()).toBe(held);
-  });
-
-  it('takes over the lock of a holder that has ended', () => {
-    const { acquire, lockText } = setUp(JSON.stringify({ pid: 200, startTime: '2000' }));
-    acquire();
-    expect(lockText()).toBe(OWN);
-  });
-
-  it('takes over when the holder pid now belongs to a later process', () => {
-    const { acquire, processTable, lockText } = setUp(JSON.stringify({ pid: 200, startTime: '1999' }));
-    processTable.add(200, 'untagged');
-    acquire();
-    expect(lockText()).toBe(OWN);
-  });
-
-  it('takes over a lock it cannot read a holder from', () => {
-    const { acquire, lockText } = setUp('not a lock');
-    acquire();
-    expect(lockText()).toBe(OWN);
-  });
-
-  it('leaves nothing but the lock behind', () => {
-    const { acquire, configDir } = setUp(JSON.stringify({ pid: 200, startTime: '2000' }));
-    acquire();
-    expect(readdirSync(configDir)).toEqual([LOCK_FILE]);
-  });
-
-  describe('when another participant takes over the same dead lock first', () => {
-    // The other participant replaces the lock between this one reading the
-    // dead holder and moving it aside.
-    function raced() {
-      const setup = setUp(JSON.stringify({ pid: 200, startTime: '2000' }));
-      const other = JSON.stringify({ pid: 300, startTime: '3000' });
-      setup.processTable.onIsRunning = (process) => {
-        if (process.pid === 200) {
-          writeFileSync(join(setup.configDir, LOCK_FILE), other);
-          setup.processTable.add(300, 'untagged');
-        }
-      };
-      return { ...setup, other };
-    }
-
-    it('refuses to start', () => {
-      const { acquire } = raced();
-      expect(acquire).toThrow('another participant (pid 300) is running on');
-    });
-
-    it('leaves the other participant its lock', () => {
-      const { acquire, lockText, other } = raced();
-      refused(acquire);
-      expect(lockText()).toBe(other);
-    });
+    expect(acquire).not.toThrow();
   });
 });

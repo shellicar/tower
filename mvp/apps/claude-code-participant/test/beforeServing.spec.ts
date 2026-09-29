@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { beforeServing } from '../src/beforeServing.js';
-import { LOCK_FILE } from '../src/ParticipantLock.js';
+import { ParticipantLock } from '../src/ParticipantLock.js';
 import { StartupError } from '../src/startup.js';
 import { testConfig, testServices } from './support.js';
 
@@ -13,7 +13,9 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 function setUp() {
   const configDir = mkdtempSync(join(scratch, 'config-'));
   const services = testServices(testConfig({ configDir }));
-  return { ...services, configDir, tag: `TOWER_PARTICIPANT=${configDir}` };
+  /** Another participant on the same config dir, holding its lock. */
+  const holdElsewhere = () => testServices(testConfig({ configDir })).provider.resolve(ParticipantLock).acquire();
+  return { ...services, configDir, tag: `TOWER_PARTICIPANT=${configDir}`, holdElsewhere };
 }
 
 const quiet = () => {};
@@ -25,16 +27,14 @@ describe('beforeServing', () => {
   });
 
   it('refuses to start while another participant holds the config dir', async () => {
-    const { provider, configDir, processTable } = setUp();
-    writeFileSync(join(configDir, LOCK_FILE), JSON.stringify({ pid: 200, startTime: '2000' }));
-    processTable.add(200, 'untagged');
-    await expect(beforeServing(provider, 'linux', quiet)).rejects.toThrow('another participant (pid 200) is running on');
+    const { provider, holdElsewhere } = setUp();
+    holdElsewhere();
+    await expect(beforeServing(provider, 'linux', quiet)).rejects.toThrow('another participant is running on');
   });
 
   it('stops nothing when another participant holds the config dir', async () => {
-    const { provider, configDir, processTable, tag } = setUp();
-    writeFileSync(join(configDir, LOCK_FILE), JSON.stringify({ pid: 200, startTime: '2000' }));
-    processTable.add(200, 'untagged');
+    const { provider, holdElsewhere, processTable, tag } = setUp();
+    holdElsewhere();
     processTable.add(201, tag);
     await beforeServing(provider, 'linux', quiet).catch(() => {});
     expect(processTable.signals).toEqual([]);

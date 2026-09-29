@@ -83,12 +83,6 @@ function taggedPids(processes: FakeProcess[]): number[] {
 }
 
 describe('LinuxProcessTable', () => {
-  describe('own', () => {
-    it('reads its start time from field 22 of its stat', () => {
-      expect(procTable([{ pid: OWN_PID, startTime: '424242' }]).table.own()).toEqual({ pid: OWN_PID, startTime: '424242' });
-    });
-  });
-
   describe('tagged', () => {
     it('finds a process carrying the tag', () => {
       expect(taggedPids([{ pid: 200, environ: ['PATH=/usr/bin', TAG] }])).toEqual([200]);
@@ -188,32 +182,6 @@ describe('LinuxProcessTable', () => {
     it('reads the command line in full', () => {
       const long = `/home/someone/.local/share/pnpm/store/v11/links/@anthropic-ai/claude-agent-sdk-linux-x64/0.3.283/node_modules/claude`;
       expect(procTable([{ pid: 200, environ: [TAG], cmdline: [long, '--output-format', 'stream-json'] }]).table.tagged(TAG)[0]?.commandLine).toBe(`${long} --output-format stream-json`);
-    });
-  });
-
-  describe('isRunning', () => {
-    it('is true for the same pid and start time', () => {
-      expect(procTable([{ pid: 200, startTime: '1000' }]).table.isRunning({ pid: 200, startTime: '1000' })).toBe(true);
-    });
-
-    it('is false once the pid belongs to a later process', () => {
-      expect(procTable([{ pid: 200, startTime: '2000' }]).table.isRunning({ pid: 200, startTime: '1000' })).toBe(false);
-    });
-
-    it('is false once the process is gone', () => {
-      expect(procTable([]).table.isRunning({ pid: 200, startTime: '1000' })).toBe(false);
-    });
-
-    it('is false once every thread has exited', () => {
-      expect(procTable([{ pid: 200, state: 'Z' }]).table.isRunning({ pid: 200, startTime: '1000' })).toBe(false);
-    });
-
-    it('is true while a thread still runs after the main thread exited', () => {
-      const threads = [
-        { tid: 200, state: 'Z' },
-        { tid: 201, state: 'R' },
-      ];
-      expect(procTable([{ pid: 200, state: 'Z', threads }]).table.isRunning({ pid: 200, startTime: '1000' })).toBe(true);
     });
   });
 

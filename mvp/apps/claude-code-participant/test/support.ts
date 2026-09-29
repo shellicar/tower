@@ -67,23 +67,11 @@ type FakeProcess = TaggedProcess & {
 
 /** A process list the test writes, which records each signal and ends a process on the ones it names. */
 class FakeProcessTable implements IProcessTable {
-  public ownIdentity: ProcessIdentity = { pid: 100, startTime: '500' };
   public processes: FakeProcess[] = [];
   public readonly signals: { pid: number; signal: NodeJS.Signals }[] = [];
-  /** Runs on each liveness check, before it is answered: how a test makes something happen at that moment. */
-  public onIsRunning: ((process: ProcessIdentity) => void) | undefined;
 
   public add(pid: number, tag: string, endsOn: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGKILL']): void {
     this.processes.push({ pid, startTime: `${pid}0`, commandLine: `cmd-${pid}`, tag, endsOn });
-  }
-
-  public own(): ProcessIdentity {
-    return this.ownIdentity;
-  }
-
-  public isRunning(process: ProcessIdentity): boolean {
-    this.onIsRunning?.(process);
-    return process.pid === this.ownIdentity.pid ? process.startTime === this.ownIdentity.startTime : this.processes.some((p) => p.pid === process.pid && p.startTime === process.startTime);
   }
 
   public tagged(entry: string): TaggedProcess[] {

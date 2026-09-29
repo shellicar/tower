@@ -22,10 +22,6 @@ export type TaggedProcess = ProcessIdentity & {
  * process list its own way; v0 has Linux only.
  */
 export abstract class IProcessTable {
-  /** This process. */
-  public abstract own(): ProcessIdentity;
-  /** Whether the process is still there: the same pid with the same start time, and at least one of its threads not yet exited. */
-  public abstract isRunning(process: ProcessIdentity): boolean;
   /** Every running process whose environment holds `entry` exactly, other than this process, its ancestors and its descendants. */
   public abstract tagged(entry: string): TaggedProcess[];
   /** Sends `signal` only while the process still has the same start time. Whether it was sent. */
@@ -74,19 +70,6 @@ export class LinuxProcessTable implements IProcessTable {
     this.root = root;
     this.kill = kill;
     this.ownPid = ownPid;
-  }
-
-  public own(): ProcessIdentity {
-    const stat = this.stat(join(this.root, String(this.ownPid), 'stat'));
-    if (stat === undefined) {
-      throw new Error(`cannot read this process's own entry under ${this.root}`);
-    }
-    return { pid: this.ownPid, startTime: stat.startTime };
-  }
-
-  public isRunning(process: ProcessIdentity): boolean {
-    const stat = this.stat(join(this.root, String(process.pid), 'stat'));
-    return stat !== undefined && stat.startTime === process.startTime && this.anyThreadRunning(process.pid, stat);
   }
 
   public tagged(entry: string): TaggedProcess[] {

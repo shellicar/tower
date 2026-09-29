@@ -16,7 +16,7 @@ export async function beforeServing(provider: IServiceProvider, platform: NodeJS
   // and the scan would run it there, with nothing to stop a second
   // participant or an earlier run's leftovers forking a conversation.
   if (platform !== 'linux') {
-    throw new StartupError(`the config dir lock and the leftover scan read /proc, which ${platform} doesn't have: v0 runs on Linux only`);
+    throw new StartupError(`the leftover scan reads /proc, which ${platform} doesn't have: v0 runs on Linux only`);
   }
   provider.resolve(ParticipantLock).acquire();
   await provider.resolve(Leftovers).stop(log);
