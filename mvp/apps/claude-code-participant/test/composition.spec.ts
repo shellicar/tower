@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +33,21 @@ describe('findOnPath', () => {
 });
 
 describe('composeConfig', () => {
-  const env = { NATS_URL: 'nats://127.0.0.1:31416', PARTICIPANT_CONFIG_DIR: '/agents/alpha', HOME: '/home/someone', PATH: withTool };
+  const configDir = join(scratch, 'agents', 'alpha');
+  const env = { NATS_URL: 'nats://127.0.0.1:31416', PARTICIPANT_CONFIG_DIR: configDir, HOME: '/home/someone', PATH: withTool };
+
+  it('creates a config dir that does not exist yet', () => {
+    const fresh = join(scratch, 'agents', 'fresh');
+    composeConfig({ ...env, PARTICIPANT_CONFIG_DIR: fresh }, scratch);
+    expect(statSync(fresh).isDirectory()).toBe(true);
+  });
+
+  it('spells the config dir one way however it was given', () => {
+    const link = join(scratch, 'alpha-link');
+    mkdirSync(configDir, { recursive: true });
+    symlinkSync(configDir, link);
+    expect(composeConfig({ ...env, PARTICIPANT_CONFIG_DIR: `${link}/` }, scratch).configDir).toBe(realpathSync(configDir));
+  });
 
   it('makes a private home in the temp dir', () => {
     expect(composeConfig(env, scratch).privateHome.startsWith(join(scratch, 'tower-participant-home-'))).toBe(true);

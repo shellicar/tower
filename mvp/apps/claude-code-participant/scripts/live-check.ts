@@ -6,8 +6,10 @@
 //   printf '%s\n' '<control line>' ... | NATS_URL=... PARTICIPANT_CONFIG_DIR=... \
 //     pnpm exec tsx scripts/live-check.ts <cwd> <prompt>
 //
-// It reads control lines from stdin (answering each on stdout) until stdin
-// ends, then launches. Linux only: the evidence comes from /proc.
+// Like the participant, it first takes the config dir's lock and stops an
+// earlier run's leftovers (reported on stderr). It then reads control lines
+// from stdin (answering each on stdout) until stdin ends, and launches. Linux
+// only: the evidence comes from /proc.
 
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -15,6 +17,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionKey, SessionStoreEntry, SpawnedProcess } from '@anthropic-ai/claude-agent-sdk';
+import { beforeServing } from '../src/beforeServing.js';
 import { ControlLines, runControlLines } from '../src/ControlLines.js';
 import { ConversationLauncher } from '../src/ConversationLauncher.js';
 import { composeConfig } from '../src/composition.js';
@@ -53,6 +56,7 @@ services.register(RecordingSpawner).as(IProcessSpawner);
 services.register(CountingPublisher).as(IPublisher);
 const provider = services.buildProvider();
 
+await beforeServing(provider, process.platform, (line) => console.error(`participant: ${line}`));
 await runControlLines(process.stdin, process.stdout, provider.resolve(ControlLines));
 
 const id = randomUUID();
