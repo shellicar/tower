@@ -6,6 +6,7 @@ import { participantServices } from '../src/container.js';
 import { ParticipantConfig } from '../src/ParticipantConfig.js';
 import { IProcessSpawner, type ProcessOptions } from '../src/ProcessSpawner.js';
 import { IProcessTable, type ProcessIdentity, type TaggedProcess } from '../src/ProcessTable.js';
+import { ServingGate } from '../src/ServingGate.js';
 import { IPublisher } from '../src/SessionStore.js';
 import { ITimer } from '../src/Timer.js';
 
@@ -108,8 +109,11 @@ class FakeTimer implements ITimer {
   }
 }
 
-/** The participant's services with every boundary faked. */
-export function testServices(config: ParticipantConfig = testConfig()) {
+/**
+ * The participant's services with every boundary faked. The serving gate
+ * starts open, as it is once the leftover scan is done, unless `gateShut`.
+ */
+export function testServices(config: ParticipantConfig = testConfig(), options: { gateShut?: boolean } = {}) {
   const services = participantServices(config);
   services.register(FakeClaudeCode).as(IClaudeCode);
   services.register(FakeProcessSpawner).as(IProcessSpawner);
@@ -117,6 +121,9 @@ export function testServices(config: ParticipantConfig = testConfig()) {
   services.register(FakeProcessTable).as(IProcessTable);
   services.register(FakeTimer).as(ITimer);
   const provider = services.buildProvider();
+  if (options.gateShut !== true) {
+    provider.resolve(ServingGate).open();
+  }
   return {
     provider,
     claudeCode: provider.resolve(IClaudeCode) as FakeClaudeCode,

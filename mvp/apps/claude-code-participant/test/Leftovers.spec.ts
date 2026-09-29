@@ -7,8 +7,9 @@ const TAG = 'TOWER_PARTICIPANT=/agents/alpha/config';
 function setUp() {
   const services = testServices();
   const lines: string[] = [];
-  const stop = () => services.provider.resolve(Leftovers).stop((line) => lines.push(line));
-  return { ...services, lines, stop };
+  const shutdown = new AbortController();
+  const stop = () => services.provider.resolve(Leftovers).stop((line) => lines.push(line), shutdown.signal);
+  return { ...services, lines, stop, shutdown };
 }
 
 describe('Leftovers', () => {
@@ -55,7 +56,7 @@ describe('Leftovers', () => {
     ]);
   });
 
-  it('waits 30 s after SIGINT before SIGTERM', async () => {
+  it('waits 5 s after SIGINT before SIGTERM', async () => {
     const { stop, processTable, timer } = setUp();
     processTable.add(200, TAG, ['SIGTERM']);
     let sigtermAt: number | undefined;
@@ -67,10 +68,10 @@ describe('Leftovers', () => {
       return signal(process, sent);
     };
     await stop();
-    expect(sigtermAt).toBe(30_000);
+    expect(sigtermAt).toBe(5_000);
   });
 
-  it('sends SIGKILL 10 s after SIGTERM', async () => {
+  it('sends SIGKILL 2 s after SIGTERM', async () => {
     const { stop, processTable, timer } = setUp();
     processTable.add(200, TAG, ['SIGKILL']);
     let sigkillAt: number | undefined;
@@ -82,7 +83,7 @@ describe('Leftovers', () => {
       return signal(process, sent);
     };
     await stop();
-    expect(sigkillAt).toBe(40_000);
+    expect(sigkillAt).toBe(7_000);
   });
 
   it('stops waiting as soon as everything has gone', async () => {
@@ -112,7 +113,7 @@ describe('Leftovers', () => {
   it('returns what is still there after SIGKILL, so the participant serves anyway', async () => {
     const { stop, processTable } = setUp();
     processTable.add(200, TAG, []);
-    expect((await stop()).map((p) => p.pid)).toEqual([200]);
+    expect((await stop()).remaining.map((p) => p.pid)).toEqual([200]);
   });
 
   it('reports what is still there after SIGKILL', async () => {
@@ -127,5 +128,47 @@ describe('Leftovers', () => {
     processTable.add(200, TAG);
     await stop();
     expect(lines[0]).toBe('leftovers: 1 process(es) left running on /agents/alpha/config: 200 (cmd-200)');
+  });
+
+  describe('when shutdown begins during the scan', () => {
+    function shutDownAt(ms: number) {
+      const setup = setUp();
+      setup.processTable.add(200, TAG, []);
+      setup.timer.onSleep = (now) => {
+        if (now === ms) {
+          setup.shutdown.abort();
+        }
+      };
+      return setup;
+    }
+
+    it('stops waiting at once', async () => {
+      const { stop, timer } = shutDownAt(1_000);
+      await stop();
+      expect(timer.now()).toBe(1_000);
+    });
+
+    it('sends no further signal', async () => {
+      const { stop, processTable } = shutDownAt(1_000);
+      await stop();
+      expect(processTable.signals.map((s) => s.signal)).toEqual(['SIGINT']);
+    });
+
+    it('says the scan was interrupted', async () => {
+      const { stop } = shutDownAt(1_000);
+      expect((await stop()).interrupted).toBe(true);
+    });
+
+    it('reports what it left', async () => {
+      const { stop, lines } = shutDownAt(1_000);
+      await stop();
+      expect(lines.at(-1)).toBe('leftovers: scan stopped for shutdown, leaving 200 (cmd-200)');
+    });
+  });
+
+  it('says a finished scan was not interrupted', async () => {
+    const { stop, processTable } = setUp();
+    processTable.add(200, TAG);
+    expect((await stop()).interrupted).toBe(false);
   });
 });

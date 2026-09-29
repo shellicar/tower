@@ -9,6 +9,7 @@ import { ParticipantLock } from './ParticipantLock.js';
 import { ParticipantSettings } from './ParticipantSettings.js';
 import { IProcessSpawner, NodeProcessSpawner } from './ProcessSpawner.js';
 import { IProcessTable, LinuxProcessTable } from './ProcessTable.js';
+import { ServingGate } from './ServingGate.js';
 import { IPublisher, NullPublisher, PublishingSessionStore } from './SessionStore.js';
 import { ITimer, RealTimer } from './Timer.js';
 
@@ -38,5 +39,6 @@ export function participantServices(config: ParticipantConfig): IServiceCollecti
   services.register(RealTimer).as(ITimer);
   services.register(ParticipantLock).asSelf();
   services.register(Leftovers).asSelf();
+  services.register(ServingGate).asSelf();
   return services;
 }

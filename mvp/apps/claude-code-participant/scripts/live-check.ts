@@ -6,10 +6,11 @@
 //   printf '%s\n' '<control line>' ... | NATS_URL=... PARTICIPANT_CONFIG_DIR=... \
 //     pnpm exec tsx scripts/live-check.ts <cwd> <prompt>
 //
-// Like the participant, it first takes the config dir's lock and stops an
-// earlier run's leftovers (reported on stderr). It then reads control lines
-// from stdin (answering each on stdout) until stdin ends, and launches. Linux
-// only: the evidence comes from /proc.
+// Like the participant, it takes the config dir's lock and starts stopping
+// an earlier run's leftovers (reported on stderr), reading control lines from
+// stdin (answering each on stdout) meanwhile. Once stdin ends it launches,
+// which waits for the leftovers to be stopped. Linux only: the evidence comes
+// from /proc.
 
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -56,11 +57,11 @@ services.register(RecordingSpawner).as(IProcessSpawner);
 services.register(CountingPublisher).as(IPublisher);
 const provider = services.buildProvider();
 
-await beforeServing(provider, process.platform, (line) => console.error(`participant: ${line}`));
+void beforeServing(provider, process.platform, (line) => console.error(`participant: ${line}`), new AbortController().signal);
 await runControlLines(process.stdin, process.stdout, provider.resolve(ControlLines));
 
 const id = randomUUID();
-const conversation = provider.resolve(ConversationLauncher).launch({ id, cwd, additionalDirectories: [], resume: false });
+const conversation = await provider.resolve(ConversationLauncher).launch({ id, cwd, additionalDirectories: [], resume: false });
 conversation.send(prompt);
 
 function statFields(pid: number): string[] {

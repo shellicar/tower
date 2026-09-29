@@ -7,6 +7,7 @@ import { claudeCodeSettings } from './claudeCodeSettings.js';
 import { MessageChannel } from './MessageChannel.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
 import { type LaunchSettings, ParticipantSettings } from './ParticipantSettings.js';
+import { ServingGate } from './ServingGate.js';
 import { PublishingSessionStore } from './SessionStore.js';
 
 export type LaunchRequest = {
@@ -49,13 +50,20 @@ export class ConversationLauncher {
   @dependsOn(IClaudeCode) private readonly claudeCode!: IClaudeCode;
   @dependsOn(ClaudeCodeSpawner) private readonly spawner!: ClaudeCodeSpawner;
   @dependsOn(PublishingSessionStore) private readonly sessionStore!: PublishingSessionStore;
+  @dependsOn(ServingGate) private readonly gate!: ServingGate;
 
-  /** @throws NotConfiguredError until every required control line has been set. */
-  public launch(request: LaunchRequest): Conversation {
+  /**
+   * Starts Claude Code once the serving gate opens, with the values the
+   * control lines held when the launch was asked for.
+   *
+   * @throws NotConfiguredError until every required control line has been set.
+   */
+  public async launch(request: LaunchRequest): Promise<Conversation> {
     const readiness = this.settings.readiness();
     if (!readiness.ready) {
       throw new NotConfiguredError(readiness.missing);
     }
+    await this.gate.wait();
     const { settings } = readiness;
     const input = new MessageChannel<SDKUserMessage>();
     const messages = this.claudeCode.query(input, this.options(request, settings));
