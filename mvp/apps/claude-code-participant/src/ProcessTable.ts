@@ -26,7 +26,7 @@ export abstract class IProcessTable {
   public abstract own(): ProcessIdentity;
   /** Whether the process is still there: the same pid with the same start time, and at least one of its threads not yet exited. */
   public abstract isRunning(process: ProcessIdentity): boolean;
-  /** Every running process whose environment holds `entry` exactly, other than this process and its ancestors. */
+  /** Every running process whose environment holds `entry` exactly, other than this process, its ancestors and its descendants. */
   public abstract tagged(entry: string): TaggedProcess[];
   /** Sends `signal` only while the process still has the same start time. Whether it was sent. */
   public abstract signal(process: ProcessIdentity, signal: NodeJS.Signals): boolean;
@@ -101,7 +101,7 @@ export class LinuxProcessTable implements IProcessTable {
         continue;
       }
       const stat = this.stat(join(this.root, name, 'stat'));
-      if (stat === undefined || !this.anyThreadRunning(pid, stat) || !this.environment(pid).includes(entry)) {
+      if (stat === undefined || !this.anyThreadRunning(pid, stat) || !this.environment(pid).includes(entry) || this.descendsFromSelf(stat)) {
         continue;
       }
       found.push({ pid, startTime: stat.startTime, commandLine: this.commandLine(pid) });
@@ -180,6 +180,27 @@ export class LinuxProcessTable implements IProcessTable {
       pid = stat.ppid;
     }
     return pids;
+  }
+
+  /**
+   * Before this process has started anything, whatever descends from it is
+   * its own (a helper its runtime started, say) and inherited the tag from
+   * it. A leftover's parents lead to init instead, since the process that
+   * started it has gone.
+   */
+  private descendsFromSelf(stat: Stat): boolean {
+    let pid = stat.ppid;
+    for (let links = 0; pid > 0 && links < MAX_ANCESTORS; links++) {
+      if (pid === this.ownPid) {
+        return true;
+      }
+      const parent = this.stat(join(this.root, String(pid), 'stat'));
+      if (parent === undefined) {
+        return false;
+      }
+      pid = parent.ppid;
+    }
+    return false;
   }
 
   private stat(path: string): Stat | undefined {

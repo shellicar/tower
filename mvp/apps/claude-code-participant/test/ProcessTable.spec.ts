@@ -115,6 +115,28 @@ describe('LinuxProcessTable', () => {
       ).toEqual([]);
     });
 
+    it('skips a process this one started', () => {
+      expect(taggedPids([{ pid: 300, ppid: OWN_PID, environ: [TAG] }])).toEqual([]);
+    });
+
+    it('skips a process started by one this one started', () => {
+      expect(
+        taggedPids([
+          { pid: 300, ppid: OWN_PID, environ: [] },
+          { pid: 301, ppid: 300, environ: [TAG] },
+        ]),
+      ).toEqual([]);
+    });
+
+    it('finds a leftover whose parents lead to init', () => {
+      expect(
+        taggedPids([
+          { pid: 400, ppid: 1, environ: [] },
+          { pid: 401, ppid: 400, environ: [TAG] },
+        ]),
+      ).toEqual([401]);
+    });
+
     it('skips a process that has exited but not been reaped', () => {
       expect(taggedPids([{ pid: 200, state: 'Z', environ: [TAG] }])).toEqual([]);
     });
@@ -218,7 +240,10 @@ describe('LinuxProcessTable', () => {
 });
 
 describe.skipIf(process.platform !== 'linux')('LinuxProcessTable on the real /proc', () => {
-  const table = new LinuxProcessTable('/proc', process.kill, process.pid);
+  // The processes these tests start are this process's children, which a
+  // table reading as this process skips; this table reads as no process at
+  // all (pid 0 is never a process's own).
+  const table = new LinuxProcessTable('/proc', process.kill, 0);
   const tag = `TOWER_PARTICIPANT=${join(scratch, `real-${process.pid}`)}`;
   let child: ChildProcess | undefined;
 
@@ -237,19 +262,26 @@ describe.skipIf(process.platform !== 'linux')('LinuxProcessTable on the real /pr
     child = undefined;
   });
 
-  it('reads a start time that matches when this process started', () => {
-    // Field 22 counts clock ticks since boot (100 a second on Linux), so it
-    // should put this process's start within a few seconds of uptime minus
-    // how long this process has been running.
+  it('reads a start time that matches when the process started', async () => {
+    // Field 22 counts clock ticks since boot (100 a second on Linux), so a
+    // process started just now should read within a few seconds of uptime.
+    const started = startTagged();
+    await once(started, 'spawn');
     const uptime = Number(readFileSync('/proc/uptime', 'utf8').split(' ')[0]);
-    const startedAt = Number(table.own().startTime) / 100;
-    expect(Math.abs(startedAt - (uptime - process.uptime()))).toBeLessThan(5);
+    const startedAt = Number(table.tagged(tag)[0]?.startTime) / 100;
+    expect(Math.abs(startedAt - uptime)).toBeLessThan(5);
   });
 
   it('finds a tagged process', async () => {
     const started = startTagged();
     await once(started, 'spawn');
     expect(table.tagged(tag).map((p) => p.pid)).toEqual([started.pid]);
+  });
+
+  it('skips a tagged process this one started', async () => {
+    const started = startTagged();
+    await once(started, 'spawn');
+    expect(new LinuxProcessTable('/proc', process.kill, process.pid).tagged(tag)).toEqual([]);
   });
 
   it('stops a tagged process with a signal', async () => {
