@@ -25,8 +25,8 @@ export class PublishingSessionStore implements SessionStore {
   }
 
   // Returning null makes a resume read Claude Code's own local record in the
-  // agent's config dir, which is where v0 resumes from. Returning entries
-  // would resume from a temporary copy the SDK writes instead.
+  // agent's config dir. Returning entries would resume from a temporary copy
+  // the SDK writes instead.
   public load(): Promise<null> {
     return Promise.resolve(null);
   }
