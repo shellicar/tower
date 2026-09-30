@@ -73,7 +73,7 @@ map: who serves what, and whether they are alive.
 | Event | Fields | Notes |
 |---|---|---|
 | `ready` | `instanceId`, `host` | the instance can receive requests, and it pulses. It is subscribed to all its requests: `agent.v1.{world}.requests.>`, `conv.v2.{id}.requests.>` for every conversation it holds, and `approval.v1.{approvalId}.requests` for each of its outstanding approvals. Published each time the instance becomes able to receive requests, boot included |
-| `unavailable` | `instanceId` | the instance is no longer servicing. It unsubscribes from `agent.v1.{world}.requests.>`. It may stay subscribed to `conv.v2.{id}.requests.>` for each conversation it holds, and to `approval.v1.{approvalId}.requests` for that conversation's outstanding approvals, until it detaches that conversation, and answers them while it does. It keeps pulsing; its next state is `offline` or `ready` |
+| `unavailable` | `instanceId` | the instance is no longer servicing. It should unsubscribe from `agent.v1.{world}.requests.>` first, then publish `unavailable`; a `service` already on its way can still reach it after it unsubscribes. Once it has published `unavailable`, it rejects any `service` that reaches it, and any `say` on a conversation it still holds, with reason `unavailable`. It may stay subscribed to `conv.v2.{id}.requests.>` for each conversation it holds, and to `approval.v1.{approvalId}.requests` for that conversation's outstanding approvals, until it detaches that conversation, and answers their other requests while it does. It keeps pulsing; its next state is `offline` or `ready` |
 | `offline` | `instanceId` | the instance stops pulsing and is inert. `offline` is final for its `instanceId`: a process that becomes able to receive requests again publishes `ready` as a new instance, under a new `instanceId` |
 | `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement core.md forbids. `intervalS` is at most 600 (ten minutes): a longer promise buys three times its own length of presumed life, so stranded detection and takeover stop working exactly where they are needed. The bound is validity, not a cap — a larger value makes the event invalid whole, and nothing is clamped to 600 |
 
@@ -220,7 +220,7 @@ this repo's testing rule.
 
 | Request | Fields | Reply | Notes |
 |---|---|---|---|
-| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts; its premise is below. Any named environment value the world cannot establish rejects the request (`invalid_cwd`, for `cwd`); an omitted value falls to the agent's own defaults — absence delegates, presence binds, never a silent fallback. Known reasons today: `already_attached`, `at_capacity`, `invalid` (a recognised request whose body doesn't carry what it needs, e.g. a missing or empty `conversationId`), `invalid_cwd`, `failed` (the world could not undertake the operation; the cause rides `detail`), `unsupported` |
+| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts; its premise is below. Any named environment value the world cannot establish rejects the request (`invalid_cwd`, for `cwd`); an omitted value falls to the agent's own defaults — absence delegates, presence binds, never a silent fallback. Known reasons today: `already_attached`, `at_capacity`, `invalid` (a recognised request whose body doesn't carry what it needs, e.g. a missing or empty `conversationId`), `invalid_cwd`, `failed` (the world could not undertake the operation; the cause rides `detail`), `unavailable` (the instance that received it has published `unavailable`), `unsupported` |
 | `drain` | — | `accepted` \| `rejected` + `reason` | stop taking work and detach cleanly: a `detached` per conversation, then silence. Distinguishes a decided shutdown from a crash |
 
 **The premise for `service`.** Four cases, each read off a warm fold — one
@@ -335,7 +335,7 @@ export const agentRequest = {
 
 // Replies (transport truth, never outcome). Known reasons today:
 // already_attached, at_capacity, invalid, invalid_cwd, failed,
-// unsupported. `detail` is optional free-text diagnostics for a human —
+// unavailable, unsupported. `detail` is optional free-text diagnostics for a human —
 // `reason` is the machine-facing token a caller branches on, `detail` names
 // the step and underlying error; never the other way around.
 export const agentRequestReply = z.union([
