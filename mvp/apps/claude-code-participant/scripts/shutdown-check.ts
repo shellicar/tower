@@ -38,6 +38,7 @@ const started = Date.now();
 const writeError = console.error.bind(console);
 console.error = (...args: unknown[]) => writeError(`[+${String(Date.now() - started).padStart(6)} ms]`, ...args);
 const show = (what: string, value: unknown) => console.error(`check: ${what} ${JSON.stringify(value)}`);
+process.on('exit', (code) => show('participant exiting', { code }));
 
 const spawned: ChildProcess[] = [];
 class RecordingSpawner extends ClaudeCodeSpawner {
