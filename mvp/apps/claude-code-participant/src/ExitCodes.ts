@@ -5,7 +5,7 @@
  * mean killed by a signal.
  */
 export const EXITS = {
-  clean: { code: 0, meaning: 'shutdown finished its first stage: everything the participant started stopped by itself' },
+  clean: { code: 0, meaning: 'shutdown finished its first stage: everything the participant started has stopped' },
   forced: { code: 64, meaning: 'shutdown finished its second stage: whatever was still running was killed' },
   instant: { code: 65, meaning: 'shutdown reached its third stage and exited at once, whatever was still running' },
   badEnvironment: { code: 66, meaning: 'an environment value it starts from is missing or unusable' },

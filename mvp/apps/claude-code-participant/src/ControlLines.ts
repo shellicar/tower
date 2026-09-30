@@ -41,8 +41,6 @@ const claudeSettingsLine = z
   })
   .nullable();
 
-// A healthy graceful stop takes seconds. Ten minutes is past anything healthy:
-// it is also the longest liveness promise tower's spec accepts (`intervalS`).
 const LONGEST_DEADLINE_MS = 600_000;
 const deadline = z.number().int().min(1).max(LONGEST_DEADLINE_MS);
 

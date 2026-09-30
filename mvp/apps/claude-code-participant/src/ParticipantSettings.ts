@@ -52,7 +52,7 @@ export type Readiness = { ready: true; settings: LaunchSettings } | { ready: fal
 export type ShutdownPolicy = {
   /** Stage 1: interrupt everything, then wait for it all to finish. */
   gracefulMs: number;
-  /** Stage 2: kill every Claude Code, then wait for them to go. */
+  /** Stage 2: SIGTERM to every Claude Code, then to whatever is left, and a wait for them all to go. */
   teardownMs: number;
 };
 

@@ -62,8 +62,7 @@ function listed(processes: readonly TaggedProcess[]): string {
  * asking: each one moves shutdown on a stage, however quickly they come.
  * SIGHUP and stdin closing (or failing) say whoever drove the participant is
  * gone: they start shutdown if it hasn't started and never move it on,
- * because one departure often arrives as several of them at once (a closing
- * terminal gives stdin's end, then SIGHUP 3 ms later).
+ * because one departure often arrives as several of them at once.
  *
  * A stage's deadline running out also moves it on: a trigger that arrives
  * only once (a service manager's SIGTERM, a closed terminal) must not leave
@@ -132,8 +131,6 @@ export class Shutdown {
     // which it starts and never hands back. The deadline stays armed (it
     // holds nothing open) in case something never finishes.
     this.host.letEnd();
-    // A conversation launched after this point isn't stopped here: refusing
-    // new work during shutdown belongs with the requests that bring it.
     await Promise.all(this.conversations.all().map((conversation) => this.stop(conversation)));
     if (this.stage !== 1) {
       return;
@@ -144,8 +141,6 @@ export class Shutdown {
     if (!(await this.endTagged(1, { withOwnDescendants: false }))) {
       return;
     }
-    // Publishing what's left, releasing each conversation (`detached`) and
-    // draining NATS belong here.
   }
 
   private async stop(conversation: Conversation): Promise<void> {
@@ -181,7 +176,6 @@ export class Shutdown {
         this.host.log(`shutdown: signalling conversation ${conversation.id}'s Claude Code failed: ${describeError(err)}`);
       }
     }
-    // Closing NATS without draining belongs here.
     await Promise.all(signalled.map((conversation) => conversation.claudeCode.exited));
     if (this.stage !== 2) {
       return;
