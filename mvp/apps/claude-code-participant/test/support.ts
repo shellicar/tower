@@ -11,6 +11,7 @@ import { type ChildProcessHandle, IProcessSpawner, type ProcessOptions } from '.
 import { IProcessTable, type ProcessIdentity, type TaggedProcess } from '../src/ProcessTable.js';
 import { ServingGate } from '../src/ServingGate.js';
 import { IPublisher } from '../src/SessionStore.js';
+import { StartupError } from '../src/startup.js';
 import { ITimer } from '../src/Timer.js';
 
 export function testConfig(overrides: { setpriv?: string | null; configDir?: string } = {}): ParticipantConfig {
@@ -247,3 +248,13 @@ export function testServices(config: ParticipantConfig = testConfig(), options: 
 }
 
 export const CONFIGURED: unknown[] = [{ model: { name: 'claude-sonnet-5', maxTokens: 32000, thinking: 'adaptive', thinkingDisplay: 'summarized', effort: 'medium' } }, { system: { preset: true } }, { permissionMode: 'auto' }];
+
+/** Which way a start that fails exits, or undefined when `start` doesn't fail with a startup error. */
+export function startupExitOf(start: () => unknown): string | undefined {
+  try {
+    start();
+  } catch (err) {
+    return err instanceof StartupError ? err.exit : undefined;
+  }
+  return undefined;
+}

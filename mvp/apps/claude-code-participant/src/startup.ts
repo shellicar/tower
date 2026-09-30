@@ -1,4 +1,5 @@
 import { isAbsolute } from 'node:path';
+import type { ExitName } from './ExitCodes.js';
 
 // What a parent Claude Code session passes down to the processes it starts.
 // A participant launched from inside a Claude Code session would otherwise
@@ -82,8 +83,17 @@ const CLAUDE_CODE_CONFIGURATION_VARIABLES: readonly string[] = [
   // keep the declared mode and switch that hardening off.
 ];
 
+type StartupExit = Extract<ExitName, 'badEnvironment' | 'configDirLocked' | 'unsupportedPlatform'>;
+
+/** Why the process can't start, and which way it exits for it. */
 export class StartupError extends Error {
   public override name = 'StartupError';
+  public readonly exit: StartupExit;
+
+  public constructor(exit: StartupExit, message: string) {
+    super(message);
+    this.exit = exit;
+  }
 }
 
 /** What the process reads from its environment, once, at start. */
@@ -100,7 +110,7 @@ export type Startup = {
 function required(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
   if (value === undefined || value === '') {
-    throw new StartupError(`${name} is required`);
+    throw new StartupError('badEnvironment', `${name} is required`);
   }
   return value;
 }
@@ -112,7 +122,7 @@ function absolute(env: NodeJS.ProcessEnv, name: string): string {
   // start, and passed on as it is, it would resolve against each
   // conversation's own cwd.
   if (!isAbsolute(value)) {
-    throw new StartupError(`${name} must be an absolute path`);
+    throw new StartupError('badEnvironment', `${name} must be an absolute path`);
   }
   return value;
 }

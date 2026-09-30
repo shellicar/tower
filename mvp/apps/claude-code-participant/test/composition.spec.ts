@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { composeConfig, findOnPath } from '../src/composition.js';
 import { StartupError } from '../src/startup.js';
+import { startupExitOf } from './support.js';
 
 const scratch = mkdtempSync(join(tmpdir(), 'participant-test-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -115,6 +116,23 @@ describe('composeConfig', () => {
 
     it('is refused on a platform without user ids', () => {
       expect(() => composeConfig({ ...env, PARTICIPANT_CONFIG_DIR: unused() }, scratch, undefined)).toThrow(StartupError);
+    });
+
+    it('exits as an unsupported platform when there are no user ids', () => {
+      expect(startupExitOf(() => composeConfig({ ...env, PARTICIPANT_CONFIG_DIR: unused() }, scratch, undefined))).toBe('unsupportedPlatform');
+    });
+
+    it('exits as a bad environment value when a file stands in its place', () => {
+      const file = unused();
+      mkdirSync(join(file, '..'), { recursive: true });
+      writeFileSync(file, '');
+      expect(startupExitOf(() => compose(file))).toBe('badEnvironment');
+    });
+
+    it('exits as a bad environment value when another user owns it', () => {
+      const dir = unused();
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      expect(startupExitOf(() => compose(dir, (uid ?? 0) + 1))).toBe('badEnvironment');
     });
 
     it('is spelled without a trailing slash', () => {

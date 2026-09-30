@@ -1,6 +1,7 @@
 import { dependsOn } from '@shellicar/core-di';
 import type { Conversation } from './Conversation.js';
 import { Conversations } from './Conversations.js';
+import { EXITS } from './ExitCodes.js';
 import { IHost } from './Host.js';
 import { ParticipantSettings } from './ParticipantSettings.js';
 import { IProcessSpawner } from './ProcessSpawner.js';
@@ -65,7 +66,7 @@ export class Shutdown {
       return;
     }
     this.host.log(`shutdown stage 3 (${cause}): exiting now`);
-    this.host.exit(1);
+    this.host.exit(EXITS.instant.code);
   }
 
   private async graceful(): Promise<void> {
@@ -132,6 +133,6 @@ export class Shutdown {
       return;
     }
     this.host.log('shutdown stage 2: every Claude Code has exited');
-    this.host.exit(1);
+    this.host.exit(EXITS.forced.code);
   }
 }

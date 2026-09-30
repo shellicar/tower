@@ -47,7 +47,7 @@ function lstatIfPresent(path: string) {
  */
 function prepareConfigDir(given: string, uid: number | undefined): string {
   if (uid === undefined) {
-    throw new StartupError(`this platform has no user ids, so the owner of ${given} can't be checked`);
+    throw new StartupError('unsupportedPlatform', `this platform has no user ids, so the owner of ${given} can't be checked`);
   }
   // Without a trailing slash, lstat reads the entry itself rather than
   // whatever a symlink in its place points at.
@@ -57,10 +57,10 @@ function prepareConfigDir(given: string, uid: number | undefined): string {
   }
   const stat = lstatSync(dir);
   if (!stat.isDirectory()) {
-    throw new StartupError(`PARTICIPANT_CONFIG_DIR ${dir} is not a directory`);
+    throw new StartupError('badEnvironment', `PARTICIPANT_CONFIG_DIR ${dir} is not a directory`);
   }
   if (stat.uid !== uid) {
-    throw new StartupError(`PARTICIPANT_CONFIG_DIR ${dir} is owned by another user`);
+    throw new StartupError('badEnvironment', `PARTICIPANT_CONFIG_DIR ${dir} is owned by another user`);
   }
   if ((stat.mode & BEYOND_OWNER) !== 0) {
     chmodSync(dir, OWNER_ONLY);

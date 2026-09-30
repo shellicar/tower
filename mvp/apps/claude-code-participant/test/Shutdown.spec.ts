@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ConversationLauncher, type LaunchRequest } from '../src/ConversationLauncher.js';
 import { Conversations } from '../src/Conversations.js';
+import { EXITS } from '../src/ExitCodes.js';
 import { Shutdown } from '../src/Shutdown.js';
 import { CONFIGURED, type FakeChild, testServices } from './support.js';
 
@@ -254,13 +255,13 @@ describe('Shutdown', () => {
       expect(services.processes.signals).toEqual([]);
     });
 
-    it('exits with 1 once every Claude Code it signalled has exited', async () => {
+    it('exits as forced once every Claude Code it signalled has exited', async () => {
       const { shutdown, host, children } = await serving(2);
       shutdown.trigger('SIGINT');
       shutdown.trigger('SIGINT');
       exitAll(children);
       await settle();
-      expect(host.exits).toEqual([1]);
+      expect(host.exits).toEqual([EXITS.forced.code]);
     });
 
     it('keeps waiting while a signalled Claude Code still runs', async () => {
@@ -304,20 +305,20 @@ describe('Shutdown', () => {
   });
 
   describe('stage 3: exit', () => {
-    it('exits with 1 at once on a third trigger', async () => {
+    it('exits as instant at once on a third trigger', async () => {
       const { shutdown, host } = await serving(1);
       shutdown.trigger('SIGINT');
       shutdown.trigger('SIGINT');
       shutdown.trigger('SIGINT');
-      expect(host.exits).toEqual([1]);
+      expect(host.exits).toEqual([EXITS.instant.code]);
     });
 
-    it('exits with 1 when the stage 2 deadline passes', async () => {
+    it('exits as instant when the stage 2 deadline passes', async () => {
       const { shutdown, host } = await serving(1);
       shutdown.trigger('SIGHUP');
       host.deadlines[0]?.expire();
       host.deadlines[1]?.expire();
-      expect(host.exits).toEqual([1]);
+      expect(host.exits).toEqual([EXITS.instant.code]);
     });
 
     it('cancels the stage 2 deadline when a trigger escalates first', async () => {
@@ -335,7 +336,7 @@ describe('Shutdown', () => {
       shutdown.trigger('SIGINT');
       exitAll(children);
       await settle();
-      expect(host.exits).toEqual([1]);
+      expect(host.exits).toEqual([EXITS.instant.code]);
     });
   });
 });

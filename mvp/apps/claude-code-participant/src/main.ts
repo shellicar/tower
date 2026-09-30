@@ -3,6 +3,7 @@ import type { IServiceProvider } from '@shellicar/core-di';
 import { beforeServing } from './beforeServing.js';
 import { composeConfig } from './composition.js';
 import { participantServices } from './container.js';
+import { EXITS } from './ExitCodes.js';
 import { runParticipant } from './run.js';
 import { StartupError } from './startup.js';
 
@@ -16,7 +17,7 @@ try {
 } catch (err) {
   if (err instanceof StartupError) {
     console.error(`participant: ${err.message}`);
-    process.exit(2);
+    process.exit(EXITS[err.exit].code);
   }
   throw err;
 }
