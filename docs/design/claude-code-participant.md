@@ -428,6 +428,64 @@ because otherwise we'd be using a resolved value" (26 Sep).
   `instanceId` on change events, `usage` per usage frame, and `detached` on a
   clean exit.
 
+## The two object stores
+
+The spec states the contract as reference only (`docs/spec/conversation.md`,
+Transit and durable object stores; 1 Oct). The reasons are here.
+
+- **Two stores, transit and durable** (29 Sep). Transit carries a request's
+  files from tower to the agent, and its objects expire. Durable holds the
+  bytes of what the agent committed. With transit alone, an agent's images
+  expired and the agent then said it had fabricated them. "we need persisted
+  storage / the buckets were about getting attachments from tower to the
+  agent, not about the images being persisted on the bus".
+- **Only the servicer writes to durable, when it commits** (29 Sep): "an
+  attachment is part of a *request*, just like the say is a request, it ends
+  up on the conversation only when the agent puts it there". What he doesn't
+  want: "the agent is basically allowing anyone to inject something into
+  their conversation".
+- **One durable bucket per deployment, kept forever** (29 Sep), created by
+  `stream-init.sh` with no expiry: "if it can be done in the stream init
+  script, just do it there, because it needs to be setup with no expiry".
+  Not by towerd: "that makes the agent dependent on towerd". stream-init sets
+  retention on every run, so a wrong expiry is corrected on the next
+  `docker compose up`: "the point of stream init is that its idempotent".
+- **Object names are `<conversationId>/<opaqueId>`** (29 Sep), because a
+  conversation is what gets deleted: "you'd probably nuke a conversation, not
+  necessarily individual files".
+- **Each object's metadata holds the id of the message that references it,
+  and its media type** (29 Sep). Checking the bytes needs nothing more: the
+  store's own SHA-256 digest covers it.
+- **A file is stored before the message that references it is published**
+  (29 Sep): "you cannot publish a message that points to nothing".
+- **The spec does not name the bucket** (30 Sep). A reference is complete on
+  its own, bucket and id, like a URI (29 Sep): "it's a URI, as long as it's
+  fully named in the message, the bucket can be anything, the only thing is
+  that it needs to have retention, there's absolutely no need to name it in
+  the spec". The deployment names it.
+- **Every image the agent commits goes to durable, always** (30 Sep). Nothing
+  is measured to decide whether an image could ride inside the message
+  instead: "dont worry about it, its simpler".
+- **A file that can't be stored is the implementation's to handle** (30 Sep).
+  The spec lists no outcomes for it; whatever the agent does, it still never
+  publishes a message pointing at a file that isn't stored.
+- **A missing durable object is the agent's to handle** (29 Sep): "this is
+  only an issue for bridge which has no store of its own, claude code will
+  likely have it in the transcript / and if not, we generate a synthetic
+  message when restoring from the stream". Tower shows a missing file the
+  same way whichever agent serves the conversation: "a missing image should
+  render in tower the same regardless of the agent".
+
+Parked, not decided:
+
+- What scenario 8a is for, now that a committed block names the durable store
+  while 8a's still names transit.
+- Whether conformance compares bucket names literally, when the deployment
+  names the buckets and the fixtures use example names.
+- What a servicer puts in the model's request for a committed block that
+  does not resolve. The spec has no rule for it since the rewrite removed
+  its placeholder rule.
+
 ## Shutdown
 
 - **Each Ctrl-C escalates** (24 Sep, confirmed 26 Sep). In Stephen's words:
