@@ -154,7 +154,7 @@ A compliant instance watches the attachment leaf for every conversation it serve
 
 That `detached` folds as nothing: the supersession already ended its claim. A `detached` only changes the fold when its identity — the `(world, instanceId)` pair, or bare `instanceId` if either side omits `world` — still matches the standing attachment's. An instance detaching after it's already superseded is stating a fact about its own past claim, not retracting the current one.
 
-It publishes `detached` anyway, as the observable act of compliance — without it, a crash and a violation would be impossible to tell apart. An instance also publishes `detached` per conversation on clean exit (Ctrl-C, drain), same as today.
+It publishes `detached` anyway, as the observable act of compliance — without it, a crash and a violation would be impossible to tell apart. An instance also publishes `detached` per conversation on clean exit (Ctrl-C) and on drain, same as today.
 
 **Crash vs violation is derivable, never declared.** No `detached`, and dead pulses from the instance that held the claim: read as a crash. It went silent and never got the chance to release.
 
@@ -221,17 +221,18 @@ this repo's testing rule.
 | Request | Fields | Reply | Notes |
 |---|---|---|---|
 | `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts; its premise is below. Any named environment value the world cannot establish rejects the request (`invalid_cwd`, for `cwd`); an omitted value falls to the agent's own defaults — absence delegates, presence binds, never a silent fallback. Known reasons today: `already_attached`, `at_capacity`, `invalid` (a recognised request whose body doesn't carry what it needs, e.g. a missing or empty `conversationId`), `invalid_cwd`, `failed` (the world could not undertake the operation; the cause rides `detail`), `unavailable` (the instance that received it has published `unavailable`), `unsupported` |
-| `drain` | — | `accepted` \| `rejected` + `reason` | stop taking work and detach cleanly: a `detached` per conversation, then silence. Distinguishes a decided shutdown from a crash |
+| `drain` | — | `accepted` \| `rejected` + `reason` | stop serving: the instance goes `unavailable`, publishes a `detached` for each conversation it holds, then publishes `offline`. It asks the instance to stop serving, not to exit its process. Distinguishes a decided stop from a crash |
 
 **The premise for `service`.** Four cases, each read off a warm fold — one
 that has replayed capture up to its live subscription (core.md, System
-principles) — and a fifth that closes the list:
+principles) — and two that close the list:
 
 - Standing attachment in another world → accept and take over, unconditionally. The incumbent's liveness is irrelevant: asking a different world to serve *is* migration.
-- Standing attachment in this world, holder alive on a warm read of this world's own liveness fold → `rejected: already_attached`. The goal already holds, and every instance in the world gives this same answer, so a redundant or retried request never causes a takeover.
+- Standing attachment in this world, holder alive on a warm read of this world's own liveness fold → `rejected: already_attached`. The goal already holds, and every instance in the world that has not published `unavailable` gives this same answer, so a redundant or retried request never causes a takeover.
 - Standing attachment in this world, holder stranded on a warm read of that same fold → accept and take over. A dead holder never blocks pickup; the attachment is never a lease.
 - No standing attachment in a warm fold → no history: spawn fresh. History: adopt.
 - The fold is not warm — just booted, or a feed that has fallen behind → none of the four applies. An unobserved record is not an absent attachment, so it never reads as the case above and never spawns. A compliant instance never reaches here, because a cold one has not joined the queue group (below); one that answers anyway rejects and says why, in `reason`, which is free text and needs no new token.
+- The answering instance has published `unavailable` → `rejected: unavailable`, whatever its fold holds. None of the four applies.
 
 `service` means "I want this serviced" — it never moves a conversation between two live instances in the same world. That would need the holder to abandon it first (an operation not designed here), or it would be a different operation on its own leaf. A live-to-live handover inside one world is out of `service`'s scope by design, not an oversight.
 
