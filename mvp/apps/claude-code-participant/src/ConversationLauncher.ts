@@ -95,6 +95,9 @@ export class ConversationLauncher {
       // No route was found that gives Claude Code the mode and still lets
       // that setting refuse it.
       permissionMode: claudeSettings.permissions.defaultMode,
+      // Nothing answers a permission prompt: whatever the mode, rules and
+      // hooks don't allow is denied, and Claude Code is told why.
+      permissionPrompts: 'none',
       // TODO: undecided: Claude Code's settings can't carry effort `max`, per
       // model in modelSettings included (both drop it), so
       // a declared `max` goes as a launch option, and then it beats the

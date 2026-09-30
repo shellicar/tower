@@ -1,11 +1,11 @@
-// A live check of shutdown: the participant as main.ts runs it, plus one
-// conversation launched and sent a prompt, since launching has no trigger of
-// its own until the `service` request exists. Everything it shows goes to
-// stderr, stamped with the time since start, beside shutdown's own lines:
-// the control lines it applied, Claude Code's pid and process group, the
-// commands Claude Code starts, and the messages that come back.
+// A live check of shutdown's handling of processes: the participant as
+// main.ts runs it but without joining the bus, plus one conversation launched
+// directly and sent a prompt. Everything it shows goes to stderr, stamped
+// with the time since start, beside shutdown's own lines: the control lines
+// it applied, Claude Code's pid and process group, the commands Claude Code
+// starts, and the messages that come back.
 //
-//   NATS_URL=... PARTICIPANT_CONFIG_DIR=... \
+//   NATS_URL=... PARTICIPANT_WORLD=... PARTICIPANT_CONFIG_DIR=... \
 //     node --import tsx scripts/shutdown-check.ts <cwd> <control-lines-file> <prompt> [<id to resume>]
 //
 // The control lines in the file are applied before the launch. The config

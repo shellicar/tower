@@ -1,7 +1,8 @@
 import type { Readable, Writable } from 'node:stream';
 import type { IServiceProvider } from '@shellicar/core-di';
 import { ControlLines, runControlLines } from './ControlLines.js';
-import { ASKING_SIGNALS, DRIVER_GONE_SIGNALS, describeError, Shutdown } from './Shutdown.js';
+import { describeError } from './describeError.js';
+import { ASKING_SIGNALS, DRIVER_GONE_SIGNALS, Shutdown } from './Shutdown.js';
 
 /** What of its own process the participant serves through: `process` itself, or a test's stand-in. */
 export type ServedProcess = {

@@ -4,6 +4,7 @@ import { startupExitOf } from './support.js';
 
 const complete = {
   NATS_URL: 'nats://127.0.0.1:31416',
+  PARTICIPANT_WORLD: 'test-world',
   PARTICIPANT_CONFIG_DIR: '/agents/alpha/config',
   HOME: '/home/someone',
   PATH: '/usr/bin',
@@ -22,6 +23,21 @@ describe('readStartup', () => {
 
     it('is read as given', () => {
       expect(readStartup(complete).natsUrl).toBe('nats://127.0.0.1:31416');
+    });
+  });
+
+  describe('PARTICIPANT_WORLD', () => {
+    it('exits as a bad environment value when it is missing', () => {
+      const { PARTICIPANT_WORLD: _, ...env } = complete;
+      expect(startupExitOf(() => readStartup(env))).toBe('badEnvironment');
+    });
+
+    it('refuses to start when it is empty', () => {
+      expect(() => readStartup({ ...complete, PARTICIPANT_WORLD: '' })).toThrow('PARTICIPANT_WORLD is required');
+    });
+
+    it('is the world', () => {
+      expect(readStartup(complete).world).toBe('test-world');
     });
   });
 

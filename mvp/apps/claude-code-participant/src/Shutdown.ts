@@ -2,10 +2,12 @@ import { dependsOn } from '@shellicar/core-di';
 import { PARTICIPANT_TAG } from './ClaudeCodeSpawner.js';
 import type { Conversation } from './Conversation.js';
 import { Conversations } from './Conversations.js';
+import { describeError } from './describeError.js';
 import { EXITS } from './ExitCodes.js';
 import { IHost } from './Host.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
 import { ParticipantSettings } from './ParticipantSettings.js';
+import { Presence } from './Presence.js';
 import { IProcessSpawner } from './ProcessSpawner.js';
 import { IProcessTable, type TaggedProcess } from './ProcessTable.js';
 import { ITimer } from './Timer.js';
@@ -19,17 +21,6 @@ export const ASKING_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
 /** Whoever drove the participant is gone, as stdin closing also says: shutdown starts, and never moves on for it. */
 export const DRIVER_GONE_SIGNALS = ['SIGHUP'] as const;
 
-/** An error with each of its causes, so the underlying one is never dropped. */
-export function describeError(err: unknown): string {
-  const parts: string[] = [];
-  let current: unknown = err;
-  while (current !== undefined) {
-    parts.push(current instanceof Error ? current.message : String(current));
-    current = current instanceof Error ? current.cause : undefined;
-  }
-  return parts.join(': ');
-}
-
 function identify(process: TaggedProcess): string {
   return `${process.pid}:${process.startTime}`;
 }
@@ -42,16 +33,20 @@ function listed(processes: readonly TaggedProcess[]): string {
  * How the participant stops, in three stages that mirror SIGINT, SIGTERM and
  * SIGKILL: two graceful, then hard.
  *
- * 1. Interrupt every turn and close every conversation's input; each Claude
- *    Code stops its own commands, records that it did, and exits. Then
- *    SIGTERM to whatever still carries this config dir's tag, and a wait for
- *    it to go. The process then ends by itself.
+ * 1. Leave the world's queue group and publish `unavailable`. Interrupt
+ *    every turn and close every conversation's input; each Claude Code stops
+ *    its own commands, records that it did, and exits. Then `detached` for
+ *    each conversation, `offline`, SIGTERM to whatever still carries this
+ *    config dir's tag and a wait for it to go, and the NATS connection
+ *    drained. The process then ends by itself.
  * 2. SIGTERM to every Claude Code, which still records a command it was
- *    running (as "Exit code 137"), and a wait for them to exit. Then SIGTERM
- *    to whatever tagged is left, a wait for it to go, and exit.
+ *    running (as "Exit code 137"), and a wait for them to exit. Then
+ *    whichever of `detached` and `offline` stage 1 didn't reach, SIGTERM to
+ *    whatever tagged is left and a wait for it to go, the NATS connection
+ *    closed, and exit.
  * 3. SIGKILL to every tagged process, Claude Codes and commands alike, and
- *    exit at once: a process that has had SIGKILL runs none of its own code
- *    again, so there is nothing to wait for.
+ *    exit at once, publishing nothing: a process that has had SIGKILL runs
+ *    none of its own code again, so there is nothing to wait for.
  *
  * While a Claude Code runs, its commands are left to it: it stops them
  * itself and records it, which a signal from outside would bypass. Once it
@@ -76,6 +71,7 @@ export class Shutdown {
   @dependsOn(ParticipantConfig) private readonly config!: ParticipantConfig;
   @dependsOn(IProcessTable) private readonly processTable!: IProcessTable;
   @dependsOn(ITimer) private readonly timer!: ITimer;
+  @dependsOn(Presence) private readonly presence!: Presence;
 
   private stage = 0;
   private cancelDeadline: (() => void) | undefined;
@@ -124,6 +120,7 @@ export class Shutdown {
   }
 
   private async graceful(): Promise<void> {
+    this.presence.stopServing();
     // Stdin stays open and read, so control lines are still answered, but it
     // no longer keeps the process alive: once everything below is done, the
     // process ends when nothing else runs. That includes work nobody can
@@ -136,9 +133,15 @@ export class Shutdown {
       return;
     }
     this.host.log('shutdown stage 1: every Claude Code has exited');
+    this.presence.detachAll();
+    this.presence.goOffline();
     // Every Claude Code has gone, so nothing tagged still descends from this
     // process: what is left outlived its Claude Code.
-    await this.endTagged(1, { withOwnDescendants: false });
+    if (!(await this.endTagged(1, { withOwnDescendants: false }))) {
+      return;
+    }
+    // The connection is the last thing holding the process open.
+    await this.presence.disconnect('drain');
   }
 
   private async stop(conversation: Conversation): Promise<void> {
@@ -179,11 +182,14 @@ export class Shutdown {
       return;
     }
     this.host.log('shutdown stage 2: every Claude Code it signalled has exited');
+    this.presence.detachAll();
+    this.presence.goOffline();
     // This process's own descendants are included: a Claude Code that
     // couldn't be signalled above is still one, and gets SIGTERM here.
     if (!(await this.endTagged(2, { withOwnDescendants: true }))) {
       return;
     }
+    await this.presence.disconnect('close');
     this.host.exit(EXITS.forced.code);
   }
 

@@ -1,11 +1,13 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import type { Options, Query, SDKUserMessage, SessionKey, SessionStoreEntry } from '@anthropic-ai/claude-agent-sdk';
+import type { Options, Query, SDKMessage, SDKUserMessage, SessionKey, SessionStoreEntry } from '@anthropic-ai/claude-agent-sdk';
+import { type BrokerRequest, type BrokerSubscription, IBroker, type Reply } from '../src/Broker.js';
 import { IClaudeCode } from '../src/ClaudeCode.js';
 import { ControlLines } from '../src/ControlLines.js';
 import { participantServices } from '../src/container.js';
 import { IHost } from '../src/Host.js';
-import type { MessageChannel } from '../src/MessageChannel.js';
+import { IIds } from '../src/Ids.js';
+import { MessageChannel } from '../src/MessageChannel.js';
 import { ParticipantConfig } from '../src/ParticipantConfig.js';
 import { type ChildProcessHandle, IProcessSpawner, type ProcessOptions } from '../src/ProcessSpawner.js';
 import { IProcessTable, type ProcessIdentity, type TaggedProcess } from '../src/ProcessTable.js';
@@ -18,6 +20,7 @@ export function testConfig(overrides: { setpriv?: string | null; configDir?: str
   return new ParticipantConfig(
     {
       natsUrl: 'nats://127.0.0.1:31416',
+      world: 'test-world',
       configDir: overrides.configDir ?? '/agents/alpha/config',
       realHome: '/home/someone',
       inheritedEnv: { PATH: '/usr/bin', LANG: 'C.UTF-8' },
@@ -40,7 +43,14 @@ type FakeLaunch = {
   interruptBehaviour: InterruptBehaviour;
   /** Does what the SDK does when it starts Claude Code: calls the spawn hook. */
   start: () => ChildProcessHandle;
+  /** What Claude Code sends back, as the query yields it; closing it ends the query's messages. */
+  replies: MessageChannel<SDKMessage>;
 };
+
+/** The `result` Claude Code sends when a query ends, with only the fields the participant reads. */
+export function resultMessage(): SDKMessage {
+  return { type: 'result', subtype: 'success' } as SDKMessage;
+}
 
 /** Records each query instead of starting Claude Code, and collects what the conversation sends it. */
 class FakeClaudeCode implements IClaudeCode {
@@ -66,6 +76,7 @@ class FakeClaudeCode implements IClaudeCode {
         }
         return hook({ command: '/sdk/claude', args: [], cwd: options.cwd, env: {}, signal: new AbortController().signal }) as ChildProcessHandle;
       },
+      replies: new MessageChannel<SDKMessage>(),
     };
     this.launches.push(launch);
     const interrupt = (): Promise<undefined> => {
@@ -76,7 +87,7 @@ class FakeClaudeCode implements IClaudeCode {
       }
       return behaviour === 'answer' ? Promise.resolve(undefined) : Promise.reject(behaviour);
     };
-    return { interrupt } as unknown as Query;
+    return { interrupt, [Symbol.asyncIterator]: () => launch.replies[Symbol.asyncIterator]() } as unknown as Query;
   }
 }
 
@@ -228,6 +239,105 @@ class FakeTimer implements ITimer {
     this.onSleep?.(this.time);
     return Promise.resolve();
   }
+
+  public timestamp(): string {
+    return FAKE_TIMESTAMP;
+  }
+
+  /** Every repeating callback asked for; a test ticks one by calling it. */
+  public readonly repeating: { ms: number; tick: () => void; stopped: boolean }[] = [];
+
+  public every(ms: number, tick: () => void): () => void {
+    const repeating = { ms, tick, stopped: false };
+    this.repeating.push(repeating);
+    return () => {
+      repeating.stopped = true;
+    };
+  }
+}
+
+export const FAKE_TIMESTAMP = '2026-10-01T10:00:00.000+10:00';
+
+/** Ids in the order they are minted: id-1, id-2, and so on. */
+class FakeIds implements IIds {
+  private minted = 0;
+
+  public mint(): string {
+    this.minted += 1;
+    return `id-${this.minted}`;
+  }
+}
+
+/** Whether a NATS subject matches a subscription's subject, wildcards included. */
+function matches(subscribed: string, subject: string): boolean {
+  const want = subscribed.split('.');
+  const have = subject.split('.');
+  for (const [index, token] of want.entries()) {
+    if (token === '>') {
+      return have.length > index;
+    }
+    if (index >= have.length || (token !== '*' && token !== have[index])) {
+      return false;
+    }
+  }
+  return want.length === have.length;
+}
+
+type FakeSubscription = { subject: string; queue: string | undefined; handle: (request: BrokerRequest) => void; active: boolean };
+
+/** Records what is published and subscribed, and delivers a test's requests to whatever subscribes to them. */
+class FakeBroker implements IBroker {
+  public readonly published: { subject: string; body: Record<string, unknown> }[] = [];
+  public readonly subscriptions: FakeSubscription[] = [];
+  public connectFailure: Error | undefined;
+  public ended: 'drain' | 'close' | undefined;
+
+  public connect(): Promise<void> {
+    return this.connectFailure === undefined ? Promise.resolve() : Promise.reject(this.connectFailure);
+  }
+
+  public publish(subject: string, body: Record<string, unknown>): void {
+    this.published.push({ subject, body: structuredClone(body) });
+  }
+
+  public subscribe(subject: string, handle: (request: BrokerRequest) => void, options: { queue?: string } = {}): BrokerSubscription {
+    const subscription: FakeSubscription = { subject, queue: options.queue, handle, active: true };
+    this.subscriptions.push(subscription);
+    return {
+      unsubscribe: () => {
+        subscription.active = false;
+      },
+    };
+  }
+
+  public drain(): Promise<void> {
+    this.ended = 'drain';
+    return Promise.resolve();
+  }
+
+  public close(): Promise<void> {
+    this.ended = 'close';
+    return Promise.resolve();
+  }
+
+  /** The subjects published, in order. */
+  public subjects(): string[] {
+    return this.published.map((message) => message.subject);
+  }
+
+  /** Whether anything is subscribed to `subject` now. */
+  public hasResponder(subject: string): boolean {
+    return this.subscriptions.some((subscription) => subscription.active && matches(subscription.subject, subject));
+  }
+
+  /** Sends a request as a sender would; resolves with the reply, or undefined when nothing is subscribed. */
+  public request(subject: string, body: unknown): Promise<Reply | undefined> {
+    const subscription = this.subscriptions.find((candidate) => candidate.active && matches(candidate.subject, subject));
+    if (subscription === undefined) {
+      return Promise.resolve(undefined);
+    }
+    return new Promise((resolve) => subscription.handle({ subject, body, reply: resolve }));
+  }
 }
 
 /**
@@ -242,6 +352,8 @@ export function testServices(config: ParticipantConfig = testConfig(), options: 
   services.register(FakeProcessTable).as(IProcessTable);
   services.register(FakeTimer).as(ITimer);
   services.register(FakeHost).as(IHost);
+  services.register(FakeBroker).as(IBroker);
+  services.register(FakeIds).as(IIds);
   const provider = services.buildProvider();
   if (options.gateShut !== true) {
     provider.resolve(ServingGate).open();
@@ -254,6 +366,7 @@ export function testServices(config: ParticipantConfig = testConfig(), options: 
     timer: provider.resolve(ITimer) as FakeTimer,
     publisher: provider.resolve(IPublisher) as FakePublisher,
     host: provider.resolve(IHost) as FakeHost,
+    broker: provider.resolve(IBroker) as FakeBroker,
     /** Sends control lines, as stdin would, and returns their replies. */
     control: (...lines: unknown[]) => lines.map((line) => provider.resolve(ControlLines).handle(typeof line === 'string' ? line : JSON.stringify(line))),
   };

@@ -1,9 +1,8 @@
 // A live check of the foundation: configure over stdio, launch one
 // conversation, send one prompt, show the reply and what Claude Code was
-// started with. Launching has no trigger of its own until the `service`
-// request exists, so this script is that trigger.
+// started with. It launches directly, without the bus.
 //
-//   printf '%s\n' '<control line>' ... | NATS_URL=... PARTICIPANT_CONFIG_DIR=... \
+//   printf '%s\n' '<control line>' ... | NATS_URL=... PARTICIPANT_WORLD=... PARTICIPANT_CONFIG_DIR=... \
 //     pnpm exec tsx scripts/live-check.ts <cwd> <prompt>
 //
 // Like the participant, it takes the config dir's lock and starts stopping

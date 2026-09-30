@@ -184,6 +184,12 @@ describe('ConversationLauncher', () => {
     });
   });
 
+  describe('permission prompts', () => {
+    it('are answered by nobody', async () => {
+      expect((await launched(CONFIGURED)).options.permissionPrompts).toBe('none');
+    });
+  });
+
   describe('claudeSettings over the required values', () => {
     it('replaces the model', async () => {
       expect((await settingsOf([...CONFIGURED, { claudeSettings: { model: 'claude-haiku-4-5' } }])).model).toBe('claude-haiku-4-5');

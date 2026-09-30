@@ -3,6 +3,7 @@ import type { Startup } from './startup.js';
 /** Everything fixed for the process's life, decided once at start. */
 export class ParticipantConfig {
   public readonly natsUrl: string;
+  public readonly world: string;
   public readonly configDir: string;
   public readonly realHome: string;
   public readonly inheritedEnv: Readonly<Record<string, string>>;
@@ -15,6 +16,7 @@ export class ParticipantConfig {
 
   public constructor(startup: Startup, privateHome: string, setpriv: string | null, shellPrefix: string) {
     this.natsUrl = startup.natsUrl;
+    this.world = startup.world;
     this.configDir = startup.configDir;
     this.realHome = startup.realHome;
     this.inheritedEnv = startup.inheritedEnv;

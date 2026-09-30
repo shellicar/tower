@@ -4,6 +4,7 @@ import { beforeServing } from './beforeServing.js';
 import { composeConfig } from './composition.js';
 import { participantServices } from './container.js';
 import { EXITS } from './ExitCodes.js';
+import { Presence } from './Presence.js';
 import { runParticipant } from './run.js';
 import { Shutdown } from './Shutdown.js';
 import { StartupError } from './startup.js';
@@ -23,3 +24,6 @@ try {
 }
 
 runParticipant(provider);
+// TODO: undecided: what the participant does when NATS can't be reached at
+// start. As built, the rejected connect ends the process as a crash.
+void provider.resolve(Presence).start();

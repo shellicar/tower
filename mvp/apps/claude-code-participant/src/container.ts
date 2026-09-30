@@ -1,14 +1,17 @@
 import { createServiceCollection, type IServiceCollection, Lifetime, ResolveMultipleMode } from '@shellicar/core-di';
+import { IBroker, NatsBroker } from './Broker.js';
 import { IClaudeCode, SdkClaudeCode } from './ClaudeCode.js';
 import { ClaudeCodeSpawner } from './ClaudeCodeSpawner.js';
 import { ControlLines } from './ControlLines.js';
 import { ConversationLauncher } from './ConversationLauncher.js';
 import { Conversations } from './Conversations.js';
 import { IHost, NodeHost } from './Host.js';
+import { IIds, RandomIds } from './Ids.js';
 import { Leftovers } from './Leftovers.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
 import { ParticipantLock } from './ParticipantLock.js';
 import { ParticipantSettings } from './ParticipantSettings.js';
+import { Presence } from './Presence.js';
 import { IProcessSpawner, NodeProcessSpawner } from './ProcessSpawner.js';
 import { IProcessTable, LinuxProcessTable } from './ProcessTable.js';
 import { ServingGate } from './ServingGate.js';
@@ -45,6 +48,9 @@ export function participantServices(config: ParticipantConfig): IServiceCollecti
   services.register(Leftovers).asSelf();
   services.register(ServingGate).asSelf();
   services.register(NodeHost).as(IHost);
+  services.register(NatsBroker).as(IBroker);
+  services.register(RandomIds).as(IIds);
+  services.register(Presence).asSelf();
   services.register(Shutdown).asSelf();
   return services;
 }
