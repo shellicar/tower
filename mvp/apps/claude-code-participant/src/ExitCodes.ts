@@ -6,7 +6,7 @@
  */
 export const EXITS = {
   clean: { code: 0, meaning: 'shutdown finished its first stage: everything the participant started has stopped' },
-  forced: { code: 64, meaning: 'shutdown finished its second stage: whatever was still running was killed' },
+  forced: { code: 64, meaning: 'shutdown finished its second stage: whatever was still running was sent SIGTERM and has stopped' },
   instant: { code: 65, meaning: 'shutdown reached its third stage and exited at once, whatever was still running' },
   badEnvironment: { code: 66, meaning: 'an environment value it starts from is missing or unusable' },
   configDirLocked: { code: 67, meaning: 'another participant is running on the config dir' },

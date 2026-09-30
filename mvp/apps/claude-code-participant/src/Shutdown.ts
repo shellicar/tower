@@ -138,9 +138,7 @@ export class Shutdown {
     this.host.log('shutdown stage 1: every Claude Code has exited');
     // Every Claude Code has gone, so nothing tagged still descends from this
     // process: what is left outlived its Claude Code.
-    if (!(await this.endTagged(1, { withOwnDescendants: false }))) {
-      return;
-    }
+    await this.endTagged(1, { withOwnDescendants: false });
   }
 
   private async stop(conversation: Conversation): Promise<void> {
