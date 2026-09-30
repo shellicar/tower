@@ -26,7 +26,8 @@ services:
   # The same stream-init the deployment runs, against the same subject layout,
   # so a run here exercises the routing the real broker has instead of a
   # broker with no streams at all. On an empty broker it just creates the
-  # three; its release and backfill phases find nothing to do.
+  # three streams and the `durable` object store bucket; its release and
+  # backfill phases find nothing to do.
   stream-init:
     image: natsio/nats-box:latest
     depends_on:

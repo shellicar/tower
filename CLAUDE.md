@@ -138,7 +138,7 @@ LLM conversations are the opposite shape of chat-room chat:
 just build     # cargo build --workspace (mvp/)
 just test      # cargo test --workspace
 just check     # cargo clippy + fmt --check
-docker compose up -d        # broker + stream-init (event subjects only)
+docker compose up -d        # broker + stream-init (streams + durable bucket; mvp/docs/deployment.md)
 just dev       # towerd + BOTH frontends, hot reload, beside a v1 tower:
                # towerd 127.0.0.1:8081 (svelte dist) + 8083 (leptos dist),
                # db tower-v2.db, vite localhost:5174, trunk localhost:8082
