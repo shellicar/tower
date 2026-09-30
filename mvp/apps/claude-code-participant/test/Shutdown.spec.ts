@@ -51,21 +51,21 @@ describe('Shutdown', () => {
   describe('stage 1: graceful', () => {
     it('interrupts every conversation, with or without a turn of its own', async () => {
       const { shutdown, launches } = await serving(2);
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       await settle();
       expect(launches.map((launch) => launch.interrupts.length)).toEqual([1, 1]);
     });
 
     it('interrupts before closing the input', async () => {
       const { shutdown, launches } = await serving(1);
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       await settle();
       expect(launches[0]?.interrupts).toEqual([false]);
     });
 
     it('closes the input once the interrupt has answered', async () => {
       const { shutdown, launches } = await serving(1);
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       expect(await inputClosed(launches[0]?.done ?? Promise.reject())).toBe(true);
     });
 
@@ -76,7 +76,7 @@ describe('Shutdown', () => {
         throw new Error('nothing was launched');
       }
       launch.interruptBehaviour = 'hang';
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       expect(await inputClosed(launch.done)).toBe(false);
     });
 
@@ -87,7 +87,7 @@ describe('Shutdown', () => {
         throw new Error('nothing was launched');
       }
       hung.interruptBehaviour = 'hang';
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       expect(await inputClosed(other.done)).toBe(true);
     });
 
@@ -98,7 +98,7 @@ describe('Shutdown', () => {
         throw new Error('nothing was launched');
       }
       launch.interruptBehaviour = new Error('Query closed before response received');
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       expect(await inputClosed(launch.done)).toBe(true);
     });
 
@@ -109,20 +109,20 @@ describe('Shutdown', () => {
         throw new Error('nothing was launched');
       }
       launch.interruptBehaviour = new Error('interrupt refused', { cause: new Error('Cannot write to terminated process') });
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       await settle();
       expect(host.logs).toContain(`shutdown: interrupting conversation ${conversations[0]?.id} failed: interrupt refused: Cannot write to terminated process`);
     });
 
     it('lets the process end by itself', async () => {
       const { shutdown, host } = await serving(1);
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       expect(host.letEndCalls).toBe(1);
     });
 
     it('never exits the process itself', async () => {
       const { shutdown, host, children } = await serving(2);
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       await settle();
       exitAll(children);
       await settle();
@@ -131,7 +131,7 @@ describe('Shutdown', () => {
 
     it('says so once every Claude Code has exited', async () => {
       const { shutdown, host, children } = await serving(2);
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       await settle();
       exitAll(children);
       await settle();
@@ -140,7 +140,7 @@ describe('Shutdown', () => {
 
     it('keeps waiting while a Claude Code still runs', async () => {
       const { shutdown, host, children } = await serving(2);
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       await settle();
       children[0]?.exit(0);
       await settle();
@@ -151,32 +151,32 @@ describe('Shutdown', () => {
       const { shutdown, launches, children } = await serving(1);
       children[0]?.exit(0);
       await settle();
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       await settle();
       expect(launches[0]?.interrupts).toEqual([]);
     });
 
     it('names the trigger', async () => {
       const { shutdown, host } = await serving(0);
-      shutdown.trigger('SIGHUP');
+      shutdown.driverGone('SIGHUP');
       expect(host.logs[0]).toBe('shutdown stage 1 (SIGHUP): interrupting every turn and waiting up to 30000 ms for everything to finish');
     });
 
     it('arms a deadline of 30 s by default', async () => {
       const { shutdown, host } = await serving(1);
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       expect(host.deadlines.map((deadline) => deadline.ms)).toEqual([30000]);
     });
 
     it('arms the deadline the shutdown line set', async () => {
       const { shutdown, host } = await serving(1, [{ shutdownPolicy: { gracefulMs: 5000, teardownMs: 2000 } }]);
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       expect(host.deadlines.map((deadline) => deadline.ms)).toEqual([5000]);
     });
 
     it('keeps its deadline armed once every Claude Code has exited, in case something else never finishes', async () => {
       const { shutdown, host, children } = await serving(1);
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       await settle();
       exitAll(children);
       await settle();
@@ -187,37 +187,37 @@ describe('Shutdown', () => {
   describe('escalating from stage 1', () => {
     it('starts stage 2 at once on a second trigger', async () => {
       const { shutdown, processes } = await serving(1);
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
       expect(processes.signals).toEqual([{ pid: 4001, signal: 'SIGTERM' }]);
     });
 
     it('starts stage 2 when its deadline passes', async () => {
       const { shutdown, processes, host } = await serving(1);
-      shutdown.trigger('SIGTERM');
+      shutdown.ask('SIGTERM');
       host.deadlines[0]?.expire();
       expect(processes.signals).toEqual([{ pid: 4001, signal: 'SIGTERM' }]);
     });
 
     it('says the deadline passed', async () => {
       const { shutdown, host } = await serving(1);
-      shutdown.trigger('SIGTERM');
+      shutdown.ask('SIGTERM');
       host.deadlines[0]?.expire();
       expect(host.logs[1]).toBe('shutdown stage 2 (stage 1 took longer than 30000 ms): killing every Claude Code and waiting up to 10000 ms');
     });
 
     it('cancels its deadline when a trigger escalates first', async () => {
       const { shutdown, host } = await serving(1);
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('stdin closed');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGTERM');
       expect(host.deadlines[0]?.cancelled).toBe(true);
     });
 
     it('does not report stage 1 finished once stage 2 has started', async () => {
       const { shutdown, host, children } = await serving(1);
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       await settle();
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       exitAll(children);
       await settle();
       expect(host.logs).not.toContain('shutdown stage 1: every Claude Code has exited');
@@ -227,8 +227,8 @@ describe('Shutdown', () => {
   describe('stage 2: teardown', () => {
     it("sends SIGTERM to every running Claude Code's process group", async () => {
       const { shutdown, processes } = await serving(2);
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
       expect(processes.signals).toEqual([
         { pid: 4001, signal: 'SIGTERM' },
         { pid: 4002, signal: 'SIGTERM' },
@@ -237,11 +237,11 @@ describe('Shutdown', () => {
 
     it('signals no process group once its Claude Code has exited', async () => {
       const { shutdown, processes, children } = await serving(2);
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       await settle();
       children[0]?.exit(0);
       await settle();
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
       expect(processes.signals).toEqual([{ pid: 4002, signal: 'SIGTERM' }]);
     });
 
@@ -250,15 +250,15 @@ describe('Shutdown', () => {
       services.control(...CONFIGURED);
       await services.provider.resolve(ConversationLauncher).launch(request(0));
       const shutdown = services.provider.resolve(Shutdown);
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
       expect(services.processes.signals).toEqual([]);
     });
 
     it('exits as forced once every Claude Code it signalled has exited', async () => {
       const { shutdown, host, children } = await serving(2);
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
       exitAll(children);
       await settle();
       expect(host.exits).toEqual([EXITS.forced.code]);
@@ -266,8 +266,8 @@ describe('Shutdown', () => {
 
     it('keeps waiting while a signalled Claude Code still runs', async () => {
       const { shutdown, host, children } = await serving(2);
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
       children[0]?.exit(null, 'SIGTERM');
       await settle();
       expect(host.exits).toEqual([]);
@@ -276,30 +276,30 @@ describe('Shutdown', () => {
     it('logs a group it could not signal', async () => {
       const { shutdown, processes, host, conversations } = await serving(2);
       processes.signalFailures.set(4001, new Error('kill EPERM'));
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
       expect(host.logs.at(-1)).toBe(`shutdown: signalling conversation ${conversations[0]?.id}'s Claude Code failed: kill EPERM`);
     });
 
     it('still signals the rest after one fails', async () => {
       const { shutdown, processes } = await serving(2);
       processes.signalFailures.set(4001, new Error('kill EPERM'));
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
       expect(processes.signals).toEqual([{ pid: 4002, signal: 'SIGTERM' }]);
     });
 
     it('arms a deadline of 10 s by default', async () => {
       const { shutdown, host } = await serving(1);
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
       expect(host.deadlines.map((deadline) => deadline.ms)).toEqual([30000, 10000]);
     });
 
     it('arms the deadline the shutdown line set', async () => {
       const { shutdown, host } = await serving(1, [{ shutdownPolicy: { gracefulMs: 5000, teardownMs: 2000 } }]);
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
       expect(host.deadlines.map((deadline) => deadline.ms)).toEqual([5000, 2000]);
     });
   });
@@ -307,15 +307,15 @@ describe('Shutdown', () => {
   describe('stage 3: exit', () => {
     it('exits as instant at once on a third trigger', async () => {
       const { shutdown, host } = await serving(1);
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
       expect(host.exits).toEqual([EXITS.instant.code]);
     });
 
     it('exits as instant when the stage 2 deadline passes', async () => {
       const { shutdown, host } = await serving(1);
-      shutdown.trigger('SIGHUP');
+      shutdown.driverGone('SIGHUP');
       host.deadlines[0]?.expire();
       host.deadlines[1]?.expire();
       expect(host.exits).toEqual([EXITS.instant.code]);
@@ -323,20 +323,76 @@ describe('Shutdown', () => {
 
     it('cancels the stage 2 deadline when a trigger escalates first', async () => {
       const { shutdown, host } = await serving(1);
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
       expect(host.deadlines[1]?.cancelled).toBe(true);
     });
 
     it('does not exit a second time when stage 2 finishes after it', async () => {
       const { shutdown, host, children } = await serving(1);
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
-      shutdown.trigger('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
       exitAll(children);
       await settle();
       expect(host.exits).toEqual([EXITS.instant.code]);
+    });
+  });
+
+  describe('whoever drove the participant going', () => {
+    it('starts shutdown', async () => {
+      const { shutdown, launches } = await serving(1);
+      shutdown.driverGone('stdin closed');
+      await settle();
+      expect(launches[0]?.interrupts).toEqual([false]);
+    });
+
+    it('never moves shutdown on', async () => {
+      const { shutdown, processes } = await serving(1);
+      shutdown.driverGone('stdin closed');
+      shutdown.driverGone('SIGHUP');
+      expect(processes.signals).toEqual([]);
+    });
+
+    it('leaves stage 1 its deadline', async () => {
+      const { shutdown, host } = await serving(1);
+      shutdown.driverGone('stdin closed');
+      shutdown.driverGone('SIGHUP');
+      expect(host.deadlines.map((deadline) => deadline.cancelled)).toEqual([false]);
+    });
+
+    it('says it did not move shutdown on', async () => {
+      const { shutdown, host } = await serving(1);
+      shutdown.ask('SIGINT');
+      shutdown.driverGone('SIGHUP');
+      expect(host.logs).toContain("shutdown: SIGHUP during stage 1, which it doesn't move on");
+    });
+
+    it('still lets someone asking move shutdown on', async () => {
+      const { shutdown, processes } = await serving(1);
+      shutdown.driverGone('SIGHUP');
+      shutdown.ask('SIGINT');
+      expect(processes.signals).toEqual([{ pid: 4001, signal: 'SIGTERM' }]);
+    });
+  });
+
+  describe('begun', () => {
+    it('is not aborted before shutdown starts', async () => {
+      const { shutdown } = await serving(0);
+      expect(shutdown.begun.aborted).toBe(false);
+    });
+
+    it('is aborted when someone asks', async () => {
+      const { shutdown } = await serving(0);
+      shutdown.ask('SIGINT');
+      expect(shutdown.begun.aborted).toBe(true);
+    });
+
+    it('is aborted when the driver goes', async () => {
+      const { shutdown } = await serving(0);
+      shutdown.driverGone('stdin closed');
+      expect(shutdown.begun.aborted).toBe(true);
     });
   });
 });

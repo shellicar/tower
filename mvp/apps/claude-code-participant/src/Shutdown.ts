@@ -6,11 +6,14 @@ import { IHost } from './Host.js';
 import { ParticipantSettings } from './ParticipantSettings.js';
 import { IProcessSpawner } from './ProcessSpawner.js';
 
-/** The signals that start shutdown or move it on; stdin closing is the fourth trigger. */
-export const SHUTDOWN_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
+/** Someone asking the participant to stop: each one moves shutdown on a stage. */
+export const ASKING_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
+
+/** Whoever drove the participant is gone, as stdin closing also says: shutdown starts, and never moves on for it. */
+export const DRIVER_GONE_SIGNALS = ['SIGHUP'] as const;
 
 /** An error with each of its causes, so the underlying one is never dropped. */
-function describeError(err: unknown): string {
+export function describeError(err: unknown): string {
   const parts: string[] = [];
   let current: unknown = err;
   while (current !== undefined) {
@@ -21,11 +24,18 @@ function describeError(err: unknown): string {
 }
 
 /**
- * How the participant stops, in three stages. Every trigger (SIGINT, SIGTERM,
- * SIGHUP or stdin closing) moves it one stage on, and so does a stage's
- * deadline running out: a trigger that only ever arrives once (a service
- * manager's SIGTERM, a closed terminal's SIGHUP, a dead parent's stdin) must
- * not leave the process waiting forever on a Claude Code that hangs.
+ * How the participant stops, in three stages.
+ *
+ * The triggers split by what they mean. SIGINT and SIGTERM are someone
+ * asking: each one moves shutdown on a stage, so a quick second Ctrl-C still
+ * means "exit now". SIGHUP and stdin closing (or failing) say whoever drove
+ * the participant is gone: they start shutdown if it hasn't started and
+ * never move it on, because one departure often arrives as several of them
+ * at once (a closing terminal gives stdin's end, then SIGHUP 3 ms later).
+ *
+ * A stage's deadline running out also moves it on: a trigger that arrives
+ * only once (a service manager's SIGTERM, a closed terminal) must not leave
+ * the process waiting forever on something that hangs.
  *
  * 1. Graceful: interrupt every turn, close every conversation's input, and
  *    wait for everything to finish. The process then ends by itself.
@@ -41,10 +51,22 @@ export class Shutdown {
 
   private stage = 0;
   private cancelDeadline: (() => void) | undefined;
+  private readonly beginning = new AbortController();
+  /** Aborted once shutdown begins, whatever began it: the leftover scan stops where it is. */
+  public readonly begun: AbortSignal = this.beginning.signal;
 
-  /** One trigger, named by what it was: the first starts shutdown, each later one escalates. */
-  public trigger(cause: string): void {
+  /** Someone asking the participant to stop (SIGINT, SIGTERM): starts shutdown, or moves it on a stage. */
+  public ask(cause: string): void {
     this.escalate(cause);
+  }
+
+  /** Whoever drove the participant is gone (SIGHUP, stdin closing): starts shutdown, and never moves it on. */
+  public driverGone(cause: string): void {
+    if (this.stage === 0) {
+      this.escalate(cause);
+      return;
+    }
+    this.host.log(`shutdown: ${cause} during stage ${this.stage}, which it doesn't move on`);
   }
 
   private escalate(cause: string): void {
@@ -52,6 +74,7 @@ export class Shutdown {
     this.cancelDeadline = undefined;
     this.stage += 1;
     if (this.stage === 1) {
+      this.beginning.abort();
       const { gracefulMs } = this.settings.shutdownPolicy;
       this.host.log(`shutdown stage 1 (${cause}): interrupting every turn and waiting up to ${gracefulMs} ms for everything to finish`);
       this.cancelDeadline = this.host.deadline(gracefulMs, () => this.escalate(`stage 1 took longer than ${gracefulMs} ms`));
@@ -70,7 +93,7 @@ export class Shutdown {
   }
 
   private async graceful(): Promise<void> {
-    // Stdin stays open and read, so closing it still escalates, but it no
+    // Stdin stays open and read, so control lines are still answered, but it no
     // longer keeps the process alive: once everything below is done, the
     // process ends when nothing else runs. That includes work nobody can
     // await, such as the SDK's own clean-up once a Claude Code has exited,

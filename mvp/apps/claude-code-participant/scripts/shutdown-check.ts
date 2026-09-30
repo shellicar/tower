@@ -26,6 +26,7 @@ import { composeConfig } from '../src/composition.js';
 import { participantServices } from '../src/container.js';
 import type { ChildProcessHandle } from '../src/ProcessSpawner.js';
 import { runParticipant } from '../src/run.js';
+import { Shutdown } from '../src/Shutdown.js';
 
 const [cwd, linesFile, prompt, resumeId] = process.argv.slice(2);
 if (cwd === undefined || linesFile === undefined || prompt === undefined) {
@@ -58,9 +59,8 @@ for (const line of readFileSync(linesFile, 'utf8').split('\n')) {
   }
 }
 
-const scanStop = new AbortController();
-void beforeServing(provider, process.platform, (line) => console.error(`participant: ${line}`), scanStop.signal);
-runParticipant(provider, scanStop);
+void beforeServing(provider, process.platform, (line) => console.error(`participant: ${line}`), provider.resolve(Shutdown).begun);
+runParticipant(provider);
 show('participant', { pid: process.pid, pgid: statFields(process.pid)[4] });
 
 function statFields(pid: number): string[] {
