@@ -36,6 +36,11 @@ describe('beforeServing', () => {
     expect(() => run('darwin')).toThrow(StartupError);
   });
 
+  it('says the platform is not supported', () => {
+    const { run } = setUp();
+    expect(() => run('darwin')).toThrow('platform not supported');
+  });
+
   it('refuses to start while another participant holds the config dir', () => {
     const { run, holdElsewhere } = setUp();
     holdElsewhere();
