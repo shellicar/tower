@@ -128,7 +128,7 @@ export class Shutdown {
       return;
     }
     // Publishing what's left, releasing each conversation (`detached`) and
-    // draining NATS go here, once they exist.
+    // draining NATS belong here.
   }
 
   /**
@@ -215,7 +215,7 @@ export class Shutdown {
       }
       await this.timer.sleep(POLL_MS);
     }
-    // Closing NATS without draining goes here, once it exists.
+    // Closing NATS without draining belongs here.
     this.host.log('shutdown stage 2: nothing it started is still running');
     this.host.exit(EXITS.forced.code);
   }
