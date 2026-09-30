@@ -457,10 +457,15 @@ illustrative, not required.
 
 **`attachments`** — optional; files riding with the say. Bytes never travel
 on a subject (the broker's payload limit alone forbids it): the sender puts
-them in the deployment's transit object store first and the say carries
-reference blocks, API-shaped with an `object` source:
+them in the deployment's transit store first and the say carries
+reference blocks, API-shaped with an `object` source. A file becomes part of
+the conversation only when the servicer commits the say as a message: the
+file is stored in the durable store, and the committed message carries a
+reference block of the same shape naming the durable store and that object
+(Transit and durable object stores):
 
 ```json
+// conv.v2.c7547187-3d91-40da-8c69-99fa278d9da3.requests.say
 {
   "ts": "2026-07-07T17:20:04+10:00",
   "from": { "kind": "human" },
@@ -471,31 +476,43 @@ reference blocks, API-shaped with an `object` source:
   ],
   "precondition": { "tip": "m4" }
 }
+// conv.v2.c7547187-3d91-40da-8c69-99fa278d9da3.changes.message: the say, committed
+{
+  "ts": "2026-07-07T17:20:05+10:00",
+  "instanceId": "inst-1a2f",
+  "id": "m5", "queryId": "q7", "turnId": "t3",
+  "role": "user",
+  "from": { "kind": "human" },
+  "content": [
+    { "type": "image",
+      "source": { "type": "object", "id": "c7547187-3d91-40da-8c69-99fa278d9da3/9232cd6f-1267-4094-b722-fe8e2a9aec87", "bucket": "durable", "mediaType": "image/png", "size": 48213 } },
+    { "type": "text", "text": "what does this diagram show?" }
+  ]
+}
 ```
 
-The servicer resolves at request-build: fetch the object at its own edge,
-inline the bytes for the model. The **committed message carries the
-reference block verbatim, never the bytes** — the record stays light and
-wire-legal. The store is transit, not storage: ids are opaque and
-short-lived, and bytes are the servicer's private state once fetched.
-`source.bucket` names the store the object actually landed in — the block
-carries it, not deployment config, so a servicer never has to guess which
-bucket a sender it doesn't control used; a block minted before this field
-existed falls back to the servicer's own configured default.
+The bucket names `attach` and `durable` are examples. The deployment names
+both stores.
 
-Failure means two different things depending on when it happens. An object
-that no longer resolves while **replaying already-committed history** — an
-adopted conversation past the transit window — is expected ageing, and
-renders in the request as a stated placeholder (media type and size, from
-the block itself); the record still holds the block, and the repair is
-re-attaching. Unknown `source.type` values get the same placeholder
-treatment — source kinds are an open set (`base64` beside `object` would be
-add-only). But an attachment that fails to resolve among the **fresh
-blocks riding THIS say** is never ageing — it means the object the sender
-just referenced genuinely isn't there. That is not a placeholder case: the
-say itself rejects, same reply shape as a stale precondition, rather than
-let the model see a placeholder in place of what the sender actually
-attached.
+The servicer resolves a block at request-build: it fetches the object at its
+own edge and inlines the bytes for the model. The committed message carries a
+reference block, never the bytes. `source.bucket` names the store the object
+is in and `source.id` names the object. A block with no `bucket` does not
+resolve.
+
+When a block does not resolve:
+
+- **A block riding the say.** The say is rejected with reason
+  `attachment_unavailable`, the same reply shape as a stale precondition.
+  Nothing commits, and no placeholder stands in for the file.
+- **A committed block whose durable object is missing.** The agent deals
+  with it for its own model. Tower shows a missing file the same way
+  whichever agent is serving the conversation.
+
+A block whose `source.type` the servicer does not know renders in the
+request as a stated placeholder: its media type and size, from the block
+itself. Source kinds are an open set (`base64` beside `object` would be
+add-only).
 
 Two candidates follow from this design and are named, not designed:
 
@@ -567,6 +584,38 @@ sender that wants the answer subscribes to the change stream — one mechanism
 for every reader; the `query.closed` closure says when the answer is
 complete.
 
+## Transit and durable object stores
+
+Bytes never ride a subject. A deployment has two object stores.
+
+**Transit** carries a request's files from the sender to the servicer, and
+its objects expire. The sender stores a say's files in transit before it
+sends the say. The deployment names the transit store and sets how long it
+keeps objects.
+
+**Durable** holds the bytes of what the servicer commits. A say's file
+becomes part of the conversation only when the servicer commits it.
+
+- The durable store is one object store bucket per deployment, with no
+  maximum age. The deployment names it.
+- Every file the servicer commits, whether an image, a document or binary
+  content in a tool result, is stored in the durable store, and the
+  committed message references it with a reference block.
+- Object names are `{conversationId}/{opaqueId}`.
+- Each object's `metadata` holds `messageId`, the id of the message that
+  references it, and `mediaType`, its media type. The store's own digest of
+  the object covers integrity.
+
+**Order.** The servicer stores a file in the durable store before it
+publishes the message that references it. A message never references a file
+that is not stored. What happens to a say whose file can't be stored is up
+to the implementation (Implementation details).
+
+**References.** A reference block's `source.bucket` names the store and
+`source.id` names the object; a durable object's id is its whole name,
+`{conversationId}/{opaqueId}`. The reference is complete on its own, like a
+URI.
+
 ## What consumers may assume
 
 - Traffic for one conversation arrives in publication order per subject, and
@@ -608,6 +657,9 @@ implementation's own, made visible by its commits rather than specified:
   transformation, is between the agent and its model.
 - Revision policy — what gets trimmed, when, by what thresholds. The change
   stream carries effects, never reasons.
+- What happens to a say whose file can't be stored in the durable store.
+  Whatever the implementation does, it never publishes a message pointing at
+  a file that isn't stored (Transit and durable object stores).
 
 ## Message schemas — normative
 
@@ -723,10 +775,12 @@ export const conversationRequest = {
   'say': z.looseObject({
     ts, from: sender, text: z.string(),
     // Reference blocks only — bytes never ride a subject. source.type is an
-    // open set; unresolvable sources render as stated placeholders.
+    // open set. A block that does not resolve rejects the say
+    // (attachment_unavailable). bucket names the store the object is in; a
+    // block with no bucket does not resolve.
     attachments: z.array(z.looseObject({
       type: z.string(),
-      source: z.looseObject({ type: z.string(), id: z.string(), mediaType: z.string().optional(), size: z.number().int().optional() }),
+      source: z.looseObject({ type: z.string(), id: z.string(), bucket: z.string().optional(), mediaType: z.string().optional(), size: z.number().int().optional() }),
     })).optional(),
     precondition: z.looseObject({ tip: z.string().nullable() }),
   }),
@@ -735,7 +789,8 @@ export const conversationRequest = {
 };
 
 // Replies (transport truth, never outcome). Known reasons today:
-// stale, not_found, already_complete, unsupported, busy.
+// stale, not_found, already_complete, unsupported, busy,
+// attachment_unavailable.
 export const requestReply = z.union([
   z.looseObject({ accepted: z.literal(true), id: z.string().optional() }),
   z.looseObject({ rejected: z.literal(true), reason: z.string() }),

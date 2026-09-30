@@ -6,7 +6,8 @@ files in `fixtures/` — **this repo is their source of truth**; implementations
 carry verbatim copies, byte-diffable against these files (conformance.md,
 Artifacts). One line per wire message, the subject riding each line; request
 lines carry their reply inline, since a reply has no subject of its own. `ts`
-values and minted ids (`m…`, `q…`, `t…`, `apr-…`, `toolu_…`, `inst-…`) are
+values and minted ids (`m…`, `q…`, `t…`, `apr-…`, `toolu_…`, `inst-…`, and the
+opaque part of a durable object name, `{conversationId}/{opaqueId}`) are
 placeholders: conformance normalises them before comparison, so a fixture is a
 template by construction, never a byte-exact recording. The templates double as
 the specs' worked examples. First implementation contact validates them — where
@@ -26,6 +27,7 @@ wrong, and the fix lands twice.
 | 7 — the block stream | `fixtures/scenario-7.jsonl` |
 | 8 — the attachment, both endings | `fixtures/scenario-8a.jsonl`, `fixtures/scenario-8b.jsonl` |
 | 9: the query's parent | `fixtures/v2/scenario-9.jsonl` |
+| 10: a say's file, committed durably | `fixtures/v2/scenario-10.jsonl` |
 
 Each template lists the **required** entries: a producer's capture must contain
 them as a subsequence per subject, extras allowed (add-only honoured).
@@ -35,7 +37,7 @@ them as a subsequence per subject, extras allowed (add-only honoured).
 `fixtures/v2/` carries the conversation scenarios in the v2 tree
 (conversation.md, Subjects): leaf subjects spelling each type, and a
 query closure change wherever a query closes — completed in scenarios 1,
-2b, 3 and 9; cancelled in scenarios 2 and 2c. Scenario 5's second query never
+2b, 3, 9 and 10; cancelled in scenarios 2 and 2c. Scenario 5's second query never
 closes (still live when the fixture ends), scenario 7 is one turn's stream
 mid-query, and scenario 8b never opens a query at all (rejected before
 acceptance), so none of the three carries a closure. Scenario 6 is
@@ -48,9 +50,9 @@ Query start and closure). Agent scenario a17's closure carries the old name
 too. A consumer reads that record forever, so these fixtures stay its test
 surface. A producer that follows the spec now publishes `query.closed` and
 never `query`, so its capture cannot contain these fixtures' closure lines.
-Whether these fixtures move to the new names is not yet decided. Scenario 9
-is the only fixture with the new names; it has no v1 form, since v1 has no
-query changes.
+Whether these fixtures move to the new names is not yet decided. Scenarios 9
+and 10 carry the new names. Neither has a v1 form, since v1 has no query
+changes.
 
 Every v2 change line carries the envelope `instanceId` — required of every
 compliant publisher, optional in the schema only for producers that predate
@@ -258,9 +260,9 @@ A `say` carrying a reference block from a prior `POST /attachment` upload
 Two captures, same shape as scenario 6's two endings:
 
 1. **Resolved** (8a) — the block names a bucket the servicer can actually
-   fetch from. The say is accepted and the committed message carries the
-   reference block **verbatim** — never the resolved bytes; resolution is a
-   model-facing render, not a record fact (conversation.md).
+   fetch from. The say is accepted and the committed message carries a
+   reference block, never the resolved bytes; resolution is a model-facing
+   render, not a record fact (conversation.md).
 2. **Unresolvable** (8b) — the block names no bucket (or one the servicer
    can't reach). The say rejects outright, before anything commits — no
    placeholder, no partial accept. `reason` is the canonical token
@@ -271,15 +273,19 @@ Two captures, same shape as scenario 6's two endings:
 - Exercises: an `attachments` array riding a `say`; the reference block
   ordering (attachment blocks lead, the text block follows — same order the
   API sees); a say-level reject distinct from `stale`/`empty`.
-- Asserts: a resolvable attachment's reference block is never rewritten by
-  acceptance — the record holds exactly what the sender sent; an
-  unresolvable one never reaches acceptance at all, so no dangling pending
-  say and no placeholder text stands in for what the sender actually
-  attached.
+- Asserts: a resolvable file is accepted and committed as a reference block,
+  never as bytes; an unresolvable one never reaches acceptance at all, so no
+  dangling pending say and no placeholder text stands in for what the sender
+  actually attached.
 
 ### 8a — resolved
 
 Fixture: `fixtures/scenario-8a.jsonl`.
+
+8a's committed message carries the say's block unchanged, naming the
+transit store. A servicer commits a block naming the durable store
+(conversation.md, Transit and durable object stores), so a producer's
+capture matches scenario 10's message line, not 8a's.
 
 ### 8b — unresolvable
 
@@ -287,7 +293,7 @@ Fixture: `fixtures/scenario-8b.jsonl`.
 
 This is a request-driven fixture (The two branches) with a twist: there is no
 "unsupported" branch here, because every servicer that accepts `attachments`
-at all must validate them the same way — accept-with-verbatim-block or
+at all must validate them the same way — accept-with-a-reference-block or
 reject-outright are the only two compliant outcomes for a resolvable-or-not
 block. A servicer that has never implemented attachment support simply never
 exercises this fixture (declared capability, per the two-branches rule).
@@ -314,6 +320,28 @@ tree from the messages and the `tip_moved`. This fixture does not check
 placement by parent. A start whose parent is not the current tip, with no
 `tip_moved` before it, is an open question (conversation.md, Open
 questions), and no fixture takes a side on it.
+
+## 10. A say's file, committed durably
+
+A `say` carrying scenario 8a's attachment, accepted and committed with its
+file in the durable store (conversation.md, Transit and durable object
+stores). The say's block names the transit store; the committed message's
+block names the durable store and the object that holds the file. The query
+opens with `query.started`, its `parent` the say's premise `m4`, and closes
+with `query.closed` after the reply. The conversation id and the object's
+opaque id are random GUIDs. v2 only.
+
+- Exercises: a committed block that differs from the say's block in `bucket`
+  and `id` only: same `type`, same `mediaType`, same `size`.
+- Asserts: the committed message never carries the transit reference; its
+  block's `id` is the object's whole name, `{conversationId}/{opaqueId}`,
+  whose `conversationId` is the conversation the message belongs to.
+
+Fixture: `fixtures/v2/scenario-10.jsonl`.
+
+The bucket names `attach` and `durable` are examples; the deployment names
+both stores. The object's metadata (`messageId`, `mediaType`) is in the
+store, not on the wire, so no fixture carries it.
 
 ## Agent scenarios
 

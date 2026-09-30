@@ -46,7 +46,8 @@ Three roles:
 - **Producers**: drive a scripted session, capture what got published per
   subject, normalise the volatile fields (`ts`, and every minted id —
   `queryId`, `turnId`, `messageId`, `approvalId`, `toolu_…` tool use ids,
-  `inst-…` instance ids), then every message
+  `inst-…` instance ids, and the opaque part of a durable object name,
+  `{conversationId}/{opaqueId}`), then every message
   validates against its schema and each subject's capture contains the
   fixture's required entries as a subsequence, extras allowed. Extras allowed
   is add-only honoured in the test: new optional events pass; a misshaped old
