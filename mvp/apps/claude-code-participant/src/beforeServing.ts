@@ -20,13 +20,13 @@ export function beforeServing(provider: IServiceProvider, platform: NodeJS.Platf
     throw new StartupError('platform not supported');
   }
   provider.resolve(ParticipantLock).acquire();
-  return provider
-    .resolve(Leftovers)
-    .stop(log, shutdown)
-    .then((stopped) => {
-      if (!stopped.interrupted) {
-        provider.resolve(ServingGate).open();
-      }
-      return stopped;
-    });
+  return scanThenServe(provider, log, shutdown);
+}
+
+async function scanThenServe(provider: IServiceProvider, log: (line: string) => void, shutdown: AbortSignal): Promise<LeftoverStop> {
+  const stopped = await provider.resolve(Leftovers).stop(log, shutdown);
+  if (!stopped.interrupted) {
+    provider.resolve(ServingGate).open();
+  }
+  return stopped;
 }
