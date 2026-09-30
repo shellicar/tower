@@ -17,7 +17,7 @@ import { StartupError } from './startup.js';
  */
 export function beforeServing(provider: IServiceProvider, platform: NodeJS.Platform, log: (line: string) => void, shutdown: AbortSignal): Promise<LeftoverStop> {
   if (platform !== 'linux') {
-    throw new StartupError(`the leftover scan reads /proc, which ${platform} doesn't have`);
+    throw new StartupError(`the participant runs only on Linux, and this platform is ${platform}`);
   }
   provider.resolve(ParticipantLock).acquire();
   return provider
