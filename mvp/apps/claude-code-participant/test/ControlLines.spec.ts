@@ -209,7 +209,6 @@ describe('control lines', () => {
           context: 'ctx',
           claudeSettings: { advisorModel: 'm' },
           missing: [],
-          agent: 'alpha',
           configDir: '/agents/alpha/config',
           privateHome: '/tmp/tower-participant-home-abc123',
           setpriv: '/usr/bin/setpriv',

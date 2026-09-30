@@ -89,10 +89,8 @@ export class StartupError extends Error {
 /** What the process reads from its environment, once, at start. */
 export type Startup = {
   natsUrl: string;
-  /** The agent's own Claude Code config dir, reused across runs. */
+  /** The agent's own Claude Code config dir, reused across runs: the agent's identity, which no two participants may share. */
   configDir: string;
-  /** The agent's name, the tag each Claude Code carries. */
-  agent: string;
   /** The real home: the login lives under it, and commands run with it. */
   realHome: string;
   /** The environment Claude Code inherits, parent-session and Claude Code configuration variables removed. */
@@ -125,7 +123,6 @@ export function readStartup(env: NodeJS.ProcessEnv): Startup {
   // None of these can arrive later (they aren't control lines), so a process
   // started without one could never serve: it stops at start instead.
   const configDir = absolute(env, 'PARTICIPANT_CONFIG_DIR');
-  const agent = required(env, 'PARTICIPANT_AGENT');
   const realHome = absolute(env, 'HOME');
   const inheritedEnv: Record<string, string> = {};
   for (const [name, value] of Object.entries(env)) {
@@ -133,5 +130,5 @@ export function readStartup(env: NodeJS.ProcessEnv): Startup {
       inheritedEnv[name] = value;
     }
   }
-  return { natsUrl, configDir, agent, realHome, inheritedEnv };
+  return { natsUrl, configDir, realHome, inheritedEnv };
 }

@@ -5,14 +5,16 @@ import { ControlLines } from '../src/ControlLines.js';
 import { participantServices } from '../src/container.js';
 import { ParticipantConfig } from '../src/ParticipantConfig.js';
 import { IProcessSpawner, type ProcessOptions } from '../src/ProcessSpawner.js';
+import { IProcessTable, type ProcessIdentity, type TaggedProcess } from '../src/ProcessTable.js';
+import { ServingGate } from '../src/ServingGate.js';
 import { IPublisher } from '../src/SessionStore.js';
+import { ITimer } from '../src/Timer.js';
 
-export function testConfig(overrides: { setpriv?: string | null } = {}): ParticipantConfig {
+export function testConfig(overrides: { setpriv?: string | null; configDir?: string } = {}): ParticipantConfig {
   return new ParticipantConfig(
     {
       natsUrl: 'nats://127.0.0.1:31416',
-      configDir: '/agents/alpha/config',
-      agent: 'alpha',
+      configDir: overrides.configDir ?? '/agents/alpha/config',
       realHome: '/home/someone',
       inheritedEnv: { PATH: '/usr/bin', LANG: 'C.UTF-8' },
     },
@@ -57,17 +59,77 @@ class FakePublisher implements IPublisher {
   }
 }
 
-/** The participant's services with every boundary faked. */
-export function testServices(config: ParticipantConfig = testConfig()) {
+type FakeProcess = TaggedProcess & {
+  /** The one environment entry the fake matches the tag against. */
+  tag: string;
+  /** The signals that end it; any other it ignores. */
+  endsOn: NodeJS.Signals[];
+};
+
+/** A process list the test writes, which records each signal and ends a process on the ones it names. */
+class FakeProcessTable implements IProcessTable {
+  public processes: FakeProcess[] = [];
+  public readonly signals: { pid: number; signal: NodeJS.Signals }[] = [];
+
+  public add(pid: number, tag: string, endsOn: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGKILL']): void {
+    this.processes.push({ pid, startTime: `${pid}0`, commandLine: `cmd-${pid}`, tag, endsOn });
+  }
+
+  public tagged(entry: string): TaggedProcess[] {
+    return this.processes.filter((p) => p.tag === entry).map(({ pid, startTime, commandLine }) => ({ pid, startTime, commandLine }));
+  }
+
+  public signal(process: ProcessIdentity, signal: NodeJS.Signals): boolean {
+    const target = this.processes.find((p) => p.pid === process.pid && p.startTime === process.startTime);
+    if (target === undefined) {
+      return false;
+    }
+    this.signals.push({ pid: process.pid, signal });
+    if (target.endsOn.includes(signal)) {
+      this.processes = this.processes.filter((p) => p !== target);
+    }
+    return true;
+  }
+}
+
+/** Time that passes only when something sleeps, all at once. */
+class FakeTimer implements ITimer {
+  public time = 0;
+  /** Runs after each sleep, with the time it ended at: how a test makes something happen partway through a wait. */
+  public onSleep: ((now: number) => void) | undefined;
+
+  public now(): number {
+    return this.time;
+  }
+
+  public sleep(ms: number): Promise<void> {
+    this.time += ms;
+    this.onSleep?.(this.time);
+    return Promise.resolve();
+  }
+}
+
+/**
+ * The participant's services with every boundary faked. The serving gate
+ * starts open, as it is once the leftover scan is done, unless `gateShut`.
+ */
+export function testServices(config: ParticipantConfig = testConfig(), options: { gateShut?: boolean } = {}) {
   const services = participantServices(config);
   services.register(FakeClaudeCode).as(IClaudeCode);
   services.register(FakeProcessSpawner).as(IProcessSpawner);
   services.register(FakePublisher).as(IPublisher);
+  services.register(FakeProcessTable).as(IProcessTable);
+  services.register(FakeTimer).as(ITimer);
   const provider = services.buildProvider();
+  if (options.gateShut !== true) {
+    provider.resolve(ServingGate).open();
+  }
   return {
     provider,
     claudeCode: provider.resolve(IClaudeCode) as FakeClaudeCode,
     processes: provider.resolve(IProcessSpawner) as FakeProcessSpawner,
+    processTable: provider.resolve(IProcessTable) as FakeProcessTable,
+    timer: provider.resolve(ITimer) as FakeTimer,
     publisher: provider.resolve(IPublisher) as FakePublisher,
     /** Sends control lines, as stdin would, and returns their replies. */
     control: (...lines: unknown[]) => lines.map((line) => provider.resolve(ControlLines).handle(typeof line === 'string' ? line : JSON.stringify(line))),

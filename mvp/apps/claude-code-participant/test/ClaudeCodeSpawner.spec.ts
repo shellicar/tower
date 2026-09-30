@@ -1,6 +1,6 @@
 import type { SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import { describe, expect, it } from 'vitest';
-import { AGENT_TAG, ClaudeCodeSpawner, REAL_HOME_VARIABLE } from '../src/ClaudeCodeSpawner.js';
+import { ClaudeCodeSpawner, PARTICIPANT_TAG, REAL_HOME_VARIABLE } from '../src/ClaudeCodeSpawner.js';
 import { testConfig, testServices } from './support.js';
 
 const SDK_SPAWN: SpawnOptions = {
@@ -53,8 +53,8 @@ describe('ClaudeCodeSpawner', () => {
   });
 
   describe('environment', () => {
-    it('tags Claude Code with the agent', () => {
-      expect(spawned().options.env[AGENT_TAG]).toBe('alpha');
+    it('tags Claude Code with the config dir', () => {
+      expect(spawned().options.env[PARTICIPANT_TAG]).toBe('/agents/alpha/config');
     });
 
     it('gives Claude Code the private home', () => {

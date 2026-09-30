@@ -161,7 +161,6 @@ export class ControlLines {
         context: this.settings.context ?? null,
         claudeSettings: this.settings.claudeSettings ?? null,
         missing: readiness.ready ? [] : readiness.missing,
-        agent: this.config.agent,
         configDir: this.config.configDir,
         privateHome: this.config.privateHome,
         setpriv: this.config.setpriv,

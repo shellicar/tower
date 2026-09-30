@@ -3,10 +3,15 @@ import { IClaudeCode, SdkClaudeCode } from './ClaudeCode.js';
 import { ClaudeCodeSpawner } from './ClaudeCodeSpawner.js';
 import { ControlLines } from './ControlLines.js';
 import { ConversationLauncher } from './ConversationLauncher.js';
+import { Leftovers } from './Leftovers.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
+import { ParticipantLock } from './ParticipantLock.js';
 import { ParticipantSettings } from './ParticipantSettings.js';
 import { IProcessSpawner, NodeProcessSpawner } from './ProcessSpawner.js';
+import { IProcessTable, LinuxProcessTable } from './ProcessTable.js';
+import { ServingGate } from './ServingGate.js';
 import { IPublisher, NullPublisher, PublishingSessionStore } from './SessionStore.js';
+import { ITimer, RealTimer } from './Timer.js';
 
 /**
  * Every service the participant is made of, one instance each. A later
@@ -27,5 +32,13 @@ export function participantServices(config: ParticipantConfig): IServiceCollecti
   services.register(ClaudeCodeSpawner).asSelf();
   services.register(SdkClaudeCode).as(IClaudeCode);
   services.register(ConversationLauncher).asSelf();
+  services
+    .register(LinuxProcessTable)
+    .using(() => new LinuxProcessTable('/proc', (pid, signal) => process.kill(pid, signal), process.pid))
+    .as(IProcessTable);
+  services.register(RealTimer).as(ITimer);
+  services.register(ParticipantLock).asSelf();
+  services.register(Leftovers).asSelf();
+  services.register(ServingGate).asSelf();
   return services;
 }

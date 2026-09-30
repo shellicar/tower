@@ -178,8 +178,8 @@ Not at all:
   attempt's code (Evidence) lists what a builder needs to know from them and
   what they decided without Stephen.
 - **Everything but the publisher first:** the process and its configuration,
-  launching Claude Code, the requests on NATS, shutdown, and leftovers and
-  recovery. The publisher (what turns Claude Code's writes into `changes`)
+  launching Claude Code, the requests on NATS, shutdown, and leftovers
+  (recovery deferred). The publisher (what turns Claude Code's writes into `changes`)
   follows.
 - **Where it lives:** `mvp/apps/claude-code-participant`. Inside `mvp/`,
   projects group by language: Rust in `crates/`, TypeScript apps in `apps/`
@@ -458,15 +458,34 @@ because otherwise we'd be using a resolved value" (26 Sep).
   then its not, no point logging it it will be logged every single time".
   Linux only; the SDK's own exit handler already covers normal exits and
   JavaScript crashes.
-- **Recovery on every serve, blind** (27 Sep, proof 17): before serving, the participant adds whatever Claude Code's record holds that the store lacks, whatever ended the last run: "they need to prove its resilient". Proven after every press, SIGKILL, crash, a lone Claude Code SIGKILL, abort and a mid-turn reboot. Accepted gap: a reboot after orphans finish loses a resumed conversation's last lines from the SDK's temp copy: "this is likely the edge case im not fussed about".
-- **Leftover Claude Codes before serving** (28 Sep, proofs 21 and 25):
-  each Claude Code is tagged at spawn (`TOWER_AGENT=<agent>`); before
-  serving, the participant finds leftovers of earlier runs by the tag,
-  interrupts them, waits for the Claude Codes (not their commands) to exit,
-  recovers what they wrote, then serves. One that won't exit is forced
-  (SIGTERM, then SIGKILL), following the same escalation as the three
-  Ctrl-C levels. Stephen: "my decision is the strategy, the 3 levels of
-  exit, not what exactly happens in each ... it should be *obvious*".
+- **Recovery on every serve, blind** (27 Sep, proof 17): before serving, the participant adds whatever Claude Code's record holds that the store lacks, whatever ended the last run: "they need to prove its resilient". Proven after every press, SIGKILL, crash, a lone Claude Code SIGKILL, abort and a mid-turn reboot. Accepted gap: a reboot after orphans finish loses a resumed conversation's last lines from the SDK's temp copy: "this is likely the edge case im not fussed about". **Deferred** (29 Sep): "we dont need that now / if the participant crashes, thats the time to build it".
+- **The config dir is the participant's identity** (29 Sep). The agent name
+  is gone: "participant agent was a proxy for what we already had". Each
+  Claude Code is spawned with the environment variable
+  `TOWER_PARTICIPANT=<config dir>`, which the commands it starts inherit.
+- **One participant per config dir** (29 Sep): an exclusive sqlite
+  transaction (`node:sqlite`) on a file in the config dir, held for the
+  process's life; the kernel releases it however the holder dies. A second
+  participant on the same dir refuses to start. "since we need sqlite
+  anyway, just use it", chosen over a pid file to close its race: "id
+  rather have this fixed".
+- **The config dir is owner-only** (29 Sep), as tmux and claude-cli's
+  scratch dir do it: a missing one is created `0o700` ("if it doesnt exist,
+  why wouldnt it create it?"); one that isn't a directory, is a symlink, or
+  isn't the user's is refused; the user's own with any group or other
+  access is tightened to `0o700`. No ACL check: "ACLs arent necessary".
+- **Leftovers stopped once, at startup** (29 Sep, proofs 21 and 25), after
+  the lock is taken. Every process carrying this config dir's environment
+  variable, Claude Codes and their commands alike, other than the
+  participant itself, its ancestors and its descendants, gets SIGINT, 5 s,
+  SIGTERM, 5 s, SIGKILL ("this is timing, ie there's no guarantee of
+  anything"). Whatever is still there is reported and the participant
+  serves anyway: "sigkill and serve". Earlier (28 Sep) the strategy was
+  "the 3 levels of exit, not what exactly happens in each".
+- **Stdin is answered during the scan** (29 Sep): control lines are read
+  and answered at once; only launching a Claude Code waits for the scan.
+  "my launcher will require stdin is immediately writable *and* responded
+  to".
 - **SIGINT, SIGTERM, SIGHUP and stdin closing all start it** (26 Sep). Bridge
   also exits when stdin closes.
 - **Each Claude Code runs in its own process group** (29 Sep), so every
@@ -478,11 +497,13 @@ because otherwise we'd be using a resolved value" (26 Sep).
   `detached: true` (its own group and session on Linux and macOS) with
   `windowsHide: true` (its own hidden console on Windows); the shutdown build
   tests it by signalling the process group directly.
-- **The leftover scan is Linux only in v0,** behind an abstract class, so the
+- **The participant runs on Linux only in v0.** The leftover scan reads each
+  process's environment from `/proc`, behind an abstract class, so the
   macOS one can be written on a Mac: "lets get it working, i can then
-  actually imeplement the macos part *on* my macbook". It reads each
-  process's environment from `/proc`. On macOS in v0, nothing stops a leftover
-  from forking a conversation that is served again while it still writes.
+  actually imeplement the macos part *on* my macbook". On any other
+  platform the participant refuses to start with "platform not supported"
+  (29–30 Sep): "it'll prevent me from accidentally starting it on mac
+  before i fix it"; "just say platform not supported or something".
 - **Running as a service comes later:** "telling it if it's a service or know
   so it knows how to *interpret* SIGHUP would be something when we look at
   service-fying it" (26 Sep).

@@ -3,11 +3,14 @@
 // started with. Launching has no trigger of its own until the `service`
 // request exists, so this script is that trigger.
 //
-//   printf '%s\n' '<control line>' ... | NATS_URL=... PARTICIPANT_CONFIG_DIR=... PARTICIPANT_AGENT=... \
+//   printf '%s\n' '<control line>' ... | NATS_URL=... PARTICIPANT_CONFIG_DIR=... \
 //     pnpm exec tsx scripts/live-check.ts <cwd> <prompt>
 //
-// It reads control lines from stdin (answering each on stdout) until stdin
-// ends, then launches. Linux only: the evidence comes from /proc.
+// Like the participant, it takes the config dir's lock and starts stopping
+// an earlier run's leftovers (reported on stderr), reading control lines from
+// stdin (answering each on stdout) meanwhile. Once stdin ends it launches,
+// which waits for the leftovers to be stopped. Linux only: the evidence comes
+// from /proc.
 
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -15,6 +18,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionKey, SessionStoreEntry, SpawnedProcess } from '@anthropic-ai/claude-agent-sdk';
+import { beforeServing } from '../src/beforeServing.js';
 import { ControlLines, runControlLines } from '../src/ControlLines.js';
 import { ConversationLauncher } from '../src/ConversationLauncher.js';
 import { composeConfig } from '../src/composition.js';
@@ -47,16 +51,17 @@ class CountingPublisher implements IPublisher {
   }
 }
 
-const config = composeConfig(process.env, tmpdir());
+const config = composeConfig(process.env, tmpdir(), process.getuid?.());
 const services = participantServices(config);
 services.register(RecordingSpawner).as(IProcessSpawner);
 services.register(CountingPublisher).as(IPublisher);
 const provider = services.buildProvider();
 
+void beforeServing(provider, process.platform, (line) => console.error(`participant: ${line}`), new AbortController().signal);
 await runControlLines(process.stdin, process.stdout, provider.resolve(ControlLines));
 
 const id = randomUUID();
-const conversation = provider.resolve(ConversationLauncher).launch({ id, cwd, additionalDirectories: [], resume: false });
+const conversation = await provider.resolve(ConversationLauncher).launch({ id, cwd, additionalDirectories: [], resume: false });
 conversation.send(prompt);
 
 function statFields(pid: number): string[] {
@@ -79,7 +84,7 @@ function evidence(pid: number): Record<string, unknown> {
     ownSid,
     ownGroup: pgid === String(pid),
     HOME: value('HOME'),
-    TOWER_AGENT: value('TOWER_AGENT'),
+    TOWER_PARTICIPANT: value('TOWER_PARTICIPANT'),
     CLAUDE_CONFIG_DIR: value('CLAUDE_CONFIG_DIR'),
     CLAUDE_SECURESTORAGE_CONFIG_DIR: value('CLAUDE_SECURESTORAGE_CONFIG_DIR'),
     CLAUDE_CODE_SHELL_PREFIX: value('CLAUDE_CODE_SHELL_PREFIX'),
