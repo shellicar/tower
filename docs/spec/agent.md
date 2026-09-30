@@ -25,7 +25,7 @@ durable names for places; the processes standing in them are disposable.
   pair `(world, instanceId)` — in payloads, never in subjects: address a
   process and you inherit its lifecycle (core.md, "Work is addressed to
   the work, never the worker").
-  `instanceId` is minted fresh per process and unique within its world; the
+  `instanceId` is minted fresh per process, and again after `offline`, and unique within its world; the
   pair is then unique everywhere, since worlds are. The format is free — a
   pid qualifies, a uuid is typical — the spec mandates uniqueness within
   the world, nothing else. Never reused or inherited across a restart: a
@@ -73,7 +73,7 @@ map: who serves what, and whether they are alive.
 | Event | Fields | Notes |
 |---|---|---|
 | `ready` | `instanceId`, `host` | the instance can receive requests, and it pulses. It is subscribed to all its requests: `agent.v1.{world}.requests.>`, `conv.v2.{id}.requests.>` for every conversation it holds, and `approval.v1.{approvalId}.requests` for each of its outstanding approvals. Published each time the instance becomes able to receive requests, boot included |
-| `unavailable` | `instanceId` | the instance is no longer servicing. It should unsubscribe from `agent.v1.{world}.requests.>` first, then publish `unavailable`; a `service` already on its way can still reach it after it unsubscribes. Once it has published `unavailable`, it rejects any `service` that reaches it, and any `say` on a conversation it still holds, with reason `unavailable`. It may stay subscribed to `conv.v2.{id}.requests.>` for each conversation it holds, and to `approval.v1.{approvalId}.requests` for that conversation's outstanding approvals, until it detaches that conversation, and answers their other requests while it does. It keeps pulsing; its next state is `offline` or `ready` |
+| `unavailable` | `instanceId` | the instance is no longer servicing. It unsubscribes from `agent.v1.{world}.requests.>`; the recommended order is to unsubscribe first, then publish `unavailable`. Once it has published `unavailable`, it rejects any `service` that reaches it, and any `say` on a conversation it still holds, with reason `unavailable`. It may stay subscribed to `conv.v2.{id}.requests.>` for each conversation it holds, and to `approval.v1.{approvalId}.requests` for that conversation's outstanding approvals, until it detaches that conversation, and answers their other requests while it does. It keeps pulsing; its next state is `offline` or `ready` |
 | `offline` | `instanceId` | the instance stops pulsing and is inert. `offline` is final for its `instanceId`: a process that becomes able to receive requests again publishes `ready` as a new instance, under a new `instanceId` |
 | `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement core.md forbids. `intervalS` is at most 600 (ten minutes): a longer promise buys three times its own length of presumed life, so stranded detection and takeover stop working exactly where they are needed. The bound is validity, not a cap — a larger value makes the event invalid whole, and nothing is clamped to 600 |
 
@@ -154,13 +154,13 @@ A compliant instance watches the attachment leaf for every conversation it serve
 
 That `detached` folds as nothing: the supersession already ended its claim. A `detached` only changes the fold when its identity — the `(world, instanceId)` pair, or bare `instanceId` if either side omits `world` — still matches the standing attachment's. An instance detaching after it's already superseded is stating a fact about its own past claim, not retracting the current one.
 
-It publishes `detached` anyway, as the observable act of compliance — without it, a crash and a violation would be impossible to tell apart. An instance also publishes `detached` per conversation on clean exit (Ctrl-C) and on drain, same as today.
+It publishes `detached` anyway, as the observable act of compliance — without it, a crash and a violation would be impossible to tell apart. On clean exit (Ctrl-C) and on drain, an instance publishes `unavailable`, a `detached` per conversation, then `offline`.
 
 **Crash vs violation is derivable, never declared.** No `detached`, and dead pulses from the instance that held the claim: read as a crash. It went silent and never got the chance to release.
 
 No `detached`, and *live* pulses from an instance that's already been superseded: read as a violation. It saw the displacement — or should have — and kept going anyway.
 
-Neither is a state the wire declares. Both are what a consumer reads off facts it already folds: `attached`, `detached`, `pulse`, `offline`.
+Neither is a state the wire declares. Both are what a consumer reads off facts it already folds: `attached`, `detached`, `pulse`.
 
 A conversation's servicing state derives from these facts exactly as before, now read off the conversation's own tree rather than the world's:
 
