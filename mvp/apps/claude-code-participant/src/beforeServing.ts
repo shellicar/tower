@@ -17,7 +17,7 @@ import { StartupError } from './startup.js';
  */
 export function beforeServing(provider: IServiceProvider, platform: NodeJS.Platform, log: (line: string) => void, shutdown: AbortSignal): Promise<LeftoverStop> {
   if (platform !== 'linux') {
-    throw new StartupError('platform not supported');
+    throw new StartupError('unsupportedPlatform', 'platform not supported');
   }
   provider.resolve(ParticipantLock).acquire();
   return scanThenServe(provider, log, shutdown);

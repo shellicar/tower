@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { LOCK_FILE, ParticipantLock } from '../src/ParticipantLock.js';
 import { StartupError } from '../src/startup.js';
-import { testConfig, testServices } from './support.js';
+import { startupExitOf, testConfig, testServices } from './support.js';
 
 const scratch = mkdtempSync(join(tmpdir(), 'participant-lock-test-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -66,6 +66,12 @@ describe('ParticipantLock', () => {
     const configDir = freshConfigDir();
     lockOn(configDir)();
     expect(lockOn(configDir)).toThrow(`another participant is running on ${configDir}`);
+  });
+
+  it('exits as the config dir being locked', () => {
+    const configDir = freshConfigDir();
+    lockOn(configDir)();
+    expect(startupExitOf(lockOn(configDir))).toBe('configDirLocked');
   });
 
   it('refuses while another process holds it', async () => {

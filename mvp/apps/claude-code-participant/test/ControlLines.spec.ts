@@ -184,6 +184,55 @@ describe('control lines', () => {
     });
   });
 
+  describe('shutdownPolicy', () => {
+    it('starts with 30 s for stage 1 and 10 s for stage 2', () => {
+      const [reply] = testServices().control({ settings: {} });
+      expect((reply as ReadBack).settings.shutdownPolicy).toEqual({ gracefulMs: 30000, teardownMs: 10000 });
+    });
+
+    it('answers with the deadlines it set', () => {
+      expect(testServices().control({ shutdownPolicy: { gracefulMs: 5000, teardownMs: 2000 } })).toEqual([{ shutdownPolicy: { gracefulMs: 5000, teardownMs: 2000 } }]);
+    });
+
+    it('reads back the deadlines it set', () => {
+      const [, reply] = testServices().control({ shutdownPolicy: { gracefulMs: 5000, teardownMs: 2000 } }, { settings: {} });
+      expect((reply as ReadBack).settings.shutdownPolicy).toEqual({ gracefulMs: 5000, teardownMs: 2000 });
+    });
+
+    it('requires both deadlines', () => {
+      expect(testServices().control({ shutdownPolicy: { gracefulMs: 5000 } })).toEqual([{ error: 'invalid shutdownPolicy: teardownMs: Invalid input: expected number, received undefined' }]);
+    });
+
+    it('keeps the deadlines it had when a line is rejected', () => {
+      const [, reply] = testServices().control({ shutdownPolicy: { gracefulMs: 5000 } }, { settings: {} });
+      expect((reply as ReadBack).settings.shutdownPolicy).toEqual({ gracefulMs: 30000, teardownMs: 10000 });
+    });
+
+    it('rejects a key it does not know', () => {
+      expect(testServices().control({ shutdownPolicy: { gracefulMs: 5000, teardownMs: 2000, killMs: 1 } })).toEqual([{ error: 'invalid shutdownPolicy: Unrecognized key: "killMs"' }]);
+    });
+
+    it('rejects a deadline below 1 ms', () => {
+      expect(testServices().control({ shutdownPolicy: { gracefulMs: 0, teardownMs: 2000 } })).toEqual([{ error: 'invalid shutdownPolicy: gracefulMs: Too small: expected number to be >=1' }]);
+    });
+
+    it('rejects a deadline that is not a whole number of milliseconds', () => {
+      expect(testServices().control({ shutdownPolicy: { gracefulMs: 5000, teardownMs: 1.5 } })).toEqual([{ error: 'invalid shutdownPolicy: teardownMs: Invalid input: expected int, received number' }]);
+    });
+
+    it('accepts a deadline of ten minutes', () => {
+      expect(testServices().control({ shutdownPolicy: { gracefulMs: 600000, teardownMs: 2000 } })).toEqual([{ shutdownPolicy: { gracefulMs: 600000, teardownMs: 2000 } }]);
+    });
+
+    it('rejects a deadline longer than ten minutes', () => {
+      expect(testServices().control({ shutdownPolicy: { gracefulMs: 2000, teardownMs: 600001 } })).toEqual([{ error: 'invalid shutdownPolicy: teardownMs: Too big: expected number to be <=600000' }]);
+    });
+
+    it('rejects null', () => {
+      expect(testServices().control({ shutdownPolicy: null })).toEqual([{ error: 'invalid shutdownPolicy: Invalid input: expected object, received null' }]);
+    });
+  });
+
   describe('settings', () => {
     it('rejects a key in its body', () => {
       expect(testServices().control({ settings: { include: ['system'] } })).toEqual([{ error: 'invalid settings: Unrecognized key: "include"' }]);
@@ -208,6 +257,7 @@ describe('control lines', () => {
           permissionMode: 'auto',
           context: 'ctx',
           claudeSettings: { advisorModel: 'm' },
+          shutdownPolicy: { gracefulMs: 30000, teardownMs: 10000 },
           missing: [],
           configDir: '/agents/alpha/config',
           privateHome: '/tmp/tower-participant-home-abc123',

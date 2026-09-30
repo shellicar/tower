@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readStartup, StartupError } from '../src/startup.js';
+import { startupExitOf } from './support.js';
 
 const complete = {
   NATS_URL: 'nats://127.0.0.1:31416',
@@ -25,6 +26,15 @@ describe('readStartup', () => {
   });
 
   describe('PARTICIPANT_CONFIG_DIR', () => {
+    it('exits as a bad environment value when it is missing', () => {
+      const { PARTICIPANT_CONFIG_DIR: _, ...env } = complete;
+      expect(startupExitOf(() => readStartup(env))).toBe('badEnvironment');
+    });
+
+    it('exits as a bad environment value when it is relative', () => {
+      expect(startupExitOf(() => readStartup({ ...complete, PARTICIPANT_CONFIG_DIR: 'agents/alpha' }))).toBe('badEnvironment');
+    });
+
     it('refuses to start without it', () => {
       const { PARTICIPANT_CONFIG_DIR: _, ...env } = complete;
       expect(() => readStartup(env)).toThrow('PARTICIPANT_CONFIG_DIR is required');

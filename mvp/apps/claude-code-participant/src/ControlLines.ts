@@ -41,6 +41,12 @@ const claudeSettingsLine = z
   })
   .nullable();
 
+const LONGEST_DEADLINE_MS = 600_000;
+const deadline = z.number().int().min(1).max(LONGEST_DEADLINE_MS);
+
+/** Configures how shutdown behaves, never asks for one: both deadlines are required and replaced together. */
+const shutdownPolicyLine = z.strictObject({ gracefulMs: deadline, teardownMs: deadline });
+
 const settingsLine = z.strictObject({});
 
 function explain(error: z.ZodError): string {
@@ -66,6 +72,7 @@ export class ControlLines {
     permissionMode: (value) => this.permissionMode(value),
     context: (value) => this.context(value),
     claudeSettings: (value) => this.claudeSettings(value),
+    shutdownPolicy: (value) => this.shutdownPolicy(value),
     settings: (value) => this.readBack(value),
   };
 
@@ -147,6 +154,16 @@ export class ControlLines {
     return { claudeSettings: value === null ? 'cleared' : 'set' };
   }
 
+  /** Reaches the next stage to start: a stage already under way keeps the deadline it started with. */
+  private shutdownPolicy(value: unknown): Reply {
+    const line = shutdownPolicyLine.safeParse(value);
+    if (!line.success) {
+      return { error: `invalid shutdownPolicy: ${explain(line.error)}` };
+    }
+    this.settings.shutdownPolicy = { ...line.data };
+    return { shutdownPolicy: this.settings.shutdownPolicy };
+  }
+
   private readBack(value: unknown): Reply {
     const line = settingsLine.safeParse(value);
     if (!line.success) {
@@ -160,6 +177,7 @@ export class ControlLines {
         permissionMode: this.settings.permissionMode ?? null,
         context: this.settings.context ?? null,
         claudeSettings: this.settings.claudeSettings ?? null,
+        shutdownPolicy: this.settings.shutdownPolicy,
         missing: readiness.ready ? [] : readiness.missing,
         configDir: this.config.configDir,
         privateHome: this.config.privateHome,

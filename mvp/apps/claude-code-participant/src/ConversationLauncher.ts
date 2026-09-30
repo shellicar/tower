@@ -1,8 +1,10 @@
 import type { Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { dependsOn } from '@shellicar/core-di';
 import { IClaudeCode } from './ClaudeCode.js';
+import { ClaudeCodeProcess } from './ClaudeCodeProcess.js';
 import { ClaudeCodeSpawner } from './ClaudeCodeSpawner.js';
 import { Conversation } from './Conversation.js';
+import { Conversations } from './Conversations.js';
 import { claudeCodeSettings } from './claudeCodeSettings.js';
 import { MessageChannel } from './MessageChannel.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
@@ -51,6 +53,7 @@ export class ConversationLauncher {
   @dependsOn(ClaudeCodeSpawner) private readonly spawner!: ClaudeCodeSpawner;
   @dependsOn(PublishingSessionStore) private readonly sessionStore!: PublishingSessionStore;
   @dependsOn(ServingGate) private readonly gate!: ServingGate;
+  @dependsOn(Conversations) private readonly conversations!: Conversations;
 
   /**
    * Starts Claude Code once the serving gate opens, with the values the
@@ -66,13 +69,16 @@ export class ConversationLauncher {
     await this.gate.wait();
     const { settings } = readiness;
     const input = new MessageChannel<SDKUserMessage>();
-    const messages = this.claudeCode.query(input, this.options(request, settings));
+    const claudeCodeProcess = new ClaudeCodeProcess();
+    const messages = this.claudeCode.query(input, this.options(request, settings, claudeCodeProcess));
     // The context is built into a new conversation's first message. A resumed
     // one already carries it in its record.
-    return new Conversation(request.id, input, messages, request.resume ? undefined : settings.context);
+    const conversation = new Conversation(request.id, input, messages, claudeCodeProcess, request.resume ? undefined : settings.context);
+    this.conversations.add(conversation);
+    return conversation;
   }
 
-  private options(request: LaunchRequest, settings: LaunchSettings): Options {
+  private options(request: LaunchRequest, settings: LaunchSettings, claudeCodeProcess: ClaudeCodeProcess): Options {
     // The required values go in the settings, as a baseline the override is
     // applied over; a launch option would outrank every setting, the
     // override's included. Model, effort, thinking and max tokens need
@@ -118,7 +124,11 @@ export class ConversationLauncher {
       ...(request.resume ? { resume: request.id } : { sessionId: request.id }),
       sessionStore: this.sessionStore,
       sessionStoreFlush: 'eager',
-      spawnClaudeCodeProcess: (options) => this.spawner.spawn(options),
+      spawnClaudeCodeProcess: (options) => {
+        const child = this.spawner.spawn(options);
+        claudeCodeProcess.started(child);
+        return child;
+      },
     };
   }
 }

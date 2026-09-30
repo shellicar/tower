@@ -488,6 +488,36 @@ because otherwise we'd be using a resolved value" (26 Sep).
   to".
 - **SIGINT, SIGTERM, SIGHUP and stdin closing all start it** (26 Sep). Bridge
   also exits when stdin closes.
+- **Triggers split by what they mean** (29 Sep). SIGINT and SIGTERM are
+  someone asking: each one escalates a stage. SIGHUP, stdin closing and a
+  stdin read error mean the driver has gone: they start shutdown and never
+  escalate it, so a closing terminal (stdin's end, then SIGHUP) stays in
+  stage 1. No timing guard between presses: "i dont want to add that as a
+  guard".
+- **Each stage has a deadline** (29 Sep), and a new trigger escalates at
+  once: "the only question is what the time is, which im not fussed about,
+  as long as i can tweak it". A `shutdownPolicy` control line carries
+  `gracefulMs` and `teardownMs`, both required and replaced together, each
+  1 to 600,000 ms, `null` refused. Until one is sent, 30 s and 10 s.
+- **Nothing the participant started survives its exit** (29 Sep): "i dont
+  think it makes sense that it says "exited cleanly" and there are
+  processes that it spawned (directly or indirectly) still running". It
+  reaches every process whose environment carries this config dir's
+  `TOWER_PARTICIPANT`, since Claude Code runs each command in a session of
+  its own, out of reach of its process group. While a Claude Code is
+  alive, its commands are left to it.
+- **Two graceful stages, then a hard one** (30 Sep): "its two levels of
+  graceful exit then hard exit / so if it sigkills that would be in stage
+  3". Stage 1 interrupts each Claude Code, waits for it, then sends SIGTERM
+  to whatever is still tagged. Stage 2 sends SIGTERM to each Claude Code's
+  process group, waits, then SIGTERM to whatever is left; it never sends
+  SIGKILL. Stage 3 SIGKILLs every tagged process and exits at once.
+- **One exit code per way of exiting** (29 Sep): "a unique code for each
+  exit type makes sense". Clean (stage 1) is 0; stage 2 is 64, stage 3 65,
+  a bad environment value 66, the config dir held by another participant
+  67, an unsupported platform 68. One table in the code, with a test that
+  no two share a number and all but 0 sit in 64 to 113. A crash stays on
+  Node's own 1.
 - **Each Claude Code runs in its own process group** (29 Sep), so every
   trigger goes through the participant's one path, a terminal's Ctrl-C
   included: "having a single path where we're in control makes the most sense

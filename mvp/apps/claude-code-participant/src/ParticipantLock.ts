@@ -43,7 +43,7 @@ export class ParticipantLock {
     } catch (err) {
       db.close();
       if (isBusy(err)) {
-        throw new StartupError(`another participant is running on ${this.config.configDir}`);
+        throw new StartupError('configDirLocked', `another participant is running on ${this.config.configDir}`);
       }
       throw err;
     }

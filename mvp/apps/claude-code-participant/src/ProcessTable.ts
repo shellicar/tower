@@ -21,8 +21,13 @@ export type TaggedProcess = ProcessIdentity & {
  * and the OS's process list.
  */
 export abstract class IProcessTable {
-  /** Every running process whose environment holds `entry` exactly, other than this process, its ancestors and its descendants. */
-  public abstract tagged(entry: string): TaggedProcess[];
+  /**
+   * Every running process whose environment holds `entry` exactly, other than
+   * this process and its ancestors, and other than its descendants unless
+   * `withOwnDescendants`: what it started is left out of a search for what
+   * an earlier run left behind, and belongs in one for what it must stop.
+   */
+  public abstract tagged(entry: string, options?: { withOwnDescendants?: boolean }): TaggedProcess[];
   /** Sends `signal` only while the process still has the same start time. Whether it was sent. */
   public abstract signal(process: ProcessIdentity, signal: NodeJS.Signals): boolean;
 }
@@ -71,7 +76,7 @@ export class LinuxProcessTable implements IProcessTable {
     this.ownPid = ownPid;
   }
 
-  public tagged(entry: string): TaggedProcess[] {
+  public tagged(entry: string, options: { withOwnDescendants?: boolean } = {}): TaggedProcess[] {
     const excluded = this.selfAndAncestors();
     const found: TaggedProcess[] = [];
     for (const name of this.list(this.root)) {
@@ -83,7 +88,7 @@ export class LinuxProcessTable implements IProcessTable {
         continue;
       }
       const stat = this.stat(join(this.root, name, 'stat'));
-      if (stat === undefined || !this.anyThreadRunning(pid, stat) || !this.environment(pid).includes(entry) || this.descendsFromSelf(stat)) {
+      if (stat === undefined || !this.anyThreadRunning(pid, stat) || !this.environment(pid).includes(entry) || (options.withOwnDescendants !== true && this.descendsFromSelf(stat))) {
         continue;
       }
       found.push({ pid, startTime: stat.startTime, commandLine: this.commandLine(pid) });

@@ -6,7 +6,7 @@ import { beforeServing } from '../src/beforeServing.js';
 import { ParticipantLock } from '../src/ParticipantLock.js';
 import { ServingGate } from '../src/ServingGate.js';
 import { StartupError } from '../src/startup.js';
-import { testConfig, testServices } from './support.js';
+import { startupExitOf, testConfig, testServices } from './support.js';
 
 const scratch = mkdtempSync(join(tmpdir(), 'participant-before-serving-test-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -34,6 +34,11 @@ describe('beforeServing', () => {
   it('refuses to start on a platform without a process table', () => {
     const { run } = setUp();
     expect(() => run('darwin')).toThrow(StartupError);
+  });
+
+  it('exits as an unsupported platform', () => {
+    const { run } = setUp();
+    expect(startupExitOf(() => run('darwin'))).toBe('unsupportedPlatform');
   });
 
   it('says the platform is not supported', () => {

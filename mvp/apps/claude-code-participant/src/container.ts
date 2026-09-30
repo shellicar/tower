@@ -3,6 +3,8 @@ import { IClaudeCode, SdkClaudeCode } from './ClaudeCode.js';
 import { ClaudeCodeSpawner } from './ClaudeCodeSpawner.js';
 import { ControlLines } from './ControlLines.js';
 import { ConversationLauncher } from './ConversationLauncher.js';
+import { Conversations } from './Conversations.js';
+import { IHost, NodeHost } from './Host.js';
 import { Leftovers } from './Leftovers.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
 import { ParticipantLock } from './ParticipantLock.js';
@@ -11,6 +13,7 @@ import { IProcessSpawner, NodeProcessSpawner } from './ProcessSpawner.js';
 import { IProcessTable, LinuxProcessTable } from './ProcessTable.js';
 import { ServingGate } from './ServingGate.js';
 import { IPublisher, NullPublisher, PublishingSessionStore } from './SessionStore.js';
+import { Shutdown } from './Shutdown.js';
 import { ITimer, RealTimer } from './Timer.js';
 
 /**
@@ -31,6 +34,7 @@ export function participantServices(config: ParticipantConfig): IServiceCollecti
   services.register(NodeProcessSpawner).as(IProcessSpawner);
   services.register(ClaudeCodeSpawner).asSelf();
   services.register(SdkClaudeCode).as(IClaudeCode);
+  services.register(Conversations).asSelf();
   services.register(ConversationLauncher).asSelf();
   services
     .register(LinuxProcessTable)
@@ -40,5 +44,7 @@ export function participantServices(config: ParticipantConfig): IServiceCollecti
   services.register(ParticipantLock).asSelf();
   services.register(Leftovers).asSelf();
   services.register(ServingGate).asSelf();
+  services.register(NodeHost).as(IHost);
+  services.register(Shutdown).asSelf();
   return services;
 }
