@@ -44,7 +44,7 @@ economics (racing servicers waste work), a deployment's choice.
 
 | Subject | Traffic | Carries |
 |---|---|---|
-| `agent.v1.{world}.telemetry.>` | events | servicing facts: ready, pulse |
+| `agent.v1.{world}.telemetry.>` | events | servicing facts: ready, unavailable, offline, pulse |
 | `agent.v1.{world}.requests.>` | requests | operations on the world's servicing |
 
 Attachment claims are not here. A conversation's attachment is about the
@@ -58,6 +58,8 @@ The subject spells the type, as in the conversation spec: `telemetry.pulse`,
 | Type | Subject |
 |---|---|
 | `ready` | `agent.v1.{world}.telemetry.ready` |
+| `unavailable` | `agent.v1.{world}.telemetry.unavailable` |
+| `offline` | `agent.v1.{world}.telemetry.offline` |
 | `pulse` | `agent.v1.{world}.telemetry.pulse` |
 | `service` | `agent.v1.{world}.requests.service` |
 | `drain` | `agent.v1.{world}.requests.drain` |
@@ -70,12 +72,15 @@ map: who serves what, and whether they are alive.
 
 | Event | Fields | Notes |
 |---|---|---|
-| `ready` | `instanceId`, `host` | a process now serves this world; published once on boot, after its subscriptions are up |
+| `ready` | `instanceId`, `host` | the instance can receive requests, and it pulses. Published each time the instance becomes able to receive requests, boot included |
+| `unavailable` | `instanceId` | the instance cannot receive requests. It keeps pulsing; its next state is `offline` or `ready` |
+| `offline` | `instanceId` | the instance stops pulsing and is inert |
 | `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement core.md forbids. `intervalS` is at most 600 (ten minutes): a longer promise buys three times its own length of presumed life, so stranded detection and takeover stop working exactly where they are needed. The bound is validity, not a cap — a larger value makes the event invalid whole, and nothing is clamped to 600 |
 
 **Liveness is a fold, never declared.** An instance is presumed gone after
 about three of its own declared intervals of silence — judged against its own
-promise, nobody else's; the spec mandates no cadence. **No declared interval
+promise, nobody else's; the spec mandates no cadence. An instance that
+publishes `offline` is gone at once, with no wait on silence. **No declared interval
 yet is not the same as alive**: an attachment (or a pulse) that has never
 carried `intervalS` still needs a verdict, so a consumer applies a flat
 default silence threshold (60s is this spec's suggested default — deployments
@@ -158,9 +163,11 @@ Neither is a state the wire declares. Both are what a consumer reads off facts i
 
 A conversation's servicing state derives from these facts exactly as before, now read off the conversation's own tree rather than the world's:
 
-- **alive** — attached by an instance whose pulse is fresh;
+- **alive** — attached by an instance whose pulse is fresh and which has not
+  published `offline`;
 - **released** — cleanly detached (by the instanceId that held the claim);
-- **stranded** — attached, and the holding instance's pulse has gone silent.
+- **stranded** — attached, and the holding instance's pulse has gone silent
+  or it has published `offline`.
 
 The decided/emergent line is deliberate: `detached` is a fact someone
 published; stranded is inferred from a broken promise. Consumers render them
@@ -274,7 +281,7 @@ access and arbitrary work placement; deployments grade accordingly. World
 - Publication order per subject, and per subscription across one wildcard;
   nothing across classes.
 - Liveness, existence, and strandedness are folds. Computed from `ready`,
-  `pulse` (this tree) and `attached`, `detached` (conversation.md,
+  `pulse`, `offline` (this tree) and `attached`, `detached` (conversation.md,
   Attachment) — never carried as declared state. Names are free to
   generate, never free to remember: what a folding consumer retains of dead
   worlds and instances is its own retention policy, same as a stream's
@@ -312,6 +319,8 @@ const sender = z.looseObject({
 // schema lives on the conversation's own tree (conversation.md, Attachment).
 export const agentTelemetry = {
   'ready': z.looseObject({ ts, instanceId: z.string(), host: z.string().optional() }),
+  'unavailable': z.looseObject({ ts, instanceId: z.string() }),
+  'offline': z.looseObject({ ts, instanceId: z.string() }),
   'pulse': z.looseObject({ ts, instanceId: z.string(), intervalS: z.number().int().positive().max(600) }),
 };
 
