@@ -122,6 +122,40 @@ describe('LinuxProcessTable', () => {
       ).toEqual([]);
     });
 
+    describe('with its own descendants', () => {
+      function withOwn(processes: FakeProcess[]): number[] {
+        return procTable(processes)
+          .table.tagged(TAG, { withOwnDescendants: true })
+          .map((p) => p.pid);
+      }
+
+      it('finds a process this one started', () => {
+        expect(withOwn([{ pid: 300, ppid: OWN_PID, environ: [TAG] }])).toEqual([300]);
+      });
+
+      it('finds a process started by one this one started', () => {
+        expect(
+          withOwn([
+            { pid: 300, ppid: OWN_PID, environ: [] },
+            { pid: 301, ppid: 300, environ: [TAG] },
+          ]),
+        ).toEqual([301]);
+      });
+
+      it('still skips this process', () => {
+        expect(withOwn([{ pid: OWN_PID, ppid: 1, environ: [TAG] }])).toEqual([]);
+      });
+
+      it('still skips what started this process', () => {
+        expect(
+          withOwn([
+            { pid: OWN_PID, ppid: 50, environ: [TAG] },
+            { pid: 50, ppid: 1, environ: [TAG] },
+          ]),
+        ).toEqual([]);
+      });
+    });
+
     it('finds a leftover whose parents lead to init', () => {
       expect(
         taggedPids([

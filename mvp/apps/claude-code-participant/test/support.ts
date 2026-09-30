@@ -173,6 +173,8 @@ type FakeProcess = TaggedProcess & {
   tag: string;
   /** The signals that end it; any other it ignores. */
   endsOn: NodeJS.Signals[];
+  /** Started by this process, directly or not: left out unless the search asks for its own descendants. */
+  own: boolean;
 };
 
 /** A process list the test writes, which records each signal and ends a process on the ones it names. */
@@ -180,12 +182,16 @@ class FakeProcessTable implements IProcessTable {
   public processes: FakeProcess[] = [];
   public readonly signals: { pid: number; signal: NodeJS.Signals }[] = [];
 
-  public add(pid: number, tag: string, endsOn: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGKILL']): void {
-    this.processes.push({ pid, startTime: `${pid}0`, commandLine: `cmd-${pid}`, tag, endsOn });
+  public add(pid: number, tag: string, endsOn: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGKILL'], own = false): void {
+    this.processes.push({ pid, startTime: `${pid}0`, commandLine: `cmd-${pid}`, tag, endsOn, own });
   }
 
-  public tagged(entry: string): TaggedProcess[] {
-    return this.processes.filter((p) => p.tag === entry).map(({ pid, startTime, commandLine }) => ({ pid, startTime, commandLine }));
+  public remove(pid: number): void {
+    this.processes = this.processes.filter((p) => p.pid !== pid);
+  }
+
+  public tagged(entry: string, options: { withOwnDescendants?: boolean } = {}): TaggedProcess[] {
+    return this.processes.filter((p) => p.tag === entry && (options.withOwnDescendants === true || !p.own)).map(({ pid, startTime, commandLine }) => ({ pid, startTime, commandLine }));
   }
 
   public signal(process: ProcessIdentity, signal: NodeJS.Signals): boolean {

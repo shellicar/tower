@@ -6,7 +6,6 @@ import { EXITS } from './ExitCodes.js';
 import { IHost } from './Host.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
 import { ParticipantSettings } from './ParticipantSettings.js';
-import { IProcessSpawner } from './ProcessSpawner.js';
 import { IProcessTable, type TaggedProcess } from './ProcessTable.js';
 import { ITimer } from './Timer.js';
 
@@ -55,14 +54,13 @@ export function describeError(err: unknown): string {
  * 1. Graceful: interrupt every turn, close every conversation's input, wait
  *    for every Claude Code to exit, then send SIGTERM to whatever it started
  *    that outlived it and wait for that too. The process then ends by itself.
- * 2. Teardown: kill every Claude Code (SIGTERM to its process group), wait for
- *    them to go, and exit.
+ * 2. Teardown: SIGKILL to every Claude Code and everything it started, wait
+ *    for them to go, and exit.
  * 3. Exit at once.
  */
 export class Shutdown {
   @dependsOn(Conversations) private readonly conversations!: Conversations;
   @dependsOn(ParticipantSettings) private readonly settings!: ParticipantSettings;
-  @dependsOn(IProcessSpawner) private readonly processes!: IProcessSpawner;
   @dependsOn(IHost) private readonly host!: IHost;
   @dependsOn(ParticipantConfig) private readonly config!: ParticipantConfig;
   @dependsOn(IProcessTable) private readonly processTable!: IProcessTable;
@@ -102,7 +100,7 @@ export class Shutdown {
     }
     if (this.stage === 2) {
       const { teardownMs } = this.settings.shutdownPolicy;
-      this.host.log(`shutdown stage 2 (${cause}): killing every Claude Code and waiting up to ${teardownMs} ms`);
+      this.host.log(`shutdown stage 2 (${cause}): killing everything it started and waiting up to ${teardownMs} ms`);
       this.cancelDeadline = this.host.deadline(teardownMs, () => this.escalate(`stage 2 took longer than ${teardownMs} ms`));
       void this.teardown();
       return;
@@ -185,35 +183,40 @@ export class Shutdown {
     await conversation.claudeCode.exited;
   }
 
+  /**
+   * SIGKILL to every process carrying this config dir's tag, the Claude
+   * Codes and whatever they started alike, then a wait until none is left,
+   * and exit. Neither Claude Code nor its commands can refuse it, and nothing
+   * they are running is recorded.
+   */
   private async teardown(): Promise<void> {
-    const signalled: Conversation[] = [];
-    for (const conversation of this.conversations.all()) {
-      const pid = conversation.claudeCode.runningPid;
-      if (pid === undefined) {
-        continue;
+    // TODO: undecided: whether the Claude Codes get SIGKILL here with
+    // everything else, or SIGTERM first, which lets each record a
+    // running tool's result before it exits: either SIGTERM to the Claude
+    // Codes and SIGKILL to the rest at once, or SIGTERM to the Claude Codes,
+    // a wait for them, then SIGKILL to what is left.
+    const entry = `${PARTICIPANT_TAG}=${this.config.configDir}`;
+    const killed = new Set<string>();
+    for (;;) {
+      if (this.stage !== 2) {
+        return;
       }
-      // Claude Code's whole process group. That doesn't hold the commands it
-      // starts: Claude Code runs each Bash command in a session and group of
-      // its own, and stops them itself when it gets SIGTERM. Claude Code
-      // keeps no partial reply on SIGTERM, unlike an interrupt.
-      // TODO: undecided: whether this stage also reaches the commands of a
-      // Claude Code that doesn't act on SIGTERM (hung or stopped), which
-      // otherwise keep running after the participant exits. Nothing short of
-      // walking its descendants, or finding them by the TOWER_AGENT tag they
-      // inherit, reaches them.
-      try {
-        this.processes.signalGroup(pid, 'SIGTERM');
-        signalled.push(conversation);
-      } catch (err) {
-        this.host.log(`shutdown: signalling conversation ${conversation.id}'s Claude Code failed: ${describeError(err)}`);
+      const left = this.processTable.tagged(entry, { withOwnDescendants: true });
+      if (left.length === 0) {
+        break;
       }
+      const unkilled = left.filter((process) => !killed.has(identify(process)));
+      if (unkilled.length > 0) {
+        this.host.log(`shutdown stage 2: SIGKILL to ${listed(unkilled)}`);
+        for (const process of unkilled) {
+          killed.add(identify(process));
+          this.processTable.signal(process, 'SIGKILL');
+        }
+      }
+      await this.timer.sleep(POLL_MS);
     }
     // Closing NATS without draining goes here, once it exists.
-    await Promise.all(signalled.map((conversation) => conversation.claudeCode.exited));
-    if (this.stage !== 2) {
-      return;
-    }
-    this.host.log('shutdown stage 2: every Claude Code has exited');
+    this.host.log('shutdown stage 2: nothing it started is still running');
     this.host.exit(EXITS.forced.code);
   }
 }
