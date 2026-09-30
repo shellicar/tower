@@ -47,6 +47,42 @@ function exitAll(children: FakeChild[]): void {
   }
 }
 
+type Services = ReturnType<typeof testServices>;
+
+/** The deadline in force: the latest one no escalation has cancelled. */
+function current(host: Services['host']) {
+  return host.deadlines.filter((deadline) => !deadline.cancelled).at(-1);
+}
+
+/**
+ * Every second of fake time, the deadline in force expires, so shutdown
+ * reaches stage 3 and exits whatever ignores its signals, instead of waiting
+ * on it for ever.
+ */
+function expireDeadlinesInTurn(timer: Services['timer'], host: Services['host']): void {
+  let next = 1000;
+  timer.onSleep = (now) => {
+    if (now >= next) {
+      next += 1000;
+      current(host)?.expire();
+    }
+  };
+}
+
+/** As expireDeadlinesInTurn, and returns the signals sent before the first deadline expired. */
+function signalsBeforeTheDeadline(timer: Services['timer'], host: Services['host'], table: Services['processTable']): () => unknown[] | undefined {
+  let seen: unknown[] | undefined;
+  let next = 1000;
+  timer.onSleep = (now) => {
+    if (now >= next) {
+      next += 1000;
+      seen ??= [...table.signals];
+      current(host)?.expire();
+    }
+  };
+  return () => seen;
+}
+
 /** Whether the conversation's input has been closed: the fake's reader ends when it is. */
 async function inputClosed(done: Promise<void>): Promise<boolean> {
   let closed = false;
@@ -193,7 +229,6 @@ describe('Shutdown', () => {
       expect(host.deadlines[0]?.cancelled).toBe(false);
     });
   });
-
   describe('stage 1: what outlived its Claude Code', () => {
     it('signals nothing while a Claude Code still runs', async () => {
       const { shutdown, processTable } = await serving(1);
@@ -234,30 +269,22 @@ describe('Shutdown', () => {
       processTable.add(9001, TAG);
       shutdown.ask('SIGINT');
       await settle();
-      expect(host.logs).toContain('shutdown stage 1: SIGTERM to what outlived its Claude Code: 9001 (cmd-9001)');
+      expect(host.logs).toContain('shutdown stage 1: SIGTERM to 9001 (cmd-9001)');
     });
 
     it('keeps waiting, without signalling again, for a process that ignores SIGTERM', async () => {
       const { shutdown, processTable, timer, host } = await serving(0);
       processTable.add(9001, TAG, ['SIGKILL']);
-      timer.onSleep = (now) => {
-        if (now >= 1000) {
-          host.deadlines[0]?.expire();
-        }
-      };
+      const inStage1 = signalsBeforeTheDeadline(timer, host, processTable);
       shutdown.ask('SIGINT');
       await settle();
-      expect(processTable.signals.filter((sent) => sent.signal === 'SIGTERM')).toEqual([{ pid: 9001, signal: 'SIGTERM' }]);
+      expect(inStage1()).toEqual([{ pid: 9001, signal: 'SIGTERM' }]);
     });
 
     it('does not say nothing is left while something is', async () => {
       const { shutdown, processTable, timer, host } = await serving(0);
       processTable.add(9001, TAG, ['SIGKILL']);
-      timer.onSleep = (now) => {
-        if (now >= 1000) {
-          host.deadlines[0]?.expire();
-        }
-      };
+      expireDeadlinesInTurn(timer, host);
       shutdown.ask('SIGINT');
       await settle();
       expect(host.logs).not.toContain('shutdown stage 1: nothing it started is still running');
@@ -281,28 +308,39 @@ describe('Shutdown', () => {
         { pid: 9002, signal: 'SIGTERM' },
       ]);
     });
+
+    it('carries on when a signal fails', async () => {
+      const { shutdown, processTable, timer, host } = await serving(0);
+      processTable.add(9001, TAG);
+      processTable.add(9002, TAG);
+      processTable.signalFailures.set(9001, new Error('kill EPERM'));
+      expireDeadlinesInTurn(timer, host);
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(processTable.signals).toContainEqual({ pid: 9002, signal: 'SIGTERM' });
+    });
   });
 
   describe('escalating from stage 1', () => {
     it('starts stage 2 at once on a second trigger', async () => {
-      const { shutdown, processTable } = await serving(1);
+      const { shutdown, processes } = await serving(1);
       shutdown.ask('SIGINT');
       shutdown.ask('SIGINT');
-      expect(processTable.signals).toEqual([{ pid: 4001, signal: 'SIGKILL' }]);
+      expect(processes.signals).toEqual([{ pid: 4001, signal: 'SIGTERM' }]);
     });
 
     it('starts stage 2 when its deadline passes', async () => {
-      const { shutdown, processTable, host } = await serving(1);
+      const { shutdown, processes, host } = await serving(1);
       shutdown.ask('SIGTERM');
       host.deadlines[0]?.expire();
-      expect(processTable.signals).toEqual([{ pid: 4001, signal: 'SIGKILL' }]);
+      expect(processes.signals).toEqual([{ pid: 4001, signal: 'SIGTERM' }]);
     });
 
     it('says the deadline passed', async () => {
       const { shutdown, host } = await serving(1);
       shutdown.ask('SIGTERM');
       host.deadlines[0]?.expire();
-      expect(host.logs[1]).toBe('shutdown stage 2 (stage 1 took longer than 30000 ms): killing everything it started and waiting up to 10000 ms');
+      expect(host.logs[1]).toBe('shutdown stage 2 (stage 1 took longer than 30000 ms): SIGTERM to every Claude Code, then to whatever is left, waiting up to 10000 ms');
     });
 
     it('cancels its deadline when a trigger escalates first', async () => {
@@ -322,98 +360,135 @@ describe('Shutdown', () => {
       expect(host.logs).not.toContain('shutdown stage 1: every Claude Code has exited');
     });
 
-    it('stops stage 1 sending SIGTERM once stage 2 has started', async () => {
-      const { shutdown, processTable, children } = await serving(1);
-      processTable.add(9001, TAG, ['SIGKILL']);
+    it('leaves what outlived its Claude Code to stage 2 once stage 2 has started', async () => {
+      const { shutdown, processTable, children, host } = await serving(1);
+      processTable.add(9001, TAG);
       shutdown.ask('SIGINT');
       await settle();
       shutdown.ask('SIGINT');
       exitAll(children);
       await settle();
-      expect(processTable.signals.filter((sent) => sent.signal === 'SIGTERM')).toEqual([]);
+      expect(host.logs.filter((line) => line.startsWith('shutdown stage 1: SIGTERM'))).toEqual([]);
     });
   });
 
-  describe('stage 2: teardown', () => {
-    it('sends SIGKILL to every Claude Code', async () => {
-      const { shutdown, processTable } = await serving(2);
+  describe('stage 2: SIGTERM', () => {
+    it("sends SIGTERM to every running Claude Code's process group", async () => {
+      const { shutdown, processes } = await serving(2);
       shutdown.ask('SIGINT');
       shutdown.ask('SIGINT');
-      expect(processTable.signals).toEqual([
-        { pid: 4001, signal: 'SIGKILL' },
-        { pid: 4002, signal: 'SIGKILL' },
+      expect(processes.signals).toEqual([
+        { pid: 4001, signal: 'SIGTERM' },
+        { pid: 4002, signal: 'SIGTERM' },
       ]);
     });
 
-    it('sends SIGKILL to what a running Claude Code started', async () => {
-      const { shutdown, processTable } = await serving(0);
-      processTable.add(9001, TAG, ['SIGKILL'], true);
+    it('signals no process group once its Claude Code has exited', async () => {
+      const { shutdown, processes, children } = await serving(2);
       shutdown.ask('SIGINT');
+      await settle();
+      children[0]?.exit(0);
+      await settle();
       shutdown.ask('SIGINT');
-      expect(processTable.signals).toEqual([{ pid: 9001, signal: 'SIGKILL' }]);
+      expect(processes.signals).toEqual([{ pid: 4002, signal: 'SIGTERM' }]);
     });
 
-    it('sends SIGKILL to what outlived its Claude Code', async () => {
-      const { shutdown, processTable } = await serving(0);
-      processTable.add(9002, TAG, ['SIGKILL']);
+    it('signals nothing for a conversation whose Claude Code never started', async () => {
+      const services = testServices();
+      services.control(...CONFIGURED);
+      await services.provider.resolve(ConversationLauncher).launch(request(0));
+      const shutdown = services.provider.resolve(Shutdown);
       shutdown.ask('SIGINT');
       shutdown.ask('SIGINT');
-      expect(processTable.signals.filter((sent) => sent.signal === 'SIGKILL')).toEqual([{ pid: 9002, signal: 'SIGKILL' }]);
+      expect(services.processes.signals).toEqual([]);
     });
 
-    it('leaves alone a process tagged for another config dir', async () => {
-      const { shutdown, processTable } = await serving(0);
-      processTable.add(9001, 'TOWER_PARTICIPANT=/agents/beta/config', ['SIGKILL'], true);
+    it('logs a group it could not signal', async () => {
+      const { shutdown, processes, host, conversations } = await serving(2);
+      processes.signalFailures.set(4001, new Error('kill EPERM'));
       shutdown.ask('SIGINT');
       shutdown.ask('SIGINT');
+      expect(host.logs).toContain(`shutdown: signalling conversation ${conversations[0]?.id}'s Claude Code failed: kill EPERM`);
+    });
+
+    it('still signals the rest after one fails', async () => {
+      const { shutdown, processes } = await serving(2);
+      processes.signalFailures.set(4001, new Error('kill EPERM'));
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      expect(processes.signals).toEqual([{ pid: 4002, signal: 'SIGTERM' }]);
+    });
+
+    it('signals no command while a Claude Code it signalled still runs', async () => {
+      const { shutdown, processTable } = await serving(1);
+      processTable.add(9001, TAG);
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      await settle();
       expect(processTable.signals).toEqual([]);
     });
 
-    it('names what it kills', async () => {
-      const { shutdown, host } = await serving(1);
+    it('sends SIGTERM to what is left once the Claude Codes have gone', async () => {
+      const { shutdown, processTable, children } = await serving(1);
+      processTable.add(9001, TAG);
       shutdown.ask('SIGINT');
       shutdown.ask('SIGINT');
-      expect(host.logs).toContain('shutdown stage 2: SIGKILL to 4001 (cmd-4001)');
+      exitAll(children);
+      await settle();
+      expect(processTable.signals).toEqual([{ pid: 9001, signal: 'SIGTERM' }]);
+    });
+
+    it('sends SIGTERM to a Claude Code whose group it could not signal', async () => {
+      const { shutdown, processes, processTable, timer, host } = await serving(1);
+      processes.signalFailures.set(4001, new Error('kill EPERM'));
+      const inStage2 = signalsBeforeTheDeadline(timer, host, processTable);
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(inStage2()).toEqual([{ pid: 4001, signal: 'SIGTERM' }]);
+    });
+
+    it('sends no SIGKILL, however long something ignores SIGTERM', async () => {
+      const { shutdown, processTable, timer, host } = await serving(0);
+      processTable.add(9001, TAG, ['SIGKILL']);
+      const inStage2 = signalsBeforeTheDeadline(timer, host, processTable);
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(inStage2()).toEqual([{ pid: 9001, signal: 'SIGTERM' }]);
+    });
+
+    it('names what it signals', async () => {
+      const { shutdown, processTable, host } = await serving(0);
+      processTable.add(9001, TAG);
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(host.logs).toContain('shutdown stage 2: SIGTERM to 9001 (cmd-9001)');
     });
 
     it('exits as forced once nothing it started is left', async () => {
-      const { shutdown, host } = await serving(2);
+      const { shutdown, host, children } = await serving(2);
       shutdown.ask('SIGINT');
       shutdown.ask('SIGINT');
+      exitAll(children);
       await settle();
       expect(host.exits).toEqual([EXITS.forced.code]);
     });
 
-    it('exits as forced when nothing was running', async () => {
-      const { shutdown, host } = await serving(0);
+    it('keeps waiting while a Claude Code it signalled still runs', async () => {
+      const { shutdown, host, children } = await serving(2);
       shutdown.ask('SIGINT');
       shutdown.ask('SIGINT');
+      children[0]?.exit(null, 'SIGTERM');
       await settle();
-      expect(host.exits).toEqual([EXITS.forced.code]);
+      expect(host.exits).toEqual([]);
     });
 
-    it('kills something that outlasts SIGKILL only once', async () => {
+    it('leaves exiting to the deadline while something ignores SIGTERM', async () => {
       const { shutdown, processTable, timer, host } = await serving(0);
-      processTable.add(9001, TAG, [], true);
-      timer.onSleep = (now) => {
-        if (now >= 1000) {
-          host.deadlines[1]?.expire();
-        }
-      };
-      shutdown.ask('SIGINT');
-      shutdown.ask('SIGINT');
-      await settle();
-      expect(processTable.signals).toEqual([{ pid: 9001, signal: 'SIGKILL' }]);
-    });
-
-    it('leaves exiting to the deadline while something outlasts SIGKILL', async () => {
-      const { shutdown, processTable, timer, host } = await serving(0);
-      processTable.add(9001, TAG, [], true);
-      timer.onSleep = (now) => {
-        if (now >= 1000) {
-          host.deadlines[1]?.expire();
-        }
-      };
+      processTable.add(9001, TAG, ['SIGKILL']);
+      expireDeadlinesInTurn(timer, host);
       shutdown.ask('SIGINT');
       shutdown.ask('SIGINT');
       await settle();
@@ -435,13 +510,77 @@ describe('Shutdown', () => {
     });
   });
 
-  describe('stage 3: exit', () => {
+  describe('stage 3: SIGKILL and exit', () => {
     it('exits as instant at once on a third trigger', async () => {
       const { shutdown, host } = await serving(1);
       shutdown.ask('SIGINT');
       shutdown.ask('SIGINT');
       shutdown.ask('SIGINT');
       expect(host.exits).toEqual([EXITS.instant.code]);
+    });
+
+    it('sends SIGKILL to every Claude Code', async () => {
+      const { shutdown, processTable } = await serving(2);
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      expect(processTable.signals).toEqual([
+        { pid: 4001, signal: 'SIGKILL' },
+        { pid: 4002, signal: 'SIGKILL' },
+      ]);
+    });
+
+    it('sends SIGKILL to what a running Claude Code started', async () => {
+      const { shutdown, processTable } = await serving(0);
+      processTable.add(9001, TAG, ['SIGKILL'], true);
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      expect(processTable.signals.filter((sent) => sent.signal === 'SIGKILL')).toEqual([{ pid: 9001, signal: 'SIGKILL' }]);
+    });
+
+    it('sends SIGKILL to what outlived its Claude Code', async () => {
+      const { shutdown, processTable } = await serving(1);
+      processTable.add(9002, TAG, ['SIGKILL']);
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      expect(processTable.signals.filter((sent) => sent.pid === 9002)).toEqual([{ pid: 9002, signal: 'SIGKILL' }]);
+    });
+
+    it('leaves alone a process tagged for another config dir', async () => {
+      const { shutdown, processTable } = await serving(0);
+      processTable.add(9001, 'TOWER_PARTICIPANT=/agents/beta/config', ['SIGKILL'], true);
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      expect(processTable.signals).toEqual([]);
+    });
+
+    it('names what it kills', async () => {
+      const { shutdown, host } = await serving(1);
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      expect(host.logs.at(-1)).toBe('shutdown stage 3 (SIGINT): SIGKILL to 4001 (cmd-4001), then exiting now');
+    });
+
+    it('still exits when a SIGKILL fails', async () => {
+      const { shutdown, processTable, host } = await serving(1);
+      processTable.signalFailures.set(4001, new Error('kill EPERM'));
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      expect(host.exits).toEqual([EXITS.instant.code]);
+    });
+
+    it('logs a SIGKILL that failed', async () => {
+      const { shutdown, processTable, host } = await serving(1);
+      processTable.signalFailures.set(4001, new Error('kill EPERM'));
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      expect(host.logs).toContain('shutdown: SIGKILL to 4001 failed: kill EPERM');
     });
 
     it('exits as instant when the stage 2 deadline passes', async () => {
@@ -480,10 +619,10 @@ describe('Shutdown', () => {
     });
 
     it('never moves shutdown on', async () => {
-      const { shutdown, processTable } = await serving(1);
+      const { shutdown, processes } = await serving(1);
       shutdown.driverGone('stdin closed');
       shutdown.driverGone('SIGHUP');
-      expect(processTable.signals).toEqual([]);
+      expect(processes.signals).toEqual([]);
     });
 
     it('leaves stage 1 its deadline', async () => {
@@ -501,10 +640,10 @@ describe('Shutdown', () => {
     });
 
     it('still lets someone asking move shutdown on', async () => {
-      const { shutdown, processTable } = await serving(1);
+      const { shutdown, processes } = await serving(1);
       shutdown.driverGone('SIGHUP');
       shutdown.ask('SIGINT');
-      expect(processTable.signals).toEqual([{ pid: 4001, signal: 'SIGKILL' }]);
+      expect(processes.signals).toEqual([{ pid: 4001, signal: 'SIGTERM' }]);
     });
   });
 

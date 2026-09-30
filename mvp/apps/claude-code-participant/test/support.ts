@@ -181,6 +181,8 @@ type FakeProcess = TaggedProcess & {
 class FakeProcessTable implements IProcessTable {
   public processes: FakeProcess[] = [];
   public readonly signals: { pid: number; signal: NodeJS.Signals }[] = [];
+  /** Makes signalling this pid fail with this error. */
+  public readonly signalFailures = new Map<number, Error>();
 
   public add(pid: number, tag: string, endsOn: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGKILL'], own = false): void {
     this.processes.push({ pid, startTime: `${pid}0`, commandLine: `cmd-${pid}`, tag, endsOn, own });
@@ -195,6 +197,10 @@ class FakeProcessTable implements IProcessTable {
   }
 
   public signal(process: ProcessIdentity, signal: NodeJS.Signals): boolean {
+    const failure = this.signalFailures.get(process.pid);
+    if (failure !== undefined) {
+      throw failure;
+    }
     const target = this.processes.find((p) => p.pid === process.pid && p.startTime === process.startTime);
     if (target === undefined) {
       return false;
