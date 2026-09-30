@@ -25,7 +25,7 @@ durable names for places; the processes standing in them are disposable.
   pair `(world, instanceId)` — in payloads, never in subjects: address a
   process and you inherit its lifecycle (core.md, "Work is addressed to
   the work, never the worker").
-  `instanceId` is minted fresh per process and unique within its world; the
+  `instanceId` is minted fresh per process, and again after `offline`, and unique within its world; the
   pair is then unique everywhere, since worlds are. The format is free — a
   pid qualifies, a uuid is typical — the spec mandates uniqueness within
   the world, nothing else. Never reused or inherited across a restart: a
@@ -44,7 +44,7 @@ economics (racing servicers waste work), a deployment's choice.
 
 | Subject | Traffic | Carries |
 |---|---|---|
-| `agent.v1.{world}.telemetry.>` | events | servicing facts: ready, pulse |
+| `agent.v1.{world}.telemetry.>` | events | servicing facts: ready, unavailable, offline, pulse |
 | `agent.v1.{world}.requests.>` | requests | operations on the world's servicing |
 
 Attachment claims are not here. A conversation's attachment is about the
@@ -58,6 +58,8 @@ The subject spells the type, as in the conversation spec: `telemetry.pulse`,
 | Type | Subject |
 |---|---|
 | `ready` | `agent.v1.{world}.telemetry.ready` |
+| `unavailable` | `agent.v1.{world}.telemetry.unavailable` |
+| `offline` | `agent.v1.{world}.telemetry.offline` |
 | `pulse` | `agent.v1.{world}.telemetry.pulse` |
 | `service` | `agent.v1.{world}.requests.service` |
 | `drain` | `agent.v1.{world}.requests.drain` |
@@ -70,12 +72,16 @@ map: who serves what, and whether they are alive.
 
 | Event | Fields | Notes |
 |---|---|---|
-| `ready` | `instanceId`, `host` | a process now serves this world; published once on boot, after its subscriptions are up |
+| `ready` | `instanceId`, `host` | the instance can receive requests, and it pulses. It is subscribed to all its requests: `agent.v1.{world}.requests.>`, `conv.v2.{id}.requests.>` for every conversation it holds, and `approval.v1.{approvalId}.requests` for each of its outstanding approvals. Published each time the instance becomes able to receive requests, boot included |
+| `unavailable` | `instanceId` | the instance is no longer servicing. It unsubscribes from `agent.v1.{world}.requests.>`; the recommended order is to unsubscribe first, then publish `unavailable`. Once it has published `unavailable`, it rejects any `service` that reaches it, and any `say` on a conversation it still holds, with reason `unavailable`. It may stay subscribed to `conv.v2.{id}.requests.>` for each conversation it holds, and to `approval.v1.{approvalId}.requests` for that conversation's outstanding approvals, until it detaches that conversation, and answers their other requests while it does. It keeps pulsing; its next state is `offline` or `ready` |
+| `offline` | `instanceId` | the instance stops pulsing and is inert. `offline` is final for its `instanceId`: a process that becomes able to receive requests again publishes `ready` as a new instance, under a new `instanceId` |
 | `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement core.md forbids. `intervalS` is at most 600 (ten minutes): a longer promise buys three times its own length of presumed life, so stranded detection and takeover stop working exactly where they are needed. The bound is validity, not a cap — a larger value makes the event invalid whole, and nothing is clamped to 600 |
 
-**Liveness is a fold, never declared.** An instance is presumed gone after
+**Liveness is a fold, never a declared verdict.** An instance is presumed gone after
 about three of its own declared intervals of silence — judged against its own
-promise, nobody else's; the spec mandates no cadence. **No declared interval
+promise, nobody else's; the spec mandates no cadence. The fold also reads
+`offline`: an instance that publishes it is gone at once, with no wait on
+silence. **No declared interval
 yet is not the same as alive**: an attachment (or a pulse) that has never
 carried `intervalS` still needs a verdict, so a consumer applies a flat
 default silence threshold (60s is this spec's suggested default — deployments
@@ -148,7 +154,7 @@ A compliant instance watches the attachment leaf for every conversation it serve
 
 That `detached` folds as nothing: the supersession already ended its claim. A `detached` only changes the fold when its identity — the `(world, instanceId)` pair, or bare `instanceId` if either side omits `world` — still matches the standing attachment's. An instance detaching after it's already superseded is stating a fact about its own past claim, not retracting the current one.
 
-It publishes `detached` anyway, as the observable act of compliance — without it, a crash and a violation would be impossible to tell apart. An instance also publishes `detached` per conversation on clean exit (Ctrl-C, drain), same as today.
+It publishes `detached` anyway, as the observable act of compliance — without it, a crash and a violation would be impossible to tell apart. On clean exit (Ctrl-C) and on drain, an instance publishes `unavailable`, a `detached` per conversation, then `offline`.
 
 **Crash vs violation is derivable, never declared.** No `detached`, and dead pulses from the instance that held the claim: read as a crash. It went silent and never got the chance to release.
 
@@ -158,12 +164,15 @@ Neither is a state the wire declares. Both are what a consumer reads off facts i
 
 A conversation's servicing state derives from these facts exactly as before, now read off the conversation's own tree rather than the world's:
 
-- **alive** — attached by an instance whose pulse is fresh;
+- **alive** — attached by an instance whose pulse is fresh and which has not
+  published `offline`;
 - **released** — cleanly detached (by the instanceId that held the claim);
-- **stranded** — attached, and the holding instance's pulse has gone silent.
+- **stranded** — attached, and the holding instance's pulse has gone silent
+  or it has published `offline`.
 
-The decided/emergent line is deliberate: `detached` is a fact someone
-published; stranded is inferred from a broken promise. Consumers render them
+The line between them is deliberate: `detached` is a published release of
+the claim; stranded is inferred, from a broken promise or a published
+`offline`, with the claim never released. Consumers render them
 differently because they are different.
 
 ### Examples
@@ -211,18 +220,19 @@ this repo's testing rule.
 
 | Request | Fields | Reply | Notes |
 |---|---|---|---|
-| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts; its premise is below. Any named environment value the world cannot establish rejects the request (`invalid_cwd`, for `cwd`); an omitted value falls to the agent's own defaults — absence delegates, presence binds, never a silent fallback. Known reasons today: `already_attached`, `at_capacity`, `invalid` (a recognised request whose body doesn't carry what it needs, e.g. a missing or empty `conversationId`), `invalid_cwd`, `failed` (the world could not undertake the operation; the cause rides `detail`), `unsupported` |
-| `drain` | — | `accepted` \| `rejected` + `reason` | stop taking work and detach cleanly: a `detached` per conversation, then silence. Distinguishes a decided shutdown from a crash |
+| `service` | `conversationId`, environment (`cwd`, `model`, … — an open set) | `accepted` \| `rejected` + `reason` | ensure this conversation is served in this world. One verb for spawn, resume, and takeover — the servicer reads the conversation's record and reacts; its premise is below. Any named environment value the world cannot establish rejects the request (`invalid_cwd`, for `cwd`); an omitted value falls to the agent's own defaults — absence delegates, presence binds, never a silent fallback. Known reasons today: `already_attached`, `at_capacity`, `invalid` (a recognised request whose body doesn't carry what it needs, e.g. a missing or empty `conversationId`), `invalid_cwd`, `failed` (the world could not undertake the operation; the cause rides `detail`), `unavailable` (the instance that received it has published `unavailable`), `unsupported` |
+| `drain` | — | `accepted` \| `rejected` + `reason` | stop serving: the instance goes `unavailable`, publishes a `detached` for each conversation it holds, then publishes `offline`. It asks the instance to stop serving, not to exit its process. Distinguishes a decided stop from a crash. Known limitation: `drain` goes to the world's queue group, so whichever instance the group picks answers it. A sender cannot choose which instance stops, so it cannot stop a chosen instance, such as stopping A and then B of two instances in turn |
 
 **The premise for `service`.** Four cases, each read off a warm fold — one
 that has replayed capture up to its live subscription (core.md, System
-principles) — and a fifth that closes the list:
+principles) — and two that close the list:
 
 - Standing attachment in another world → accept and take over, unconditionally. The incumbent's liveness is irrelevant: asking a different world to serve *is* migration.
-- Standing attachment in this world, holder alive on a warm read of this world's own liveness fold → `rejected: already_attached`. The goal already holds, and every instance in the world gives this same answer, so a redundant or retried request never causes a takeover.
+- Standing attachment in this world, holder alive on a warm read of this world's own liveness fold → `rejected: already_attached`. The goal already holds, and every instance in the world that has not published `unavailable` gives this same answer, so a redundant or retried request never causes a takeover.
 - Standing attachment in this world, holder stranded on a warm read of that same fold → accept and take over. A dead holder never blocks pickup; the attachment is never a lease.
 - No standing attachment in a warm fold → no history: spawn fresh. History: adopt.
 - The fold is not warm — just booted, or a feed that has fallen behind → none of the four applies. An unobserved record is not an absent attachment, so it never reads as the case above and never spawns. A compliant instance never reaches here, because a cold one has not joined the queue group (below); one that answers anyway rejects and says why, in `reason`, which is free text and needs no new token.
+- The answering instance has published `unavailable` → `rejected: unavailable`, whatever its fold holds. None of the four applies.
 
 `service` means "I want this serviced" — it never moves a conversation between two live instances in the same world. That would need the holder to abandon it first (an operation not designed here), or it would be a different operation on its own leaf. A live-to-live handover inside one world is out of `service`'s scope by design, not an oversight.
 
@@ -274,7 +284,7 @@ access and arbitrary work placement; deployments grade accordingly. World
 - Publication order per subject, and per subscription across one wildcard;
   nothing across classes.
 - Liveness, existence, and strandedness are folds. Computed from `ready`,
-  `pulse` (this tree) and `attached`, `detached` (conversation.md,
+  `pulse`, `offline` (this tree) and `attached`, `detached` (conversation.md,
   Attachment) — never carried as declared state. Names are free to
   generate, never free to remember: what a folding consumer retains of dead
   worlds and instances is its own retention policy, same as a stream's
@@ -312,6 +322,8 @@ const sender = z.looseObject({
 // schema lives on the conversation's own tree (conversation.md, Attachment).
 export const agentTelemetry = {
   'ready': z.looseObject({ ts, instanceId: z.string(), host: z.string().optional() }),
+  'unavailable': z.looseObject({ ts, instanceId: z.string() }),
+  'offline': z.looseObject({ ts, instanceId: z.string() }),
   'pulse': z.looseObject({ ts, instanceId: z.string(), intervalS: z.number().int().positive().max(600) }),
 };
 
@@ -324,7 +336,7 @@ export const agentRequest = {
 
 // Replies (transport truth, never outcome). Known reasons today:
 // already_attached, at_capacity, invalid, invalid_cwd, failed,
-// unsupported. `detail` is optional free-text diagnostics for a human —
+// unavailable, unsupported. `detail` is optional free-text diagnostics for a human —
 // `reason` is the machine-facing token a caller branches on, `detail` names
 // the step and underlying error; never the other way around.
 export const agentRequestReply = z.union([
