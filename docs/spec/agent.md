@@ -72,15 +72,16 @@ map: who serves what, and whether they are alive.
 
 | Event | Fields | Notes |
 |---|---|---|
-| `ready` | `instanceId`, `host` | the instance can receive requests, and it pulses. It is subscribed to all its requests: the world's (`service`, `drain`), those of every conversation it holds (`say`, `cancel`, `chdir`), and those of its outstanding approvals (`approval.v1.{approvalId}.requests`). Published each time the instance becomes able to receive requests, boot included |
-| `unavailable` | `instanceId` | the instance cannot receive requests: it has unsubscribed from all its requests, the world's (`service`, `drain`), those of every conversation it holds (`say`, `cancel`, `chdir`), and those of its outstanding approvals (`approval.v1.{approvalId}.requests`). It keeps pulsing; its next state is `offline` or `ready` |
-| `offline` | `instanceId` | the instance stops pulsing and is inert |
+| `ready` | `instanceId`, `host` | the instance can receive requests, and it pulses. It is subscribed to all its requests: `agent.v1.{world}.requests.>`, `conv.v2.{id}.requests.>` for every conversation it holds, and `approval.v1.{approvalId}.requests` for each of its outstanding approvals. Published each time the instance becomes able to receive requests, boot included |
+| `unavailable` | `instanceId` | the instance cannot receive requests: it has unsubscribed from all its requests: `agent.v1.{world}.requests.>`, `conv.v2.{id}.requests.>` for every conversation it holds, and `approval.v1.{approvalId}.requests` for each of its outstanding approvals. It keeps pulsing; its next state is `offline` or `ready` |
+| `offline` | `instanceId` | the instance stops pulsing and is inert. `offline` is final for its `instanceId`: a process that becomes able to receive requests again publishes `ready` as a new instance, under a new `instanceId` |
 | `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement core.md forbids. `intervalS` is at most 600 (ten minutes): a longer promise buys three times its own length of presumed life, so stranded detection and takeover stop working exactly where they are needed. The bound is validity, not a cap — a larger value makes the event invalid whole, and nothing is clamped to 600 |
 
-**Liveness is a fold, never declared.** An instance is presumed gone after
+**Liveness is a fold, never a declared verdict.** An instance is presumed gone after
 about three of its own declared intervals of silence — judged against its own
-promise, nobody else's; the spec mandates no cadence. An instance that
-publishes `offline` is gone at once, with no wait on silence. **No declared interval
+promise, nobody else's; the spec mandates no cadence. The fold also reads
+`offline`: an instance that publishes it is gone at once, with no wait on
+silence. **No declared interval
 yet is not the same as alive**: an attachment (or a pulse) that has never
 carried `intervalS` still needs a verdict, so a consumer applies a flat
 default silence threshold (60s is this spec's suggested default — deployments
@@ -159,7 +160,7 @@ It publishes `detached` anyway, as the observable act of compliance — without 
 
 No `detached`, and *live* pulses from an instance that's already been superseded: read as a violation. It saw the displacement — or should have — and kept going anyway.
 
-Neither is a state the wire declares. Both are what a consumer reads off facts it already folds: `attached`, `detached`, `pulse`.
+Neither is a state the wire declares. Both are what a consumer reads off facts it already folds: `attached`, `detached`, `pulse`, `offline`.
 
 A conversation's servicing state derives from these facts exactly as before, now read off the conversation's own tree rather than the world's:
 
@@ -169,8 +170,9 @@ A conversation's servicing state derives from these facts exactly as before, now
 - **stranded** — attached, and the holding instance's pulse has gone silent
   or it has published `offline`.
 
-The decided/emergent line is deliberate: `detached` is a fact someone
-published; stranded is inferred from a broken promise. Consumers render them
+The line between them is deliberate: `detached` is a published release of
+the claim; stranded is inferred, from a broken promise or a published
+`offline`, with the claim never released. Consumers render them
 differently because they are different.
 
 ### Examples
