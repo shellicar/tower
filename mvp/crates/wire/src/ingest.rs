@@ -176,7 +176,9 @@ fn conv_kind(class: &str, event_type: &str, value: Value) -> Option<EventKind> {
             "message" => ConvChange::Message(serde_json::from_value(value).ok()?),
             "revision" => ConvChange::Revision(serde_json::from_value(value).ok()?),
             "tip_moved" => ConvChange::TipMoved(serde_json::from_value(value).ok()?),
-            "query" => ConvChange::Query(serde_json::from_value(value).ok()?),
+            // `changes.query` is the closure's old name, and consumers read it
+            // forever (conversation.md, Query start and closure).
+            "query_closed" | "query" => ConvChange::Query(serde_json::from_value(value).ok()?),
             _ => return None,
         }),
         "attachment" => EventKind::Attachment(match event_type {
@@ -339,6 +341,21 @@ mod tests {
             panic!("expected query");
         };
         assert_eq!(q.reason, "completed");
+    }
+
+    #[test]
+    fn query_closed_leaf_parses_as_the_closure() {
+        // docs/spec/fixtures/v2/scenario-9.jsonl line 5, verbatim.
+        let payload = br#"{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","queryId":"q1","reason":"completed"}"#;
+        let expected = EventKind::Change(ConvChange::Query(crate::conv::Query {
+            ts: "2026-07-07T21:00:00+10:00".into(),
+            query_id: crate::ids::QueryId("q1".into()),
+            reason: "completed".into(),
+        }));
+
+        let actual = conv_event("conv.v2.conv-abc.changes.query.closed", payload).kind;
+
+        assert_eq!(actual, expected);
     }
 
     #[test]
