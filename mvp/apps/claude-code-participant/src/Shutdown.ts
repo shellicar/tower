@@ -51,14 +51,14 @@ export class Shutdown {
     this.cancelDeadline = undefined;
     this.stage += 1;
     if (this.stage === 1) {
-      const { gracefulMs } = this.settings.shutdown;
+      const { gracefulMs } = this.settings.shutdownPolicy;
       this.host.log(`shutdown stage 1 (${cause}): interrupting every turn and waiting up to ${gracefulMs} ms for everything to finish`);
       this.cancelDeadline = this.host.deadline(gracefulMs, () => this.escalate(`stage 1 took longer than ${gracefulMs} ms`));
       void this.graceful();
       return;
     }
     if (this.stage === 2) {
-      const { teardownMs } = this.settings.shutdown;
+      const { teardownMs } = this.settings.shutdownPolicy;
       this.host.log(`shutdown stage 2 (${cause}): killing every Claude Code and waiting up to ${teardownMs} ms`);
       this.cancelDeadline = this.host.deadline(teardownMs, () => this.escalate(`stage 2 took longer than ${teardownMs} ms`));
       void this.teardown();

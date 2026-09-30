@@ -41,13 +41,13 @@ const claudeSettingsLine = z
   })
   .nullable();
 
-// setTimeout's longest delay: Node fires a longer one after 1 ms instead, so
-// a deadline above it would escalate at once.
-const LONGEST_DEADLINE_MS = 2_147_483_647;
+// A healthy graceful stop takes seconds. Ten minutes is past anything healthy:
+// it is also the longest liveness promise tower's spec accepts (`intervalS`).
+const LONGEST_DEADLINE_MS = 600_000;
 const deadline = z.number().int().min(1).max(LONGEST_DEADLINE_MS);
 
-/** The shutdown line replaces both deadlines at once. */
-const shutdownLine = z.strictObject({ gracefulMs: deadline, teardownMs: deadline });
+/** Configures how shutdown behaves, never asks for one: both deadlines are required and replaced together. */
+const shutdownPolicyLine = z.strictObject({ gracefulMs: deadline, teardownMs: deadline });
 
 const settingsLine = z.strictObject({});
 
@@ -74,7 +74,7 @@ export class ControlLines {
     permissionMode: (value) => this.permissionMode(value),
     context: (value) => this.context(value),
     claudeSettings: (value) => this.claudeSettings(value),
-    shutdown: (value) => this.shutdown(value),
+    shutdownPolicy: (value) => this.shutdownPolicy(value),
     settings: (value) => this.readBack(value),
   };
 
@@ -157,13 +157,13 @@ export class ControlLines {
   }
 
   /** Reaches the next stage to start: a stage already under way keeps the deadline it started with. */
-  private shutdown(value: unknown): Reply {
-    const line = shutdownLine.safeParse(value);
+  private shutdownPolicy(value: unknown): Reply {
+    const line = shutdownPolicyLine.safeParse(value);
     if (!line.success) {
-      return { error: `invalid shutdown: ${explain(line.error)}` };
+      return { error: `invalid shutdownPolicy: ${explain(line.error)}` };
     }
-    this.settings.shutdown = { ...line.data };
-    return { shutdown: this.settings.shutdown };
+    this.settings.shutdownPolicy = { ...line.data };
+    return { shutdownPolicy: this.settings.shutdownPolicy };
   }
 
   private readBack(value: unknown): Reply {
@@ -179,7 +179,7 @@ export class ControlLines {
         permissionMode: this.settings.permissionMode ?? null,
         context: this.settings.context ?? null,
         claudeSettings: this.settings.claudeSettings ?? null,
-        shutdown: this.settings.shutdown,
+        shutdownPolicy: this.settings.shutdownPolicy,
         missing: readiness.ready ? [] : readiness.missing,
         configDir: this.config.configDir,
         privateHome: this.config.privateHome,

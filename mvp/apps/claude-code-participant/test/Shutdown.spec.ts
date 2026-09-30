@@ -168,7 +168,7 @@ describe('Shutdown', () => {
     });
 
     it('arms the deadline the shutdown line set', async () => {
-      const { shutdown, host } = await serving(1, [{ shutdown: { gracefulMs: 5000, teardownMs: 2000 } }]);
+      const { shutdown, host } = await serving(1, [{ shutdownPolicy: { gracefulMs: 5000, teardownMs: 2000 } }]);
       shutdown.trigger('SIGINT');
       expect(host.deadlines.map((deadline) => deadline.ms)).toEqual([5000]);
     });
@@ -296,7 +296,7 @@ describe('Shutdown', () => {
     });
 
     it('arms the deadline the shutdown line set', async () => {
-      const { shutdown, host } = await serving(1, [{ shutdown: { gracefulMs: 5000, teardownMs: 2000 } }]);
+      const { shutdown, host } = await serving(1, [{ shutdownPolicy: { gracefulMs: 5000, teardownMs: 2000 } }]);
       shutdown.trigger('SIGINT');
       shutdown.trigger('SIGINT');
       expect(host.deadlines.map((deadline) => deadline.ms)).toEqual([5000, 2000]);
