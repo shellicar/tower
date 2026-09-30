@@ -37,3 +37,25 @@ describe.skipIf(process.platform === 'win32')('NodeProcessSpawner', () => {
     expect(survived).toBe(false);
   });
 });
+
+function failingWith(code: string) {
+  return () => {
+    throw Object.assign(new Error(`kill ${code}`), { code });
+  };
+}
+
+describe('NodeProcessSpawner.signalGroup', () => {
+  it('signals the group through its negative pid', () => {
+    const sent: { pid: number; signal: NodeJS.Signals }[] = [];
+    new NodeProcessSpawner((pid, signal) => sent.push({ pid, signal })).signalGroup(4321, 'SIGTERM');
+    expect(sent).toEqual([{ pid: -4321, signal: 'SIGTERM' }]);
+  });
+
+  it('ignores a group that is already gone', () => {
+    expect(() => new NodeProcessSpawner(failingWith('ESRCH')).signalGroup(4321, 'SIGTERM')).not.toThrow();
+  });
+
+  it('passes on any other failure', () => {
+    expect(() => new NodeProcessSpawner(failingWith('EPERM')).signalGroup(4321, 'SIGTERM')).toThrow('kill EPERM');
+  });
+});

@@ -23,16 +23,25 @@ export abstract class IProcessSpawner {
   public abstract signalGroup(pid: number, signal: NodeJS.Signals): void;
 }
 
+type Kill = (pid: number, signal: NodeJS.Signals) => void;
+
 export class NodeProcessSpawner implements IProcessSpawner {
+  private readonly kill: Kill;
+
+  public constructor(kill: Kill = (pid, signal) => process.kill(pid, signal)) {
+    this.kill = kill;
+  }
+
   public spawn(command: string, args: string[], options: ProcessOptions): ChildProcessHandle {
     return spawn(command, args, options) as ChildProcessHandle;
   }
 
-  // Linux and macOS only. Windows has no process groups: a negative pid is
-  // refused there, and the error reaches the caller.
+  // Linux and macOS only. Windows has no process groups: there a negative pid
+  // names no process, which comes back as ESRCH, the same as a group already
+  // gone, so nothing is signalled and nothing is reported.
   public signalGroup(pid: number, signal: NodeJS.Signals): void {
     try {
-      process.kill(-pid, signal);
+      this.kill(-pid, signal);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ESRCH') {
         throw err;
