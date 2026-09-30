@@ -3,7 +3,10 @@
 Claude Code joining tower's bus as one more participant, through the Agent
 SDK.
 
-This is the decision record. Nothing is built yet; how it will be built is under How it's built. Every decision here is
+This is the decision record. The participant's process, its configuration,
+launching Claude Code, its presence on the bus, the `service`, `say` and
+`cancel` requests, and shutdown are built; the publisher (what turns Claude
+Code's writes into `changes`) is not. Every decision here is
 Stephen's, with the date he made it and, where it matters, his words. Open
 questions are listed under [Open](#open). Evidence comes from proofs run on
 26 and 27 Sep, each on its own branch (listed under [Evidence](#evidence)).
@@ -33,6 +36,10 @@ questions are listed under [Open](#open). Evidence comes from proofs run on
 
 ## Scope of v0
 
+**The first milestone** (1 Oct): driving a conversation from tower. "if i
+can drive the conversation, that's the first major milestone" ("it will need
+others soon").
+
 In:
 
 - Seeing a conversation in tower and saying into it, fully usable from
@@ -56,7 +63,9 @@ Out of v0:
 - **Approvals.** "anything that cannot be auto approved by automode, can be
   droped, ie AskUserQuestion" (26 Sep). When they come, each ask only has to
   work in one place: answers on the bus and in the terminal aren't
-  reconciled (23 Sep).
+  reconciled (23 Sep). Until then Claude Code runs with
+  `permissionPrompts: 'none'` (1 Oct): nothing answers a permission prompt,
+  so whatever the mode, rules and hooks don't allow is denied.
 - **Rewind.** Make or break, but "i dont need it to *start using* it"
   (23 Sep). When Claude Code rewinds itself, that is published as
   `tip.moved`. Tower doesn't need a way to ask for a rewind (23 Sep).
@@ -170,6 +179,9 @@ Not at all:
   needs; that is post-v0. Host death is the known gap: it loses the end only
   with no transcript to recover from as well, and "this is for the 99% of
   cases".
+- **Claude Code is the source of state** (1 Oct): "it publishes what it
+  *knows*". So a `say`'s precondition is checked against the tip in Claude
+  Code's own record.
 - **Claude Code's stderr goes to the participant's stderr** (29 Sep).
   Logging isn't designed yet: "it hasnt come up yet".
 
@@ -253,6 +265,12 @@ Not at all:
 - **Environment values fail fast, with no defaults** (29 Sep): "these are the
   ones that are required, no defaults". A missing or unusable one stops the
   process at start, as a missing `NATS_URL` does.
+- **The world and the durable bucket name are environment variables**
+  (1 Oct), not control lines: "this is really plumbing"; "the bucket name,
+  the world, have no bearing on how claude works". The world is
+  `PARTICIPANT_WORLD`, fixed for the process, "otherwise it could switch
+  worlds". The bucket name "needs to be static, remember the no ambient
+  config is about the model, the agent".
 - **Claude Code's configuration variables are stripped** (29 Sep) from the
   environment Claude Code inherits: "if we can strip this, please". Claude
   Code ranks some environment variables above its settings, so an inherited
@@ -420,7 +438,8 @@ because otherwise we'd be using a resolved value" (26 Sep).
   easy as accepting, since the participant knows a query is running, so it
   is rejected with reason `busy`: "it would be slightly better to reject if
   we know we cannot accept it" (27 Sep). The sender can send it again when
-  the query ends.
+  the query ends. For now (1 Oct) every `chdir` is answered `unsupported`;
+  the above is how it works once built.
 - **`retry`:** not in v0: "its not needed in v0, until i hit a real issue /
   the bridge retry was for a real issue, because i had to implement it
   myself" (26 Sep). Claude Code's own retry default is accepted until then.
@@ -436,12 +455,59 @@ because otherwise we'd be using a resolved value" (26 Sep).
   enabled; "probably not for v0 though" (26 Sep).
 - **`revise`:** not needed: "revise isnt needed" (26 Sep).
 
+## Presence on the bus
+
+The spec states the events as reference (`docs/spec/agent.md`, 1 Oct). The
+reasons are here.
+
+- **Three agent events: `ready`, `unavailable`, `offline`** (1 Oct). In
+  Stephen's words: "ready means you can receive requests and will pulse /
+  unavailable means you cannot, you still pulse because the expected next
+  state is offline, or ready / offline means you stop pulsing, you're
+  inert". `unavailable` exists because "we need something to say you are no
+  longer available, you'd publish it, then stop subscribing". It is named
+  beside `ready`: "we have ready for now, so go ready and unavailable".
+  With `offline`, tower knows at once that an instance has stopped, rather
+  than after its pulse goes quiet.
+- **`offline` doesn't require the process to exit** (1 Oct): "offline means
+  you're no longer ready / it doesnt mean your process *must* exit". "if
+  that cuases issues, thjen we can require it".
+- **`offline` is final for its `instanceId`** (1 Oct). A process that can
+  take requests again publishes `ready` as a new instance, under a new
+  `instanceId`. Stephen: "we might find issues here in review, in which case
+  we forbid offline -> ready with the same instanceId". Otherwise a live
+  holder that had published `offline` would read as stranded, and its
+  conversations could be taken over.
+- **Once `unavailable`, it takes no new work** (1 Oct): "the main thing is,
+  once its unavailable, it shouldnt be accepting new conversations (service)
+  or messages (say)". A `service`, or a `say` on a conversation it still
+  holds, is rejected with the reason `unavailable`. It must unsubscribe from
+  the world's requests; the recommended order is to unsubscribe, then publish
+  `unavailable`. "it should definitely unsubscribe from the world, but it can
+  stay subscribed for the conversations if it wants to (until detached)". A
+  request that then finds no responder is expected: "this also happens once
+  its shut down".
+- **`drain` is answered `unsupported`** by the participant for now (1 Oct).
+  It stops on signals (see [Shutdown](#shutdown)).
+
+Parked, not decided:
+
+- **`drain` can't choose its instance.** It goes to the world's queue group,
+  so whichever instance NATS picks answers it; the spec states this as a
+  known limitation. Stephen: "it's for restarting an agent, you dont drain a
+  random server, you pick one". The shape for the fix: `drain` names the
+  `instanceId` in its body, never in the subject; every instance receives it
+  and only the named one acts; a `drain` reaching an instance already
+  `unavailable` is `accepted`. Not needed for the first milestone.
+
 ## The protocol
 
 - **`service` without a cwd** is rejected `invalid` (agent.md:214: "a
   recognised request whose body doesn't carry what it needs"). This reverses
   the earlier "takes the agent's own default" for this participant (26 Sep).
-  Nothing in tower sends `service` today.
+- **Tower's UI has no action that starts a conversation** (1 Oct, parked):
+  "i dont need this right now, i can just use a script". A script sends
+  `service` with a conversation id and a cwd.
 - **`service` with a named cwd** that can't be established is rejected
   `invalid_cwd` (agent.md:214).
 - **`service` for a conversation that's already served:** the spec's premise
@@ -537,6 +603,8 @@ Parked, not decided:
   loses up to 9 lines. This follows from "commit as things happen" and the
   partial-reply amendment. Stephen: "do you think losing everything is a
   good idea?"
+- **What the bus sees at shutdown** (1 Oct): `unavailable` first, then a
+  `detached` for each conversation it holds, then `offline`.
 - **Orphans after a hard kill** (28 Sep): each Claude Code is launched
   through `setpriv --pdeathsig SIGINT` when `setpriv` is available, so a
   SIGKILLed participant's Claude Codes are interrupted within about 2.6 s
