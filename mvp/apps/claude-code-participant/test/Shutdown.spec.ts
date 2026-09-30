@@ -5,6 +5,8 @@ import { EXITS } from '../src/ExitCodes.js';
 import { Shutdown } from '../src/Shutdown.js';
 import { CONFIGURED, type FakeChild, testServices } from './support.js';
 
+const TAG = 'TOWER_PARTICIPANT=/agents/alpha/config';
+
 function request(n: number): LaunchRequest {
   return { id: `0f8b7c1e-2a4d-4e6f-9b1a-3c5d7e9f1a2${n}`, cwd: '/work/project', additionalDirectories: [], resume: false };
 }
@@ -181,6 +183,95 @@ describe('Shutdown', () => {
       exitAll(children);
       await settle();
       expect(host.deadlines[0]?.cancelled).toBe(false);
+    });
+  });
+
+  describe('stage 1: what outlived its Claude Code', () => {
+    it('signals nothing while a Claude Code still runs', async () => {
+      const { shutdown, processTable } = await serving(1);
+      processTable.add(9001, TAG);
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(processTable.signals).toEqual([]);
+    });
+
+    it('sends SIGTERM to what is left once every Claude Code has exited', async () => {
+      const { shutdown, processTable, children } = await serving(1);
+      processTable.add(9001, TAG);
+      shutdown.ask('SIGINT');
+      await settle();
+      exitAll(children);
+      await settle();
+      expect(processTable.signals).toEqual([{ pid: 9001, signal: 'SIGTERM' }]);
+    });
+
+    it('leaves alone a process tagged for another config dir', async () => {
+      const { shutdown, processTable } = await serving(0);
+      processTable.add(9001, 'TOWER_PARTICIPANT=/agents/beta/config');
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(processTable.signals).toEqual([]);
+    });
+
+    it('says so once nothing it started is left', async () => {
+      const { shutdown, processTable, host } = await serving(0);
+      processTable.add(9001, TAG);
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(host.logs).toContain('shutdown stage 1: nothing it started is still running');
+    });
+
+    it('names what it signals', async () => {
+      const { shutdown, processTable, host } = await serving(0);
+      processTable.add(9001, TAG);
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(host.logs).toContain('shutdown stage 1: SIGTERM to what outlived its Claude Code: 9001 (cmd-9001)');
+    });
+
+    it('keeps waiting, without signalling again, for a process that ignores SIGTERM', async () => {
+      const { shutdown, processTable, timer, host } = await serving(0);
+      processTable.add(9001, TAG, ['SIGKILL']);
+      timer.onSleep = (now) => {
+        if (now >= 1000) {
+          host.deadlines[0]?.expire();
+        }
+      };
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(processTable.signals.filter((sent) => sent.signal === 'SIGTERM')).toEqual([{ pid: 9001, signal: 'SIGTERM' }]);
+    });
+
+    it('does not say nothing is left while something is', async () => {
+      const { shutdown, processTable, timer, host } = await serving(0);
+      processTable.add(9001, TAG, ['SIGKILL']);
+      timer.onSleep = (now) => {
+        if (now >= 1000) {
+          host.deadlines[0]?.expire();
+        }
+      };
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(host.logs).not.toContain('shutdown stage 1: nothing it started is still running');
+    });
+
+    it('signals a process that appears while it waits', async () => {
+      const { shutdown, processTable, timer } = await serving(0);
+      processTable.add(9001, TAG, ['SIGKILL']);
+      timer.onSleep = (now) => {
+        if (now === 100) {
+          processTable.add(9002, TAG);
+        }
+        if (now >= 1000) {
+          processTable.processes = [];
+        }
+      };
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(processTable.signals).toEqual([
+        { pid: 9001, signal: 'SIGTERM' },
+        { pid: 9002, signal: 'SIGTERM' },
+      ]);
     });
   });
 

@@ -1,10 +1,17 @@
 import { dependsOn } from '@shellicar/core-di';
+import { PARTICIPANT_TAG } from './ClaudeCodeSpawner.js';
 import type { Conversation } from './Conversation.js';
 import { Conversations } from './Conversations.js';
 import { EXITS } from './ExitCodes.js';
 import { IHost } from './Host.js';
+import { ParticipantConfig } from './ParticipantConfig.js';
 import { ParticipantSettings } from './ParticipantSettings.js';
 import { IProcessSpawner } from './ProcessSpawner.js';
+import { IProcessTable, type TaggedProcess } from './ProcessTable.js';
+import { ITimer } from './Timer.js';
+
+/** How often a wait for processes to go looks again. */
+const POLL_MS = 50;
 
 /** Someone asking the participant to stop: each one moves shutdown on a stage. */
 export const ASKING_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
@@ -13,6 +20,14 @@ export const ASKING_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
 export const DRIVER_GONE_SIGNALS = ['SIGHUP'] as const;
 
 /** An error with each of its causes, so the underlying one is never dropped. */
+function identify(process: TaggedProcess): string {
+  return `${process.pid}:${process.startTime}`;
+}
+
+function listed(processes: readonly TaggedProcess[]): string {
+  return processes.map((process) => `${process.pid} (${process.commandLine === '' ? 'no command line' : process.commandLine})`).join(', ');
+}
+
 export function describeError(err: unknown): string {
   const parts: string[] = [];
   let current: unknown = err;
@@ -37,8 +52,9 @@ export function describeError(err: unknown): string {
  * only once (a service manager's SIGTERM, a closed terminal) must not leave
  * the process waiting forever on something that hangs.
  *
- * 1. Graceful: interrupt every turn, close every conversation's input, and
- *    wait for everything to finish. The process then ends by itself.
+ * 1. Graceful: interrupt every turn, close every conversation's input, wait
+ *    for every Claude Code to exit, then send SIGTERM to whatever it started
+ *    that outlived it and wait for that too. The process then ends by itself.
  * 2. Teardown: kill every Claude Code (SIGTERM to its process group), wait for
  *    them to go, and exit.
  * 3. Exit at once.
@@ -48,6 +64,9 @@ export class Shutdown {
   @dependsOn(ParticipantSettings) private readonly settings!: ParticipantSettings;
   @dependsOn(IProcessSpawner) private readonly processes!: IProcessSpawner;
   @dependsOn(IHost) private readonly host!: IHost;
+  @dependsOn(ParticipantConfig) private readonly config!: ParticipantConfig;
+  @dependsOn(IProcessTable) private readonly processTable!: IProcessTable;
+  @dependsOn(ITimer) private readonly timer!: ITimer;
 
   private stage = 0;
   private cancelDeadline: (() => void) | undefined;
@@ -107,8 +126,47 @@ export class Shutdown {
       return;
     }
     this.host.log('shutdown stage 1: every Claude Code has exited');
+    if (!(await this.stopWhatOutlivedThem())) {
+      return;
+    }
     // Publishing what's left, releasing each conversation (`detached`) and
     // draining NATS go here, once they exist.
+  }
+
+  /**
+   * SIGTERM to every process still carrying this config dir's tag, then a
+   * wait until none is left or the stage moves on. Only once every Claude
+   * Code has exited: while one runs, it stops its own commands when
+   * interrupted and records that it did, which a signal from outside would
+   * bypass. What is left then is what outlived its Claude Code (a command
+   * started in the background, say): Claude Code runs each command in a
+   * session of its own, and once its Claude Code has gone nothing but the
+   * inherited tag ties it back here.
+   *
+   * @returns whether nothing is left, false when the stage moved on first.
+   */
+  private async stopWhatOutlivedThem(): Promise<boolean> {
+    const entry = `${PARTICIPANT_TAG}=${this.config.configDir}`;
+    const signalled = new Set<string>();
+    for (;;) {
+      if (this.stage !== 1) {
+        return false;
+      }
+      const left = this.processTable.tagged(entry);
+      if (left.length === 0) {
+        this.host.log(`shutdown stage 1: nothing it started is still running`);
+        return true;
+      }
+      const unsignalled = left.filter((process) => !signalled.has(identify(process)));
+      if (unsignalled.length > 0) {
+        this.host.log(`shutdown stage 1: SIGTERM to what outlived its Claude Code: ${listed(unsignalled)}`);
+        for (const process of unsignalled) {
+          signalled.add(identify(process));
+          this.processTable.signal(process, 'SIGTERM');
+        }
+      }
+      await this.timer.sleep(POLL_MS);
+    }
   }
 
   private async stop(conversation: Conversation): Promise<void> {
