@@ -72,8 +72,8 @@ map: who serves what, and whether they are alive.
 
 | Event | Fields | Notes |
 |---|---|---|
-| `ready` | `instanceId`, `host` | the instance can receive requests, and it pulses. Published each time the instance becomes able to receive requests, boot included |
-| `unavailable` | `instanceId` | the instance cannot receive requests: it has unsubscribed from the world's requests (`service`, `drain`) and from the requests of every conversation it holds (`say`, `cancel`, `chdir`). It keeps pulsing; its next state is `offline` or `ready` |
+| `ready` | `instanceId`, `host` | the instance can receive requests, and it pulses. It is subscribed to all its requests: the world's (`service`, `drain`), those of every conversation it holds (`say`, `cancel`, `chdir`), and those of its outstanding approvals (`approval.v1.{approvalId}.requests`). Published each time the instance becomes able to receive requests, boot included |
+| `unavailable` | `instanceId` | the instance cannot receive requests: it has unsubscribed from all its requests, the world's (`service`, `drain`), those of every conversation it holds (`say`, `cancel`, `chdir`), and those of its outstanding approvals (`approval.v1.{approvalId}.requests`). It keeps pulsing; its next state is `offline` or `ready` |
 | `offline` | `instanceId` | the instance stops pulsing and is inert |
 | `pulse` | `instanceId`, `intervalS` | the liveness promise: "you will hear from me again within `intervalS` seconds." One pulse per instance, never per conversation — a process's liveness is one fact, and restating it per conversation is the restatement core.md forbids. `intervalS` is at most 600 (ten minutes): a longer promise buys three times its own length of presumed life, so stranded detection and takeover stop working exactly where they are needed. The bound is validity, not a cap — a larger value makes the event invalid whole, and nothing is clamped to 600 |
 
