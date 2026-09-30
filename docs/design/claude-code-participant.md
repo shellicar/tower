@@ -170,6 +170,8 @@ Not at all:
   needs; that is post-v0. Host death is the known gap: it loses the end only
   with no transcript to recover from as well, and "this is for the 99% of
   cases".
+- **Claude Code's stderr goes to the participant's stderr** (29 Sep).
+  Logging isn't designed yet: "it hasnt come up yet".
 
 ## How it's built (29 Sep)
 
@@ -248,6 +250,17 @@ Not at all:
 - **`NATS_URL` has no default,** and the participant won't start without it:
   "having a default that is \"prod\" is what led to the mess that made me
   have the test nats anyway" (25 Sep).
+- **Environment values fail fast, with no defaults** (29 Sep): "these are the
+  ones that are required, no defaults". A missing or unusable one stops the
+  process at start, as a missing `NATS_URL` does.
+- **Claude Code's configuration variables are stripped** (29 Sep) from the
+  environment Claude Code inherits: "if we can strip this, please". Claude
+  Code ranks some environment variables above its settings, so an inherited
+  one would silently replace a required value (the model, effort, thinking,
+  max tokens, the system prompt, the permission mode). The list is in the
+  code (`mvp/apps/claude-code-participant/src/startup.ts`). A value set on
+  purpose goes through
+  `claudeSettings.env`, which still wins.
 
 ### The login
 
@@ -297,6 +310,11 @@ because otherwise we'd be using a resolved value" (26 Sep).
   `{"claude-opus-5-5": {"effortLevel": "high"}}`). Overrides per model or
   family "doesnt need to be v0, but we should consider it to make adding it
   later seamless" (26 Sep).
+- **A `claudeSettings` line replaces the whole value,** arrays included
+  (29 Sep): "the workaround is "settings": {} then merge it yourself, not
+  hard"; "its not set in stone, once we use it ill know".
+- **Control lines are validated strictly, with zod** (29 Sep): "invalid
+  config silently accepted is confusing rather than helpful".
 - **Pinned per conversation:** tools and the system prompt are fixed for a
   conversation's life. "should be "pinned" if possible anyway / in terms
   of, changing these invalidates the entire conversation cache, or rather,
@@ -324,9 +342,17 @@ because otherwise we'd be using a resolved value" (26 Sep).
   no summary (proof 1). With `adaptive` and `summarized` declared, Claude
   Code silently substitutes the right shape per model (`enabled` with a
   budget on Haiku 4.5), with no error and no signal if it can't.
+  The type is `adaptive` or `disabled`, nothing else, and the display is
+  required even when thinking is `disabled` (29 Sep).
 - **Effort:** required. "avoid implicit defaults / especially when they
   affect everything ... it should be provided" (26 Sep). An account flag can
   move the default; a declared value outranks it (read from the code).
+  Required means it has to be set, not that it overrides Claude Code's own
+  settings (29 Sep): "a launch option doesnt beat settings ... requiring
+  effort to be set is about *requiring it to be set*, not that it
+  *ovewrrides* anything else". So a per-model `effortLevel` in
+  `modelSettings` still applies over it. How a declared `max` is carried is
+  open (see [Open](#open)).
 - **System prompt:** required, and Claude Code's `claude_code` preset (about
   28k chars, the interactive CLI's prompt) is one of the choices: "because
   there is a default/preset, our config should also allow that" (26 Sep).
@@ -349,7 +375,10 @@ because otherwise we'd be using a resolved value" (26 Sep).
   settings are required, meaning they must be the baseline / so in that
   case, auto is replaced by plan, why wouldnt it be? else the
   permissions.defaultMode does nothing" (27 Sep). The same holds for any
-  required field the fallback also sets. The SDK's typed `permissionMode` accepts `auto`, at start
+  required field the fallback also sets, thinking and max tokens included
+  (29 Sep): "the required fields are about not allowing any
+  default/ambient". The required values "have to be reconciled with the
+  standard settings" (29 Sep). The SDK's typed `permissionMode` accepts `auto`, at start
   and live through `setPermissionMode('auto')` (proof 10).
 - **Account connectors off by default** (27 Sep): the participant's
   baseline sets Claude Code's `disableClaudeAiConnectors: true`, and the
@@ -573,7 +602,8 @@ Parked, not decided:
 - **One exit code per way of exiting** (29 Sep): "a unique code for each
   exit type makes sense". Clean (stage 1) is 0; stage 2 is 64, stage 3 65,
   a bad environment value 66, the config dir held by another participant
-  67, an unsupported platform 68. One table in the code, with a test that
+  67, an unsupported platform 68. So a startup error is told apart from a
+  crash: "more exit codes are good" (29 Sep). One table in the code, with a test that
   no two share a number and all but 0 sit in 64 to 113. A crash stays on
   Node's own 1.
 - **Each Claude Code runs in its own process group** (29 Sep), so every
@@ -724,6 +754,20 @@ separately, they can go in this branch" (26 Sep).
 - **Settled for now (29 Sep) by "What is committed follows Claude Code"** (How it runs), for both of the next two items: the as-received form and the integration rerun are set aside. The store proof found committing every store entry unchanged, and resuming with `resumeSessionAt` at the last committed entry, sent the live request at every pickup (an agent's report, not re-checked).
 - **The hybrid store, confirmed end to end:** local record first, tower's tip checked before use, tower for a conversation this machine never had, exact against the live next query, alongside the private HOME, the orphan tag and recovery. First run as one thing in the third integration attempt (28 Sep, branch `integration-participant-3`), judged by a check built on the wrong wording (see What the invariant means); a rerun waits on that check.
 - **Skills:** the route proven (proofs 22, 26) is the `user` source over the agent's config dir, with the spawn hook linking each declared skill folder into whichever config dir each Claude Code gets, skipping folders that carry `.claude-plugin`, and `reloadSkills()` when the declared set changes; the private HOME keeps the housekeeping it turns on out of the real home. Proposed by Claude, not yet confirmed by Stephen. The review of the third attempt found its code opening the `user` source unconditionally (`extraArgs`), undoing `settingSources: []`. Skills are their own later piece (29 Sep); the question there is declaring a skills directory without opening Claude Code's whole `user` source (CLAUDE.md, hooks, permissions, MCP).
+- **Left from the foundation piece** (29 Sep), none blocking:
+  - `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` still passes through to Claude Code.
+    It forces the permission mode to `default`, but it is also security
+    hardening: it isolates the commands Claude Code runs. `GITHUB_ACTIONS`
+    turns it on too. Strip it, keep it, or refuse loudly.
+  - Whether variables that change a required value only indirectly belong
+    on the strip list: the model catalog (`CLAUDE_CODE_MODEL_CATALOG` and
+    `_URL`) and `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`.
+  - The permission mode goes as a launch option, because Claude Code's
+    settings alone never apply it, and as an option it beats
+    `claudeSettings.permissions.disableAutoMode`.
+  - Effort `max`: Claude Code's settings can't carry it (the top-level and
+    per-model `effortLevel` both drop it silently), so a declared `max` goes
+    as a launch option and then beats every effort the fallback sets.
 - **Later, not v0:** the `tools` line; queueing (v1); showing shells and subagents (v1).
 
 ## Evidence
