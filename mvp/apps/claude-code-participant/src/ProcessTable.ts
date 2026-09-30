@@ -18,7 +18,7 @@ export type TaggedProcess = ProcessIdentity & {
 
 /**
  * The processes running on this machine: the edge between the participant
- * and the OS's process list. v0 has Linux only.
+ * and the OS's process list.
  */
 export abstract class IProcessTable {
   /** Every running process whose environment holds `entry` exactly, other than this process, its ancestors and its descendants. */
