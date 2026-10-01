@@ -198,6 +198,32 @@ HELM_BRIDGE_PATH=./target/debug/bridge cargo run -p helm
 Env: `HELM_BRIDGE_PATH`, `HELM_BRIDGE_LOG` (bridge stderr, default
 `/tmp/helm-bridge.log`), `HELM_EMOJI`.
 
+## claude-code-participant
+
+Claude Code on tower's bus (`mvp/apps/claude-code-participant`): one participant per world, serving conversations through the Agent SDK. The scripts in its `scripts/` directory run it. Every script needs `NATS_URL` given explicitly, so it never defaults to 4222 (the live deployment), and runs from the app's own directory. To try it on the test broker, run these from the repo root, each terminal in turn:
+
+```sh
+pnpm install
+```
+
+```sh
+cd mvp && docker compose -f compose.test.yaml up -d nats && docker compose -f compose.test.yaml run --rm stream-init
+```
+
+```sh
+cd mvp && NATS_URL=nats://127.0.0.1:31416 TOWER_DB=tower-test.db just dev
+```
+
+```sh
+cd mvp/apps/claude-code-participant && NATS_URL=nats://127.0.0.1:31416 node --import tsx scripts/start.ts
+```
+
+```sh
+mkdir -p /tmp/cc-try && cd mvp/apps/claude-code-participant && NATS_URL=nats://127.0.0.1:31416 node --import tsx scripts/new-conversation.ts /tmp/cc-try
+```
+
+The new conversation shows in tower; say into it there. `start.ts` configures the participant (model, system prompt, permission mode, sandbox) and keeps it running; Ctrl-C stops it, and a second Ctrl-C forces it. Its config dir is `${XDG_DATA_HOME:-~/.local/share}/tower/worlds/<world>`. `just dev` needs `trunk` (`cargo install trunk --locked`). When done, stop the test broker with `cd mvp && docker compose -f compose.test.yaml down`.
+
 ## Seams
 
 Edges get their seam at birth. An edge is anywhere the code meets what a
