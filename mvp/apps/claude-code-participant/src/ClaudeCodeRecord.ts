@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isObject, type RecordEntry, roleOf } from './ConversationEntries.js';
 
 /** Claude Code's own record of a conversation: its transcript in the agent's config dir. */
 export type ClaudeCodeRecord = {
@@ -7,17 +8,12 @@ export type ClaudeCodeRecord = {
   tip: string | null;
 };
 
-// TODO: undecided: which transcript entries count as the conversation's
-// messages is settled with the publisher. Until then the tip is the last
-// user, assistant or system entry outside a subagent's sidechain.
-const MESSAGE_TYPES: readonly string[] = ['user', 'assistant', 'system'];
-
 function isNotFound(err: unknown): boolean {
   const { code } = err as NodeJS.ErrnoException;
   return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
-/** The id of the last message in a transcript (one JSON entry per line), or null when there is none. */
+/** The id of the last entry in a transcript (one JSON entry per line) that counts as a message, or null when there is none. */
 export function lastMessageId(transcript: string): string | null {
   let tip: string | null = null;
   for (const line of transcript.split('\n')) {
@@ -30,12 +26,12 @@ export function lastMessageId(transcript: string): string | null {
     } catch {
       continue;
     }
-    if (typeof entry !== 'object' || entry === null) {
+    if (!isObject(entry) || typeof entry.type !== 'string') {
       continue;
     }
-    const { type, uuid, isSidechain } = entry as Record<string, unknown>;
-    if (typeof type === 'string' && MESSAGE_TYPES.includes(type) && typeof uuid === 'string' && isSidechain !== true) {
-      tip = uuid;
+    const recorded = entry as RecordEntry;
+    if (roleOf(recorded) !== undefined) {
+      tip = recorded.uuid ?? null;
     }
   }
   return tip;

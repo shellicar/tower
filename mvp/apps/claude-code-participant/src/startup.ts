@@ -101,6 +101,8 @@ export type Startup = {
   natsUrl: string;
   /** The world this participant serves conversations from, named in every agent subject it uses. */
   world: string;
+  /** The deployment's durable object store bucket, where the files in published messages are stored. */
+  durableBucket: string;
   /** The agent's own Claude Code config dir, reused across runs: the agent's identity, which no two participants may share. */
   configDir: string;
   /** The real home: the login lives under it, and commands run with it. */
@@ -133,6 +135,7 @@ export function readStartup(env: NodeJS.ProcessEnv): Startup {
   // NATS_URL has no default: an unset one must never land on a live broker.
   const natsUrl = required(env, 'NATS_URL');
   const world = required(env, 'PARTICIPANT_WORLD');
+  const durableBucket = required(env, 'PARTICIPANT_DURABLE_BUCKET');
   // None of these can arrive later (they aren't control lines), so a process
   // started without one could never serve: it stops at start instead.
   const configDir = absolute(env, 'PARTICIPANT_CONFIG_DIR');
@@ -143,5 +146,5 @@ export function readStartup(env: NodeJS.ProcessEnv): Startup {
       inheritedEnv[name] = value;
     }
   }
-  return { natsUrl, world, configDir, realHome, inheritedEnv };
+  return { natsUrl, world, durableBucket, configDir, realHome, inheritedEnv };
 }

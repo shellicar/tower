@@ -2,7 +2,7 @@
 // conversation, send one prompt, show the reply and what Claude Code was
 // started with. It launches directly, without the bus.
 //
-//   printf '%s\n' '<control line>' ... | NATS_URL=... PARTICIPANT_WORLD=... PARTICIPANT_CONFIG_DIR=... \
+//   printf '%s\n' '<control line>' ... | NATS_URL=... PARTICIPANT_WORLD=... PARTICIPANT_DURABLE_BUCKET=... PARTICIPANT_CONFIG_DIR=... \
 //     pnpm exec tsx scripts/live-check.ts <cwd> <prompt>
 //
 // Like the participant, it takes the config dir's lock and starts stopping
@@ -47,6 +47,10 @@ class CountingPublisher implements IPublisher {
       appended.push(entry.type);
     }
     return Promise.resolve();
+  }
+
+  public route(): () => void {
+    return () => {};
   }
 }
 

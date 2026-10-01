@@ -6,7 +6,7 @@
 // interrupts; a say against Claude Code's own tip; and the events shutdown
 // publishes after SIGINT.
 //
-//   NATS_URL=nats://127.0.0.1:31416 PARTICIPANT_WORLD=... PARTICIPANT_CONFIG_DIR=... \
+//   NATS_URL=nats://127.0.0.1:31416 PARTICIPANT_WORLD=... PARTICIPANT_DURABLE_BUCKET=... PARTICIPANT_CONFIG_DIR=... \
 //     node --import tsx scripts/bus-check.ts <cwd>
 //
 // Everything it shows goes to stdout as one JSON object per line, stamped
@@ -25,7 +25,7 @@ import { lastMessageId } from '../src/ClaudeCodeRecord.js';
 const [cwd] = process.argv.slice(2);
 const { NATS_URL: natsUrl, PARTICIPANT_WORLD: world, PARTICIPANT_CONFIG_DIR: configDir } = process.env;
 if (cwd === undefined || natsUrl === undefined || world === undefined || configDir === undefined) {
-  console.error('usage: NATS_URL=... PARTICIPANT_WORLD=... PARTICIPANT_CONFIG_DIR=... bus-check.ts <cwd>');
+  console.error('usage: NATS_URL=... PARTICIPANT_WORLD=... PARTICIPANT_DURABLE_BUCKET=... PARTICIPANT_CONFIG_DIR=... bus-check.ts <cwd>');
   process.exit(2);
 }
 

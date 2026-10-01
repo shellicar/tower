@@ -157,6 +157,7 @@ vite: `WEB_PORT`; bridge: `NATS_URL`, `BRIDGE_WORLD`,
 full catalogue, later says a delta naming skills whose SKILL.md changed; the
 same control line repoints it live); claude-code-participant
 (`mvp/apps/claude-code-participant`): `NATS_URL`, `PARTICIPANT_WORLD`,
+`PARTICIPANT_DURABLE_BUCKET` (the durable object store bucket),
 `PARTICIPANT_CONFIG_DIR` (absolute) and `HOME` (absolute), all required with
 no default, plus `PATH`, searched for `setpriv`.
 

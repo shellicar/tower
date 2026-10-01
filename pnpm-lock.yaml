@@ -171,6 +171,9 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.3.283
         version: 0.3.283(@anthropic-ai/sdk@0.128.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.30.1(zod@4.6.5))(zod@4.6.5)
+      '@nats-io/obj':
+        specifier: ^3.4.0
+        version: 3.4.0
       '@nats-io/transport-node':
         specifier: ^3.4.0
         version: 3.4.0
@@ -815,6 +818,9 @@ packages:
       '@emnapi/core': ^1.7.1 || ^2.0.0-alpha.4
       '@emnapi/runtime': ^1.7.1 || ^2.0.0-alpha.4
 
+  '@nats-io/jetstream@3.4.0':
+    resolution: {integrity: sha512-GzHQodNJ942+R5LRb8PuZ5ugVWVWMRiufxUYLLVWkXKfwDXYN+Owo0d7L/b9O7BPyrbYD7jQWAC6+ZVuXa9Gyw==}
+
   '@nats-io/nats-core@3.4.0':
     resolution: {integrity: sha512-QMDM86EUNm+wudlKC67HLar/KHHQUvJGLfb4jbahje3pUk3K9afeck9fwsxBZF0eUFox6T/TA6m/t+lQqf+QsQ==}
 
@@ -825,6 +831,9 @@ packages:
   '@nats-io/nuid@3.0.0':
     resolution: {integrity: sha512-QbXZDrxmYlrn5AD06gYcUTmEHwxn96HBQMIk7XTjDlEcx6FPzVBBPjp4AMRh1lEv6B4iJ6Xb/Uz61JugPXFRQg==}
     engines: {node: '>= 22.x'}
+
+  '@nats-io/obj@3.4.0':
+    resolution: {integrity: sha512-zQRyrbxVtapKtqlxcA7qiMBN5aoo1aqSLNHyTZY9d6xBmBAYsw7sfYfSdHSguiR7GXtEjFgFnynTcv7Rw9MIrg==}
 
   '@nats-io/transport-node@3.4.0':
     resolution: {integrity: sha512-hH7u7ejIBTFEJIZ8rIcMrHJI6wl+HhpO5sVFs1+ppmXa8RuB2+Lh1+UwTzZ5xTNNm1TKcRkYy+2qCV56qp8RxA==}
@@ -1842,6 +1851,9 @@ packages:
   jose@6.2.12:
     resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
 
+  js-sha256@0.11.1:
+    resolution: {integrity: sha512-o6WSo/LUvY2uC4j7mO50a2ms7E/EAdbP0swigLV+nzHKTTaYnaLIWJ02VdXrsJX0vGedDESQnLsOekr94ryfjg==}
+
   jsdom@29.1.1:
     resolution: {integrity: sha512-ECi4Fi2f7BdJtUKTflYRTiaMxIB0O6zfR1fX0GXpUrf6flp8QIYn1UT20YQqdSOfk2dfkCwS8LAFoJDEppNK5Q==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24.0.0}
@@ -2792,6 +2804,10 @@ snapshots:
       '@tybys/wasm-util': 0.10.4
     optional: true
 
+  '@nats-io/jetstream@3.4.0':
+    dependencies:
+      '@nats-io/nats-core': 3.4.0
+
   '@nats-io/nats-core@3.4.0':
     dependencies:
       '@nats-io/nkeys': 2.0.3
@@ -2802,6 +2818,12 @@ snapshots:
       tweetnacl: 1.0.3
 
   '@nats-io/nuid@3.0.0': {}
+
+  '@nats-io/obj@3.4.0':
+    dependencies:
+      '@nats-io/jetstream': 3.4.0
+      '@nats-io/nats-core': 3.4.0
+      js-sha256: 0.11.1
 
   '@nats-io/transport-node@3.4.0':
     dependencies:
@@ -3633,6 +3655,8 @@ snapshots:
   jiti@2.7.0: {}
 
   jose@6.2.12: {}
+
+  js-sha256@0.11.1: {}
 
   jsdom@29.1.1:
     dependencies:

@@ -15,7 +15,7 @@ import { Presence } from './Presence.js';
 import { IProcessSpawner, NodeProcessSpawner } from './ProcessSpawner.js';
 import { IProcessTable, LinuxProcessTable } from './ProcessTable.js';
 import { ServingGate } from './ServingGate.js';
-import { IPublisher, NullPublisher, PublishingSessionStore } from './SessionStore.js';
+import { BusPublisher, IPublisher, PublishingSessionStore } from './SessionStore.js';
 import { Shutdown } from './Shutdown.js';
 import { ITimer, RealTimer } from './Timer.js';
 
@@ -32,7 +32,7 @@ export function participantServices(config: ParticipantConfig): IServiceCollecti
     .asSelf();
   services.register(ParticipantSettings).asSelf();
   services.register(ControlLines).asSelf();
-  services.register(NullPublisher).as(IPublisher);
+  services.register(BusPublisher).as(IPublisher);
   services.register(PublishingSessionStore).asSelf();
   services.register(NodeProcessSpawner).as(IProcessSpawner);
   services.register(ClaudeCodeSpawner).asSelf();

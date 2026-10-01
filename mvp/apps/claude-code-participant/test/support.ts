@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import type { Options, Query, SDKMessage, SDKUserMessage, SessionKey, SessionStoreEntry } from '@anthropic-ai/claude-agent-sdk';
+import type { Options, Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { type BrokerRequest, type BrokerSubscription, IBroker, type Reply } from '../src/Broker.js';
 import { IClaudeCode } from '../src/ClaudeCode.js';
 import { ControlLines } from '../src/ControlLines.js';
@@ -12,7 +12,6 @@ import { ParticipantConfig } from '../src/ParticipantConfig.js';
 import { type ChildProcessHandle, IProcessSpawner, type ProcessOptions } from '../src/ProcessSpawner.js';
 import { IProcessTable, type ProcessIdentity, type TaggedProcess } from '../src/ProcessTable.js';
 import { ServingGate } from '../src/ServingGate.js';
-import { IPublisher } from '../src/SessionStore.js';
 import { StartupError } from '../src/startup.js';
 import { ITimer } from '../src/Timer.js';
 
@@ -21,6 +20,7 @@ export function testConfig(overrides: { setpriv?: string | null; configDir?: str
     {
       natsUrl: 'nats://127.0.0.1:31416',
       world: 'test-world',
+      durableBucket: 'durable-test',
       configDir: overrides.configDir ?? '/agents/alpha/config',
       realHome: '/home/someone',
       inheritedEnv: { PATH: '/usr/bin', LANG: 'C.UTF-8' },
@@ -47,9 +47,14 @@ type FakeLaunch = {
   replies: MessageChannel<SDKMessage>;
 };
 
+/** Lets every pending promise callback run. */
+export function settle(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 /** The `result` Claude Code sends when a query ends, with only the fields the participant reads. */
-export function resultMessage(): SDKMessage {
-  return { type: 'result', subtype: 'success' } as SDKMessage;
+export function resultMessage(ending: 'success' | 'error_during_execution' = 'success'): SDKMessage {
+  return { type: 'result', subtype: ending, is_error: ending !== 'success' } as SDKMessage;
 }
 
 /** Records each query instead of starting Claude Code, and collects what the conversation sends it. */
@@ -170,15 +175,6 @@ class FakeHost implements IHost {
   }
 }
 
-class FakePublisher implements IPublisher {
-  public readonly published: { key: SessionKey; entries: SessionStoreEntry[] }[] = [];
-
-  public publish(key: SessionKey, entries: SessionStoreEntry[]): Promise<void> {
-    this.published.push({ key, entries });
-    return Promise.resolve();
-  }
-}
-
 type FakeProcess = TaggedProcess & {
   /** The one environment entry the fake matches the tag against. */
   tag: string;
@@ -285,11 +281,23 @@ function matches(subscribed: string, subject: string): boolean {
 
 type FakeSubscription = { subject: string; queue: string | undefined; handle: (request: BrokerRequest) => void; active: boolean };
 
-/** Records what is published and subscribed, and delivers a test's requests to whatever subscribes to them. */
+type StoredObject = {
+  bucket: string;
+  name: string;
+  data: Uint8Array;
+  metadata: Record<string, string>;
+  /** How many messages had been published when it was stored. */
+  publishedBefore: number;
+};
+
+/** Records what is published, stored and subscribed, and delivers a test's requests to whatever subscribes to them. */
 class FakeBroker implements IBroker {
   public readonly published: { subject: string; body: Record<string, unknown> }[] = [];
+  public readonly objects: StoredObject[] = [];
   public readonly subscriptions: FakeSubscription[] = [];
   public connectFailure: Error | undefined;
+  /** Makes every store fail with this error. */
+  public storeFailure: Error | undefined;
   public ended: 'drain' | 'close' | undefined;
 
   public connect(): Promise<void> {
@@ -308,6 +316,17 @@ class FakeBroker implements IBroker {
         subscription.active = false;
       },
     };
+  }
+
+  /** While set, every store waits for it before it completes. */
+  public storeHold: Promise<void> | undefined;
+
+  public async storeObject(bucket: string, name: string, data: Uint8Array, metadata: Record<string, string>): Promise<void> {
+    if (this.storeFailure !== undefined) {
+      throw this.storeFailure;
+    }
+    await this.storeHold;
+    this.objects.push({ bucket, name, data, metadata, publishedBefore: this.published.length });
   }
 
   public drain(): Promise<void> {
@@ -348,7 +367,6 @@ export function testServices(config: ParticipantConfig = testConfig(), options: 
   const services = participantServices(config);
   services.register(FakeClaudeCode).as(IClaudeCode);
   services.register(FakeProcessSpawner).as(IProcessSpawner);
-  services.register(FakePublisher).as(IPublisher);
   services.register(FakeProcessTable).as(IProcessTable);
   services.register(FakeTimer).as(ITimer);
   services.register(FakeHost).as(IHost);
@@ -364,9 +382,9 @@ export function testServices(config: ParticipantConfig = testConfig(), options: 
     processes: provider.resolve(IProcessSpawner) as FakeProcessSpawner,
     processTable: provider.resolve(IProcessTable) as FakeProcessTable,
     timer: provider.resolve(ITimer) as FakeTimer,
-    publisher: provider.resolve(IPublisher) as FakePublisher,
     host: provider.resolve(IHost) as FakeHost,
     broker: provider.resolve(IBroker) as FakeBroker,
+    ids: provider.resolve(IIds) as FakeIds,
     /** Sends control lines, as stdin would, and returns their replies. */
     control: (...lines: unknown[]) => lines.map((line) => provider.resolve(ControlLines).handle(typeof line === 'string' ? line : JSON.stringify(line))),
   };

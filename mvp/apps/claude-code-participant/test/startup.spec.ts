@@ -5,6 +5,7 @@ import { startupExitOf } from './support.js';
 const complete = {
   NATS_URL: 'nats://127.0.0.1:31416',
   PARTICIPANT_WORLD: 'test-world',
+  PARTICIPANT_DURABLE_BUCKET: 'durable',
   PARTICIPANT_CONFIG_DIR: '/agents/alpha/config',
   HOME: '/home/someone',
   PATH: '/usr/bin',
@@ -38,6 +39,21 @@ describe('readStartup', () => {
 
     it('is the world', () => {
       expect(readStartup(complete).world).toBe('test-world');
+    });
+  });
+
+  describe('PARTICIPANT_DURABLE_BUCKET', () => {
+    it('exits as a bad environment value when it is missing', () => {
+      const { PARTICIPANT_DURABLE_BUCKET: _, ...env } = complete;
+      expect(startupExitOf(() => readStartup(env))).toBe('badEnvironment');
+    });
+
+    it('refuses to start when it is empty', () => {
+      expect(() => readStartup({ ...complete, PARTICIPANT_DURABLE_BUCKET: '' })).toThrow('PARTICIPANT_DURABLE_BUCKET is required');
+    });
+
+    it('is the durable bucket', () => {
+      expect(readStartup(complete).durableBucket).toBe('durable');
     });
   });
 

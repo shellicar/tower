@@ -5,7 +5,7 @@
 // it applied, Claude Code's pid and process group, the commands Claude Code
 // starts, and the messages that come back.
 //
-//   NATS_URL=... PARTICIPANT_WORLD=... PARTICIPANT_CONFIG_DIR=... \
+//   NATS_URL=... PARTICIPANT_WORLD=... PARTICIPANT_DURABLE_BUCKET=... PARTICIPANT_CONFIG_DIR=... \
 //     node --import tsx scripts/shutdown-check.ts <cwd> <control-lines-file> <prompt> [<id to resume>]
 //
 // The control lines in the file are applied before the launch. The config

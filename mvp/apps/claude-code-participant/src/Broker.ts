@@ -1,3 +1,4 @@
+import { type ObjectStore, Objm } from '@nats-io/obj';
 import { connect, type Msg, type NatsConnection } from '@nats-io/transport-node';
 import { dependsOn } from '@shellicar/core-di';
 import { describeError } from './describeError.js';
@@ -22,6 +23,8 @@ export abstract class IBroker {
   public abstract publish(subject: string, body: Record<string, unknown>): void;
   /** Hands each request on `subject` to `handle`; with `queue`, as one member of that queue group. */
   public abstract subscribe(subject: string, handle: (request: BrokerRequest) => void, options?: { queue?: string }): BrokerSubscription;
+  /** Stores `data` as the object `name` in the object store `bucket`; resolves once the store has it. */
+  public abstract storeObject(bucket: string, name: string, data: Uint8Array, metadata: Record<string, string>): Promise<void>;
   /** Sends what is published, lets every subscription finish what it received, then closes. */
   public abstract drain(): Promise<void>;
   /** Sends what is published and closes, without waiting on subscriptions. */
@@ -40,6 +43,7 @@ export class NatsBroker implements IBroker {
   @dependsOn(ParticipantConfig) private readonly config!: ParticipantConfig;
   @dependsOn(IHost) private readonly host!: IHost;
   private connection: NatsConnection | undefined;
+  private readonly objectStores = new Map<string, Promise<ObjectStore>>();
   private ended = false;
 
   public async connect(): Promise<void> {
@@ -70,6 +74,11 @@ export class NatsBroker implements IBroker {
     return { unsubscribe: () => subscription.unsubscribe() };
   }
 
+  public async storeObject(bucket: string, name: string, data: Uint8Array, metadata: Record<string, string>): Promise<void> {
+    const store = await this.objectStore(bucket);
+    await store.putBlob({ name, metadata }, data);
+  }
+
   public async drain(): Promise<void> {
     this.ended = true;
     await this.connection?.drain();
@@ -78,6 +87,22 @@ export class NatsBroker implements IBroker {
   public async close(): Promise<void> {
     this.ended = true;
     await this.connection?.close();
+  }
+
+  /** The bucket, opened once; an open that fails is tried again next time. */
+  private objectStore(bucket: string): Promise<ObjectStore> {
+    const opened = this.objectStores.get(bucket);
+    if (opened !== undefined) {
+      return opened;
+    }
+    const opening = new Objm(this.connected()).open(bucket);
+    this.objectStores.set(bucket, opening);
+    opening.catch(() => {
+      if (this.objectStores.get(bucket) === opening) {
+        this.objectStores.delete(bucket);
+      }
+    });
+    return opening;
   }
 
   private connected(): NatsConnection {

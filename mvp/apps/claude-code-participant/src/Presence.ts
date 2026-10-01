@@ -11,6 +11,7 @@ import { IIds } from './Ids.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
 import { rejected, ServedConversation, type ServingInstance } from './ServedConversation.js';
 import { ServingGate } from './ServingGate.js';
+import { IPublisher } from './SessionStore.js';
 import { ITimer } from './Timer.js';
 
 /** The liveness promise every pulse and `attached` makes: another pulse within this many seconds. */
@@ -45,6 +46,7 @@ export class Presence {
   @dependsOn(IHost) private readonly host!: IHost;
   @dependsOn(ConversationLauncher) private readonly launcher!: ConversationLauncher;
   @dependsOn(ServingGate) private readonly gate!: ServingGate;
+  @dependsOn(IPublisher) private readonly publisher!: IPublisher;
 
   private state: State = 'idle';
   private instanceId: string | undefined;
@@ -216,7 +218,9 @@ export class Presence {
       timer: this.timer,
       ids: this.ids,
       host: this.host,
+      publisher: this.publisher,
       configDir: this.config.configDir,
+      durableBucket: this.config.durableBucket,
       world: this.config.world,
       instanceId,
       isUnavailable: () => this.state !== 'serving',

@@ -1,10 +1,13 @@
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { BrokerRequest, BrokerSubscription, IBroker, Reply } from './Broker.js';
 import { readRecord } from './ClaudeCodeRecord.js';
 import type { Conversation } from './Conversation.js';
+import { ConversationChanges, type QueryReason } from './ConversationChanges.js';
 import { describeError } from './describeError.js';
 import type { IHost } from './Host.js';
 import type { IIds } from './Ids.js';
+import type { IPublisher } from './SessionStore.js';
 import type { ITimer } from './Timer.js';
 
 const sayRequest = z.looseObject({
@@ -25,25 +28,36 @@ export type ServingInstance = {
   timer: ITimer;
   ids: IIds;
   host: IHost;
+  publisher: IPublisher;
   configDir: string;
+  durableBucket: string;
   world: string;
   instanceId: string;
   /** Whether the instance has published `unavailable`. */
   isUnavailable(): boolean;
 };
 
+/** How a query Claude Code sent `result` for ended. */
+function reasonOf(result: Extract<SDKMessage, { type: 'result' }>): QueryReason {
+  return result.subtype === 'success' && result.is_error !== true ? 'completed' : 'aborted';
+}
+
 /**
  * A conversation this instance holds on the bus, from `attached` to
- * `detached`: it answers the conversation's requests, and knows which query
- * is running in it and which have ended.
+ * `detached`: it answers the conversation's requests, publishes its
+ * changes, and knows which query is running in it and which have ended.
  */
 export class ServedConversation {
   private readonly conversation: Conversation;
   private readonly instance: ServingInstance;
   private readonly requestPrefix: string;
   private readonly subscription: BrokerSubscription;
+  private readonly changes: ConversationChanges;
+  private readonly unroute: () => void;
   /** The query running now, started by an accepted `say`. */
   private live: string | undefined;
+  /** Whether a cancel was accepted for the live query. */
+  private liveCancelled = false;
   private readonly ended = new Set<string>();
   /** Says are decided one at a time, in the order they arrive. */
   private says: Promise<void> = Promise.resolve();
@@ -53,6 +67,16 @@ export class ServedConversation {
     this.conversation = conversation;
     this.instance = instance;
     this.requestPrefix = `conv.v2.${conversation.id}.requests.`;
+    this.changes = new ConversationChanges(conversation.id, {
+      broker: instance.broker,
+      timer: instance.timer,
+      ids: instance.ids,
+      host: instance.host,
+      instanceId: instance.instanceId,
+      durableBucket: instance.durableBucket,
+      abort: () => this.interrupt('aborting the query'),
+    });
+    this.unroute = instance.publisher.route(conversation.id, this.changes);
     this.subscription = instance.broker.subscribe(`${this.requestPrefix}>`, (request) => this.handle(request));
     void this.follow();
   }
@@ -61,13 +85,14 @@ export class ServedConversation {
     return this.conversation.id;
   }
 
-  /** Stops answering the conversation's requests and publishes `detached`, once. */
+  /** Stops answering the conversation's requests and publishing its changes, and publishes `detached`, once. */
   public detach(): void {
     if (this.isDetached) {
       return;
     }
     this.isDetached = true;
     this.subscription.unsubscribe();
+    this.unroute();
     this.instance.broker.publish(`conv.v2.${this.id}.attachment.detached`, { ts: this.instance.timer.timestamp(), instanceId: this.instance.instanceId, world: this.instance.world });
   }
 
@@ -119,6 +144,8 @@ export class ServedConversation {
     }
     const queryId = this.instance.ids.mint();
     this.live = queryId;
+    this.liveCancelled = false;
+    void this.changes.openQuery(queryId, say.data.from);
     this.conversation.send(say.data.text);
     return { accepted: true, id: queryId };
   }
@@ -130,30 +157,41 @@ export class ServedConversation {
     }
     const { id } = cancel.data;
     if (id === this.live) {
-      this.conversation.interrupt().catch((err: unknown) => this.instance.host.log(`conversation ${this.id}: interrupting query ${id} failed: ${describeError(err)}`));
+      this.liveCancelled = true;
+      this.interrupt(`interrupting query ${id}`);
       return { accepted: true };
     }
     return this.ended.has(id) ? rejected('already_complete') : rejected('not_found');
   }
 
-  /** Reads what Claude Code sends back: its `result` ends the running query, whether it finished or was interrupted. */
+  private interrupt(what: string): void {
+    this.conversation.interrupt().catch((err: unknown) => this.instance.host.log(`conversation ${this.id}: ${what} failed: ${describeError(err)}`));
+  }
+
+  /**
+   * Reads what Claude Code sends back: its `result` ends the running query,
+   * whether it finished, was interrupted or failed.
+   */
   private async follow(): Promise<void> {
     try {
       for await (const message of this.conversation.messages) {
         if (message.type === 'result') {
-          this.endQuery();
+          this.endQuery(reasonOf(message));
         }
       }
     } catch (err) {
       this.instance.host.log(`conversation ${this.id}: reading Claude Code's messages failed: ${describeError(err)}`);
     }
-    this.endQuery();
+    this.endQuery('aborted');
   }
 
-  private endQuery(): void {
+  /** Ends the query running now, and publishes its closure: `cancelled` when a cancel for it was accepted. */
+  private endQuery(reason: QueryReason): void {
+    const cancelled = this.live !== undefined && this.liveCancelled;
     if (this.live !== undefined) {
       this.ended.add(this.live);
       this.live = undefined;
     }
+    void this.changes.close(cancelled ? 'cancelled' : reason);
   }
 }

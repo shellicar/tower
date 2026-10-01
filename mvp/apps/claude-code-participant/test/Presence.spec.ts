@@ -2,20 +2,18 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { RecordEntry } from '../src/ConversationEntries.js';
 import { EXITS } from '../src/ExitCodes.js';
 import { Presence } from '../src/Presence.js';
 import { ServingGate } from '../src/ServingGate.js';
+import { PublishingSessionStore } from '../src/SessionStore.js';
 import { Shutdown } from '../src/Shutdown.js';
-import { CONFIGURED, FAKE_TIMESTAMP, resultMessage, testConfig, testServices } from './support.js';
+import { ANSWER, IMAGE_TOOL_RESULT, INTERRUPT_MARKER, PROMPT, THINKING, TOOL_USE } from './entries.js';
+import { CONFIGURED, FAKE_TIMESTAMP, resultMessage, settle, testConfig, testServices } from './support.js';
 
 const ID = '0f8b7c1e-2a4d-4e6f-9b1a-3c5d7e9f1a2b';
 const WORLD = 'agent.v1.test-world';
 const CONV = `conv.v2.${ID}`;
-
-/** Lets every pending promise callback run. */
-function settle(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve));
-}
 
 function scratch(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -26,6 +24,13 @@ function writeTranscript(configDir: string, ...uuids: string[]): void {
   const project = join(configDir, 'projects', '-work-project');
   mkdirSync(project, { recursive: true });
   writeFileSync(join(project, `${ID}.jsonl`), uuids.map((uuid, n) => JSON.stringify({ type: n % 2 === 0 ? 'user' : 'assistant', uuid })).join('\n'));
+}
+
+/** Writes these entries as Claude Code's transcript of the conversation. */
+function writeEntries(configDir: string, ...entries: RecordEntry[]): void {
+  const project = join(configDir, 'projects', '-work-project');
+  mkdirSync(project, { recursive: true });
+  writeFileSync(join(project, `${ID}.jsonl`), entries.map((entry) => JSON.stringify(entry)).join('\n'));
 }
 
 /** A configured participant that has announced itself on the bus. */
@@ -383,6 +388,133 @@ describe('Presence', () => {
       const query = await acceptedQuery(services, 'hello', null);
       services.presence.stopServing();
       expect(await cancel(services, query)).toEqual({ accepted: true });
+    });
+  });
+
+  describe('changes', () => {
+    const KEY = { projectKey: '-work-project', sessionId: ID };
+
+    /** Claude Code appending to its record, as the session store receives it. */
+    async function append(services: Serving, ...entries: RecordEntry[]): Promise<void> {
+      await services.provider.resolve(PublishingSessionStore).append(KEY, entries);
+    }
+
+    function changes(services: Serving) {
+      return services.broker.published.filter(({ subject }) => subject.startsWith(`${CONV}.changes.`));
+    }
+
+    function closure(services: Serving) {
+      return services.broker.published.find(({ subject }) => subject === `${CONV}.changes.query.closed`)?.body;
+    }
+
+    it("publishes a say's prompt in the query the say was accepted as, with the say's from", async () => {
+      const services = await serving();
+      const queryId = await acceptedQuery(services, 'hello', null);
+      await append(services, PROMPT);
+      expect(changes(services)[0]?.body).toMatchObject({ id: PROMPT.uuid, queryId, from: { kind: 'human' } });
+    });
+
+    it('carries the instance id on each change', async () => {
+      const services = await serving();
+      await acceptedQuery(services, 'hello', null);
+      await append(services, PROMPT);
+      expect(changes(services)[0]?.body.instanceId).toBe('id-1');
+    });
+
+    it('closes the query completed once Claude Code sends its result', async () => {
+      const services = await serving();
+      const queryId = await acceptedQuery(services, 'hello', null);
+      await append(services, PROMPT, ANSWER);
+      services.launch.replies.push(resultMessage());
+      await settle();
+      expect(closure(services)).toEqual({ ts: FAKE_TIMESTAMP, instanceId: 'id-1', queryId, reason: 'completed' });
+    });
+
+    it("publishes the closure after the query's messages", async () => {
+      const services = await serving();
+      await acceptedQuery(services, 'hello', null);
+      await append(services, PROMPT, ANSWER);
+      services.launch.replies.push(resultMessage());
+      await settle();
+      expect(changes(services).map(({ subject }) => subject.slice(CONV.length + 1))).toEqual(['changes.message', 'changes.message', 'changes.query.closed']);
+    });
+
+    it('publishes the closure after a message whose file is still being stored when the result arrives', async () => {
+      const services = await serving();
+      const held = Promise.withResolvers<void>();
+      services.broker.storeHold = held.promise;
+      await acceptedQuery(services, 'hello', null);
+      const appended = append(services, PROMPT, IMAGE_TOOL_RESULT);
+      services.launch.replies.push(resultMessage());
+      await settle();
+      held.resolve();
+      await appended;
+      await settle();
+      expect(changes(services).map(({ subject }) => subject.slice(CONV.length + 1))).toEqual(['changes.message', 'changes.message', 'changes.query.closed']);
+    });
+
+    it('closes a cancelled query cancelled', async () => {
+      const services = await serving();
+      const queryId = await acceptedQuery(services, 'hello', null);
+      await cancel(services, queryId);
+      services.launch.replies.push(resultMessage('error_during_execution'));
+      await settle();
+      expect(closure(services)?.reason).toBe('cancelled');
+    });
+
+    it('closes a query that failed aborted', async () => {
+      const services = await serving();
+      await acceptedQuery(services, 'hello', null);
+      services.launch.replies.push(resultMessage('error_during_execution'));
+      await settle();
+      expect(closure(services)?.reason).toBe('aborted');
+    });
+
+    it('closes the running query aborted when Claude Code stops sending', async () => {
+      const services = await serving();
+      await acceptedQuery(services, 'hello', null);
+      services.launch.replies.close();
+      await settle();
+      expect(closure(services)?.reason).toBe('aborted');
+    });
+
+    it('interrupts Claude Code when a file cannot be stored', async () => {
+      const services = await serving();
+      services.broker.storeFailure = new Error('no responders');
+      await acceptedQuery(services, 'hello', null);
+      await append(services, PROMPT, THINKING, TOOL_USE, IMAGE_TOOL_RESULT);
+      expect(services.launch.interrupts).toHaveLength(1);
+    });
+
+    it('closes the query aborted when a file cannot be stored', async () => {
+      const services = await serving();
+      services.broker.storeFailure = new Error('no responders');
+      await acceptedQuery(services, 'hello', null);
+      await append(services, PROMPT, THINKING, TOOL_USE, IMAGE_TOOL_RESULT);
+      services.launch.replies.push(resultMessage('error_during_execution'));
+      await settle();
+      expect(closure(services)?.reason).toBe('aborted');
+    });
+
+    it('accepts a say premised on the last message it published', async () => {
+      const services = await serving();
+      await acceptedQuery(services, 'hello', null);
+      await append(services, PROMPT, ANSWER, INTERRUPT_MARKER);
+      writeEntries(services.configDir, PROMPT, ANSWER, INTERRUPT_MARKER);
+      services.launch.replies.push(resultMessage());
+      await settle();
+      const lastPublished = changes(services)
+        .filter(({ subject }) => subject.endsWith('.message'))
+        .at(-1)?.body.id;
+      expect(await say(services, 'again', lastPublished as string)).toMatchObject({ accepted: true });
+    });
+
+    it('publishes nothing once detached', async () => {
+      const services = await serving();
+      await acceptedQuery(services, 'hello', null);
+      services.presence.detachAll();
+      await append(services, PROMPT);
+      expect(changes(services)).toEqual([]);
     });
   });
 

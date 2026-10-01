@@ -37,7 +37,7 @@ describe('findOnPath', () => {
 describe('composeConfig', () => {
   const uid = process.getuid?.();
   const configDir = join(scratch, 'agents', 'alpha');
-  const env = { NATS_URL: 'nats://127.0.0.1:31416', PARTICIPANT_WORLD: 'test-world', PARTICIPANT_CONFIG_DIR: configDir, HOME: '/home/someone', PATH: withTool };
+  const env = { NATS_URL: 'nats://127.0.0.1:31416', PARTICIPANT_WORLD: 'test-world', PARTICIPANT_DURABLE_BUCKET: 'durable', PARTICIPANT_CONFIG_DIR: configDir, HOME: '/home/someone', PATH: withTool };
   let dirs = 0;
   /** A config dir path under the scratch dir that nothing has used yet. */
   const unused = () => join(scratch, 'config-dirs', `dir-${dirs++}`);

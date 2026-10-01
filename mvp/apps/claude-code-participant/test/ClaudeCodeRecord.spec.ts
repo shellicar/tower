@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { lastMessageId, readRecord } from '../src/ClaudeCodeRecord.js';
+import { IMAGE_TOOL_RESULT, INTERRUPT_MARKER, PARTIAL_REPLY, PROMPT, SECOND_PROMPT, TOKENS_REMINDER, TOOL_USE } from './entries.js';
 
 const ID = '0f8b7c1e-2a4d-4e6f-9b1a-3c5d7e9f1a2b';
 
@@ -29,6 +30,18 @@ describe('lastMessageId', () => {
 
   it("skips a subagent's sidechain", () => {
     expect(lastMessageId(lines({ type: 'user', uuid: 'u1' }, { type: 'assistant', uuid: 'a1', isSidechain: true }))).toBe('u1');
+  });
+
+  it('skips an interrupt marker', () => {
+    expect(lastMessageId(lines(SECOND_PROMPT, PARTIAL_REPLY, INTERRUPT_MARKER))).toBe(PARTIAL_REPLY.uuid);
+  });
+
+  it('skips a reminder', () => {
+    expect(lastMessageId(lines(PROMPT, { type: 'user', uuid: 'm1', isMeta: true, message: { role: 'user', content: 'Continue.' } }))).toBe(PROMPT.uuid);
+  });
+
+  it('counts a tool result', () => {
+    expect(lastMessageId(lines(TOOL_USE, IMAGE_TOOL_RESULT, TOKENS_REMINDER))).toBe(IMAGE_TOOL_RESULT.uuid);
   });
 
   it('skips a line that is not JSON', () => {
