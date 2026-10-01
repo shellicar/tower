@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import type { SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import { dependsOn } from '@shellicar/core-di';
 import { ParticipantConfig } from './ParticipantConfig.js';
@@ -31,13 +31,19 @@ export class ClaudeCodeSpawner {
       // Claude Code's own housekeeping, caches and logs land in a private
       // home, never the real one.
       HOME: this.config.privateHome,
-      // The login stays in the real ~/.claude. The SDK sets its own value on
-      // the resume route, so it has to be set here, after the SDK.
-      CLAUDE_SECURESTORAGE_CONFIG_DIR: join(this.config.realHome, '.claude'),
+      // The login: on Linux the real ~/.claude, on macOS the participant's own
+      // login dir, which names its Keychain entry. The SDK sets its own value
+      // on the resume route, so it has to be set here, after the SDK.
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: this.config.loginDir ?? join(this.config.realHome, '.claude'),
       // Bash, hooks and stdio MCP servers run with the real HOME.
       CLAUDE_CODE_SHELL_PREFIX: this.config.shellPrefix,
       [REAL_HOME_VARIABLE]: this.config.realHome,
     };
+    const { securityShimDir } = this.config;
+    if (securityShimDir !== null) {
+      // An unset PATH searches /usr/bin:/bin, so that is what follows the shim.
+      env.PATH = `${securityShimDir}${delimiter}${options.env.PATH ?? '/usr/bin:/bin'}`;
+    }
     // setpriv makes the kernel send Claude Code SIGINT if the participant
     // dies, so a killed participant's Claude Codes stop instead of running on
     // unsupervised. setpriv execs Claude Code, so the pid is Claude Code's.

@@ -10,12 +10,13 @@ import { IIds } from '../src/Ids.js';
 import { MessageChannel } from '../src/MessageChannel.js';
 import { ParticipantConfig } from '../src/ParticipantConfig.js';
 import { type ChildProcessHandle, IProcessSpawner, type ProcessOptions } from '../src/ProcessSpawner.js';
-import { IProcessTable, type ProcessIdentity, type TaggedProcess } from '../src/ProcessTable.js';
+import { IProcessTable, type ProcessIdentity, ProcessListUnreadable, type TaggedProcess } from '../src/ProcessTable.js';
 import { ServingGate } from '../src/ServingGate.js';
 import { StartupError } from '../src/startup.js';
 import { ITimer } from '../src/Timer.js';
 
-export function testConfig(overrides: { setpriv?: string | null; configDir?: string } = {}): ParticipantConfig {
+/** A Linux config unless `macOS` is set, which gives it a login dir and the security shim. */
+export function testConfig(overrides: { setpriv?: string | null; configDir?: string; macOS?: boolean } = {}): ParticipantConfig {
   return new ParticipantConfig(
     {
       natsUrl: 'nats://127.0.0.1:31416',
@@ -23,11 +24,13 @@ export function testConfig(overrides: { setpriv?: string | null; configDir?: str
       durableBucket: 'durable-test',
       configDir: overrides.configDir ?? '/agents/alpha/config',
       realHome: '/home/someone',
+      loginDir: overrides.macOS === true ? '/data/tower/login' : null,
       inheritedEnv: { PATH: '/usr/bin', LANG: 'C.UTF-8' },
     },
     '/tmp/tower-participant-home-abc123',
     overrides.setpriv === undefined ? '/usr/bin/setpriv' : overrides.setpriv,
     '/opt/participant/bin/real-home-shell.sh',
+    overrides.macOS === true ? '/opt/participant/bin/real-home-security' : null,
   );
 }
 
@@ -190,6 +193,14 @@ class FakeProcessTable implements IProcessTable {
   public readonly signals: { pid: number; signal: NodeJS.Signals }[] = [];
   /** Makes signalling this pid fail with this error. */
   public readonly signalFailures = new Map<number, Error>();
+  /** Makes `check` fail with this error, as a process list that can't be read does. */
+  public checkFailure: Error | undefined;
+
+  public check(): void {
+    if (this.checkFailure !== undefined) {
+      throw this.checkFailure;
+    }
+  }
 
   public add(pid: number, tag: string, endsOn: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGKILL'], own = false): void {
     this.processes.push({ pid, startTime: `${pid}0`, commandLine: `cmd-${pid}`, tag, endsOn, own });
@@ -199,11 +210,23 @@ class FakeProcessTable implements IProcessTable {
     this.processes = this.processes.filter((p) => p.pid !== pid);
   }
 
-  public tagged(entry: string, options: { withOwnDescendants?: boolean } = {}): TaggedProcess[] {
+  /**
+   * Makes the list unreadable for `tagged` and `signal`, as a ps that stops
+   * working does: a strict read throws, any other reads as no processes.
+   */
+  public unreadable = false;
+
+  public tagged(entry: string, options: { withOwnDescendants?: boolean; strict?: boolean } = {}): TaggedProcess[] {
+    if (this.unreadable) {
+      return this.whenUnreadable(options.strict, []);
+    }
     return this.processes.filter((p) => p.tag === entry && (options.withOwnDescendants === true || !p.own)).map(({ pid, startTime, commandLine }) => ({ pid, startTime, commandLine }));
   }
 
-  public signal(process: ProcessIdentity, signal: NodeJS.Signals): boolean {
+  public signal(process: ProcessIdentity, signal: NodeJS.Signals, options: { strict?: boolean } = {}): boolean {
+    if (this.unreadable) {
+      return this.whenUnreadable(options.strict, false);
+    }
     const failure = this.signalFailures.get(process.pid);
     if (failure !== undefined) {
       throw failure;
@@ -217,6 +240,13 @@ class FakeProcessTable implements IProcessTable {
       this.processes = this.processes.filter((p) => p !== target);
     }
     return true;
+  }
+
+  private whenUnreadable<T>(strict: boolean | undefined, otherwise: T): T {
+    if (strict === true) {
+      throw new ProcessListUnreadable('ps could not be run', { cause: new Error('spawnSync /bin/ps EPERM') });
+    }
+    return otherwise;
   }
 }
 
@@ -364,7 +394,7 @@ class FakeBroker implements IBroker {
  * starts open, as it is once the leftover scan is done, unless `gateShut`.
  */
 export function testServices(config: ParticipantConfig = testConfig(), options: { gateShut?: boolean } = {}) {
-  const services = participantServices(config);
+  const services = participantServices(config, 'linux');
   services.register(FakeClaudeCode).as(IClaudeCode);
   services.register(FakeProcessSpawner).as(IProcessSpawner);
   services.register(FakeProcessTable).as(IProcessTable);

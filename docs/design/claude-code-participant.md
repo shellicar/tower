@@ -58,7 +58,8 @@ Out of v0:
   from tower would need is in the minimum entries proof (Evidence).
 - **Windows** (29 Sep): "its not a v0 thing, possibly v1 if its not too
   difficult". It matters because a friend of Stephen's uses Windows; tower and
-  bridge already work there.
+  bridge already work there. Stephen (1 Oct): "windows is also on the cards
+  in the future (not now/v0, but v1)". v0 runs on Linux and macOS only.
 
 - **Approvals.** "anything that cannot be auto approved by automode, can be
   droped, ie AskUserQuestion" (26 Sep). When they come, each ask only has to
@@ -289,25 +290,66 @@ Not at all:
   dir, so Claude Code's housekeeping, caches and logs never touch the real
   home ("that looks like a good solution"; "one per *process* is fine";
   "can it be in a tmp directory? then we dont need to worry about
-  cleanup"). The login is pointed back at the real `~/.claude` with an
-  absolute `CLAUDE_SECURESTORAGE_CONFIG_DIR`, and `CLAUDE_CODE_SHELL_PREFIX`
+  cleanup"). On Linux the login is pointed back at the real `~/.claude`
+  with an absolute `CLAUDE_SECURESTORAGE_CONFIG_DIR`; on macOS it is a
+  participant login directory instead (below). `CLAUDE_CODE_SHELL_PREFIX`
   gives Bash, hooks and stdio MCP servers the real `HOME`. No cleanup in
   v0: "for v0 we dont need to worry about this". Must work on Linux and
-  macOS; Windows "isnt really in scope though, ie its not make/break".
-  macOS login: accepted as a known risk for now (28 Sep). Per the code
-  (`.claude/tasks/research-macos-keychain.md`), with a private HOME no
-  setting shares both the Keychain entry and the refresh lock, and an
-  absolute path comes up not logged in. Stephen: "thats acceptable for now
-  ... ill test and fix it on my mac, no point trying to fix that here". The
-  Mac test is `mvp/claude-code-harness/proofs/macos-keychain.mts` on branch
-  `research-macos-keychain`.
-- **The shared store:** the agent's own `CLAUDE_CONFIG_DIR` (one per agent,
-  reused across its runs, never fresh per run), with the login staying in
-  `~/.claude` under one refresh lock: "i think 1" (26 Sep). On 26 Sep that
-  was `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`; since the private `HOME`
-  (28 Sep, above) it is the absolute path, which is what the code sets. The variable is undocumented,
-  and a `/logout` on the isolated side logs Stephen out everywhere. Works on
-  Linux (harness smoke run); macOS untested.
+  macOS; Windows "isnt really in scope though, ie its not make/break" (and
+  later: "windows is also on the cards in the future (not now/v0, but v1)").
+- **The shared store, on Linux:** the agent's own `CLAUDE_CONFIG_DIR` (one
+  per agent, reused across its runs, never fresh per run), with the login
+  staying in `~/.claude` under one refresh lock: "i think 1" (26 Sep). On
+  26 Sep that was `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`; since the private
+  `HOME` (28 Sep, above) it is the absolute path, which is what the code
+  sets. The variable is undocumented, and a `/logout` on the isolated side
+  logs Stephen out everywhere. Works on Linux (harness smoke run).
+- **The login on macOS** (1 Oct). Claude Code keeps its login in the
+  Keychain there, by running `security`, which inherits Claude Code's
+  `HOME`. The macOS build's code (the darwin-arm64 binary of Agent SDK
+  0.3.282) was read first; the proof
+  `mvp/claude-code-harness/proofs/macos-keychain.mts` (branch
+  `feature/research/macos-keychain`) was then run on Stephen's Mac, its
+  first run on a Mac (it was developed on WSL). Findings:
+  - Under a private `HOME`, `/usr/bin/security` finds no keychain at all.
+  - Cases C and F (an absolute `CLAUDE_SECURESTORAGE_CONFIG_DIR`) logged in
+    through the `.credentials.json` fallback in that directory, not the
+    Keychain.
+  - Case G (`security` run with the real `HOME`) logged in through the
+    Keychain entry.
+
+  This replaces the earlier assumption that an absolute path comes up not
+  logged in, and "accepted as a known risk" / "macOS untested" (28 Sep:
+  "thats acceptable for now ... ill test and fix it on my mac, no point
+  trying to fix that here").
+
+  What is built, all on macOS only:
+  - A `security` shim, alone in `bin/real-home-security/`, goes first on
+    Claude Code's `PATH` and runs `/usr/bin/security` with
+    `HOME="$TOWER_REAL_HOME"`. Commands Claude Code runs see it first on
+    their `PATH` too, and get the same `security` they would have had.
+  - `CLAUDE_SECURESTORAGE_CONFIG_DIR` is one participant login directory per
+    machine, shared by every world. Stephen: "One per machine". It comes from
+    `PARTICIPANT_LOGIN_DIR`: required on macOS, absolute, no default, ignored
+    on Linux, and given the config dir's permission checks. `start.ts`
+    defaults it to `${XDG_DATA_HOME:-~/.local/share}/tower/login`, and an
+    optional `.env` in the app directory, loaded with Node's
+    `--env-file-if-exists`, or the environment overrides that: "node env file
+    it is"; "the default stays the same, the .env is just load it if it's
+    there".
+  - That gives the participant its own Keychain entry and its own refresh
+    lock, separate from Stephen's own Claude Code (which keeps
+    `Claude Code-credentials`) and from bridge (`@shellicar/credentials`).
+  - The login is made once with `pnpm claude-login` (`scripts/login.ts`),
+    which runs the SDK's own Claude Code as `auth login` under the
+    participant's macOS environment, so Claude Code writes the entry itself.
+    Stephen: "A script". The `pnpm` script is not named `login`, which
+    `pnpm` runs as its own registry login.
+  - Linux is unchanged: no shim, and the login stays the real `~/.claude`.
+
+  The Keychain entry's name carries a hash of
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR` (per the proof's reading of the build),
+  so a dedicated directory names an entry of its own.
 
 ### The shape
 
@@ -611,8 +653,11 @@ Parked, not decided:
   instead of running on unsupervised (proof 21); when it isn't available,
   launched without it, silently: "setpriv is used when available, if not,
   then its not, no point logging it it will be logged every single time".
-  Linux only; the SDK's own exit handler already covers normal exits and
-  JavaScript crashes.
+  `setpriv` is Linux only, so on macOS it is absent and skipped, and a
+  SIGKILLed participant can leave a Claude Code running until the next
+  start's scan finds it (the scan finds only processes whose environment
+  `ps` shows, see the platforms below). The SDK's own exit handler already
+  covers normal exits and JavaScript crashes.
 - **Recovery on every serve, blind** (27 Sep, proof 17): before serving, the participant adds whatever Claude Code's record holds that the store lacks, whatever ended the last run: "they need to prove its resilient". Proven after every press, SIGKILL, crash, a lone Claude Code SIGKILL, abort and a mid-turn reboot. Accepted gap: a reboot after orphans finish loses a resumed conversation's last lines from the SDK's temp copy: "this is likely the edge case im not fussed about". **Deferred** (29 Sep): "we dont need that now / if the participant crashes, thats the time to build it".
 - **The config dir is the participant's identity** (29 Sep). The agent name
   is gone: "participant agent was a proxy for what we already had". Each
@@ -670,7 +715,8 @@ Parked, not decided:
 - **One exit code per way of exiting** (29 Sep): "a unique code for each
   exit type makes sense". Clean (stage 1) is 0; stage 2 is 64, stage 3 65,
   a bad environment value 66, the config dir held by another participant
-  67, an unsupported platform 68. So a startup error is told apart from a
+  67, an unsupported platform 68, a process list that couldn't be read
+  before the participant was ready 69. So a startup error is told apart from a
   crash: "more exit codes are good" (29 Sep). One table in the code, with a test that
   no two share a number and all but 0 sit in 64 to 113. A crash stays on
   Node's own 1.
@@ -683,13 +729,47 @@ Parked, not decided:
   `detached: true` (its own group and session on Linux and macOS) with
   `windowsHide: true` (its own hidden console on Windows); the shutdown build
   tests it by signalling the process group directly.
-- **The participant runs on Linux only in v0.** The leftover scan reads each
-  process's environment from `/proc`, behind an abstract class, so the
-  macOS one can be written on a Mac: "lets get it working, i can then
-  actually imeplement the macos part *on* my macbook". On any other
-  platform the participant refuses to start with "platform not supported"
-  (29–30 Sep): "it'll prevent me from accidentally starting it on mac
-  before i fix it"; "just say platform not supported or something".
+- **The participant runs on Linux and macOS in v0.** The leftover scan
+  reads processes behind an abstract class: on Linux each process's
+  environment from `/proc`, written first so the macOS one could be written
+  on a Mac: "lets get it working, i can then actually imeplement the macos
+  part *on* my macbook" (29–30 Sep). On any other platform the participant
+  refuses to start with "platform not supported" and exit 68. That refusal
+  once covered macOS too: "it'll prevent me from accidentally starting it on
+  mac before i fix it"; "just say platform not supported or something".
+  Windows is v1 (see Out of v0).
+- **The leftover scan on macOS** (1 Oct) reads processes with `ps -wwE`,
+  Stephen asking for the easiest route to get it working. Reference:
+  - `ps -E` prints a process's command and environment as one
+    space-joined line, so the tag counts only in what follows the command
+    line (read again without `-E`); a tag named in a process's arguments
+    alone, as in a running `grep`, is no match. A config dir path holding a
+    space can still match ambiguously.
+  - The start time is `ps`'s `lstart` text, with one-second resolution; it
+    is compared for equality only.
+  - macOS hides the environment of Apple platform binaries from `ps -E`
+    (measured on this Mac: `/bin/sleep` carrying the tag was invisible;
+    `node` and Claude Code were visible). So Claude Code's `/bin/sh` and
+    `bash` descendants are not found. Stephen: "this is an edge case, it
+    doesnt need to be perfect for v0, the main thing is get it working".
+  - A full listing's exit status 0 is success; a `-p <pids>` read exiting
+    non-zero is `ps`'s normal answer that some named pids have gone, and its
+    output still holds those that are running.
+- **A `ps` that fails** (1 Oct), decided in steps. Stephen: "if ps doesnt
+  start on *launch*, treat it as a failure. if it doesnt run during the app
+  (after startup), ignore it"; then, on exit status, "ps zero-exit =
+  success, anything else = failure"; then "during the startup process,
+  before it's ready, a ps failure should exit. after it's ready, it
+  shouldn't". As built: until the serving gate opens, a `ps` that can't be
+  run, or a full listing that exits non-zero, in the launch check or any
+  read of the leftover scan, ends the participant with exit 69
+  (`noProcessList`) and the gate stays shut. After that (shutdown's scans
+  and signals, anything later) the same failure reads as no processes, and
+  nothing is signalled. On a shutdown that starts before the participant is
+  ready, Stephen: "they need to be independent, in that, the startup process
+  itself would be cancelled/aborted, and shutdown would initiate": the scan
+  stops as interrupted, the gate stays shut, a `ps` failure in the scan no
+  longer counts, and shutdown runs its own path and exits with its own code.
 - **Running as a service comes later:** "telling it if it's a service or know
   so it knows how to *interpret* SIGHUP would be something when we look at
   service-fying it" (26 Sep).

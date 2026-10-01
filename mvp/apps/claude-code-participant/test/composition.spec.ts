@@ -1,10 +1,10 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import { composeConfig, findOnPath } from '../src/composition.js';
+import { composeConfig, findOnPath, prepareOwnDir } from '../src/composition.js';
 import { StartupError } from '../src/startup.js';
 import { startupExitOf } from './support.js';
 
@@ -41,7 +41,7 @@ describe('composeConfig', () => {
   let dirs = 0;
   /** A config dir path under the scratch dir that nothing has used yet. */
   const unused = () => join(scratch, 'config-dirs', `dir-${dirs++}`);
-  const compose = (dir: string, asUid: number | undefined = uid) => composeConfig({ ...env, PARTICIPANT_CONFIG_DIR: dir }, scratch, asUid);
+  const compose = (dir: string, asUid: number | undefined = uid) => composeConfig({ ...env, PARTICIPANT_CONFIG_DIR: dir }, scratch, asUid, 'linux');
   const permissions = (dir: string) => statSync(dir).mode & 0o777;
 
   describe('the config dir', () => {
@@ -115,11 +115,11 @@ describe('composeConfig', () => {
     });
 
     it('is refused on a platform without user ids', () => {
-      expect(() => composeConfig({ ...env, PARTICIPANT_CONFIG_DIR: unused() }, scratch, undefined)).toThrow(StartupError);
+      expect(() => composeConfig({ ...env, PARTICIPANT_CONFIG_DIR: unused() }, scratch, undefined, 'linux')).toThrow(StartupError);
     });
 
     it('exits as an unsupported platform when there are no user ids', () => {
-      expect(startupExitOf(() => composeConfig({ ...env, PARTICIPANT_CONFIG_DIR: unused() }, scratch, undefined))).toBe('unsupportedPlatform');
+      expect(startupExitOf(() => composeConfig({ ...env, PARTICIPANT_CONFIG_DIR: unused() }, scratch, undefined, 'linux'))).toBe('unsupportedPlatform');
     });
 
     it('exits as a bad environment value when a file stands in its place', () => {
@@ -150,19 +150,76 @@ describe('composeConfig', () => {
   });
 
   it('makes a private home in the temp dir', () => {
-    expect(composeConfig(env, scratch, uid).privateHome.startsWith(join(scratch, 'tower-participant-home-'))).toBe(true);
+    expect(composeConfig(env, scratch, uid, 'linux').privateHome.startsWith(join(scratch, 'tower-participant-home-'))).toBe(true);
   });
 
   it('makes a fresh private home each time', () => {
-    expect(composeConfig(env, scratch, uid).privateHome).not.toBe(composeConfig(env, scratch, uid).privateHome);
+    expect(composeConfig(env, scratch, uid, 'linux').privateHome).not.toBe(composeConfig(env, scratch, uid, 'linux').privateHome);
   });
 
   it('uses setpriv from the path', () => {
-    expect(composeConfig(env, scratch, uid).setpriv).toBe(join(withTool, 'setpriv'));
+    expect(composeConfig(env, scratch, uid, 'linux').setpriv).toBe(join(withTool, 'setpriv'));
   });
 
   it('points the shell prefix at an executable script', () => {
-    expect(statSync(composeConfig(env, scratch, uid).shellPrefix).mode & 0o111).not.toBe(0);
+    expect(statSync(composeConfig(env, scratch, uid, 'linux').shellPrefix).mode & 0o111).not.toBe(0);
+  });
+
+  describe('on Linux', () => {
+    it('has no login dir', () => {
+      expect(composeConfig(env, scratch, uid, 'linux').loginDir).toBeNull();
+    });
+
+    it('has no security shim', () => {
+      expect(composeConfig(env, scratch, uid, 'linux').securityShimDir).toBeNull();
+    });
+  });
+
+  describe('on macOS', () => {
+    const composeOnMac = (loginDir: string) => composeConfig({ ...env, PARTICIPANT_LOGIN_DIR: loginDir }, scratch, uid, 'darwin');
+
+    it('creates the login dir for its owner only', () => {
+      const dir = unused();
+      composeOnMac(dir);
+      expect(permissions(dir)).toBe(0o700);
+    });
+
+    it('tightens a login dir only its group can reach', () => {
+      const dir = unused();
+      mkdirSync(dir, { recursive: true });
+      chmodSync(dir, 0o750);
+      composeOnMac(dir);
+      expect(permissions(dir)).toBe(0o700);
+    });
+
+    it('refuses a login dir another user owns', () => {
+      const dir = unused();
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      expect(() => prepareOwnDir('PARTICIPANT_LOGIN_DIR', dir, (uid ?? 0) + 1)).toThrow(`PARTICIPANT_LOGIN_DIR ${dir} is owned by another user`);
+    });
+
+    it('refuses a symlink standing in for the login dir', () => {
+      const target = unused();
+      const link = unused();
+      mkdirSync(target, { recursive: true, mode: 0o700 });
+      symlinkSync(target, link);
+      expect(() => composeOnMac(link)).toThrow(`PARTICIPANT_LOGIN_DIR ${link} is not a directory`);
+    });
+
+    it('spells the login dir as its real path', () => {
+      const dir = unused();
+      expect(composeOnMac(`${dir}/`).loginDir).toBe(realpathSync(dir));
+    });
+
+    it('points the security shim dir at a directory holding only security', () => {
+      const shimDir = composeOnMac(unused()).securityShimDir;
+      expect(shimDir === null ? [] : readdirSync(shimDir)).toEqual(['security']);
+    });
+
+    it('makes the security shim executable', () => {
+      const shimDir = composeOnMac(unused()).securityShimDir ?? '';
+      expect(statSync(join(shimDir, 'security')).mode & 0o111).not.toBe(0);
+    });
   });
 });
 

@@ -1,3 +1,4 @@
+import { delimiter } from 'node:path';
 import type { SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import { describe, expect, it } from 'vitest';
 import { ClaudeCodeSpawner, PARTICIPANT_TAG, REAL_HOME_VARIABLE } from '../src/ClaudeCodeSpawner.js';
@@ -11,9 +12,9 @@ const SDK_SPAWN: SpawnOptions = {
   signal: new AbortController().signal,
 };
 
-function spawned(setpriv: string | null = '/usr/bin/setpriv') {
-  const services = testServices(testConfig({ setpriv }));
-  services.provider.resolve(ClaudeCodeSpawner).spawn(SDK_SPAWN);
+function spawned(setpriv: string | null = '/usr/bin/setpriv', options: { macOS?: boolean; sdk?: SpawnOptions } = {}) {
+  const services = testServices(testConfig({ setpriv, macOS: options.macOS }));
+  services.provider.resolve(ClaudeCodeSpawner).spawn(options.sdk ?? SDK_SPAWN);
   const spawn = services.processes.spawns[0];
   if (spawn === undefined) {
     throw new Error('nothing was spawned');
@@ -79,6 +80,31 @@ describe('ClaudeCodeSpawner', () => {
 
     it('keeps the rest of the SDK environment', () => {
       expect(spawned().options.env.PATH).toBe('/usr/bin');
+    });
+  });
+
+  describe('environment on macOS', () => {
+    const onMac = () => spawned(null, { macOS: true });
+
+    it('points the login at the login dir', () => {
+      expect(onMac().options.env.CLAUDE_SECURESTORAGE_CONFIG_DIR).toBe('/data/tower/login');
+    });
+
+    it('puts the security shim first on the path', () => {
+      expect(onMac().options.env.PATH).toBe(`/opt/participant/bin/real-home-security${delimiter}/usr/bin`);
+    });
+
+    it('follows the shim with the default search path when the SDK gives none', () => {
+      const withoutPath = { CLAUDE_CONFIG_DIR: '/agents/alpha/config', HOME: '/home/someone' };
+      expect(spawned(null, { macOS: true, sdk: { ...SDK_SPAWN, env: withoutPath } }).options.env.PATH).toBe(`/opt/participant/bin/real-home-security${delimiter}/usr/bin:/bin`);
+    });
+
+    it('hands the shim the real home', () => {
+      expect(onMac().options.env[REAL_HOME_VARIABLE]).toBe('/home/someone');
+    });
+
+    it('still gives Claude Code the private home', () => {
+      expect(onMac().options.env.HOME).toBe('/tmp/tower-participant-home-abc123');
     });
   });
 

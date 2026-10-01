@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { readStartup, StartupError } from '../src/startup.js';
+import { readStartup as readStartupOn, StartupError } from '../src/startup.js';
 import { startupExitOf } from './support.js';
+
+/** Read as on Linux, unless a test names another platform. */
+const readStartup = (env: NodeJS.ProcessEnv, platform: NodeJS.Platform = 'linux') => readStartupOn(env, platform);
 
 const complete = {
   NATS_URL: 'nats://127.0.0.1:31416',
@@ -93,6 +96,34 @@ describe('readStartup', () => {
 
     it('is the real home', () => {
       expect(readStartup(complete).realHome).toBe('/home/someone');
+    });
+  });
+
+  describe('PARTICIPANT_LOGIN_DIR', () => {
+    const onMac = { ...complete, PARTICIPANT_LOGIN_DIR: '/data/tower/login' };
+
+    it('refuses to start without it on macOS', () => {
+      expect(() => readStartup(complete, 'darwin')).toThrow('PARTICIPANT_LOGIN_DIR is required');
+    });
+
+    it('exits as a bad environment value when it is missing on macOS', () => {
+      expect(startupExitOf(() => readStartup(complete, 'darwin'))).toBe('badEnvironment');
+    });
+
+    it('refuses a relative path on macOS', () => {
+      expect(() => readStartup({ ...onMac, PARTICIPANT_LOGIN_DIR: 'tower/login' }, 'darwin')).toThrow('PARTICIPANT_LOGIN_DIR must be an absolute path');
+    });
+
+    it('is the login dir on macOS', () => {
+      expect(readStartup(onMac, 'darwin').loginDir).toBe('/data/tower/login');
+    });
+
+    it('is not needed on Linux', () => {
+      expect(readStartup(complete).loginDir).toBeNull();
+    });
+
+    it('is ignored on Linux', () => {
+      expect(readStartup(onMac).loginDir).toBeNull();
     });
   });
 

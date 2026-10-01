@@ -83,7 +83,7 @@ const CLAUDE_CODE_CONFIGURATION_VARIABLES: readonly string[] = [
   // keep the declared mode and switch that hardening off.
 ];
 
-type StartupExit = Extract<ExitName, 'badEnvironment' | 'configDirLocked' | 'unsupportedPlatform'>;
+type StartupExit = Extract<ExitName, 'badEnvironment' | 'configDirLocked' | 'unsupportedPlatform' | 'noProcessList'>;
 
 /** Why the process can't start, and which way it exits for it. */
 export class StartupError extends Error {
@@ -105,8 +105,10 @@ export type Startup = {
   durableBucket: string;
   /** The agent's own Claude Code config dir, reused across runs: the agent's identity, which no two participants may share. */
   configDir: string;
-  /** The real home: the login lives under it, and commands run with it. */
+  /** The real home: on Linux the login lives under it; commands run with it. */
   realHome: string;
+  /** macOS only, null elsewhere: the participant's own login, one per machine, shared by every world. */
+  loginDir: string | null;
   /** The environment Claude Code inherits, parent-session and Claude Code configuration variables removed. */
   inheritedEnv: Record<string, string>;
 };
@@ -131,7 +133,7 @@ function absolute(env: NodeJS.ProcessEnv, name: string): string {
   return value;
 }
 
-export function readStartup(env: NodeJS.ProcessEnv): Startup {
+export function readStartup(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): Startup {
   // NATS_URL has no default: an unset one must never land on a live broker.
   const natsUrl = required(env, 'NATS_URL');
   const world = required(env, 'PARTICIPANT_WORLD');
@@ -140,11 +142,12 @@ export function readStartup(env: NodeJS.ProcessEnv): Startup {
   // started without one could never serve: it stops at start instead.
   const configDir = absolute(env, 'PARTICIPANT_CONFIG_DIR');
   const realHome = absolute(env, 'HOME');
+  const loginDir = platform === 'darwin' ? absolute(env, 'PARTICIPANT_LOGIN_DIR') : null;
   const inheritedEnv: Record<string, string> = {};
   for (const [name, value] of Object.entries(env)) {
     if (value !== undefined && !PARENT_SESSION_VARIABLES.includes(name) && !CLAUDE_CODE_CONFIGURATION_VARIABLES.includes(name)) {
       inheritedEnv[name] = value;
     }
   }
-  return { natsUrl, world, durableBucket, configDir, realHome, inheritedEnv };
+  return { natsUrl, world, durableBucket, configDir, realHome, loginDir, inheritedEnv };
 }

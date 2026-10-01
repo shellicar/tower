@@ -33,17 +33,106 @@ function setUp() {
 describe('beforeServing', () => {
   it('refuses to start on a platform without a process table', () => {
     const { run } = setUp();
-    expect(() => run('darwin')).toThrow(StartupError);
+    expect(() => run('win32')).toThrow(StartupError);
   });
 
   it('exits as an unsupported platform', () => {
     const { run } = setUp();
-    expect(startupExitOf(() => run('darwin'))).toBe('unsupportedPlatform');
+    expect(startupExitOf(() => run('win32'))).toBe('unsupportedPlatform');
   });
 
   it('says the platform is not supported', () => {
     const { run } = setUp();
-    expect(() => run('darwin')).toThrow('platform not supported');
+    expect(() => run('win32')).toThrow('platform not supported');
+  });
+
+  it('refuses to start when the process list cannot be read', () => {
+    const { run, processTable } = setUp();
+    processTable.checkFailure = new Error('ps could not be run', { cause: new Error('spawnSync /bin/ps EPERM') });
+    expect(() => run('darwin')).toThrow(StartupError);
+  });
+
+  it('exits as no process list when the process list cannot be read', () => {
+    const { run, processTable } = setUp();
+    processTable.checkFailure = new Error('ps could not be run');
+    expect(startupExitOf(() => run('darwin'))).toBe('noProcessList');
+  });
+
+  it('names the underlying cause when the process list cannot be read', () => {
+    const { run, processTable } = setUp();
+    processTable.checkFailure = new Error('ps could not be run', { cause: new Error('spawnSync /bin/ps EPERM') });
+    expect(() => run('darwin')).toThrow('spawnSync /bin/ps EPERM');
+  });
+
+  it('keeps the serving gate shut when the process list cannot be read', async () => {
+    const { run, processTable, gateOpen } = setUp();
+    processTable.checkFailure = new Error('ps could not be run');
+    try {
+      run('darwin');
+    } catch {
+      // refused
+    }
+    expect(await gateOpen()).toBe(false);
+  });
+
+  describe('when the process list stops being readable during the scan', () => {
+    function unreadableMidScan() {
+      const services = setUp();
+      services.processTable.add(201, services.tag);
+      services.processTable.unreadable = true;
+      return services;
+    }
+
+    it('fails the start as no process list', async () => {
+      const { run } = unreadableMidScan();
+      const failure = await run('darwin').then(
+        () => undefined,
+        (err: unknown) => err,
+      );
+      expect(failure instanceof StartupError ? failure.exit : failure).toBe('noProcessList');
+    });
+
+    it('names the underlying cause', async () => {
+      const { run } = unreadableMidScan();
+      await expect(run('darwin')).rejects.toThrow('spawnSync /bin/ps EPERM');
+    });
+
+    it('keeps the serving gate shut', async () => {
+      const { run, gateOpen } = unreadableMidScan();
+      await run('darwin').catch(() => {});
+      expect(await gateOpen()).toBe(false);
+    });
+  });
+
+  describe('when shutdown begins during the scan and the process list then cannot be read', () => {
+    function shutDownThenUnreadable() {
+      const services = setUp();
+      services.processTable.add(201, services.tag, []);
+      services.timer.onSleep = (now) => {
+        if (now === 1_000) {
+          services.shutdown.abort();
+          services.processTable.unreadable = true;
+        }
+      };
+      return services;
+    }
+
+    it('ends the scan as interrupted rather than failing the start', async () => {
+      const { run } = shutDownThenUnreadable();
+      expect((await run('darwin')).interrupted).toBe(true);
+    });
+
+    it('keeps the serving gate shut', async () => {
+      const { run, gateOpen } = shutDownThenUnreadable();
+      await run('darwin');
+      expect(await gateOpen()).toBe(false);
+    });
+  });
+
+  it('starts on macOS', async () => {
+    const { run, gateOpen } = setUp();
+    await run('darwin');
+    expect(await gateOpen()).toBe(true);
   });
 
   it('refuses to start while another participant holds the config dir', () => {

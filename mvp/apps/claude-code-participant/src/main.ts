@@ -9,18 +9,23 @@ import { runParticipant } from './run.js';
 import { Shutdown } from './Shutdown.js';
 import { StartupError } from './startup.js';
 
-let provider: IServiceProvider;
-try {
-  provider = participantServices(composeConfig(process.env, tmpdir(), process.getuid?.())).buildProvider();
-  // Not awaited: control lines are read and answered while the scan runs;
-  // only launching waits for it.
-  void beforeServing(provider, process.platform, (line) => console.error(`participant: ${line}`), provider.resolve(Shutdown).begun);
-} catch (err) {
+/** Ends the process the way a startup error says; anything else is thrown on. */
+function exitOnStartupError(err: unknown): never {
   if (err instanceof StartupError) {
     console.error(`participant: ${err.message}`);
     process.exit(EXITS[err.exit].code);
   }
   throw err;
+}
+
+let provider: IServiceProvider;
+try {
+  provider = participantServices(composeConfig(process.env, tmpdir(), process.getuid?.(), process.platform), process.platform).buildProvider();
+  // Not awaited: control lines are read and answered while the scan runs;
+  // only launching waits for it.
+  void beforeServing(provider, process.platform, (line) => console.error(`participant: ${line}`), provider.resolve(Shutdown).begun).catch(exitOnStartupError);
+} catch (err) {
+  exitOnStartupError(err);
 }
 
 runParticipant(provider);

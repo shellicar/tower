@@ -11,6 +11,7 @@ export const EXITS = {
   badEnvironment: { code: 66, meaning: 'an environment value it starts from is missing or unusable' },
   configDirLocked: { code: 67, meaning: 'another participant is running on the config dir' },
   unsupportedPlatform: { code: 68, meaning: "the platform isn't one it runs on" },
+  noProcessList: { code: 69, meaning: "the process list couldn't be read before the participant was ready, in the launch check or the leftover scan (on macOS, ps couldn't be run or its full listing exited non-zero), so an earlier run's leftovers couldn't be found" },
 } as const;
 
 export type ExitName = keyof typeof EXITS;

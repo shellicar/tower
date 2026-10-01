@@ -1,7 +1,7 @@
 import { dependsOn } from '@shellicar/core-di';
 import { PARTICIPANT_TAG } from './ClaudeCodeSpawner.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
-import { IProcessTable, type TaggedProcess } from './ProcessTable.js';
+import { IProcessTable, ProcessListUnreadable, type TaggedProcess } from './ProcessTable.js';
 import { ITimer } from './Timer.js';
 
 const SIGINT_WAIT_MS = 5_000;
@@ -9,6 +9,10 @@ const SIGTERM_WAIT_MS = 5_000;
 /** SIGKILL can't be refused; this only gives the kernel time to take the process down before what's left is reported. */
 const SIGKILL_WAIT_MS = 1_000;
 const POLL_MS = 50;
+/** Strict reads until shutdown begins: until then, a process list that can't be read fails the start. */
+function strictUntil(shutdown: AbortSignal): { strict: boolean } {
+  return { strict: !shutdown.aborted };
+}
 
 const ESCALATION: readonly { signal: NodeJS.Signals; waitMs: number }[] = [
   { signal: 'SIGINT', waitMs: SIGINT_WAIT_MS },
@@ -49,11 +53,30 @@ export class Leftovers {
    * SIGINT, wait, SIGTERM, wait, SIGKILL; each stage reaches every tagged
    * process there at the time, one that appeared since included.
    *
+   * Until shutdown begins, the scan reads strictly: a process list that
+   * can't be read throws ProcessListUnreadable, which fails the start. Once
+   * shutdown has begun the start is cancelled, so such a failure, even one
+   * from a read already under way, ends the scan as interrupted instead.
+   *
    * @param shutdown aborted when shutdown begins, which stops the scan where it is.
    */
   public async stop(log: (line: string) => void, shutdown: AbortSignal): Promise<LeftoverStop> {
     const entry = `${PARTICIPANT_TAG}=${this.config.configDir}`;
-    const found = this.processes.tagged(entry);
+    try {
+      return await this.scan(entry, log, shutdown);
+    } catch (err) {
+      if (err instanceof ProcessListUnreadable && shutdown.aborted) {
+        return this.interrupted(entry, log);
+      }
+      throw err;
+    }
+  }
+
+  private async scan(entry: string, log: (line: string) => void, shutdown: AbortSignal): Promise<LeftoverStop> {
+    if (shutdown.aborted) {
+      return this.interrupted(entry, log);
+    }
+    const found = this.processes.tagged(entry, strictUntil(shutdown));
     if (found.length === 0) {
       return { interrupted: false, remaining: [] };
     }
@@ -63,11 +86,11 @@ export class Leftovers {
       if (shutdown.aborted) {
         return this.interrupted(entry, log);
       }
-      const targets = this.processes.tagged(entry);
+      const targets = this.processes.tagged(entry, strictUntil(shutdown));
       if (targets.length === 0) {
         break;
       }
-      const sent = targets.filter((target) => this.processes.signal(target, signal));
+      const sent = targets.filter((target) => this.processes.signal(target, signal, strictUntil(shutdown)));
       log(`leftovers: ${signal} to ${sent.map((p) => p.pid).join(', ') || 'none (already gone)'}; waiting up to ${waitMs} ms`);
       if (await this.goneWithin(entry, waitMs, shutdown)) {
         log(`leftovers: all gone after ${Math.round(this.timer.now() - started)} ms`);
@@ -77,13 +100,14 @@ export class Leftovers {
     if (shutdown.aborted) {
       return this.interrupted(entry, log);
     }
-    const remaining = this.processes.tagged(entry);
+    const remaining = this.processes.tagged(entry, strictUntil(shutdown));
     if (remaining.length > 0) {
       log(`leftovers: still there after SIGKILL, serving anyway: ${listed(remaining)}`);
     }
     return { interrupted: false, remaining };
   }
 
+  /** Shutdown has begun, so this read is lenient: an unreadable list reads as nothing left. */
   private interrupted(entry: string, log: (line: string) => void): LeftoverStop {
     const remaining = this.processes.tagged(entry);
     log(`leftovers: scan stopped for shutdown${remaining.length > 0 ? `, leaving ${listed(remaining)}` : ''}`);
@@ -93,11 +117,16 @@ export class Leftovers {
   private async goneWithin(entry: string, waitMs: number, shutdown: AbortSignal): Promise<boolean> {
     const deadline = this.timer.now() + waitMs;
     for (;;) {
-      if (this.processes.tagged(entry).length === 0) {
+      // Checked before the read: once shutdown has begun, the start is
+      // cancelled, whatever the list says.
+      if (shutdown.aborted) {
+        return false;
+      }
+      if (this.processes.tagged(entry, strictUntil(shutdown)).length === 0) {
         return true;
       }
       const left = deadline - this.timer.now();
-      if (left <= 0 || shutdown.aborted) {
+      if (left <= 0) {
         return false;
       }
       await this.timer.sleep(Math.min(POLL_MS, left));

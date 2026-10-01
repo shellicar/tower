@@ -159,7 +159,8 @@ same control line repoints it live); claude-code-participant
 (`mvp/apps/claude-code-participant`): `NATS_URL`, `PARTICIPANT_WORLD`,
 `PARTICIPANT_DURABLE_BUCKET` (the durable object store bucket),
 `PARTICIPANT_CONFIG_DIR` (absolute) and `HOME` (absolute), all required with
-no default, plus `PATH`, searched for `setpriv`.
+no default, plus `PATH`, searched for `setpriv`; on macOS also
+`PARTICIPANT_LOGIN_DIR` (absolute, required, no default; ignored on Linux).
 
 The model has no env var and no default either. A `model` control line
 carries name, maxTokens, thinking, thinkingDisplay and effort; it MERGES
@@ -200,7 +201,7 @@ Env: `HELM_BRIDGE_PATH`, `HELM_BRIDGE_LOG` (bridge stderr, default
 
 ## claude-code-participant
 
-Claude Code on tower's bus (`mvp/apps/claude-code-participant`): one participant per world, serving conversations through the Agent SDK. The scripts in its `scripts/` directory run it. Every script needs `NATS_URL` given explicitly, so it never defaults to 4222 (the live deployment), and runs from the app's own directory. To try it on the test broker, run these from the repo root, each terminal in turn:
+Claude Code on tower's bus (`mvp/apps/claude-code-participant`): one participant per world, serving conversations through the Agent SDK. The scripts in its `scripts/` directory run it. Every script that reaches the broker needs `NATS_URL` given explicitly, so it never defaults to 4222 (the live deployment), and runs from the app's own directory. To try it on the test broker, run these from the repo root, each terminal in turn:
 
 ```sh
 pnpm install
@@ -214,26 +215,34 @@ cd mvp && docker compose -f compose.test.yaml up -d nats && docker compose -f co
 cd mvp && NATS_URL=nats://127.0.0.1:31416 TOWER_DB=tower-test.db just dev
 ```
 
+On macOS only, once per machine (see macOS below):
+
 ```sh
-cd mvp/apps/claude-code-participant && NATS_URL=nats://127.0.0.1:31416 node --import tsx scripts/start.ts
+cd mvp/apps/claude-code-participant && pnpm claude-login
 ```
 
 ```sh
-mkdir -p /tmp/cc-try && cd mvp/apps/claude-code-participant && NATS_URL=nats://127.0.0.1:31416 node --import tsx scripts/new-conversation.ts /tmp/cc-try
+cd mvp/apps/claude-code-participant && NATS_URL=nats://127.0.0.1:31416 node --env-file-if-exists=.env --import tsx scripts/start.ts
 ```
+
+```sh
+mkdir -p /tmp/cc-try && cd mvp/apps/claude-code-participant && NATS_URL=nats://127.0.0.1:31416 node --env-file-if-exists=.env --import tsx scripts/new-conversation.ts /tmp/cc-try
+```
+
+The run commands above, the usage lines of `start.ts`, `new-conversation.ts` and `say.ts`, and `pnpm claude-login` (`login.ts`) all pass `--env-file-if-exists=.env`, which loads an optional `.env` in the app directory (git-ignored) when it is there; a variable already in the environment wins over the file. It can set any variable those scripts read: `NATS_URL`, `PARTICIPANT_WORLD`, `PARTICIPANT_DURABLE_BUCKET`, and `PARTICIPANT_LOGIN_DIR` (absolute; the same value reaches `start.ts` and `login.ts`, so both name the same Keychain entry). With `NATS_URL` in the `.env`, the commands need no inline variable, so they run unchanged from PowerShell or cmd: `node --env-file-if-exists=.env --import tsx scripts/start.ts` (or set it first in PowerShell: `$env:NATS_URL='nats://127.0.0.1:31416'`).
 
 The new conversation shows in tower; say into it there. `start.ts` configures the participant (model, system prompt, permission mode, sandbox) and keeps it running; Ctrl-C stops it, and a second Ctrl-C forces it. Its config dir is `${XDG_DATA_HOME:-~/.local/share}/tower/worlds/<world>`. `just dev` needs `trunk` (`cargo install trunk --locked`). When done, stop the test broker with `cd mvp && docker compose -f compose.test.yaml down`.
 
 ### macOS
 
-The participant runs on Linux only for now. To make it work on macOS:
+The participant runs on Linux and macOS (`src/beforeServing.ts` refuses every other platform with exit code 68, `unsupportedPlatform`). On macOS it differs in four ways:
 
-1. **Lift the platform refusal.** `src/beforeServing.ts` refuses anything but `linux` with exit code 68 (`unsupportedPlatform`). Remove that once the steps below work.
-2. **A macOS process table.** At startup the participant stops an earlier run's leftover processes, found by the `TOWER_PARTICIPANT=<config dir>` tag in each process's environment. The `ProcessTable` abstract class (`src/ProcessTable.ts`) has only `LinuxProcessTable`, which reads `/proc`, registered in `src/container.ts`. macOS needs its own implementation that reads each process's environment (for example through `sysctl` with `KERN_PROCARGS2`, or `ps -E`).
-3. **The login through the Keychain.** On macOS, Claude Code keeps its login in the Keychain rather than in `~/.claude`. Whether the participant's shared login (it points Claude Code's secure storage at the real `~/.claude`) works there is untested; check it first.
-4. **`setpriv` is Linux-only.** It gives each Claude Code a signal when the participant dies. On macOS it isn't found and is skipped, so a killed participant can leave a Claude Code running until the next start's leftover scan stops it.
+1. **Its own login.** Claude Code keeps its login in the Keychain, through `/usr/bin/security`, which finds no keychain under the participant's private HOME. So on macOS Claude Code's `CLAUDE_SECURESTORAGE_CONFIG_DIR` is `PARTICIPANT_LOGIN_DIR`, one login dir per machine shared by every world, which names the participant's own Keychain entry (`Claude Code-credentials-<hash of the dir>`) and holds its refresh lock, separate from your own Claude Code's entry and from bridge. `start.ts` sets it to `${XDG_DATA_HOME:-~/.local/share}/tower/login` unless `PARTICIPANT_LOGIN_DIR` comes from the environment or the `.env`; it gets the config dir's permission checks. `pnpm claude-login` (`scripts/login.ts`, reading `PARTICIPANT_LOGIN_DIR` the same way) logs that entry in once: it runs the SDK's own Claude Code as `auth login` with the participant's environment, so Claude Code writes the entry itself. On Linux the login stays the real `~/.claude`.
+2. **The `security` shim.** `bin/real-home-security/security`, alone in its directory, is put first on Claude Code's PATH on macOS. It runs `/usr/bin/security` with `HOME="$TOWER_REAL_HOME"`, so Claude Code finds the user's keychains while its own HOME stays private. Commands Claude Code runs see it first on PATH too, and get the same `security` they would have.
+3. **The leftover scan reads `ps`.** `MacProcessTable` (`src/ProcessTable.ts`) finds the `TOWER_PARTICIPANT=<config dir>` tag with `ps -axwwE`, which prints the command and the environment as one space-joined line; only what follows the plain command line (read again without `-E`) counts, so a tag named in a process's arguments alone is no match, but a config dir path holding a space can still match ambiguously. The participant won't start without a working `ps`: until it is ready (the serving gate opens once the leftover scan finishes), a `ps` that can't be run or a full listing that exits non-zero, in the launch check or anywhere in the scan, ends it with exit 69 (`noProcessList`) and the gate stays shut. A shutdown that starts before the participant is ready cancels startup: the scan stops as interrupted, the gate stays shut, a `ps` failure in the scan no longer counts, and shutdown's own reads treat one as no processes and signal nothing; it exits with its own code. After the participant is ready, a `ps` failure is likewise read as no processes. A read of named pids (`ps -p`) that exits non-zero is ps saying some have gone, not a failure: the rows of those still running are used. macOS hides the environment of its own platform binaries from `ps -E` (a tagged `/bin/sleep` is invisible; `node` and Claude Code are visible), so a leftover `/bin/sh` or `bash` that Claude Code started is not found.
+4. **No `setpriv`.** It isn't found and is skipped, so a killed participant can leave a Claude Code running until the next start's leftover scan stops it.
 
-Expected to work unchanged: Claude Code in its own process group, the private HOME and real-home shell prefix, the config dir's permission checks (group bits included), and Claude Code's sandbox, which uses macOS's Seatbelt.
+Unchanged from Linux: Claude Code in its own process group, the private HOME and real-home shell prefix, the config dir's permission checks (group bits included), and Claude Code's sandbox, which uses macOS's Seatbelt.
 
 ## Seams
 

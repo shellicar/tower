@@ -5,7 +5,7 @@
 // Claude Code; the answer isn't printed here.
 //
 //   NATS_URL=nats://127.0.0.1:31416 \
-//     node --import tsx scripts/say.ts <conversation id> <text> [<tip message id>]
+//     node --env-file-if-exists=.env --import tsx scripts/say.ts <conversation id> <text> [<tip message id>]
 //
 // NATS_URL is required, with no default. A say against a conversation that
 // already has messages needs its tip: the id of its last message.

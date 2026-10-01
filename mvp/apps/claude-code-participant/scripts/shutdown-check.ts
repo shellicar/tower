@@ -49,7 +49,7 @@ class RecordingSpawner extends ClaudeCodeSpawner {
   }
 }
 
-const services = participantServices(composeConfig(process.env, tmpdir(), process.getuid?.()));
+const services = participantServices(composeConfig(process.env, tmpdir(), process.getuid?.(), process.platform), process.platform);
 services.register(RecordingSpawner).as(ClaudeCodeSpawner);
 const provider = services.buildProvider();
 

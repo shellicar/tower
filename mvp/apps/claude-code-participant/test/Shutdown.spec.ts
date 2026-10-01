@@ -264,6 +264,15 @@ describe('Shutdown', () => {
       expect(host.logs).toContain('shutdown stage 1: nothing it started is still running');
     });
 
+    it('reads a process list that cannot be read as nothing left, without throwing', async () => {
+      const { shutdown, processTable, host } = await serving(0);
+      processTable.add(9001, TAG);
+      processTable.unreadable = true;
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(host.logs).toContain('shutdown stage 1: nothing it started is still running');
+    });
+
     it('names what it signals', async () => {
       const { shutdown, processTable, host } = await serving(0);
       processTable.add(9001, TAG);
@@ -513,6 +522,16 @@ describe('Shutdown', () => {
   describe('stage 3: SIGKILL and exit', () => {
     it('exits as instant at once on a third trigger', async () => {
       const { shutdown, host } = await serving(1);
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      shutdown.ask('SIGINT');
+      expect(host.exits).toEqual([EXITS.instant.code]);
+    });
+
+    it('still exits as instant when the process list cannot be read', async () => {
+      const { shutdown, processTable, host } = await serving(0);
+      processTable.add(9001, TAG, ['SIGKILL'], true);
+      processTable.unreadable = true;
       shutdown.ask('SIGINT');
       shutdown.ask('SIGINT');
       shutdown.ask('SIGINT');

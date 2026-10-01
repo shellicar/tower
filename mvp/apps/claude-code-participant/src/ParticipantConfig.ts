@@ -14,8 +14,12 @@ export class ParticipantConfig {
   public readonly setpriv: string | null;
   /** The script that gives commands Claude Code runs the real HOME back. */
   public readonly shellPrefix: string;
+  /** macOS only, null elsewhere: Claude Code's secure storage dir, which names its Keychain entry. */
+  public readonly loginDir: string | null;
+  /** macOS only, null elsewhere: the directory holding the `security` shim, put first on Claude Code's PATH. */
+  public readonly securityShimDir: string | null;
 
-  public constructor(startup: Startup, privateHome: string, setpriv: string | null, shellPrefix: string) {
+  public constructor(startup: Startup, privateHome: string, setpriv: string | null, shellPrefix: string, securityShimDir: string | null) {
     this.natsUrl = startup.natsUrl;
     this.world = startup.world;
     this.durableBucket = startup.durableBucket;
@@ -25,5 +29,7 @@ export class ParticipantConfig {
     this.privateHome = privateHome;
     this.setpriv = setpriv;
     this.shellPrefix = shellPrefix;
+    this.loginDir = startup.loginDir;
+    this.securityShimDir = securityShimDir;
   }
 }

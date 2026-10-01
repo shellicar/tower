@@ -6,14 +6,18 @@
 // it keeps the participant's stdin open until the participant exits, and
 // exits with the participant's own exit code.
 //
-//   NATS_URL=nats://127.0.0.1:31416 [PARTICIPANT_WORLD=claude-code] [PARTICIPANT_DURABLE_BUCKET=durable] \
-//     node --import tsx scripts/start.ts
+//   NATS_URL=nats://127.0.0.1:31416 [PARTICIPANT_WORLD=claude-code] [PARTICIPANT_DURABLE_BUCKET=durable] [PARTICIPANT_LOGIN_DIR=/abs/dir] \
+//     node --env-file-if-exists=.env --import tsx scripts/start.ts
 //
-// NATS_URL is required, with no default. PARTICIPANT_WORLD defaults to
-// claude-code. PARTICIPANT_DURABLE_BUCKET defaults to durable, the bucket
-// stream-init creates. The config dir is
+// Any of these can also come from an optional .env in the app directory;
+// the environment wins over it. NATS_URL is required, with no default.
+// PARTICIPANT_WORLD defaults to claude-code. PARTICIPANT_DURABLE_BUCKET
+// defaults to durable, the bucket stream-init creates. The config dir is
 // ${XDG_DATA_HOME:-$HOME/.local/share}/tower/worlds/<world> (a relative
-// XDG_DATA_HOME counts as unset), created if it isn't there. Ctrl-C and
+// XDG_DATA_HOME counts as unset), created if it isn't there. On macOS the
+// participant logs in from PARTICIPANT_LOGIN_DIR, by default
+// ${XDG_DATA_HOME:-$HOME/.local/share}/tower/login, which login.ts fills;
+// run it once first. Ctrl-C and
 // SIGTERM are passed to the participant, one for one: the first starts its
 // shutdown, a second moves it on a stage. The participant's stderr (its
 // diagnostics, and Claude Code's) comes through as it is.
@@ -38,6 +42,8 @@ const world = process.env.PARTICIPANT_WORLD || 'claude-code';
 const durableBucket = process.env.PARTICIPANT_DURABLE_BUCKET || 'durable';
 const configDir = join(dataHome(process.env), 'tower', 'worlds', world);
 mkdirSync(configDir, { recursive: true, mode: 0o700 });
+// Where login.ts logs the participant in; read on macOS only.
+const loginDir = process.env.PARTICIPANT_LOGIN_DIR || join(dataHome(process.env), 'tower', 'login');
 
 console.log(`start: world ${world}, durable bucket ${durableBucket}, config dir ${configDir}, NATS ${natsUrl}`);
 
@@ -56,7 +62,7 @@ function shellExitCode(code: number | null, signal: NodeJS.Signals | null): numb
 
 const main = fileURLToPath(new URL('../src/main.ts', import.meta.url));
 const participant = spawnInOwnSession(process.execPath, ['--import', 'tsx', main], {
-  env: { ...process.env, NATS_URL: natsUrl, PARTICIPANT_WORLD: world, PARTICIPANT_DURABLE_BUCKET: durableBucket, PARTICIPANT_CONFIG_DIR: configDir },
+  env: { ...process.env, NATS_URL: natsUrl, PARTICIPANT_WORLD: world, PARTICIPANT_DURABLE_BUCKET: durableBucket, PARTICIPANT_CONFIG_DIR: configDir, PARTICIPANT_LOGIN_DIR: loginDir },
 });
 const exited = new Promise<number>((resolve) => {
   participant.once('exit', (code, signal) => resolve(shellExitCode(code, signal)));

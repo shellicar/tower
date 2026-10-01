@@ -4,7 +4,7 @@
 // Code for it and published `attached`.
 //
 //   NATS_URL=nats://127.0.0.1:31416 [PARTICIPANT_WORLD=claude-code] \
-//     node --import tsx scripts/new-conversation.ts <absolute cwd>
+//     node --env-file-if-exists=.env --import tsx scripts/new-conversation.ts <absolute cwd>
 //
 // NATS_URL is required, with no default. PARTICIPANT_WORLD defaults to
 // claude-code. The cwd is sent as given; the participant rejects one that

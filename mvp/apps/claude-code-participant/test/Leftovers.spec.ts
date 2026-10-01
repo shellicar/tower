@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Leftovers } from '../src/Leftovers.js';
+import { ProcessListUnreadable } from '../src/ProcessTable.js';
 import { testServices } from './support.js';
 
 const TAG = 'TOWER_PARTICIPANT=/agents/alpha/config';
@@ -164,6 +165,45 @@ describe('Leftovers', () => {
       await stop();
       expect(lines.at(-1)).toBe('leftovers: scan stopped for shutdown, leaving 200 (cmd-200)');
     });
+
+    it('ends as interrupted, without failing, when the process list then cannot be read', async () => {
+      const setup = setUp();
+      setup.processTable.add(200, TAG, []);
+      setup.timer.onSleep = (now) => {
+        if (now === 1_000) {
+          setup.shutdown.abort();
+          setup.processTable.unreadable = true;
+        }
+      };
+      expect(await setup.stop()).toEqual({ interrupted: true, remaining: [] });
+    });
+
+    it('ends as interrupted when shutdown begins during a read that then fails', async () => {
+      const setup = setUp();
+      setup.processTable.add(200, TAG, []);
+      const tagged = setup.processTable.tagged.bind(setup.processTable);
+      setup.processTable.tagged = (entry, options) => {
+        if (setup.timer.now() >= 1_000 && !setup.shutdown.signal.aborted) {
+          setup.shutdown.abort();
+          throw new ProcessListUnreadable('ps could not be run');
+        }
+        return tagged(entry, options);
+      };
+      expect((await setup.stop()).interrupted).toBe(true);
+    });
+  });
+
+  it('ends as interrupted when shutdown began before the scan, with nothing tagged', async () => {
+    const { stop, shutdown } = setUp();
+    shutdown.abort();
+    expect((await stop()).interrupted).toBe(true);
+  });
+
+  it('fails when the process list cannot be read and shutdown has not begun', async () => {
+    const { stop, processTable } = setUp();
+    processTable.add(200, TAG, []);
+    processTable.unreadable = true;
+    await expect(stop()).rejects.toThrow(ProcessListUnreadable);
   });
 
   it('says a finished scan was not interrupted', async () => {

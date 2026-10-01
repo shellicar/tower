@@ -13,7 +13,7 @@ import { ParticipantLock } from './ParticipantLock.js';
 import { ParticipantSettings } from './ParticipantSettings.js';
 import { Presence } from './Presence.js';
 import { IProcessSpawner, NodeProcessSpawner } from './ProcessSpawner.js';
-import { IProcessTable, LinuxProcessTable } from './ProcessTable.js';
+import { IProcessTable, LinuxProcessTable, MacProcessTable, realPs } from './ProcessTable.js';
 import { ServingGate } from './ServingGate.js';
 import { BusPublisher, IPublisher, PublishingSessionStore } from './SessionStore.js';
 import { Shutdown } from './Shutdown.js';
@@ -22,9 +22,10 @@ import { ITimer, RealTimer } from './Timer.js';
 /**
  * Every service the participant is made of, one instance each. A later
  * registration for the same token replaces an earlier one, which is how a
- * test puts a fake at a boundary.
+ * test puts a fake at a boundary. The process table is the one for
+ * `platform`.
  */
-export function participantServices(config: ParticipantConfig): IServiceCollection {
+export function participantServices(config: ParticipantConfig, platform: NodeJS.Platform): IServiceCollection {
   const services = createServiceCollection({ defaultLifetime: Lifetime.Singleton, registrationMode: ResolveMultipleMode.LastRegistered });
   services
     .register(ParticipantConfig)
@@ -39,10 +40,17 @@ export function participantServices(config: ParticipantConfig): IServiceCollecti
   services.register(SdkClaudeCode).as(IClaudeCode);
   services.register(Conversations).asSelf();
   services.register(ConversationLauncher).asSelf();
-  services
-    .register(LinuxProcessTable)
-    .using(() => new LinuxProcessTable('/proc', (pid, signal) => process.kill(pid, signal), process.pid))
-    .as(IProcessTable);
+  if (platform === 'darwin') {
+    services
+      .register(MacProcessTable)
+      .using(() => new MacProcessTable(realPs, (pid, signal) => process.kill(pid, signal), process.pid))
+      .as(IProcessTable);
+  } else {
+    services
+      .register(LinuxProcessTable)
+      .using(() => new LinuxProcessTable('/proc', (pid, signal) => process.kill(pid, signal), process.pid))
+      .as(IProcessTable);
+  }
   services.register(RealTimer).as(ITimer);
   services.register(ParticipantLock).asSelf();
   services.register(Leftovers).asSelf();
