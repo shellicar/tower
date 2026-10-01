@@ -224,6 +224,17 @@ mkdir -p /tmp/cc-try && cd mvp/apps/claude-code-participant && NATS_URL=nats://1
 
 The new conversation shows in tower; say into it there. `start.ts` configures the participant (model, system prompt, permission mode, sandbox) and keeps it running; Ctrl-C stops it, and a second Ctrl-C forces it. Its config dir is `${XDG_DATA_HOME:-~/.local/share}/tower/worlds/<world>`. `just dev` needs `trunk` (`cargo install trunk --locked`). When done, stop the test broker with `cd mvp && docker compose -f compose.test.yaml down`.
 
+### macOS
+
+The participant runs on Linux only for now. To make it work on macOS:
+
+1. **Lift the platform refusal.** `src/beforeServing.ts` refuses anything but `linux` with exit code 68 (`unsupportedPlatform`). Remove that once the steps below work.
+2. **A macOS process table.** At startup the participant stops an earlier run's leftover processes, found by the `TOWER_PARTICIPANT=<config dir>` tag in each process's environment. The `ProcessTable` abstract class (`src/ProcessTable.ts`) has only `LinuxProcessTable`, which reads `/proc`, registered in `src/container.ts`. macOS needs its own implementation that reads each process's environment (for example through `sysctl` with `KERN_PROCARGS2`, or `ps -E`).
+3. **The login through the Keychain.** On macOS, Claude Code keeps its login in the Keychain rather than in `~/.claude`. Whether the participant's shared login (it points Claude Code's secure storage at the real `~/.claude`) works there is untested; check it first.
+4. **`setpriv` is Linux-only.** It gives each Claude Code a signal when the participant dies. On macOS it isn't found and is skipped, so a killed participant can leave a Claude Code running until the next start's leftover scan stops it.
+
+Expected to work unchanged: Claude Code in its own process group, the private HOME and real-home shell prefix, the config dir's permission checks (group bits included), and Claude Code's sandbox, which uses macOS's Seatbelt.
+
 ## Seams
 
 Edges get their seam at birth. An edge is anywhere the code meets what a
