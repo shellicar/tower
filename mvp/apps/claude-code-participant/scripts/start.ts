@@ -3,8 +3,10 @@
 // Claude Code's sandbox. Each control line and its reply are printed; if any
 // reply is an error it says which, closes the participant's stdin (which
 // starts its shutdown) and exits 1 once the participant has gone. Otherwise
-// it keeps the participant's stdin open until the participant exits, and
-// exits with the participant's own exit code.
+// it forwards each line typed in its own terminal to the participant's stdin
+// and prints the participant's reply, until the participant exits; it then
+// exits with the participant's own exit code. When the terminal's input ends
+// (Ctrl-D), it closes the participant's stdin, which starts its shutdown.
 //
 //   NATS_URL=nats://127.0.0.1:31416 [PARTICIPANT_WORLD=claude-code] [PARTICIPANT_DURABLE_BUCKET=durable] [PARTICIPANT_LOGIN_DIR=/abs/dir] \
 //     node --env-file-if-exists=.env --import tsx scripts/start.ts
@@ -29,6 +31,7 @@ import { isAbsolute, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { describeError } from '../src/describeError.js';
 
 const CONTROL_LINES = [{ model: { name: 'claude-sonnet-5-5', maxTokens: 120000, thinking: 'adaptive', thinkingDisplay: 'summarized', effort: 'medium' } }, { system: { preset: true } }, { permissionMode: 'auto' }, { claudeSettings: { sandbox: { enabled: true, autoAllowBashIfSandboxed: true } } }];
 
@@ -63,6 +66,10 @@ function shellExitCode(code: number | null, signal: NodeJS.Signals | null): numb
 const main = fileURLToPath(new URL('../src/main.ts', import.meta.url));
 const participant = spawnInOwnSession(process.execPath, ['--import', 'tsx', main], {
   env: { ...process.env, NATS_URL: natsUrl, PARTICIPANT_WORLD: world, PARTICIPANT_DURABLE_BUCKET: durableBucket, PARTICIPANT_CONFIG_DIR: configDir, PARTICIPANT_LOGIN_DIR: loginDir },
+});
+// A failed write to the participant's stdin is logged; the exit code is still the participant's.
+participant.stdin.on('error', (err) => {
+  console.error(`start: writing to the participant's stdin failed: ${describeError(err)}`);
 });
 const exited = new Promise<number>((resolve) => {
   participant.once('exit', (code, signal) => resolve(shellExitCode(code, signal)));
@@ -107,7 +114,19 @@ for (const line of CONTROL_LINES) {
 }
 console.log('start: every control line accepted; the participant publishes ready once it has connected');
 
-// Anything more the participant writes on stdout is printed, so its pipe never fills.
+// Each line typed in this terminal goes to the participant's stdin as it is.
+// The terminal stays in line mode so Ctrl-C still reaches the signal handlers above.
+// When this terminal's input ends, the participant's stdin is closed, which starts its shutdown.
+createInterface({ input: process.stdin, terminal: false })
+  .on('line', (line) => {
+    participant.stdin.write(`${line}\n`);
+  })
+  .on('close', () => {
+    console.log("start: end of input, closing the participant's stdin");
+    participant.stdin.end();
+  });
+
+// Anything more the participant writes on stdout, including the reply to each forwarded line, is printed, so its pipe never fills.
 void (async () => {
   for (let next = await replies.next(); !next.done; next = await replies.next()) {
     console.log(`start: participant stdout ${next.value}`);
