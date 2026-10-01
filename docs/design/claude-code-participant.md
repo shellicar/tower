@@ -103,7 +103,7 @@ The next stretch makes the participant something Stephen can use every day
 instead of the terminal. In order:
 
 1. Small fixes: `ready` published only once the participant is configured,
-   and replies labelled by their role.
+   and replies no longer shown as "system".
 2. Robustness: a conversation stuck after a dropped message, Claude Code
    exiting on its own, and the broker going away.
 3. Streaming replies.
@@ -111,9 +111,10 @@ instead of the terminal. In order:
    yes".
 5. Publishing `query.started`, and tower reading it.
 6. Showing subagents and shells.
-7. The permission mode, effort and sandbox carried per query, on
-   `query.started`, since they can change while a conversation runs. The
-   sandbox's state is something Stephen would "potentially show in tower".
+7. The permission mode, effort and sandbox on `query.started`. Where they
+   go still needs a short discussion; for the sandbox's state Stephen said
+   "maybe in the query event metadata?". The sandbox's state is something he
+   would "potentially show in tower".
 8. A folded status in tower's conversation list, with `unavailable` and
    `offline`: "it should really have a folded status, otherwise almost
    everything has query".
@@ -613,11 +614,13 @@ Parked, not decided:
   `changes.query.closed`. Tower shows the conversation's current state, not
   everything Claude Code records. Publishing everything: "its not *wrong*,
   its just wasteful" (29 Sep).
-- **The rest stays internal,** in Claude Code's own record, which v0 resumes
-  from: reminders, attachment entries, Claude Code's marker texts, subagent
-  entries and bookkeeping. "it can remain *internal*" (29 Sep). Which other
-  entry kinds would reach tower for a resume from tower is post-v0 (see How it
-  runs, "What is committed follows Claude Code").
+- **These kinds stay internal, as built,** in Claude Code's own record, which
+  v0 resumes from: reminders, attachment entries, Claude Code's marker texts,
+  subagent entries and bookkeeping. For reminders and subagent entries: "it
+  can remain *internal*" (29 Sep). The build also leaves out compaction
+  summaries; whether they stay internal is not decided (see [Open](#open)).
+  Which other entry kinds would reach tower for a resume from tower is
+  post-v0 (see How it runs, "What is committed follows Claude Code").
 - **A file a message carries is stored first,** in the durable bucket, and the
   message carries a reference in its place (see
   [The two object stores](#the-two-object-stores)).
@@ -996,6 +999,17 @@ separately, they can go in this branch" (26 Sep).
   - Effort `max`: Claude Code's settings can't carry it (the top-level and
     per-model `effortLevel` both drop it silently), so a declared `max` goes
     as a launch option and then beats every effort the fallback sets.
+- **Left from the publisher** (1 Oct), parked:
+  - Messages over the broker's 1 MB payload limit. `tool_use.input` has no
+    size limit, so such a message fails to publish and is dropped (and
+    logged). Never losing one needs a carrier for oversized values, which is
+    a design.
+  - Compaction summaries. The build leaves them out, though the model sees
+    them as a user message. Whether tower carries them is not decided. It
+    only matters in long conversations.
+  - Checking that the durable bucket exists at startup. Today a missing
+    bucket goes unnoticed until the first query that carries a file, which
+    is aborted.
 - **Later, not v0:** the `tools` line; queueing (v1); showing shells and subagents (v1).
 
 ## Evidence
