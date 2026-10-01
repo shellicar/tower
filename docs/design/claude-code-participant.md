@@ -812,6 +812,14 @@ separately, they can go in this branch" (26 Sep).
   or an orchestrator); anything the harness generated has none
   (`mvp/docs/tower-ws-spec.md` for the browser, `docs/spec/conversation.md`
   for the wire).
+- **Done:** a message with no `from` that isn't in the user role is
+  labelled by its role, in both frontends (1 Oct). The participant publishes
+  Claude Code's replies as `role: "assistant"` with no `from`, and both
+  frontends labelled them "system". Now a reply reads "assistant" and a
+  `role: "system"` message "system"; a user-role message with no `from`
+  still reads "tool" or "system" as above. How a role outside user,
+  assistant and system is labelled is undecided (it shows the role as it
+  arrives; TODO in both functions).
 
 ## Open
 

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { ContentBlock, ConversationMessage, Sender } from '../types';
 import { senderLabel } from './sender';
 
-function message(from: Sender | undefined, content: ContentBlock[]): ConversationMessage {
-  return { id: 'm', query: 'q', turn: 't', role: 'user', from, content, ts: 1 };
+function message(from: Sender | undefined, content: ContentBlock[], role = 'user'): ConversationMessage {
+  return { id: 'm', query: 'q', turn: 't', role, from, content, ts: 1 };
 }
 
 const text: ContentBlock = { type: 'text', text: 'hi' };
@@ -54,6 +54,22 @@ describe('senderLabel', () => {
     const expected = 'system';
 
     const actual = senderLabel(message(undefined, []));
+
+    expect(actual).toBe(expected);
+  });
+
+  it('reads no sender in the assistant role as assistant', () => {
+    const expected = 'assistant';
+
+    const actual = senderLabel(message(undefined, [text], 'assistant'));
+
+    expect(actual).toBe(expected);
+  });
+
+  it('reads no sender in the system role as system', () => {
+    const expected = 'system';
+
+    const actual = senderLabel(message(undefined, [text], 'system'));
 
     expect(actual).toBe(expected);
   });
