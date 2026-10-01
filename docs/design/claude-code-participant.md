@@ -5,8 +5,8 @@ SDK.
 
 This is the decision record. The participant's process, its configuration,
 launching Claude Code, its presence on the bus, the `service`, `say` and
-`cancel` requests, and shutdown are built; the publisher (what turns Claude
-Code's writes into `changes`) is not. Every decision here is
+`cancel` requests, shutdown, the publisher (what turns Claude Code's writes
+into `changes`) and the scripts that drive it are built. Every decision here is
 Stephen's, with the date he made it and, where it matters, his words. Open
 questions are listed under [Open](#open). Evidence comes from proofs run on
 26 and 27 Sep, each on its own branch (listed under [Evidence](#evidence)).
@@ -38,7 +38,8 @@ questions are listed under [Open](#open). Evidence comes from proofs run on
 
 **The first milestone** (1 Oct): driving a conversation from tower. "if i
 can drive the conversation, that's the first major milestone" ("it will need
-others soon").
+others soon"). Reached on 1 Oct, on the test broker: Stephen said "hello"
+from tower and the reply came back.
 
 In:
 
@@ -47,7 +48,6 @@ In:
   "needs to be fully usable from tower's ui, because there wont *be* a
   terminal to use" (29 Sep).
 - Auto mode.
-- Images sent with a `say` (26 Sep).
 
 Out of v0:
 
@@ -56,6 +56,13 @@ Out of v0:
   Claude Code's own local record (its transcript in the agent's config dir);
   what is published only has to render correctly in tower's UI. What a resume
   from tower would need is in the minimum entries proof (Evidence).
+- **Images in tower** (1 Oct): showing the images Claude Code committed,
+  and attaching images to a `say`. Deferred until the lack of them hurts: "i
+  have no alternative right now other than putting an image somewhere and
+  telling claude to look at it ... deferred till i cant stand it". The
+  publisher already stores every image Claude Code commits in the durable
+  bucket (see [The publisher](#the-publisher)); a `say` carrying attachments
+  is answered `unsupported`.
 - **Windows** (29 Sep): "its not a v0 thing, possibly v1 if its not too
   difficult". It matters because a friend of Stephen's uses Windows; tower and
   bridge already work there. Stephen (1 Oct): "windows is also on the cards
@@ -90,6 +97,32 @@ Not at all:
 - File checkpointing (23 Sep).
 - A proxy between Claude Code and the API, except as a fallback (23 Sep).
 
+### After v0 (1 Oct)
+
+The next stretch makes the participant something Stephen can use every day
+instead of the terminal. In order:
+
+1. Small fixes: `ready` published only once the participant is configured,
+   and replies labelled by their role.
+2. Robustness: a conversation stuck after a dropped message, Claude Code
+   exiting on its own, and the broker going away.
+3. Streaming replies.
+4. Creating and servicing conversations from tower: "creating and servicing
+   yes".
+5. Publishing `query.started`, and tower reading it.
+6. Showing subagents and shells.
+7. The permission mode, effort and sandbox carried per query, on
+   `query.started`, since they can change while a conversation runs. The
+   sandbox's state is something Stephen would "potentially show in tower".
+8. A folded status in tower's conversation list, with `unavailable` and
+   `offline`: "it should really have a folded status, otherwise almost
+   everything has query".
+9. Images, deferred (see Out of v0).
+
+Later: approvals, queueing, rewind, skills, the `tools` line, running as a
+service, logging, resuming from tower, Windows, `drain` naming its instance,
+and the Files API.
+
 ## How it runs
 
 - **The Agent SDK** (23 Sep): "i dont want to write a huge amount of code /
@@ -98,7 +131,9 @@ Not at all:
 - **pnpm, inside the repo's workspace** (25 Sep).
 - **The official NATS client,** `@nats-io/transport-node` 3.4.0 and its
   `@nats-io/*` companions, never the deprecated `nats`: "if issues come up,
-  we address them" (25 Sep).
+  we address them" (25 Sep). The object store is written through
+  `@nats-io/obj`, the client's object store companion (1 Oct): "why wouldnt
+  we?".
 - **One `query()` per served conversation, fed a stream of messages**
   ("streaming input"), so Claude Code keeps running between messages and
   background tasks can keep running and report back (26 Sep). One `query()`
@@ -129,10 +164,15 @@ Not at all:
   things happen". Every piece keeps its own id on tower, so a rewind to any
   piece has an id to name. Which pieces form one reply is carried by
   `turnId`: the spec defines a turn as one round of the loop, which is one
-  API response (proof 9 rebuilt replies from it).
-- **Claude Code's `role: "system"` messages are published on
-  `changes.message` as sent** (26 Sep): "add role to changes.message DONE".
-  The schema's role is an open set (conversation.md, Message schemas), and
+  API response (proof 9 rebuilt replies from it). The publisher groups pieces
+  by response id (the `message.id` every piece of one API response shares),
+  so parallel tool calls stay in one turn; input that follows a reply joins
+  the next turn.
+- **Role `system` on `changes.message` is Claude Code's own notes** (1 Oct):
+  the `system` entries in its record, such as a compaction notice or an API
+  error, which the model mostly never sees. "its not undecided? thats
+  literally what its for?". Earlier (26 Sep): "add role to changes.message
+  DONE". The schema's role is an open set (conversation.md, Message schemas), and
   it now lists `system` (see [Spec changes owed](#spec-changes-owed)).
 - **Where a reminder sits in what the model received is semantic, not
   presentation** (27 Sep): "yes semantic". Publishing Claude Code's entries
@@ -195,7 +235,7 @@ Not at all:
 - **Everything but the publisher first:** the process and its configuration,
   launching Claude Code, the requests on NATS, shutdown, and leftovers
   (recovery deferred). The publisher (what turns Claude Code's writes into `changes`)
-  follows.
+  came after them.
 - **Where it lives:** `mvp/apps/claude-code-participant`. Inside `mvp/`,
   projects group by language: Rust in `crates/`, TypeScript apps in `apps/`
   and TypeScript libraries in `packages/`, so each workspace file is a glob.
@@ -208,8 +248,8 @@ Not at all:
   crosses a boundary, the store is a good one because it would write into nats
   / anything that writes/reads from a file could be another / i dont think we
   need an abstraction for claude, unless it makes sense for testing". The
-  session store hands entries to an abstract publisher, which does nothing
-  until the publisher is built.
+  session store hands entries to an abstract publisher, which publishes them
+  on the bus.
 - **Runs through `tsx`** (29 Sep): core-di uses TC39 decorators, which Node
   can't run from `.mts` (type stripping doesn't transform them; a decorated
   field is a `SyntaxError` on Node 26.3.1). "no build step doesnt really buy
@@ -270,8 +310,8 @@ Not at all:
   (1 Oct), not control lines: "this is really plumbing"; "the bucket name,
   the world, have no bearing on how claude works". The world is
   `PARTICIPANT_WORLD`, fixed for the process, "otherwise it could switch
-  worlds". The bucket name "needs to be static, remember the no ambient
-  config is about the model, the agent".
+  worlds". The bucket name is `PARTICIPANT_DURABLE_BUCKET`, and it "needs to
+  be static, remember the no ambient config is about the model, the agent".
 - **Claude Code's configuration variables are stripped** (29 Sep) from the
   environment Claude Code inherits: "if we can strip this, please". Claude
   Code ranks some environment variables above its settings, so an inherited
@@ -564,6 +604,45 @@ Parked, not decided:
   because "the doc wins where code and doc disagree" (CLAUDE.md):
   `instanceId` on change events, `usage` per usage frame, and `detached` on a
   clean exit.
+
+## The publisher
+
+- **It publishes what tower shows** (1 Oct), following from v0's purpose:
+  prompts, the pieces of each reply, tool results and Claude Code's own
+  `system` notes, each as a `changes.message`, and each query's end as
+  `changes.query.closed`. Tower shows the conversation's current state, not
+  everything Claude Code records. Publishing everything: "its not *wrong*,
+  its just wasteful" (29 Sep).
+- **The rest stays internal,** in Claude Code's own record, which v0 resumes
+  from: reminders, attachment entries, Claude Code's marker texts, subagent
+  entries and bookkeeping. "it can remain *internal*" (29 Sep). Which other
+  entry kinds would reach tower for a resume from tower is post-v0 (see How it
+  runs, "What is committed follows Claude Code").
+- **A file a message carries is stored first,** in the durable bucket, and the
+  message carries a reference in its place (see
+  [The two object stores](#the-two-object-stores)).
+
+## The driving kit (1 Oct)
+
+Three scripts in `mvp/apps/claude-code-participant/scripts/` drive the
+participant from a terminal: `start.ts` starts it configured and keeps it
+running, `new-conversation.ts` sends `service` for a new conversation in a
+given cwd, and `say.ts` says into one. Each needs `NATS_URL` given
+explicitly; the test broker first, then 4222.
+
+What `start.ts` declares, all Stephen's:
+
+- **Model** `claude-sonnet-5-5`, **max tokens** 120000.
+- **Effort** `medium`: "docs say sonnet-5-5 is default high, but claude code
+  says medium".
+- **Thinking** `adaptive`, displayed `summarized`.
+- **Permission mode** `auto`.
+- **System prompt:** the preset, with nothing appended.
+- **Sandbox** on, through `claudeSettings` for now (`sandbox.enabled` and
+  `autoAllowBashIfSandboxed`): "how it is now is fine".
+- **World** `claude-code`. More than one agent in a world comes later: "it'd
+  be agent1 agent2 or something, no need to worry now".
+- **Config dir** `${XDG_DATA_HOME:-~/.local/share}/tower/worlds/<world>`.
 
 ## The two object stores
 
@@ -871,9 +950,10 @@ separately, they can go in this branch" (26 Sep).
     this". Owed before the code branch: what happens to the old fixtures that
     use `changes.query`, and whether a start away from the tip moves the tip.
     The code (wire, towerd, bridge) follows in its own branch.
-- **Owed, if chosen:** a `shutdown` query reason. "i'd rather say its on the
+- **Not taken:** a `shutdown` query reason. "i'd rather say its on the
   table, then let the agent who has to implement this \"decide\"" (26 Sep).
-  The build brief says so, and the agent reports what it chose and why.
+  The publisher closes a query interrupted by shutdown as `aborted`, a reason
+  the spec already has, so nothing is owed.
 
 ## Frontend work owed
 
