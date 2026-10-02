@@ -204,6 +204,52 @@ describe('control lines', () => {
     });
   });
 
+  describe('required values stay set', () => {
+    const MODEL_FIELDS = ['name', 'maxTokens', 'thinking', 'thinkingDisplay', 'effort'];
+    const SETTINGS_BEFORE = { advisorModel: 'm' };
+    const UNSETTING_CLAUDE_SETTINGS = [{ model: null }, { model: '' }, { effortLevel: null }, { permissions: null }, { permissions: { defaultMode: null } }];
+
+    it.each(MODEL_FIELDS)('model line: leaves %s as it was when sent as null', (field) => {
+      const [, , reply] = testServices().control({ model: FULL_MODEL }, { model: { [field]: null } }, { settings: {} });
+      expect((reply as ReadBack).settings.model).toEqual(FULL_MODEL);
+    });
+
+    it('model line: rejects an empty name', () => {
+      const [, reply] = testServices().control({ model: FULL_MODEL }, { model: { name: '' } });
+      expect(reply).toEqual({ error: expect.stringMatching(/^invalid model: name: /) });
+    });
+
+    it('model line: leaves the name as it was when an empty name is sent', () => {
+      const [, , reply] = testServices().control({ model: FULL_MODEL }, { model: { name: '' } }, { settings: {} });
+      expect((reply as ReadBack).settings.model).toEqual(FULL_MODEL);
+    });
+
+    it('system line: leaves system as it was when text-only is sent', () => {
+      const [, , reply] = testServices().control({ system: { preset: true } }, { system: { text: 'x' } }, { settings: {} });
+      expect((reply as ReadBack).settings.system).toEqual({ preset: true });
+    });
+
+    it.each(UNSETTING_CLAUDE_SETTINGS)('claudeSettings line: rejects %j', (sent) => {
+      const [, reply] = testServices().control({ claudeSettings: SETTINGS_BEFORE }, { claudeSettings: sent });
+      expect(reply).toEqual({ error: expect.stringMatching(/^invalid claudeSettings: /) });
+    });
+
+    it.each(UNSETTING_CLAUDE_SETTINGS)('claudeSettings line: keeps the value it had when %j is sent', (sent) => {
+      const [, , reply] = testServices().control({ claudeSettings: SETTINGS_BEFORE }, { claudeSettings: sent }, { settings: {} });
+      expect((reply as ReadBack).settings.claudeSettings).toEqual(SETTINGS_BEFORE);
+    });
+
+    it.each([{ model: 'claude-opus-5-5' }, { effortLevel: 'high' }, { permissions: { defaultMode: 'plan' } }])('claudeSettings line: applies %j', (sent) => {
+      const [, , reply] = testServices().control({ claudeSettings: SETTINGS_BEFORE }, { claudeSettings: sent }, { settings: {} });
+      expect((reply as unknown as { settings: Record<string, unknown> }).settings.claudeSettings).toEqual(sent);
+    });
+
+    it.each(MODEL_FIELDS)('model line: applies a valid %s', (field) => {
+      const [reply] = testServices().control({ model: { [field]: (FULL_MODEL as Record<string, unknown>)[field] } });
+      expect(reply).toEqual({ model: { [field]: (FULL_MODEL as Record<string, unknown>)[field] } });
+    });
+  });
+
   describe('shutdownPolicy', () => {
     it('starts with 30 s for stage 1 and 10 s for stage 2', () => {
       const [reply] = testServices().control({ settings: {} });
