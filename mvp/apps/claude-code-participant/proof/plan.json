@@ -1,6 +1,6 @@
 {
   "run": "r4",
-  "phase": "resume",
-  "shapes": ["compact", "text"],
-  "methods": ["local", "file", "file2", "file3", "file4", "file5", "file6", "file7", "file8", "file9", "local2", "local3", "local4", "local5", "local6", "local7", "local8"]
+  "phase": "compare",
+  "shapes": ["text", "thinking", "tool", "parallel", "midturn", "background", "compact"],
+  "methods": []
 }

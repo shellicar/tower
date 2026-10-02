@@ -1,0 +1,1195 @@
+{
+ "local": {
+  "background": {
+   "cacheRead": 19128,
+   "cacheCreation": 2682,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "compact": {
+   "cacheRead": 12213,
+   "cacheCreation": 9734,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5692
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 2737,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 2942,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 8956,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 6691,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 2688,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "local2": {
+  "background": {
+   "cacheRead": 19128,
+   "cacheCreation": 2682,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "compact": {
+   "cacheRead": 12298,
+   "cacheCreation": 9744,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 2732,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 2942,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 8956,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 6686,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 2683,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "local3": {
+  "background": {
+   "cacheRead": 19128,
+   "cacheCreation": 2682,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "compact": {
+   "cacheRead": 12213,
+   "cacheCreation": 9744,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5692
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 2737,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 2947,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 8961,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 6691,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 2693,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "msg": {
+  "background": {
+   "cacheRead": 10624,
+   "cacheCreation": 9433,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "compact": {
+   "cacheRead": 10620,
+   "cacheCreation": 9015,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "midturn": {
+   "cacheRead": 10620,
+   "cacheCreation": 8958,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 10620,
+   "cacheCreation": 8838,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 10620,
+   "cacheCreation": 8845,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "thinking": {
+   "cacheRead": 10624,
+   "cacheCreation": 9681,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 10620,
+   "cacheCreation": 8956,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras": {
+  "background": {
+   "cacheRead": 18761,
+   "cacheCreation": 3726,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 6266
+  },
+  "compact": {
+   "cacheRead": 10624,
+   "cacheCreation": 12388,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 3459,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 3778,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9792,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 7603,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 3524,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras": {
+  "background": {
+   "cacheRead": 18501,
+   "cacheCreation": 4080,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 6266
+  },
+  "compact": {
+   "cacheRead": 10624,
+   "cacheCreation": 12432,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 3763,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 3778,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9754,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 7532,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 3496,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras": {
+  "background": {
+   "cacheRead": 18761,
+   "cacheCreation": 3597,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 6266
+  },
+  "compact": {
+   "cacheRead": 10620,
+   "cacheCreation": 12112,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 7255
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 3568,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 3783,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9754,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 7489,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 3600,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras": {
+  "background": {
+   "cacheRead": 18761,
+   "cacheCreation": 3754,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 6266
+  },
+  "compact": {
+   "cacheRead": 18504,
+   "cacheCreation": 8028,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5692
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 3606,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 3849,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9873,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 7636,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 3562,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system": {
+  "background": {
+   "cacheRead": 10620,
+   "cacheCreation": 9313,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 7831
+  },
+  "compact": {
+   "cacheRead": 10624,
+   "cacheCreation": 9007,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "midturn": {
+   "cacheRead": 10620,
+   "cacheCreation": 8963,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 7424
+  },
+  "parallel": {
+   "cacheRead": 10620,
+   "cacheCreation": 9108,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 7225
+  },
+  "text": {
+   "cacheRead": 10624,
+   "cacheCreation": 8916,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17400
+  },
+  "thinking": {
+   "cacheRead": 10624,
+   "cacheCreation": 9564,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17427
+  },
+  "tool": {
+   "cacheRead": 10624,
+   "cacheCreation": 9013,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17466
+  }
+ },
+ "msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras": {
+  "background": {
+   "cacheRead": 18761,
+   "cacheCreation": 3792,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 6266
+  },
+  "compact": {
+   "cacheRead": 10620,
+   "cacheCreation": 12351,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 7255
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 3416,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 3702,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9754,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 7451,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 3567,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin": {
+  "background": {
+   "cacheRead": 19128,
+   "cacheCreation": 3556,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "compact": {
+   "cacheRead": 10624,
+   "cacheCreation": 12310,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 3606,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 3664,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9792,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 7641,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 3638,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@": {
+  "background": {
+   "cacheRead": 18761,
+   "cacheCreation": 3868,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 6266
+  },
+  "compact": {
+   "cacheRead": 10624,
+   "cacheCreation": 12203,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 3606,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 3664,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9754,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 7560,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 3562,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras": {
+  "background": {
+   "cacheRead": 18761,
+   "cacheCreation": 3602,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 6266
+  },
+  "compact": {
+   "cacheRead": 10624,
+   "cacheCreation": 12159,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 3335,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 3783,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9982,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 7451,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 3524,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras": {
+  "background": {
+   "cacheRead": 18761,
+   "cacheCreation": 3792,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 6266
+  },
+  "compact": {
+   "cacheRead": 10624,
+   "cacheCreation": 12203,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 3573,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 3740,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9835,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 12215,
+   "cacheCreation": 10570,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5678
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 3448,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras": {
+  "background": {
+   "cacheRead": 18761,
+   "cacheCreation": 3650,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 6266
+  },
+  "compact": {
+   "cacheRead": 10620,
+   "cacheCreation": 12234,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 7255
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 3449,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 3697,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9754,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 7565,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 3605,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras": {
+  "background": {
+   "cacheRead": 19128,
+   "cacheCreation": 3594,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "compact": {
+   "cacheRead": 10624,
+   "cacheCreation": 12203,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 3725,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 3740,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9868,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 7560,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 3486,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras": {
+  "background": {
+   "cacheRead": 18501,
+   "cacheCreation": 3968,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "compact": {
+   "cacheRead": 10624,
+   "cacheCreation": 12388,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "midturn": {
+   "cacheRead": 18562,
+   "cacheCreation": 3747,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18387,
+   "cacheCreation": 4047,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9868,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "thinking": {
+   "cacheRead": 12215,
+   "cacheCreation": 10684,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18510,
+   "cacheCreation": 3643,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "raw": {
+  "background": {
+   "cacheRead": 19128,
+   "cacheCreation": 3632,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "compact": {
+   "cacheRead": 10620,
+   "cacheCreation": 12190,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 7255
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 3568,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 3854,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9901,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 7370,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 3372,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "raw@": {
+  "background": {
+   "cacheRead": 19128,
+   "cacheCreation": 3480,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "compact": {
+   "cacheRead": 10624,
+   "cacheCreation": 12193,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "midturn": {
+   "cacheRead": 18776,
+   "cacheCreation": 3497,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "parallel": {
+   "cacheRead": 18622,
+   "cacheCreation": 3692,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9830,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  },
+  "thinking": {
+   "cacheRead": 18589,
+   "cacheCreation": 7365,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  },
+  "tool": {
+   "cacheRead": 18636,
+   "cacheCreation": 3600,
+   "input": 2,
+   "missReason": null,
+   "missedTokens": null
+  }
+ },
+ "file": {
+  "compact": {
+   "cacheRead": 10620,
+   "cacheCreation": 12239,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 7255
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9944,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  }
+ },
+ "file2": {
+  "compact": {
+   "cacheRead": 10620,
+   "cacheCreation": 12190,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 7255
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9901,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  }
+ },
+ "file3": {
+  "compact": {
+   "cacheRead": 10624,
+   "cacheCreation": 12276,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9944,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  }
+ },
+ "file4": {
+  "compact": {
+   "cacheRead": 10624,
+   "cacheCreation": 12305,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9749,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  }
+ },
+ "file5": {
+  "compact": {
+   "cacheRead": 10620,
+   "cacheCreation": 12429,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 7255
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9678,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  }
+ },
+ "file6": {
+  "compact": {
+   "cacheRead": 10620,
+   "cacheCreation": 12234,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 7255
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9754,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  }
+ },
+ "file7": {
+  "compact": {
+   "cacheRead": 10620,
+   "cacheCreation": 12234,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 7255
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9678,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  }
+ },
+ "file8": {
+  "compact": {
+   "cacheRead": 10624,
+   "cacheCreation": 12193,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9716,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  }
+ },
+ "file9": {
+  "compact": {
+   "cacheRead": 10624,
+   "cacheCreation": 12242,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 9754,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  }
+ },
+ "local4": {
+  "compact": {
+   "cacheRead": 12213,
+   "cacheCreation": 9744,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5692
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 8956,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  }
+ },
+ "local5": {
+  "compact": {
+   "cacheRead": 12298,
+   "cacheCreation": 9744,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 8956,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  }
+ },
+ "local6": {
+  "compact": {
+   "cacheRead": 12298,
+   "cacheCreation": 9744,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 8956,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  }
+ },
+ "local7": {
+  "compact": {
+   "cacheRead": 12298,
+   "cacheCreation": 9744,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 8961,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  }
+ },
+ "local8": {
+  "compact": {
+   "cacheRead": 12298,
+   "cacheCreation": 9744,
+   "input": 2,
+   "missReason": "system_changed",
+   "missedTokens": 17440
+  },
+  "text": {
+   "cacheRead": 12211,
+   "cacheCreation": 8956,
+   "input": 2,
+   "missReason": "messages_changed",
+   "missedTokens": 5654
+  }
+ }
+}

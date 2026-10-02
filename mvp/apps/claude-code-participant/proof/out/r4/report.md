@@ -2,6 +2,563 @@
 
 Reference: the `local` method (Claude Code reads its own record). Each other method is compared with it, request for request.
 
+## text
+
+Summary (what differs, by location):
+
+- `file`: same
+- `file2`: same
+- `file3`: same
+- `file4`: same
+- `file5`: same
+- `file6`: same
+- `file7`: same
+- `file8`: same
+- `file9`: same
+- `local`: same
+- `local2`: same
+- `local3`: same
+- `local4`: same
+- `local5`: same
+- `local6`: same
+- `local7`: same
+- `local8`: same
+- `msg`: differs; differs at system.0.text, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs; differs at system.2.text, system.3.text, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at diagnostics.previous_message_id
+- `raw`: same
+- `raw@`: same
+
+Detail:
+
+- `file`: same
+- `file2`: same
+- `file3`: same
+- `file4`: same
+- `file5`: same
+- `file6`: same
+- `file7`: same
+- `file8`: same
+- `file9`: same
+- `local`: same (the reference)
+- `local2`: same
+- `local3`: same
+- `local4`: same
+- `local5`: same
+- `local6`: same
+- `local7`: same
+- `local8`: same
+- `msg`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>15000000 tokens left</total_tokens>" vs [{"type":"text","text":"harbour"}]
+    - … 11 more lines in report.json
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs
+    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>15000000 tokens left</total_tokens>" vs [{"type":"text","text":"harbour"}]
+    - … 11 more lines in report.json
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk; cc_promp…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+- `raw`: same
+- `raw@`: same
+
+## thinking
+
+Summary (what differs, by location):
+
+- `local`: same
+- `local2`: same
+- `local3`: same
+- `msg`: differs; differs at system.0.text, system.2.text, system.3.text, diagnostics.previous_message_id, messages[0], messages[1], messages[2], messages[3], messages[4]
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs; differs at system.2.text, system.3.text, messages[0], messages[1], messages[3], messages[4]
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: differs; differs at messages[2]
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at diagnostics.previous_message_id, messages[2]
+- `raw`: same
+- `raw@`: same
+
+Detail:
+
+- `local`: same (the reference)
+- `local2`: same
+- `local3`: same
+- `msg`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.c63; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011Cfdkv27DYwSxYYU95hwMy; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.c63; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - diagnostics.previous_message_id: "msg_011Cfdkv2TYycKmkFDZtL1Cg" vs null
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Without using any tools, work out how many positiv…")] vs user[text("Without using any tools, work out how many positiv…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Without using any tools, work out how many positive integers n below 1000 are such that n and n+1 both have exactly 6 divisors. Reason care…
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Without using any tools, work out how many positive integers n below 1000 are such that n and n+1 both have exactly 6… vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[2] assistant[thinking + text("**Answer: 20 such n, and the smallest is n = 44.**…")] vs assistant[text("**Answer: 20 such n, and the smallest is n = 44.**…")]
+    -     messages[2].content.0.type: "thinking" vs "text"
+    - … 9 more lines in report.json
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.c63; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011Cfdkv27DYwSxYYU95hwMy; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.c63; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011Cfdkv27DYwSxYYU95hwMy; cc_prompt_id…
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs
+    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Without using any tools, work out how many positiv…")] vs user[text("Without using any tools, work out how many positiv…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Without using any tools, work out how many positive integers n below 1000 are such that n and n+1 both have exactly 6 divisors. Reason care…
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Without using any tools, work out how many positive integers n below 1000 are such that n and n+1 both have exactly 6… vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[3] user[text("PROBE-THINKING: reply with exactly one word, no to…")] vs user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("PROBE-THINKING: reply with exactly one word, no to…")]
+    -     messages[3].content.0.text: "PROBE-THINKING: reply with exactly one word, no tools." vs "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen…
+    -     messages[3].content.1: undefined vs {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's…
+    -     messages[3].content.2: undefined vs {"type":"text","text":"PROBE-THINKING: reply with exactly one word, no tools."}
+    - … 2 more lines in report.json
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: differs
+    - messages[2] assistant[thinking + text("**Answer: 20 such n, and the smallest is n = 44.**…")] vs assistant[text("**Answer: 20 such n, and the smallest is n = 44.**…")]
+    -     messages[2].content.0.type: "thinking" vs "text"
+    -     messages[2].content.0.thinking: "<REDACTED>" vs undefined
+    -     messages[2].content.0.signature: "CAQSujAKEAgSGAI4AUIIdGhpbmtpbmcSDNwBs3vQecvAnJHqTBoMuu0Ft7lbaKWM2H2FIjAAEINsRQO8txbd6pcjRmKvVAqA/UvZG+WS/bkN3fHyTmoRRQfOptCaHhkqyIg3KB4q1y9… vs undefined
+    -     messages[2].content.0.text: undefined vs "**Answer: 20 such n, and the smallest is n = 44.**\n\n**Approach.** A number has exactly 6 divisors only if it is p²·q (p and q distinct pr…
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.c63; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011Cfdkv27DYwSxYYU95hwMy; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.c63; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk; cc_promp…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - diagnostics.previous_message_id: "msg_011Cfdkv2TYycKmkFDZtL1Cg" vs null
+    - messages[2] assistant[thinking + text("**Answer: 20 such n, and the smallest is n = 44.**…")] vs assistant[text("**Answer: 20 such n, and the smallest is n = 44.**…")]
+    -     messages[2].content.0.type: "thinking" vs "text"
+    -     messages[2].content.0.thinking: "<REDACTED>" vs undefined
+    -     messages[2].content.0.signature: "CAQSujAKEAgSGAI4AUIIdGhpbmtpbmcSDNwBs3vQecvAnJHqTBoMuu0Ft7lbaKWM2H2FIjAAEINsRQO8txbd6pcjRmKvVAqA/UvZG+WS/bkN3fHyTmoRRQfOptCaHhkqyIg3KB4q1y9… vs undefined
+    -     messages[2].content.0.text: undefined vs "**Answer: 20 such n, and the smallest is n = 44.**\n\n**Approach.** A number has exactly 6 divisors only if it is p²·q (p and q distinct pr…
+- `raw`: same
+- `raw@`: same
+
+## tool
+
+Summary (what differs, by location):
+
+- `local`: same
+- `local2`: same
+- `local3`: same
+- `msg`: differs; differs at system.0.text, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs; differs at system.2.text, system.3.text, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at diagnostics.previous_message_id, messages, messages[2], messages[3], messages[4], messages[5], messages[6], messages[7]
+- `raw`: same
+- `raw@`: same
+
+Detail:
+
+- `local`: same (the reference)
+- `local2`: same
+- `local3`: same
+- `msg`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.03f; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjzjoE5YDZBGL5XMYAH; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.03f; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - diagnostics.previous_message_id: "msg_011CfdjzkDGUoQgiZnPaTyeY" vs null
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Use the Read tool on note.txt in the current direc…")] vs user[text("Use the Read tool on note.txt in the current direc…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Use the Read tool on note.txt in the current directory and tell me its first word after \"is:\". Reply with just that word."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Use the Read tool on note.txt in the current directory and tell me its first word after \"is:\". Reply with just that… vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>14981419 tokens left</total_tokens>")] vs assistant[text("marmalade")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>14981419 tokens left</total_tokens>" vs [{"type":"text","text":"marmalade"}]
+    - … 11 more lines in report.json
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.03f; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjzjoE5YDZBGL5XMYAH; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.03f; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjzjoE5YDZBGL5XMYAH; cc_prompt_id…
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs
+    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Use the Read tool on note.txt in the current direc…")] vs user[text("Use the Read tool on note.txt in the current direc…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Use the Read tool on note.txt in the current directory and tell me its first word after \"is:\". Reply with just that word."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Use the Read tool on note.txt in the current directory and tell me its first word after \"is:\". Reply with just that… vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>14981419 tokens left</total_tokens>")] vs assistant[text("marmalade")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>14981419 tokens left</total_tokens>" vs [{"type":"text","text":"marmalade"}]
+    - … 11 more lines in report.json
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.03f; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjzjoE5YDZBGL5XMYAH; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.03f; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk; cc_promp…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - diagnostics.previous_message_id: "msg_011CfdjzkDGUoQgiZnPaTyeY" vs null
+    - messages: 8 vs 5
+    - messages[2] assistant[tool_use(Read 7EmQfn)] vs assistant[text("marmalade") + tool_use(Read 7EmQfn)]
+    -     messages[2].content.0.type: "tool_use" vs "text"
+    -     messages[2].content.0.id: "toolu_017ThAAZ4qwKJCuoHy7EmQfn" vs undefined
+    -     messages[2].content.0.name: "Read" vs undefined
+    -     messages[2].content.0.input: {"file_path":"/tmp/tower-proof/tool/cwd/note.txt"} vs undefined
+    - messages[3] user[tool_result(7EmQfn)] vs user[tool_result(7EmQfn) + text("PROBE-TOOL: reply with exactly one word, no tools.")]
+    -     messages[3].content.1: undefined vs {"type":"text","text":"PROBE-TOOL: reply with exactly one word, no tools."}
+    - messages[4] system[string("<total_tokens>14981419 tokens left</total_tokens>")] vs system[text+cc("<total_tokens>14981419 tokens left</total_tokens>\n…")]
+    -     messages[4].content: "<total_tokens>14981419 tokens left</total_tokens>" vs [{"type":"text","text":"<total_tokens>14981419 tokens left</total_tokens>\n\n## Bash command sandbox\nBy default, Bash commands run inside a…
+    - messages[5] assistant[text("marmalade")] vs (none)
+    - … 5 more lines in report.json
+- `raw`: same
+- `raw@`: same
+
+## parallel
+
+Summary (what differs, by location):
+
+- `local`: same
+- `local2`: same
+- `local3`: same
+- `msg`: differs; differs at system.0.text, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[2], messages[3], messages[4], messages[5], messages[6], messages[7], messages[8]
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs; differs at messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at diagnostics.previous_message_id, messages, messages[2], messages[3], messages[4], messages[5], messages[6], messages[7]
+- `raw`: same
+- `raw@`: same
+
+Detail:
+
+- `local`: same (the reference)
+- `local2`: same
+- `local3`: same
+- `msg`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.014; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011Cfdk4kevdqkaMYSXg19C6; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.014; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - diagnostics.previous_message_id: "msg_011Cfdk4kzGGGaqCPMoEvBDW" vs null
+    - messages: 8 vs 9
+    - messages[0] user[text("<system-reminder>\nAttribution for git commits and …") + text("Read a.txt and b.txt in the current directory with…")] vs user[text("Read a.txt and b.txt in the current directory with…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's own earlier attributi… vs "Read a.txt and b.txt in the current directory with two Read tool calls in the same response (in parallel). Then reply with both contents on…
+    -     messages[0].content.1: {"type":"text","text":"Read a.txt and b.txt in the current directory with two Read tool calls in the same response (in parallel). Then reply… vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[2] assistant[tool_use(Read 6BUeAX) + tool_use(Read PTD6BL)] vs assistant[tool_use(Read 6BUeAX)]
+    -     messages[2].content.1: {"type":"tool_use","id":"toolu_01J4sjPcj5qRXtFsH1PTD6BL","name":"Read","input":{"file_path":"/tmp/tower-proof/parallel/cwd/b.txt"},"caller":… vs undefined
+    - messages[3] user[tool_result(6BUeAX) + tool_result(PTD6BL)] vs user[tool_result(6BUeAX)]
+    -     messages[3].content.1: {"tool_use_id":"toolu_01J4sjPcj5qRXtFsH1PTD6BL","type":"tool_result","content":"1\tbravo-content\n2\t"} vs undefined
+    - … 19 more lines in report.json
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.014; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011Cfdk4kevdqkaMYSXg19C6; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.014; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011Cfdk4kevdqkaMYSXg19C6; cc_prompt_id…
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAttribution for git commits and …") + text("Read a.txt and b.txt in the current directory with…")] vs user[text("Read a.txt and b.txt in the current directory with…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's own earlier attributi… vs "Read a.txt and b.txt in the current directory with two Read tool calls in the same response (in parallel). Then reply with both contents on…
+    -     messages[0].content.1: {"type":"text","text":"Read a.txt and b.txt in the current directory with two Read tool calls in the same response (in parallel). Then reply… vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>14981474 tokens left</total_tokens>")] vs assistant[text("a.txt: alpha-content | b.txt: bravo-content")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>14981474 tokens left</total_tokens>" vs [{"type":"text","text":"a.txt: alpha-content | b.txt: bravo-content"}]
+    - messages[5] assistant[text("a.txt: alpha-content | b.txt: bravo-content")] vs user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("PROBE-PARALLEL: reply with exactly one word, no to…")]
+    -     messages[5].role: "assistant" vs "user"
+    -     messages[5].content.0.text: "a.txt: alpha-content | b.txt: bravo-content" vs "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen…
+    - … 9 more lines in report.json
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.014; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011Cfdk4kevdqkaMYSXg19C6; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.014; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk; cc_promp…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - diagnostics.previous_message_id: "msg_011Cfdk4kzGGGaqCPMoEvBDW" vs null
+    - messages: 8 vs 5
+    - messages[2] assistant[tool_use(Read 6BUeAX) + tool_use(Read PTD6BL)] vs assistant[text("a.txt: alpha-content | b.txt: bravo-content") + tool_use(Read 6BUeAX) + tool_use(Read PTD6BL)]
+    -     messages[2].content.0.type: "tool_use" vs "text"
+    -     messages[2].content.0.id: "toolu_01EyDUZXSaeyYqt6qU6BUeAX" vs undefined
+    -     messages[2].content.0.name: "Read" vs undefined
+    -     messages[2].content.0.input: {"file_path":"/tmp/tower-proof/parallel/cwd/a.txt"} vs undefined
+    - messages[3] user[tool_result(6BUeAX) + tool_result(PTD6BL)] vs user[tool_result(6BUeAX) + tool_result(PTD6BL) + text("PROBE-PARALLEL: reply with exactly one word, no to…")]
+    -     messages[3].content.1.content: "1\tbravo-content\n2\t" vs "1\tbravo-content\n2\n\n<system-reminder>\nThe session context was re-read when this session started; these values replace the earlier ones:…
+    -     messages[3].content.2: undefined vs {"type":"text","text":"PROBE-PARALLEL: reply with exactly one word, no tools."}
+    - messages[4] system[string("<total_tokens>14981474 tokens left</total_tokens>")] vs system[text+cc("<total_tokens>14981474 tokens left</total_tokens>\n…")]
+    -     messages[4].content: "<total_tokens>14981474 tokens left</total_tokens>" vs [{"type":"text","text":"<total_tokens>14981474 tokens left</total_tokens>\n\n## Bash command sandbox\nBy default, Bash commands run inside a…
+    - … 6 more lines in report.json
+- `raw`: same
+- `raw@`: same
+
+## midturn
+
+Summary (what differs, by location):
+
+- `local`: same
+- `local2`: same
+- `local3`: same
+- `msg`: differs; differs at system.0.text, safeguards.0.classifier_context.prior_turn_context, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: differs; differs at safeguards.0.classifier_context.prior_turn_context
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs; differs at messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at diagnostics.previous_message_id, messages, messages[2], messages[3], messages[4], messages[5], messages[6], messages[7]
+- `raw`: same
+- `raw@`: same
+
+Detail:
+
+- `local`: same (the reference)
+- `local2`: same
+- `local3`: same
+- `msg`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.03f; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011Cfdk98C5hwyjfUdns9o32; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.03f; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - safeguards.0.classifier_context.prior_turn_context: [{"tool_use_ids":["toolu_01VGuzYB6zLTGDRAMqLmUo7G"],"context":{"git_state":{"cwd":"/tmp/tower-proof/midturn/cwd","root":null,"branch":null,"… vs undefined
+    - diagnostics.previous_message_id: "msg_011Cfdk98b9HmBA2cce6vy8n" vs null
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Use the Bash tool to run `sleep 12; echo first-don…")] vs user[text("Use the Bash tool to run `sleep 12; echo first-don…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Use the Bash tool to run `sleep 12; echo first-done`, then reply with the output."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Use the Bash tool to run `sleep 12; echo first-done`, then reply with the output."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("The user sent a new message while you were working…")] vs assistant[text("first-done\n\nbanana")]
+    -     messages[4].role: "system" vs "assistant"
+    - … 12 more lines in report.json
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.03f; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011Cfdk98C5hwyjfUdns9o32; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.03f; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011Cfdk98C5hwyjfUdns9o32; cc_prompt_id…
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: differs
+    - safeguards.0.classifier_context.prior_turn_context: [{"tool_use_ids":["toolu_01VGuzYB6zLTGDRAMqLmUo7G"],"context":{"git_state":{"cwd":"/tmp/tower-proof/midturn/cwd","root":null,"branch":null,"… vs undefined
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Use the Bash tool to run `sleep 12; echo first-don…")] vs user[text("Use the Bash tool to run `sleep 12; echo first-don…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Use the Bash tool to run `sleep 12; echo first-done`, then reply with the output."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Use the Bash tool to run `sleep 12; echo first-done`, then reply with the output."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("The user sent a new message while you were working…")] vs assistant[text("first-done\n\nbanana")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "The user sent a new message while you were working:\nAlso, when you reply, add the word banana at the end.\n\nThis is how Claude Code surfa… vs [{"type":"text","text":"first-done\n\nbanana"}]
+    - messages[5] assistant[text("first-done\n\nbanana")] vs user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("PROBE-MIDTURN: reply with exactly one word, no too…")]
+    -     messages[5].role: "assistant" vs "user"
+    - … 9 more lines in report.json
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.03f; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011Cfdk98C5hwyjfUdns9o32; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.03f; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk; cc_promp…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - diagnostics.previous_message_id: "msg_011Cfdk98b9HmBA2cce6vy8n" vs null
+    - messages: 8 vs 5
+    - messages[2] assistant[tool_use(Bash LmUo7G)] vs assistant[text("first-done\n\nbanana") + tool_use(Bash LmUo7G)]
+    -     messages[2].content.0.type: "tool_use" vs "text"
+    -     messages[2].content.0.id: "toolu_01VGuzYB6zLTGDRAMqLmUo7G" vs undefined
+    -     messages[2].content.0.name: "Bash" vs undefined
+    -     messages[2].content.0.input: {"command":"sleep 12; echo first-done","description":"Sleep then echo"} vs undefined
+    - messages[3] user[tool_result(LmUo7G)] vs user[tool_result(LmUo7G) + text("PROBE-MIDTURN: reply with exactly one word, no too…")]
+    -     messages[3].content.1: undefined vs {"type":"text","text":"PROBE-MIDTURN: reply with exactly one word, no tools."}
+    - messages[4] system[string("The user sent a new message while you were working…")] vs system[text+cc("The user sent a new message while you were working…")]
+    -     messages[4].content: "The user sent a new message while you were working:\nAlso, when you reply, add the word banana at the end.\n\nThis is how Claude Code surfa… vs [{"type":"text","text":"The user sent a new message while you were working:\nAlso, when you reply, add the word banana at the end.\n\nThis i…
+    - messages[5] assistant[text("first-done\n\nbanana")] vs (none)
+    - … 5 more lines in report.json
+- `raw`: same
+- `raw@`: same
+
+## background
+
+Summary (what differs, by location):
+
+- `local`: same
+- `local2`: same
+- `local3`: same
+- `msg`: differs; differs at system.0.text, system.2.text, system.3.text, safeguards.0.classifier_context.prior_turn_context, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[2], messages[4], messages[5], messages[6], messages[7], messages[8], messages[9]
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text, messages[6]
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: differs; differs at messages[2], messages[6]
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: differs; differs at safeguards.0.classifier_context.prior_turn_context, messages[6]
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: differs; differs at messages[6]
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs; differs at messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7], messages[8], messages[9]
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at messages[6]
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: differs; differs at messages[6]
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: differs; differs at messages[6]
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: differs; differs at messages[6]
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text, messages[6]
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at diagnostics.previous_message_id, messages, messages[2], messages[3], messages[4], messages[5], messages[6], messages[7], messages[8], messages[9]
+- `raw`: same
+- `raw@`: same
+
+Detail:
+
+- `local`: same (the reference)
+- `local2`: same
+- `local3`: same
+- `msg`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.465; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdkDfze4fPcp1iX2NKUy; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.465; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - safeguards.0.classifier_context.prior_turn_context: [{"tool_use_ids":["toolu_013sBHj3Jk443vmoJ8tL599k"],"context":{"git_state":{"cwd":"/tmp/tower-proof/background/cwd","root":null,"branch":nul… vs undefined
+    - diagnostics.previous_message_id: "msg_011CfdkDgH1Jg4vdezutY9QD" vs null
+    - messages: 10 vs 9
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Start a background task with the Bash tool (run_in…")] vs user[text("Start a background task with the Bash tool (run_in…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Start a background task with the Bash tool (run_in_background true) that runs `sleep 5; echo bg-finished`. After starting it, reply with th…
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Start a background task with the Bash tool (run_in_background true) that runs `sleep 5; echo bg-finished`. After star… vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - … 21 more lines in report.json
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.465; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdkDfze4fPcp1iX2NKUy; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.465; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdkDfze4fPcp1iX2NKUy; cc_prompt_id…
+    - messages[6] user[string("<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER …")] vs user[string("<task-notification>\n<task-id>baqmnyz51</task-id>\n<…")]
+    -     messages[6].content: "<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\nDo NOT… vs "<task-notification>\n<task-id>baqmnyz51</task-id>\n<tool-use-id>toolu_013sBHj3Jk443vmoJ8tL599k</tool-use-id>\n<output-file>/tmp/claude-1000…
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: differs
+    - messages[2] assistant[tool_use(Bash tL599k)] vs assistant[tool_use(Bash tL599k)]
+    - messages[6] user[string("<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER …")] vs user[string("<task-notification>\n<task-id>baqmnyz51</task-id>\n<…")]
+    -     messages[6].content: "<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\nDo NOT… vs "<task-notification>\n<task-id>baqmnyz51</task-id>\n<tool-use-id>toolu_013sBHj3Jk443vmoJ8tL599k</tool-use-id>\n<output-file>/tmp/claude-1000…
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: differs
+    - safeguards.0.classifier_context.prior_turn_context: [{"tool_use_ids":["toolu_013sBHj3Jk443vmoJ8tL599k"],"context":{"git_state":{"cwd":"/tmp/tower-proof/background/cwd","root":null,"branch":nul… vs undefined
+    - messages[6] user[string("<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER …")] vs user[string("<task-notification>\n<task-id>baqmnyz51</task-id>\n<…")]
+    -     messages[6].content: "<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\nDo NOT… vs "<task-notification>\n<task-id>baqmnyz51</task-id>\n<tool-use-id>toolu_013sBHj3Jk443vmoJ8tL599k</tool-use-id>\n<output-file>/tmp/claude-1000…
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: differs
+    - messages[6] user[string("<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER …")] vs user[string("<task-notification>\n<task-id>baqmnyz51</task-id>\n<…")]
+    -     messages[6].content: "<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\nDo NOT… vs "<task-notification>\n<task-id>baqmnyz51</task-id>\n<tool-use-id>toolu_013sBHj3Jk443vmoJ8tL599k</tool-use-id>\n<output-file>/tmp/claude-1000…
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs
+    - messages: 10 vs 9
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Start a background task with the Bash tool (run_in…")] vs user[text("Start a background task with the Bash tool (run_in…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Start a background task with the Bash tool (run_in_background true) that runs `sleep 5; echo bg-finished`. After starting it, reply with th…
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Start a background task with the Bash tool (run_in_background true) that runs `sleep 5; echo bg-finished`. After star… vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>14981384 tokens left</total_tokens>")] vs assistant[text("started")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>14981384 tokens left</total_tokens>" vs [{"type":"text","text":"started"}]
+    - messages[5] assistant[text("started")] vs user[string("<task-notification>\n<task-id>baqmnyz51</task-id>\n<…")]
+    -     messages[5].role: "assistant" vs "user"
+    - … 15 more lines in report.json
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - messages[6] user[string("<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER …")] vs user[string("<task-notification>\n<task-id>baqmnyz51</task-id>\n<…")]
+    -     messages[6].content: "<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\nDo NOT… vs "<task-notification>\n<task-id>baqmnyz51</task-id>\n<tool-use-id>toolu_013sBHj3Jk443vmoJ8tL599k</tool-use-id>\n<output-file>/tmp/claude-1000…
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: differs
+    - messages[6] user[string("<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER …")] vs user[string("<task-notification>\n<task-id>baqmnyz51</task-id>\n<…")]
+    -     messages[6].content: "<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\nDo NOT… vs "<task-notification>\n<task-id>baqmnyz51</task-id>\n<tool-use-id>toolu_013sBHj3Jk443vmoJ8tL599k</tool-use-id>\n<output-file>/tmp/claude-1000…
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: differs
+    - messages[6] user[string("<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER …")] vs user[text("<task-notification>\n<task-id>baqmnyz51</task-id>\n<…")]
+    -     messages[6].content: "<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\nDo NOT… vs [{"type":"text","text":"<task-notification>\n<task-id>baqmnyz51</task-id>\n<tool-use-id>toolu_013sBHj3Jk443vmoJ8tL599k</tool-use-id>\n<outpu…
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: differs
+    - messages[6] user[string("<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER …")] vs user[string("<task-notification>\n<task-id>baqmnyz51</task-id>\n<…")]
+    -     messages[6].content: "<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\nDo NOT… vs "<task-notification>\n<task-id>baqmnyz51</task-id>\n<tool-use-id>toolu_013sBHj3Jk443vmoJ8tL599k</tool-use-id>\n<output-file>/tmp/claude-1000…
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.465; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdkDfze4fPcp1iX2NKUy; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.465; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk; cc_promp…
+    - messages[6] user[string("<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER …")] vs user[string("<task-notification>\n<task-id>baqmnyz51</task-id>\n<…")]
+    -     messages[6].content: "<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\nDo NOT… vs "<task-notification>\n<task-id>baqmnyz51</task-id>\n<tool-use-id>toolu_013sBHj3Jk443vmoJ8tL599k</tool-use-id>\n<output-file>/tmp/claude-1000…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - diagnostics.previous_message_id: "msg_011CfdkDgH1Jg4vdezutY9QD" vs null
+    - messages: 10 vs 5
+    - messages[2] assistant[tool_use(Bash tL599k)] vs assistant[text("started") + text("The background task finished with exit code 0. It …") + tool_use(Bash tL599k)]
+    -     messages[2].content.0.type: "tool_use" vs "text"
+    -     messages[2].content.0.id: "toolu_013sBHj3Jk443vmoJ8tL599k" vs undefined
+    -     messages[2].content.0.name: "Bash" vs undefined
+    -     messages[2].content.0.input: {"command":"sleep 5; echo bg-finished","run_in_background":true,"description":"Run background sleep and echo"} vs undefined
+    - messages[3] user[tool_result(tL599k)] vs user[tool_result(tL599k) + text("<task-notification>\n<task-id>baqmnyz51</task-id>\n<…") + text("PROBE-BACKGROUND: reply with exactly one word, no …")]
+    -     messages[3].content.1: undefined vs {"type":"text","text":"<task-notification>\n<task-id>baqmnyz51</task-id>\n<tool-use-id>toolu_013sBHj3Jk443vmoJ8tL599k</tool-use-id>\n<output…
+    -     messages[3].content.2: undefined vs {"type":"text","text":"PROBE-BACKGROUND: reply with exactly one word, no tools."}
+    - messages[4] system[string("<total_tokens>14981384 tokens left</total_tokens>")] vs system[text+cc("<total_tokens>14981384 tokens left</total_tokens>\n…")]
+    -     messages[4].content: "<total_tokens>14981384 tokens left</total_tokens>" vs [{"type":"text","text":"<total_tokens>14981384 tokens left</total_tokens>\n\n## Bash command sandbox\nBy default, Bash commands run inside a…
+    - … 10 more lines in report.json
+- `raw`: same
+- `raw@`: same
+
 ## compact
 
 Summary (what differs, by location):
@@ -152,107 +709,4 @@ Detail:
 - `raw@`: same, noise only
     - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
     - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
-
-## text
-
-Summary (what differs, by location):
-
-- `file`: same
-- `file2`: same
-- `file3`: same
-- `file4`: same
-- `file5`: same
-- `file6`: same
-- `file7`: same
-- `file8`: same
-- `file9`: same
-- `local`: same
-- `local2`: same
-- `local3`: same
-- `local4`: same
-- `local5`: same
-- `local6`: same
-- `local7`: same
-- `local8`: same
-- `msg`: differs; differs at system.0.text, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
-- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
-- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same
-- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: same
-- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: same
-- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs; differs at system.2.text, system.3.text, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
-- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
-- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
-- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same
-- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same
-- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: same
-- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
-- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
-- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at diagnostics.previous_message_id
-- `raw`: same
-- `raw@`: same
-
-Detail:
-
-- `file`: same
-- `file2`: same
-- `file3`: same
-- `file4`: same
-- `file5`: same
-- `file6`: same
-- `file7`: same
-- `file8`: same
-- `file9`: same
-- `local`: same (the reference)
-- `local2`: same
-- `local3`: same
-- `local4`: same
-- `local5`: same
-- `local6`: same
-- `local7`: same
-- `local8`: same
-- `msg`: differs
-    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
-    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
-    - messages: 8 vs 7
-    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
-    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
-    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
-    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
-    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
-    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
-    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
-    -     messages[4].role: "system" vs "assistant"
-    -     messages[4].content: "<total_tokens>15000000 tokens left</total_tokens>" vs [{"type":"text","text":"harbour"}]
-    - … 11 more lines in report.json
-- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs
-    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
-- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same
-- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: same
-- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: same
-- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs
-    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
-    - system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
-    - messages: 8 vs 7
-    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
-    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
-    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
-    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
-    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
-    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
-    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
-    -     messages[4].role: "system" vs "assistant"
-    -     messages[4].content: "<total_tokens>15000000 tokens left</total_tokens>" vs [{"type":"text","text":"harbour"}]
-    - … 11 more lines in report.json
-- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
-- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
-- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same
-- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same
-- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: same
-- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
-    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk; cc_promp…
-- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
-- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
-    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
-- `raw`: same
-- `raw@`: same
 
