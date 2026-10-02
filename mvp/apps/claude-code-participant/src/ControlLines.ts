@@ -12,18 +12,18 @@ type Reply = Record<string, unknown>;
 // was quietly ignored would leave the operator believing something is set
 // that isn't.
 
-/** The model line merges: it sets the fields it names, and null clears one. */
+/** The model line merges: it sets the fields it names. Every field is a required setting, so none accepts null. */
 const modelLine = z.strictObject({
-  name: z.string().min(1).nullable().optional(),
-  maxTokens: z.number().int().min(1).nullable().optional(),
-  thinking: z.enum(THINKING_TYPES).nullable().optional(),
-  thinkingDisplay: z.enum(THINKING_DISPLAYS).nullable().optional(),
-  effort: z.enum(EFFORT_LEVELS).nullable().optional(),
+  name: z.string().min(1).optional(),
+  maxTokens: z.number().int().min(1).optional(),
+  thinking: z.enum(THINKING_TYPES).optional(),
+  thinkingDisplay: z.enum(THINKING_DISPLAYS).optional(),
+  effort: z.enum(EFFORT_LEVELS).optional(),
 });
 
-const systemLine = z.strictObject({ preset: z.boolean(), text: z.string().optional() }).nullable();
+const systemLine = z.strictObject({ preset: z.boolean(), text: z.string().optional() });
 
-const permissionModeLine = z.enum(PERMISSION_MODES).nullable();
+const permissionModeLine = z.enum(PERMISSION_MODES);
 
 const contextLine = z.string().nullable();
 
@@ -103,15 +103,7 @@ export class ControlLines {
     if (!line.success) {
       return { error: `invalid model: ${explain(line.error)}` };
     }
-    const merged: Record<string, unknown> = { ...this.settings.model };
-    for (const [field, fieldValue] of Object.entries(line.data)) {
-      if (fieldValue === null) {
-        delete merged[field];
-      } else {
-        merged[field] = fieldValue;
-      }
-    }
-    this.settings.model = merged as ModelCell;
+    this.settings.model = { ...this.settings.model, ...line.data } as ModelCell;
     return { model: this.settings.model };
   }
 
@@ -120,8 +112,8 @@ export class ControlLines {
     if (!line.success) {
       return { error: `invalid system: ${explain(line.error)}` };
     }
-    this.settings.system = line.data ?? undefined;
-    return { system: line.data === null ? 'cleared' : 'set' };
+    this.settings.system = line.data;
+    return { system: 'set' };
   }
 
   private permissionMode(value: unknown): Reply {
@@ -129,7 +121,7 @@ export class ControlLines {
     if (!line.success) {
       return { error: `invalid permissionMode: ${explain(line.error)}` };
     }
-    this.settings.permissionMode = line.data ?? undefined;
+    this.settings.permissionMode = line.data;
     return { permissionMode: line.data };
   }
 
