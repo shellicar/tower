@@ -203,7 +203,16 @@ export function compareShape(run: string, shape: string): { shape: string; refer
 const SHOWN = 12;
 
 export function compareRun(plan: Plan): void {
-  const lines: string[] = [`# Resume comparison, run ${plan.run}`, '', 'Reference: the `local` method (Claude Code reads its own record). Each other method is compared with it, request for request.', ''];
+  const lines: string[] = [
+    `# Resume comparison, run ${plan.run}`,
+    '',
+    'Reference: the `local` method (Claude Code reads its own record). Each other method is compared with it, request for request.',
+    '',
+    'Compared after normalising: device id, the participant\'s private home path, the prompt id in the billing header, and the config dir path. The config dir normalisation hides a real difference that only the store methods have: their Claude Code runs in /tmp/claude-resume-<uuid>, and that path is in the probe turn\'s sandbox reminder in every store resume and, in the compact shape, in the system prompt.',
+    '',
+    '`same*` means the only differences are lines that two local resumes also differ by (the noise).',
+    '',
+  ];
   const all: unknown[] = [];
   for (const shape of plan.shapes) {
     const out = shapeOutDir(plan.run, shape);

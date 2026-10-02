@@ -2,7 +2,7 @@
 // response's usage and diagnostics.cache_miss_reason, from Claude Code's body log), and writes
 // usage.json and usage.md in the run's directory.
 //   node proof/usage.ts <run>
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 type Json = Record<string, unknown>;
@@ -35,6 +35,8 @@ for (const shape of readdirSync(root).filter((s) => existsSync(join(root, s, 'me
       if (!existsSync(responseFile)) {
         continue;
       }
+      // Kept beside the probe request so the cache numbers can be checked without the ignored body log.
+      copyFileSync(responseFile, join(root, shape, 'methods', method, 'probe.response.json'));
       const response = JSON.parse(readFileSync(responseFile, 'utf8')) as Json;
       const usage = (response.usage ?? {}) as Json;
       const miss = ((response.diagnostics ?? {}) as Json).cache_miss_reason as Json | undefined;
