@@ -25,4 +25,4 @@ buildstamp = { path = "../buildstamp" }
 
 [dev-dependencies]
 # The integration check's WS client — already in the tree via axum's ws feature.
-tokio-tungstenite = "0.29"
+tokio-tungstenite = "0.30"
