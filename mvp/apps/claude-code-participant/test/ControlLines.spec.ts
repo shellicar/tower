@@ -250,6 +250,34 @@ describe('control lines', () => {
     });
   });
 
+  describe('claudeSettings whole-line null', () => {
+    const afterNull = () => testServices().control(...CONFIGURED, { claudeSettings: { advisorModel: 'm', model: 'claude-opus-5-5' } }, { claudeSettings: null }, { settings: {} });
+
+    it('replies cleared', () => {
+      expect(afterNull().at(-2)).toEqual({ claudeSettings: 'cleared' });
+    });
+
+    it('leaves claudeSettings unset', () => {
+      expect((afterNull().at(-1) as ReadBack).settings.claudeSettings).toBeNull();
+    });
+
+    it('leaves the model as it was', () => {
+      expect((afterNull().at(-1) as ReadBack).settings.model).toEqual(FULL_MODEL);
+    });
+
+    it('leaves system as it was', () => {
+      expect((afterNull().at(-1) as ReadBack).settings.system).toEqual({ preset: true });
+    });
+
+    it('leaves permissionMode as it was', () => {
+      expect((afterNull().at(-1) as ReadBack).settings.permissionMode).toBe('auto');
+    });
+
+    it('leaves no required value missing', () => {
+      expect((afterNull().at(-1) as ReadBack).settings.missing).toEqual([]);
+    });
+  });
+
   describe('shutdownPolicy', () => {
     it('starts with 30 s for stage 1 and 10 s for stage 2', () => {
       const [reply] = testServices().control({ settings: {} });
