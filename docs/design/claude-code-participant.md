@@ -560,6 +560,10 @@ Parked, not decided:
   because i built the nats spec for multiple users" (26 Sep).
 - **Cancel** names a query id (conversation.md, Preconditions). What reaches
   `changes` afterwards is whatever Claude Code kept.
+- **Cancel behaves like Esc in Claude Code's terminal** (2 Oct): the turn
+  and its foreground subagents stop, background subagents keep running.
+  The query is launched with `perTaskStopAffordance: true`; without it,
+  an interrupt stops background subagents too.
 - **Where bridge is off the spec, the participant follows the spec,**
   because "the doc wins where code and doc disagree" (CLAUDE.md):
   `instanceId` on change events, `usage` per usage frame, and `detached` on a
@@ -708,7 +712,9 @@ Parked, not decided:
   alive, its commands are left to it.
 - **Two graceful stages, then a hard one** (30 Sep): "its two levels of
   graceful exit then hard exit / so if it sigkills that would be in stage
-  3". Stage 1 interrupts each Claude Code, waits for it, then sends SIGTERM
+  3". Stage 1 interrupts each Claude Code, stops each subagent and
+  workflow it reported still running (by task id, before closing its
+  input), waits for it, then sends SIGTERM
   to whatever is still tagged. Stage 2 sends SIGTERM to each Claude Code's
   process group, waits, then SIGTERM to whatever is left; it never sends
   SIGKILL. Stage 3 SIGKILLs every tagged process and exits at once.

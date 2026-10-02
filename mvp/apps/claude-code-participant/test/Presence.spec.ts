@@ -9,7 +9,7 @@ import { ServingGate } from '../src/ServingGate.js';
 import { PublishingSessionStore } from '../src/SessionStore.js';
 import { Shutdown } from '../src/Shutdown.js';
 import { ANSWER, IMAGE_TOOL_RESULT, INTERRUPT_MARKER, PROMPT, THINKING, TOOL_USE } from './entries.js';
-import { CONFIGURED, FAKE_TIMESTAMP, resultMessage, settle, testConfig, testServices } from './support.js';
+import { CONFIGURED, FAKE_TIMESTAMP, resultMessage, settle, taskStarted, testConfig, testServices } from './support.js';
 
 const ID = '0f8b7c1e-2a4d-4e6f-9b1a-3c5d7e9f1a2b';
 const WORLD = 'agent.v1.test-world';
@@ -363,6 +363,15 @@ describe('Presence', () => {
       expect(services.launch.interrupts).toEqual([false]);
     });
 
+    it('stops no subagent', async () => {
+      const services = await serving();
+      const query = await acceptedQuery(services, 'hello', null);
+      services.launch.replies.push(taskStarted('agent-1', 'local_agent'));
+      await settle();
+      await cancel(services, query);
+      expect(services.launch.stops).toEqual([]);
+    });
+
     it('is rejected already_complete for a query that has ended', async () => {
       const services = await serving();
       const query = await acceptedQuery(services, 'hello', null);
@@ -536,6 +545,16 @@ describe('Presence', () => {
       await settle();
       return { ...services, child, shutdown, publishedSince: () => services.broker.subjects().slice(before) };
     }
+
+    it('stops a subagent Claude Code reported starting', async () => {
+      const services = await serving();
+      services.launch.start();
+      services.launch.replies.push(taskStarted('agent-1', 'local_agent'));
+      await settle();
+      services.provider.resolve(Shutdown).ask('SIGINT');
+      await settle();
+      expect(services.launch.stops.map((stop) => stop.taskId)).toEqual(['agent-1']);
+    });
 
     it('publishes unavailable at once', async () => {
       const { publishedSince } = await shuttingDown();

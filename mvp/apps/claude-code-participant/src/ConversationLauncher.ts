@@ -98,6 +98,9 @@ export class ConversationLauncher {
       // Nothing answers a permission prompt: whatever the mode, rules and
       // hooks don't allow is denied, and Claude Code is told why.
       permissionPrompts: 'none',
+      // An interrupt (a cancel) stops the turn and its foreground subagents
+      // and leaves background tasks running. Shutdown stops those one by one.
+      perTaskStopAffordance: true,
       // TODO: undecided: Claude Code's settings can't carry effort `max`, per
       // model in modelSettings included (both drop it), so
       // a declared `max` goes as a launch option, and then it beats the

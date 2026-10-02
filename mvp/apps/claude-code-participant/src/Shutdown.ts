@@ -34,8 +34,9 @@ function listed(processes: readonly TaggedProcess[]): string {
  * SIGKILL: two graceful, then hard.
  *
  * 1. Leave the world's queue group and publish `unavailable`. Interrupt
- *    every turn and close every conversation's input; each Claude Code stops
- *    its own commands, records that it did, and exits. Then `detached` for
+ *    every turn, stop every subagent and workflow still running, and close
+ *    every conversation's input; each Claude Code stops its own commands,
+ *    records that it did, and exits. Then `detached` for
  *    each conversation, `offline`, SIGTERM to whatever still carries this
  *    config dir's tag and a wait for it to go, and the NATS connection
  *    drained. The process then ends by itself.
@@ -156,8 +157,21 @@ export class Shutdown {
       // instance one signalled directly.
       this.host.log(`shutdown: interrupting conversation ${conversation.id} failed: ${describeError(err)}`);
     }
+    // Stops each subagent and workflow Claude Code reported still running, at
+    // any depth, by its id. A stop travels on the input, so all of them come
+    // before closing it.
+    await Promise.all(conversation.runningTasks.map((taskId) => this.stopTask(conversation, taskId)));
     conversation.close();
     await conversation.claudeCode.exited;
+  }
+
+  /** A stop that fails is reported and never holds shutdown back. */
+  private async stopTask(conversation: Conversation, taskId: string): Promise<void> {
+    try {
+      await conversation.stopTask(taskId);
+    } catch (err) {
+      this.host.log(`shutdown: stopping task ${taskId} of conversation ${conversation.id} failed: ${describeError(err)}`);
+    }
   }
 
   private async teardown(): Promise<void> {

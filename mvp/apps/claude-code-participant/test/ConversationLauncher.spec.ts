@@ -190,6 +190,12 @@ describe('ConversationLauncher', () => {
     });
   });
 
+  describe('interrupts', () => {
+    it('declare a per-task stop, so an interrupt leaves background tasks running', async () => {
+      expect((await launched(CONFIGURED)).options.perTaskStopAffordance).toBe(true);
+    });
+  });
+
   describe('claudeSettings over the required values', () => {
     it('replaces the model', async () => {
       expect((await settingsOf([...CONFIGURED, { claudeSettings: { model: 'claude-haiku-4-5' } }])).model).toBe('claude-haiku-4-5');

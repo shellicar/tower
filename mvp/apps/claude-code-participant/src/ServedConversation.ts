@@ -169,12 +169,14 @@ export class ServedConversation {
   }
 
   /**
-   * Reads what Claude Code sends back: its `result` ends the running query,
+   * Reads what Claude Code sends back: every message goes to the conversation
+   * to note the tasks it reports, and a `result` ends the running query,
    * whether it finished, was interrupted or failed.
    */
   private async follow(): Promise<void> {
     try {
       for await (const message of this.conversation.messages) {
+        this.conversation.observe(message);
         if (message.type === 'result') {
           this.endQuery(reasonOf(message));
         }

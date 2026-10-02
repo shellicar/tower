@@ -3,7 +3,7 @@ import { ConversationLauncher, type LaunchRequest } from '../src/ConversationLau
 import { Conversations } from '../src/Conversations.js';
 import { EXITS } from '../src/ExitCodes.js';
 import { Shutdown } from '../src/Shutdown.js';
-import { CONFIGURED, type FakeChild, testServices } from './support.js';
+import { CONFIGURED, type FakeChild, taskEnded, taskStarted, taskUpdated, testServices } from './support.js';
 
 const TAG = 'TOWER_PARTICIPANT=/agents/alpha/config';
 
@@ -158,6 +158,74 @@ describe('Shutdown', () => {
       shutdown.ask('SIGINT');
       await settle();
       expect(host.logs).toContain(`shutdown: interrupting conversation ${conversations[0]?.id} failed: interrupt refused: Cannot write to terminated process`);
+    });
+
+    it('stops every subagent and workflow Claude Code has started', async () => {
+      const { shutdown, launches, conversations } = await serving(1);
+      conversations[0]?.observe(taskStarted('agent-1', 'local_agent'));
+      conversations[0]?.observe(taskStarted('workflow-1', 'local_workflow'));
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(launches[0]?.stops.map((stop) => stop.taskId)).toEqual(['agent-1', 'workflow-1']);
+    });
+
+    it('stops them after the interrupt and before closing the input', async () => {
+      const { shutdown, launches, conversations } = await serving(1);
+      conversations[0]?.observe(taskStarted('agent-1', 'local_agent'));
+      shutdown.ask('SIGINT');
+      await settle();
+      expect({ interrupts: launches[0]?.interrupts, stops: launches[0]?.stops }).toEqual({ interrupts: [false], stops: [{ taskId: 'agent-1', inputClosed: false }] });
+    });
+
+    it('leaves out a subagent that has ended', async () => {
+      const { shutdown, launches, conversations } = await serving(1);
+      conversations[0]?.observe(taskStarted('agent-1', 'local_agent'));
+      conversations[0]?.observe(taskEnded('agent-1'));
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(launches[0]?.stops).toEqual([]);
+    });
+
+    it.each(['completed', 'failed', 'killed'])('leaves out a subagent updated to %s', async (status) => {
+      const { shutdown, launches, conversations } = await serving(1);
+      conversations[0]?.observe(taskStarted('agent-1', 'local_agent'));
+      conversations[0]?.observe(taskUpdated('agent-1', status));
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(launches[0]?.stops).toEqual([]);
+    });
+
+    it('leaves shells to Claude Code', async () => {
+      const { shutdown, launches, conversations } = await serving(1);
+      conversations[0]?.observe(taskStarted('shell-1', 'local_bash'));
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(launches[0]?.stops).toEqual([]);
+    });
+
+    it('closes the input when stopping a subagent fails', async () => {
+      const { shutdown, launches, conversations } = await serving(1);
+      const [launch] = launches;
+      if (launch === undefined) {
+        throw new Error('nothing was launched');
+      }
+      launch.stopBehaviour = new Error('Query closed before response received');
+      conversations[0]?.observe(taskStarted('agent-1', 'local_agent'));
+      shutdown.ask('SIGINT');
+      expect(await inputClosed(launch.done)).toBe(true);
+    });
+
+    it('logs a failed stop with its underlying cause', async () => {
+      const { shutdown, launches, host, conversations } = await serving(1);
+      const [launch] = launches;
+      if (launch === undefined) {
+        throw new Error('nothing was launched');
+      }
+      launch.stopBehaviour = new Error('stop refused', { cause: new Error('Cannot write to terminated process') });
+      conversations[0]?.observe(taskStarted('agent-1', 'local_agent'));
+      shutdown.ask('SIGINT');
+      await settle();
+      expect(host.logs).toContain(`shutdown: stopping task agent-1 of conversation ${conversations[0]?.id} failed: stop refused: Cannot write to terminated process`);
     });
 
     it('lets the process end by itself', async () => {

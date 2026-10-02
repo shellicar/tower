@@ -44,6 +44,10 @@ type FakeLaunch = {
   /** Whether the input was already closed at each interrupt, one entry per interrupt. */
   interrupts: boolean[];
   interruptBehaviour: InterruptBehaviour;
+  /** Each task stopped, with whether the input was already closed when it was, in order. */
+  stops: { taskId: string; inputClosed: boolean }[];
+  /** What stopping a task does, as for an interrupt. */
+  stopBehaviour: InterruptBehaviour;
   /** Does what the SDK does when it starts Claude Code: calls the spawn hook. */
   start: () => ChildProcessHandle;
   /** What Claude Code sends back, as the query yields it; closing it ends the query's messages. */
@@ -58,6 +62,21 @@ export function settle(): Promise<void> {
 /** The `result` Claude Code sends when a query ends, with only the fields the participant reads. */
 export function resultMessage(ending: 'success' | 'error_during_execution' = 'success'): SDKMessage {
   return { type: 'result', subtype: ending, is_error: ending !== 'success' } as SDKMessage;
+}
+
+/** The `task_started` Claude Code sends when a task starts, with only the fields the participant reads. */
+export function taskStarted(taskId: string, taskType: string): SDKMessage {
+  return { type: 'system', subtype: 'task_started', task_id: taskId, task_type: taskType } as SDKMessage;
+}
+
+/** The `task_notification` Claude Code sends when a task ends, with only the fields the participant reads. */
+export function taskEnded(taskId: string): SDKMessage {
+  return { type: 'system', subtype: 'task_notification', task_id: taskId, status: 'completed' } as SDKMessage;
+}
+
+/** The `task_updated` Claude Code sends when a task's status changes, with only the fields the participant reads. */
+export function taskUpdated(taskId: string, status: string): SDKMessage {
+  return { type: 'system', subtype: 'task_updated', task_id: taskId, patch: { status } } as SDKMessage;
 }
 
 /** Records each query instead of starting Claude Code, and collects what the conversation sends it. */
@@ -77,6 +96,8 @@ class FakeClaudeCode implements IClaudeCode {
       done,
       interrupts: [],
       interruptBehaviour: 'answer',
+      stops: [],
+      stopBehaviour: 'answer',
       start: () => {
         const hook = options.spawnClaudeCodeProcess;
         if (hook === undefined) {
@@ -95,7 +116,15 @@ class FakeClaudeCode implements IClaudeCode {
       }
       return behaviour === 'answer' ? Promise.resolve(undefined) : Promise.reject(behaviour);
     };
-    return { interrupt, [Symbol.asyncIterator]: () => launch.replies[Symbol.asyncIterator]() } as unknown as Query;
+    const stopTask = (taskId: string): Promise<void> => {
+      launch.stops.push({ taskId, inputClosed: (prompt as MessageChannel<SDKUserMessage>).isClosed });
+      const behaviour = launch.stopBehaviour;
+      if (behaviour === 'hang') {
+        return new Promise(() => {});
+      }
+      return behaviour === 'answer' ? Promise.resolve() : Promise.reject(behaviour);
+    };
+    return { interrupt, stopTask, [Symbol.asyncIterator]: () => launch.replies[Symbol.asyncIterator]() } as unknown as Query;
   }
 }
 
