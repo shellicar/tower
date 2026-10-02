@@ -1,0 +1,8 @@
+{
+ "shape": "tool",
+ "id": "0a15c848-ddb1-4221-817f-120817dbd559",
+ "world": "proof-tool-0a15c848",
+ "cwd": "/tmp/tower-proof/tool/cwd",
+ "configDir": "/tmp/tower-proof/tool/config",
+ "snapshot": "/tmp/tower-proof/tool/snapshot"
+}

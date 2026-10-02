@@ -12,6 +12,8 @@ export type Step =
 
 export type Shape = {
   name: string;
+  /** Control lines sent after the defaults (the model line merges); the resumes send the same. */
+  control?: Record<string, unknown>[];
   /** Files written into the conversation's working directory before it starts. */
   files?: Record<string, string>;
   steps: Step[];
@@ -24,7 +26,8 @@ export const SHAPES: readonly Shape[] = [
   },
   {
     name: 'thinking',
-    steps: [{ say: 'Think it through carefully, without using any tools: a bat and a ball cost 1.10 in total, the bat costs 1.00 more than the ball. What does the ball cost, and why is the intuitive answer wrong? Answer in two sentences.' }],
+    control: [{ model: { effort: 'high' } }],
+    steps: [{ say: 'Without using any tools, work out how many positive integers n below 1000 are such that n and n+1 both have exactly 6 divisors. Reason carefully, then give the count and the smallest such n.' }],
   },
   {
     name: 'tool',

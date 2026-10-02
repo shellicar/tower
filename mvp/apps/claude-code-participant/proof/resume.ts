@@ -78,14 +78,17 @@ const config = composeConfig(env, tmpdir(), process.getuid?.(), process.platform
 const services = participantServices(config, process.platform);
 const mode = modeOf();
 if (mode !== undefined) {
-  services.register(LoadSetting).using(() => new LoadSetting(mode)).asSelf();
+  services
+    .register(LoadSetting)
+    .using(() => new LoadSetting(mode))
+    .asSelf();
   services.register(PublishedLoader).as(ISessionLoader);
 }
 const provider = services.buildProvider();
 
 void beforeServing(provider, process.platform, (line) => console.error(`participant: ${line}`), new AbortController().signal);
 const controlReplies: unknown[] = [];
-for (const line of CONTROL_LINES) {
+for (const line of meta.controlLines ?? CONTROL_LINES) {
   controlReplies.push(provider.resolve(ControlLines).handle(JSON.stringify(line)));
 }
 

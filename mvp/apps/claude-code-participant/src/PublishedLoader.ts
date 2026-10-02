@@ -48,10 +48,20 @@ export type LoadField =
   | 'envelope'
   /** `message.stop_reason`, `stop_sequence`, `usage` and `type` on assistant entries. */
   | 'msgmeta'
+  /** `origin` and `queueSkipAttachments` on user entries. */
+  | 'origin'
+  /** `toolUseResult`, `serverClassifierContext` and `sourceToolAssistantUUID` on user entries that are tool results. */
+  | 'toolresult'
+  /** `wireToolInputs` on assistant entries: the tool inputs as sent, in their original key order. */
+  | 'wire'
+  /** `serverClassifierRequest`, `apiBlockIndex`, `effort` and `perTurnEffort` on assistant entries. */
+  | 'asstmeta'
+  /** A system message's whole raw entry (subtype, compactMetadata, level, ...), not only its content. */
+  | 'system'
   /** The raw entries that are not messages: attachments, compaction boundary and summary, meta users. */
   | 'extras';
 
-export const LOAD_FIELDS: readonly LoadField[] = ['parent', 'time', 'msgid', 'model', 'reqid', 'turnpos', 'promptmeta', 'envelope', 'msgmeta', 'extras'];
+export const LOAD_FIELDS: readonly LoadField[] = ['parent', 'time', 'msgid', 'model', 'reqid', 'turnpos', 'promptmeta', 'envelope', 'msgmeta', 'origin', 'toolresult', 'wire', 'asstmeta', 'system', 'extras'];
 
 type Json = Record<string, unknown>;
 
@@ -183,8 +193,18 @@ export class PublishedLoader implements ISessionLoader {
     if (role === 'user') {
       take('turnpos', ['turnPosition']);
       take('promptmeta', ['promptId', 'promptSource', 'turnOrigin', 'permissionMode']);
+      take('origin', ['origin', 'queueSkipAttachments']);
+      take('toolresult', ['toolUseResult', 'serverClassifierContext', 'sourceToolAssistantUUID']);
+    }
+    if (role === 'assistant') {
+      take('wire', ['wireToolInputs']);
+      take('asstmeta', ['serverClassifierRequest', 'apiBlockIndex', 'effort', 'perTurnEffort']);
     }
     if (role === 'system') {
+      // The whole raw entry: its subtype and compaction metadata are not in the message.
+      if (mode.add.has('system') && raw !== undefined) {
+        return { ...raw, parentUuid: envelope.parentUuid ?? null } as SessionStoreEntry;
+      }
       return { type: 'system', subtype: 'informational', level: 'info', content: body.content, ...envelope } as SessionStoreEntry;
     }
     if (role === 'user') {

@@ -17,7 +17,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type Json, filesEnding, OUT, type Plan, type ShapeMeta, shapeOutDir } from './lib.js';
+import { filesEnding, type Json, OUT, type Plan, type ShapeMeta, shapeOutDir } from './lib.js';
 import { probeFor } from './shapes.js';
 
 function lastUserText(body: Json): string {

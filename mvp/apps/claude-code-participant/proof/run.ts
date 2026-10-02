@@ -69,7 +69,8 @@ async function live(shape: Shape, nc: NatsConnection): Promise<void> {
   }
   const id = randomUUID();
   const world = `proof-${shape.name}-${id.slice(0, 8)}`;
-  const meta: ShapeMeta = { shape: shape.name, id, world, cwd, configDir, snapshot };
+  const controlLines = [...CONTROL_LINES, ...(shape.control ?? [])];
+  const meta: ShapeMeta = { shape: shape.name, id, world, cwd, configDir, snapshot, controlLines };
   writeFileSync(join(out, 'meta.json'), `${JSON.stringify(meta, null, 1)}\n`);
 
   // Every message on the conversation's subjects, in arrival order.
@@ -111,7 +112,7 @@ async function live(shape: Shape, nc: NatsConnection): Promise<void> {
   });
   const exited = new Promise<number | null>((resolve) => participant.once('exit', (code) => resolve(code)));
   const replies = createInterface({ input: participant.stdout as NodeJS.ReadableStream })[Symbol.asyncIterator]();
-  for (const line of CONTROL_LINES) {
+  for (const line of controlLines) {
     participant.stdin?.write(`${JSON.stringify(line)}\n`);
     const reply = await replies.next();
     if (reply.done || String(reply.value).includes('"error"')) {

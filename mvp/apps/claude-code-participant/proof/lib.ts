@@ -45,6 +45,8 @@ export type ShapeMeta = {
   cwd: string;
   configDir: string;
   snapshot: string;
+  /** The control lines the participant was configured with, which a resume repeats. */
+  controlLines: Json[];
 };
 
 export function shapeOutDir(run: string, shape: string): string {

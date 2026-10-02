@@ -14,9 +14,9 @@ import { ParticipantSettings } from './ParticipantSettings.js';
 import { Presence } from './Presence.js';
 import { IProcessSpawner, NodeProcessSpawner } from './ProcessSpawner.js';
 import { IProcessTable, LinuxProcessTable, MacProcessTable, realPs } from './ProcessTable.js';
+import { IPublishedHistory, NatsPublishedHistory } from './PublishedHistory.js';
 import { ServingGate } from './ServingGate.js';
-import { NatsPublishedHistory, IPublishedHistory } from './PublishedHistory.js';
-import { BusPublisher, ISessionLoader, IPublisher, LocalRecordLoader, PublishingSessionStore } from './SessionStore.js';
+import { BusPublisher, IPublisher, ISessionLoader, LocalRecordLoader, PublishingSessionStore } from './SessionStore.js';
 import { Shutdown } from './Shutdown.js';
 import { ITimer, RealTimer } from './Timer.js';
 
