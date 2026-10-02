@@ -132,6 +132,14 @@ LLM conversations are the opposite shape of chat-room chat:
   API knowledge. The WS never carries megabytes. Interim — the real split
   lands at the CLI level eventually (content vocabulary).
 
+## Sandbox and permission blocks
+
+When anyone, an agent or the main session, is blocked by the sandbox or refused
+by a permission check, they stop. They don't switch the sandbox off, don't retry
+the action another way, and don't start anything to find a way round. They tell
+Stephen at once: the exact error, and what they were trying to do. He decides
+what happens next. An agent's report opens with the block, not the work.
+
 ## Build and verify
 
 ```sh
