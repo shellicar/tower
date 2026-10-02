@@ -15,6 +15,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { SessionStoreEntry } from '@anthropic-ai/claude-agent-sdk';
 import { beforeServing } from '../src/beforeServing.js';
 import { ControlLines } from '../src/ControlLines.js';
 import { ConversationLauncher } from '../src/ConversationLauncher.js';
@@ -41,6 +42,14 @@ function modeOf(): LoadMode | undefined {
   }
   if (kind === 'raw') {
     return { source: 'raw' };
+  }
+  // `file`, `file2`, ...: Claude Code's own record handed back through load().
+  if (kind?.startsWith('file')) {
+    const lines = readFileSync(join(out, 'local-record.jsonl'), 'utf8')
+      .split('\n')
+      .filter((line) => line.trim() !== '')
+      .map((line) => JSON.parse(line) as SessionStoreEntry);
+    return { source: 'file', lines };
   }
   const add = new Set<LoadField>();
   const exclude = new Set<string>();

@@ -20,6 +20,8 @@ import type { ISessionLoader } from './SessionStore.js';
  */
 export type LoadMode =
   | { source: 'raw' }
+  /** A control, not a design: Claude Code's own record, line for line, given back through `load()`, so only the store mechanism differs from a local resume. */
+  | { source: 'file'; lines: SessionStoreEntry[] }
   | {
       source: 'messages';
       add: ReadonlySet<LoadField>;
@@ -56,12 +58,14 @@ export type LoadField =
   | 'wire'
   /** `serverClassifierRequest`, `apiBlockIndex`, `effort` and `perTurnEffort` on assistant entries. */
   | 'asstmeta'
+  /** A user entry whose content was a string rather than an array of blocks. */
+  | 'strcontent'
   /** A system message's whole raw entry (subtype, compactMetadata, level, ...), not only its content. */
   | 'system'
   /** The raw entries that are not messages: attachments, compaction boundary and summary, meta users. */
   | 'extras';
 
-export const LOAD_FIELDS: readonly LoadField[] = ['parent', 'time', 'msgid', 'model', 'reqid', 'turnpos', 'promptmeta', 'envelope', 'msgmeta', 'origin', 'toolresult', 'wire', 'asstmeta', 'system', 'extras'];
+export const LOAD_FIELDS: readonly LoadField[] = ['parent', 'time', 'msgid', 'model', 'reqid', 'turnpos', 'promptmeta', 'envelope', 'msgmeta', 'origin', 'toolresult', 'wire', 'asstmeta', 'strcontent', 'system', 'extras'];
 
 type Json = Record<string, unknown>;
 
@@ -114,12 +118,16 @@ export class PublishedLoader implements ISessionLoader {
   public lastRead = 0;
 
   public async load(sessionId: string): Promise<SessionStoreEntry[] | null> {
+    const { mode } = this.setting;
+    if (mode.source === 'file') {
+      this.last = mode.lines;
+      return mode.lines;
+    }
     const changes = await this.history.read(sessionId);
     this.lastRead = changes.length;
     if (changes.length === 0) {
       return null;
     }
-    const { mode } = this.setting;
     const entries = mode.source === 'raw' ? this.raw(changes) : this.fromMessages(changes, sessionId, mode);
     this.last = entries;
     return entries;
@@ -208,7 +216,9 @@ export class PublishedLoader implements ISessionLoader {
       return { type: 'system', subtype: 'informational', level: 'info', content: body.content, ...envelope } as SessionStoreEntry;
     }
     if (role === 'user') {
-      return { type: 'user', ...envelope, message: { role: 'user', content: body.content } } as SessionStoreEntry;
+      // A string content is published as a one-block array; the entry had a string.
+      const content = mode.add.has('strcontent') && typeof rawMessage.content === 'string' ? rawMessage.content : body.content;
+      return { type: 'user', ...envelope, message: { role: 'user', content } } as SessionStoreEntry;
     }
     const message: Json = { role: 'assistant', content: body.content };
     if (mode.add.has('msgid') && rawMessage.id !== undefined) {

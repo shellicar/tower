@@ -1,0 +1,36 @@
+{
+ "method": "file9",
+ "resumeSessionAt": null,
+ "controlReplies": [
+  {
+   "model": {
+    "name": "claude-sonnet-5-5",
+    "maxTokens": 120000,
+    "thinking": "adaptive",
+    "thinkingDisplay": "summarized",
+    "effort": "medium"
+   }
+  },
+  {
+   "system": "set"
+  },
+  {
+   "permissionMode": "auto"
+  },
+  {
+   "claudeSettings": "set"
+  }
+ ],
+ "assistant": [
+  {
+   "text": "Done."
+  }
+ ],
+ "result": {
+  "subtype": "success",
+  "is_error": false,
+  "text": "Done."
+ },
+ "publishedRead": 0,
+ "entriesLoaded": 46
+}

@@ -19,18 +19,27 @@
   },
   {
    "claudeSettings": "set"
+  },
+  {
+   "model": {
+    "name": "claude-sonnet-5-5",
+    "maxTokens": 120000,
+    "thinking": "adaptive",
+    "thinkingDisplay": "summarized",
+    "effort": "high"
+   }
   }
  ],
  "assistant": [
   {
-   "text": "Acknowledged."
+   "text": "Ready."
   }
  ],
  "result": {
   "subtype": "success",
   "is_error": false,
-  "text": "Acknowledged."
+  "text": "Ready."
  },
- "publishedRead": 18,
- "entriesLoaded": 15
+ "publishedRead": 20,
+ "entriesLoaded": 16
 }

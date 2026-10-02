@@ -1,0 +1,45 @@
+{
+ "method": "msg:msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@",
+ "resumeSessionAt": "23b5dd4d-48a7-471a-ba55-b04ae0dead31",
+ "controlReplies": [
+  {
+   "model": {
+    "name": "claude-sonnet-5-5",
+    "maxTokens": 120000,
+    "thinking": "adaptive",
+    "thinkingDisplay": "summarized",
+    "effort": "medium"
+   }
+  },
+  {
+   "system": "set"
+  },
+  {
+   "permissionMode": "auto"
+  },
+  {
+   "claudeSettings": "set"
+  },
+  {
+   "model": {
+    "name": "claude-sonnet-5-5",
+    "maxTokens": 120000,
+    "thinking": "adaptive",
+    "thinkingDisplay": "summarized",
+    "effort": "high"
+   }
+  }
+ ],
+ "assistant": [
+  {
+   "text": "Acknowledged."
+  }
+ ],
+ "result": {
+  "subtype": "success",
+  "is_error": false,
+  "text": "Acknowledged."
+ },
+ "publishedRead": 20,
+ "entriesLoaded": 16
+}

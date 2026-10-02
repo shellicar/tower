@@ -176,8 +176,15 @@ export function compareShape(run: string, shape: string): { shape: string; refer
   }
   const reference = requests.get('local');
   // What two local resumes differ by (the `local2` control): the noise.
-  const control = requests.get('local2');
-  const noise = new Set(reference === undefined || control === undefined ? [] : diff(reference.norm.body, control.norm.body));
+  const noise = new Set<string>();
+  for (const name of ['local2', 'local3']) {
+    const control = requests.get(name);
+    if (reference !== undefined && control !== undefined) {
+      for (const line of diff(reference.norm.body, control.norm.body)) {
+        noise.add(line);
+      }
+    }
+  }
   for (const [name, request] of requests) {
     if (name === 'local') {
       reports.push({ method: name, status: 'same', differences: [], result: request.result, replaced: request.norm.replaced, note: 'the reference', requestFile: `methods/${name}/probe.request.json` });

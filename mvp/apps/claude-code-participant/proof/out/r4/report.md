@@ -1,0 +1,258 @@
+# Resume comparison, run r4
+
+Reference: the `local` method (Claude Code reads its own record). Each other method is compared with it, request for request.
+
+## compact
+
+Summary (what differs, by location):
+
+- `file`: same
+- `file2`: same
+- `file3`: same, noise only
+- `file4`: same, noise only
+- `file5`: same
+- `file6`: same
+- `file7`: same
+- `file8`: same, noise only
+- `file9`: same, noise only
+- `local`: same
+- `local2`: same, noise only
+- `local3`: same
+- `local4`: same
+- `local5`: same, noise only
+- `local6`: same, noise only
+- `local7`: same, noise only
+- `local8`: same, noise only
+- `msg`: differs; differs at system.0.text, diagnostics.previous_message_id, messages, messages[0], messages[2], messages[3], messages[4], messages[5], messages[6], messages[7], messages[8]
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: same, noise only
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same, noise only
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: differs; differs at system.0.text, messages, messages[0], messages[1], messages[2], messages[3], messages[4], messages[5], messages[6], messages[7]
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs; differs at system.0.text, diagnostics.previous_message_id, messages[0], messages[2], messages[3], messages[4]
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same, noise only
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same, noise only
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same, noise only
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: same, noise only
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same, noise only
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at diagnostics.previous_message_id
+- `raw`: same
+- `raw@`: same, noise only
+
+Detail:
+
+- `file`: same
+- `file2`: same
+- `file3`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `file4`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `file5`: same
+- `file6`: same
+- `file7`: same
+- `file8`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `file9`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `local`: same (the reference)
+- `local2`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `local3`: same
+- `local4`: same
+- `local5`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `local6`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `local7`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `local8`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `msg`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.1c6; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdkGzLnHziMySHZbf19w; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - diagnostics.previous_message_id: "msg_011CfdkGziMYfJMsUVcuo8Cu" vs null
+    - messages: 5 vs 9
+    - messages[0] user[string("This session is being continued from a previous co…")] vs user[text("Reply with exactly one word: one. Do not use any t…")]
+    -     messages[0].content: "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the c… vs [{"type":"text","text":"Reply with exactly one word: one. Do not use any tools."}]
+    - messages[2] assistant[text("two")] vs assistant[text("one")]
+    -     messages[2].content.0.text: "two" vs "one"
+    - messages[3] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("<local-command-caveat>The command below was run di…") + text("<command-name>/compact</command-name>\n            …") + text("<local-command-stdout>Compacted </local-command-st…") + text("PROBE-COMPACT: reply with exactly one word, no too…")] vs user[text("Reply with exactly one word: two. Do not use any t…")]
+    -     messages[3].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: two. Do not use any tools."
+    -     messages[3].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[3].content.2: {"type":"text","text":"<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request, and its output… vs undefined
+    -     messages[3].content.3: {"type":"text","text":"<command-name>/compact</command-name>\n            <command-message>compact</command-message>\n            <command-a… vs undefined
+    - … 12 more lines in report.json
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.1c6; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdkGzLnHziMySHZbf19w; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdkGzLnHziMySHZbf19w; cc_prompt_id…
+    - messages: 5 vs 8
+    - messages[0] user[string("This session is being continued from a previous co…")] vs user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: one. Do not use any t…")]
+    -     messages[0].content: "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the c… vs [{"type":"text","text":"<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's e…
+    - messages[1] system[] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: [] vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[2] assistant[text("two")] vs assistant[text("one")]
+    -     messages[2].content.0.text: "two" vs "one"
+    - messages[3] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("<local-command-caveat>The command below was run di…") + text("<command-name>/compact</command-name>\n            …") + text("<local-command-stdout>Compacted </local-command-st…") + text("PROBE-COMPACT: reply with exactly one word, no too…")] vs user[text("Reply with exactly one word: two. Do not use any t…")]
+    -     messages[3].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: two. Do not use any tools."
+    -     messages[3].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[3].content.2: {"type":"text","text":"<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request, and its output… vs undefined
+    - … 9 more lines in report.json
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.1c6; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdkGzLnHziMySHZbf19w; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.adb; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - diagnostics.previous_message_id: "msg_011CfdkGziMYfJMsUVcuo8Cu" vs null
+    - messages[0] user[string("This session is being continued from a previous co…")] vs user[text("<command-name>/compact</command-name>\n            …") + text("<local-command-stdout>Compacted </local-command-st…")]
+    -     messages[0].content: "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the c… vs [{"type":"text","text":"<command-name>/compact</command-name>\n            <command-message>compact</command-message>\n            <command-…
+    - messages[2] assistant[text("two")] vs assistant[text("No response requested.")]
+    -     messages[2].content.0.text: "two" vs "No response requested."
+    - messages[3] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("<local-command-caveat>The command below was run di…") + text("<command-name>/compact</command-name>\n            …") + text("<local-command-stdout>Compacted </local-command-st…") + text("PROBE-COMPACT: reply with exactly one word, no too…")] vs user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("PROBE-COMPACT: reply with exactly one word, no too…")]
+    -     messages[3].content.2.text: "<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request, and its output goes straight to the … vs "PROBE-COMPACT: reply with exactly one word, no tools."
+    -     messages[3].content.3: {"type":"text","text":"<command-name>/compact</command-name>\n            <command-message>compact</command-message>\n            <command-a… vs undefined
+    -     messages[3].content.4: {"type":"text","text":"<local-command-stdout>Compacted </local-command-stdout>\n"} vs undefined
+    - … 3 more lines in report.json
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.1c6; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdkGzLnHziMySHZbf19w; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.1c6; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk; cc_promp…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - diagnostics.previous_message_id: "msg_011CfdkGziMYfJMsUVcuo8Cu" vs null
+- `raw`: same
+- `raw@`: same, noise only
+    - [noise, also local vs local2] system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - [noise, also local vs local2] system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+
+## text
+
+Summary (what differs, by location):
+
+- `file`: same
+- `file2`: same
+- `file3`: same
+- `file4`: same
+- `file5`: same
+- `file6`: same
+- `file7`: same
+- `file8`: same
+- `file9`: same
+- `local`: same
+- `local2`: same
+- `local3`: same
+- `local4`: same
+- `local5`: same
+- `local6`: same
+- `local7`: same
+- `local8`: same
+- `msg`: differs; differs at system.0.text, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs; differs at system.2.text, system.3.text, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at system.0.text
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs; differs at diagnostics.previous_message_id
+- `raw`: same
+- `raw@`: same
+
+Detail:
+
+- `file`: same
+- `file2`: same
+- `file3`: same
+- `file4`: same
+- `file5`: same
+- `file6`: same
+- `file7`: same
+- `file8`: same
+- `file9`: same
+- `local`: same (the reference)
+- `local2`: same
+- `local3`: same
+- `local4`: same
+- `local5`: same
+- `local6`: same
+- `local7`: same
+- `local8`: same
+- `msg`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>15000000 tokens left</total_tokens>" vs [{"type":"text","text":"harbour"}]
+    - … 11 more lines in report.json
+- `msg-msgid,reqid,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
+- `msg-msgid,reqid,turnpos,model,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system`: differs
+    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>15000000 tokens left</total_tokens>" vs [{"type":"text","text":"harbour"}]
+    - … 11 more lines in report.json
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras,origin`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,strcontent,system,extras@`: same
+- `msg-msgid,reqid,turnpos,model,wire,toolresult,system,extras`: same
+- `msg-msgid,reqid,turnpos,wire,toolresult,strcontent,system,extras`: same
+- `msg-msgid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk; cc_promp…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,strcontent,system,extras`: same
+- `msg-reqid,turnpos,model,wire,toolresult,strcontent,system,extras`: differs
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+- `raw`: same
+- `raw@`: same
+

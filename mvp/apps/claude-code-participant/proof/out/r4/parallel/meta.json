@@ -1,0 +1,8 @@
+{
+ "shape": "parallel",
+ "id": "8f605d49-6c64-40b5-a3ab-85089793dc51",
+ "world": "proof-parallel-8f605d49",
+ "cwd": "/tmp/tower-proof/parallel/cwd",
+ "configDir": "/tmp/tower-proof/parallel/config",
+ "snapshot": "/tmp/tower-proof/parallel/snapshot"
+}

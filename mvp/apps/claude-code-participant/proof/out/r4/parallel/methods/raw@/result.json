@@ -1,0 +1,36 @@
+{
+ "method": "raw@",
+ "resumeSessionAt": "c3948289-600d-446d-a683-540c13586941",
+ "controlReplies": [
+  {
+   "model": {
+    "name": "claude-sonnet-5-5",
+    "maxTokens": 120000,
+    "thinking": "adaptive",
+    "thinkingDisplay": "summarized",
+    "effort": "medium"
+   }
+  },
+  {
+   "system": "set"
+  },
+  {
+   "permissionMode": "auto"
+  },
+  {
+   "claudeSettings": "set"
+  }
+ ],
+ "assistant": [
+  {
+   "text": "Parallel."
+  }
+ ],
+ "result": {
+  "subtype": "success",
+  "is_error": false,
+  "text": "Parallel."
+ },
+ "publishedRead": 27,
+ "entriesLoaded": 20
+}

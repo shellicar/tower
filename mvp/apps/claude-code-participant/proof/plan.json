@@ -1,6 +1,6 @@
 {
-  "run": "r3",
-  "phase": "both",
-  "shapes": ["thinking", "tool", "parallel", "midturn", "background", "compact"],
-  "methods": ["local", "local2", "raw", "raw@", "msg", "msg:extras", "msg:msgid,reqid,turnpos,extras", "msg:msgid,reqid,turnpos,extras@", "msg:msgid,reqid,turnpos,extras,model", "msg:parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras"]
+  "run": "r4",
+  "phase": "resume",
+  "shapes": ["compact", "text"],
+  "methods": ["local", "file", "file2", "file3", "file4", "file5", "file6", "file7", "file8", "file9", "local2", "local3", "local4", "local5", "local6", "local7", "local8"]
 }

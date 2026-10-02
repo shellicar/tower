@@ -23,12 +23,12 @@
  ],
  "assistant": [
   {
-   "text": "Acknowledged."
+   "text": "Ready"
   }
  ],
  "result": {
   "subtype": "success",
   "is_error": false,
-  "text": "Acknowledged."
+  "text": "Ready"
  }
 }

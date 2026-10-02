@@ -1,505 +1,5 @@
 [
  {
-  "shape": "thinking",
-  "reference": "local",
-  "methods": [
-   {
-    "method": "local",
-    "status": "same",
-    "differences": [],
-    "result": {
-     "method": "local",
-     "resumeSessionAt": null,
-     "controlReplies": [
-      {
-       "model": {
-        "name": "claude-sonnet-5-5",
-        "maxTokens": 120000,
-        "thinking": "adaptive",
-        "thinkingDisplay": "summarized",
-        "effort": "medium"
-       }
-      },
-      {
-       "system": "set"
-      },
-      {
-       "permissionMode": "auto"
-      },
-      {
-       "claudeSettings": "set"
-      }
-     ],
-     "assistant": [
-      {
-       "text": "Acknowledged."
-      }
-     ],
-     "result": {
-      "subtype": "success",
-      "is_error": false,
-      "text": "Acknowledged."
-     }
-    },
-    "replaced": {
-     "deviceId": 1,
-     "configDir": 78,
-     "privateHome": 11,
-     "promptId": 1
-    },
-    "note": "the reference",
-    "requestFile": "methods/local/probe.request.json"
-   },
-   {
-    "method": "local2",
-    "status": "same",
-    "differences": [],
-    "result": {
-     "method": "local2",
-     "resumeSessionAt": null,
-     "controlReplies": [
-      {
-       "model": {
-        "name": "claude-sonnet-5-5",
-        "maxTokens": 120000,
-        "thinking": "adaptive",
-        "thinkingDisplay": "summarized",
-        "effort": "medium"
-       }
-      },
-      {
-       "system": "set"
-      },
-      {
-       "permissionMode": "auto"
-      },
-      {
-       "claudeSettings": "set"
-      }
-     ],
-     "assistant": [
-      {
-       "text": "Acknowledged."
-      }
-     ],
-     "result": {
-      "subtype": "success",
-      "is_error": false,
-      "text": "Acknowledged."
-     }
-    },
-    "replaced": {
-     "deviceId": 1,
-     "configDir": 78,
-     "privateHome": 11,
-     "promptId": 1
-    },
-    "requestFile": "methods/local2/probe.request.json"
-   },
-   {
-    "method": "msg",
-    "status": "differs",
-    "differences": [
-     "system.0.text: \"x-anthropic-billing-header: cc_version=2.1.285.5b9; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011Cfdjvryhcjn9kACHsryod; cc_prompt_id… vs \"x-anthropic-billing-header: cc_version=2.1.285.5b9; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;\"",
-     "diagnostics.previous_message_id: \"msg_011CfdjvsLY42GJQ5rxgEzgi\" vs null",
-     "messages[0] user[text(\"<system-reminder>\\nAttribution for git commits and …\") + text(\"Think it through carefully, without using any tool…\")] vs user[text(\"Think it through carefully, without using any tool…\")]",
-     "    messages[0].content.0.text: \"<system-reminder>\\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's own earlier attributi… vs \"Think it through carefully, without using any tools: a bat and a ball cost 1.10 in total, the bat costs 1.00 more than the ball. What does …",
-     "    messages[0].content.1: {\"type\":\"text\",\"text\":\"Think it through carefully, without using any tools: a bat and a ball cost 1.10 in total, the bat costs 1.00 more tha… vs undefined",
-     "messages[1] system[string(\"## Bash command sandbox\\nBy default, Bash commands …\")] vs system[]",
-     "    messages[1].content: \"## Bash command sandbox\\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []",
-     "messages[3] user[text(\"<system-reminder>\\nThe session context was re-read …\") + text(\"PROBE-THINKING: reply with exactly one word, no to…\")] vs user[text(\"<system-reminder>\\nAs you answer the user's questio…\") + text(\"<system-reminder>\\nAttribution for git commits and …\") + text(\"PROBE-THINKING: reply with exactly one word, no to…\")]",
-     "    messages[3].content.0.text: \"<system-reminder>\\nThe session context was re-read when this session started; these values replace the earlier ones:\\n# userEmail\\nThe user… vs \"<system-reminder>\\nAs you answer the user's questions, you can use the following context:\\n# userEmail\\nThe user's email address is stephen…",
-     "    messages[3].content.1.text: \"PROBE-THINKING: reply with exactly one word, no tools.\" vs \"<system-reminder>\\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's own earlier attributi…",
-     "    messages[3].content.2: undefined vs {\"type\":\"text\",\"text\":\"PROBE-THINKING: reply with exactly one word, no tools.\"}",
-     "messages[4] system[text+cc(\"## Bash command sandbox\\nBy default, Bash commands …\")] vs system[text+cc(\"## Bash command sandbox\\nBy default, Bash commands …\")]",
-     "    messages[4].content.0.text: \"## Bash command sandbox\\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs \"## Bash command sandbox\\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…"
-    ],
-    "result": {
-     "method": "msg",
-     "resumeSessionAt": null,
-     "controlReplies": [
-      {
-       "model": {
-        "name": "claude-sonnet-5-5",
-        "maxTokens": 120000,
-        "thinking": "adaptive",
-        "thinkingDisplay": "summarized",
-        "effort": "medium"
-       }
-      },
-      {
-       "system": "set"
-      },
-      {
-       "permissionMode": "auto"
-      },
-      {
-       "claudeSettings": "set"
-      }
-     ],
-     "assistant": [
-      {
-       "text": "Acknowledged."
-      }
-     ],
-     "result": {
-      "subtype": "success",
-      "is_error": false,
-      "text": "Acknowledged."
-     },
-     "publishedRead": 18,
-     "entriesLoaded": 2
-    },
-    "replaced": {
-     "deviceId": 1,
-     "configDir": 40,
-     "privateHome": 6,
-     "promptId": 1
-    },
-    "requestFile": "methods/msg/probe.request.json"
-   },
-   {
-    "method": "msg-extras",
-    "status": "differs",
-    "differences": [
-     "system.0.text: \"x-anthropic-billing-header: cc_version=2.1.285.5b9; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011Cfdjvryhcjn9kACHsryod; cc_prompt_id… vs \"x-anthropic-billing-header: cc_version=2.1.285.5b9; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;\"",
-     "diagnostics.previous_message_id: \"msg_011CfdjvsLY42GJQ5rxgEzgi\" vs null"
-    ],
-    "result": {
-     "method": "msg:extras",
-     "resumeSessionAt": null,
-     "controlReplies": [
-      {
-       "model": {
-        "name": "claude-sonnet-5-5",
-        "maxTokens": 120000,
-        "thinking": "adaptive",
-        "thinkingDisplay": "summarized",
-        "effort": "medium"
-       }
-      },
-      {
-       "system": "set"
-      },
-      {
-       "permissionMode": "auto"
-      },
-      {
-       "claudeSettings": "set"
-      }
-     ],
-     "assistant": [
-      {
-       "text": "Acknowledged."
-      }
-     ],
-     "result": {
-      "subtype": "success",
-      "is_error": false,
-      "text": "Acknowledged."
-     },
-     "publishedRead": 18,
-     "entriesLoaded": 15
-    },
-    "replaced": {
-     "deviceId": 1,
-     "configDir": 78,
-     "privateHome": 11,
-     "promptId": 1
-    },
-    "requestFile": "methods/msg-extras/probe.request.json"
-   },
-   {
-    "method": "msg-msgid,reqid,turnpos,extras",
-    "status": "same",
-    "differences": [],
-    "result": {
-     "method": "msg:msgid,reqid,turnpos,extras",
-     "resumeSessionAt": null,
-     "controlReplies": [
-      {
-       "model": {
-        "name": "claude-sonnet-5-5",
-        "maxTokens": 120000,
-        "thinking": "adaptive",
-        "thinkingDisplay": "summarized",
-        "effort": "medium"
-       }
-      },
-      {
-       "system": "set"
-      },
-      {
-       "permissionMode": "auto"
-      },
-      {
-       "claudeSettings": "set"
-      }
-     ],
-     "assistant": [
-      {
-       "text": "Acknowledged."
-      }
-     ],
-     "result": {
-      "subtype": "success",
-      "is_error": false,
-      "text": "Acknowledged."
-     },
-     "publishedRead": 18,
-     "entriesLoaded": 15
-    },
-    "replaced": {
-     "deviceId": 1,
-     "configDir": 78,
-     "privateHome": 11,
-     "promptId": 1
-    },
-    "requestFile": "methods/msg-msgid,reqid,turnpos,extras/probe.request.json"
-   },
-   {
-    "method": "msg-msgid,reqid,turnpos,extras,model",
-    "status": "same",
-    "differences": [],
-    "result": {
-     "method": "msg:msgid,reqid,turnpos,extras,model",
-     "resumeSessionAt": null,
-     "controlReplies": [
-      {
-       "model": {
-        "name": "claude-sonnet-5-5",
-        "maxTokens": 120000,
-        "thinking": "adaptive",
-        "thinkingDisplay": "summarized",
-        "effort": "medium"
-       }
-      },
-      {
-       "system": "set"
-      },
-      {
-       "permissionMode": "auto"
-      },
-      {
-       "claudeSettings": "set"
-      }
-     ],
-     "assistant": [
-      {
-       "text": "Acknowledged."
-      }
-     ],
-     "result": {
-      "subtype": "success",
-      "is_error": false,
-      "text": "Acknowledged."
-     },
-     "publishedRead": 18,
-     "entriesLoaded": 15
-    },
-    "replaced": {
-     "deviceId": 1,
-     "configDir": 78,
-     "privateHome": 11,
-     "promptId": 1
-    },
-    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,model/probe.request.json"
-   },
-   {
-    "method": "msg-msgid,reqid,turnpos,extras@",
-    "status": "same",
-    "differences": [],
-    "result": {
-     "method": "msg:msgid,reqid,turnpos,extras@",
-     "resumeSessionAt": "ee074846-b63b-4487-93ea-4b7ff35a41dd",
-     "controlReplies": [
-      {
-       "model": {
-        "name": "claude-sonnet-5-5",
-        "maxTokens": 120000,
-        "thinking": "adaptive",
-        "thinkingDisplay": "summarized",
-        "effort": "medium"
-       }
-      },
-      {
-       "system": "set"
-      },
-      {
-       "permissionMode": "auto"
-      },
-      {
-       "claudeSettings": "set"
-      }
-     ],
-     "assistant": [
-      {
-       "text": "Acknowledged."
-      }
-     ],
-     "result": {
-      "subtype": "success",
-      "is_error": false,
-      "text": "Acknowledged."
-     },
-     "publishedRead": 18,
-     "entriesLoaded": 15
-    },
-    "replaced": {
-     "deviceId": 1,
-     "configDir": 78,
-     "privateHome": 11,
-     "promptId": 1
-    },
-    "requestFile": "methods/msg-msgid,reqid,turnpos,extras@/probe.request.json"
-   },
-   {
-    "method": "msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras",
-    "status": "same",
-    "differences": [],
-    "result": {
-     "method": "msg:parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras",
-     "resumeSessionAt": null,
-     "controlReplies": [
-      {
-       "model": {
-        "name": "claude-sonnet-5-5",
-        "maxTokens": 120000,
-        "thinking": "adaptive",
-        "thinkingDisplay": "summarized",
-        "effort": "medium"
-       }
-      },
-      {
-       "system": "set"
-      },
-      {
-       "permissionMode": "auto"
-      },
-      {
-       "claudeSettings": "set"
-      }
-     ],
-     "assistant": [
-      {
-       "text": "Acknowledged."
-      }
-     ],
-     "result": {
-      "subtype": "success",
-      "is_error": false,
-      "text": "Acknowledged."
-     },
-     "publishedRead": 18,
-     "entriesLoaded": 15
-    },
-    "replaced": {
-     "deviceId": 1,
-     "configDir": 78,
-     "privateHome": 11,
-     "promptId": 1
-    },
-    "requestFile": "methods/msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras/probe.request.json"
-   },
-   {
-    "method": "raw",
-    "status": "same",
-    "differences": [],
-    "result": {
-     "method": "raw",
-     "resumeSessionAt": null,
-     "controlReplies": [
-      {
-       "model": {
-        "name": "claude-sonnet-5-5",
-        "maxTokens": 120000,
-        "thinking": "adaptive",
-        "thinkingDisplay": "summarized",
-        "effort": "medium"
-       }
-      },
-      {
-       "system": "set"
-      },
-      {
-       "permissionMode": "auto"
-      },
-      {
-       "claudeSettings": "set"
-      }
-     ],
-     "assistant": [
-      {
-       "text": "Acknowledged."
-      }
-     ],
-     "result": {
-      "subtype": "success",
-      "is_error": false,
-      "text": "Acknowledged."
-     },
-     "publishedRead": 18,
-     "entriesLoaded": 15
-    },
-    "replaced": {
-     "deviceId": 1,
-     "configDir": 78,
-     "privateHome": 11,
-     "promptId": 1
-    },
-    "requestFile": "methods/raw/probe.request.json"
-   },
-   {
-    "method": "raw@",
-    "status": "same",
-    "differences": [],
-    "result": {
-     "method": "raw@",
-     "resumeSessionAt": "ee074846-b63b-4487-93ea-4b7ff35a41dd",
-     "controlReplies": [
-      {
-       "model": {
-        "name": "claude-sonnet-5-5",
-        "maxTokens": 120000,
-        "thinking": "adaptive",
-        "thinkingDisplay": "summarized",
-        "effort": "medium"
-       }
-      },
-      {
-       "system": "set"
-      },
-      {
-       "permissionMode": "auto"
-      },
-      {
-       "claudeSettings": "set"
-      }
-     ],
-     "assistant": [
-      {
-       "text": "Acknowledged."
-      }
-     ],
-     "result": {
-      "subtype": "success",
-      "is_error": false,
-      "text": "Acknowledged."
-     },
-     "publishedRead": 18,
-     "entriesLoaded": 15
-    },
-    "replaced": {
-     "deviceId": 1,
-     "configDir": 78,
-     "privateHome": 11,
-     "promptId": 1
-    },
-    "requestFile": "methods/raw@/probe.request.json"
-   }
-  ]
- },
- {
   "shape": "tool",
   "reference": "local",
   "methods": [
@@ -532,13 +32,13 @@
      ],
      "assistant": [
       {
-       "text": "Acknowledged."
+       "text": "Ready"
       }
      ],
      "result": {
       "subtype": "success",
       "is_error": false,
-      "text": "Acknowledged."
+      "text": "Ready"
      }
     },
     "replaced": {
@@ -816,6 +316,294 @@
     "requestFile": "methods/msg-msgid,reqid,turnpos,extras,model/probe.request.json"
    },
    {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,origin,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 23,
+     "entriesLoaded": 18
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,origin,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 23,
+     "entriesLoaded": 18
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 23,
+     "entriesLoaded": 18
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@",
+     "resumeSessionAt": "65abb510-d4a0-4734-b3e3-c888d4480431",
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 23,
+     "entriesLoaded": 18
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 23,
+     "entriesLoaded": 18
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,wire,origin,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 23,
+     "entriesLoaded": 18
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,wire,origin,system,model/probe.request.json"
+   },
+   {
     "method": "msg-msgid,reqid,turnpos,extras@",
     "status": "same",
     "differences": [],
@@ -864,6 +652,54 @@
     "requestFile": "methods/msg-msgid,reqid,turnpos,extras@/probe.request.json"
    },
    {
+    "method": "msg-parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 23,
+     "entriesLoaded": 18
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model/probe.request.json"
+   },
+   {
     "method": "msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras",
     "status": "same",
     "differences": [],
@@ -910,6 +746,54 @@
      "promptId": 1
     },
     "requestFile": "methods/msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras/probe.request.json"
+   },
+   {
+    "method": "msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 23,
+     "entriesLoaded": 18
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras/probe.request.json"
    },
    {
     "method": "raw",
@@ -1358,6 +1242,294 @@
     "requestFile": "methods/msg-msgid,reqid,turnpos,extras,model/probe.request.json"
    },
    {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,origin,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Parallel"
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Parallel"
+     },
+     "publishedRead": 27,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,origin,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Parallel"
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Parallel"
+     },
+     "publishedRead": 27,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 27,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@",
+     "resumeSessionAt": "c3948289-600d-446d-a683-540c13586941",
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 27,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 27,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,wire,origin,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 27,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,wire,origin,system,model/probe.request.json"
+   },
+   {
     "method": "msg-msgid,reqid,turnpos,extras@",
     "status": "same",
     "differences": [],
@@ -1406,6 +1578,54 @@
     "requestFile": "methods/msg-msgid,reqid,turnpos,extras@/probe.request.json"
    },
    {
+    "method": "msg-parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 27,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model/probe.request.json"
+   },
+   {
     "method": "msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras",
     "status": "same",
     "differences": [],
@@ -1452,6 +1672,54 @@
      "promptId": 1
     },
     "requestFile": "methods/msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras/probe.request.json"
+   },
+   {
+    "method": "msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 27,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras/probe.request.json"
    },
    {
     "method": "raw",
@@ -1876,6 +2144,296 @@
     "requestFile": "methods/msg-msgid,reqid,turnpos,extras,model/probe.request.json"
    },
    {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,origin,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Banana"
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Banana"
+     },
+     "publishedRead": 24,
+     "entriesLoaded": 19
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,origin,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Banana"
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Banana"
+     },
+     "publishedRead": 24,
+     "entriesLoaded": 19
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Banana"
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Banana"
+     },
+     "publishedRead": 24,
+     "entriesLoaded": 19
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@",
+     "resumeSessionAt": "b57279f9-dd7d-4edf-9574-4aeb77d55d2e",
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Banana"
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Banana"
+     },
+     "publishedRead": 24,
+     "entriesLoaded": 19
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 24,
+     "entriesLoaded": 19
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,wire,origin,system,model",
+    "status": "differs",
+    "differences": [
+     "safeguards.0.classifier_context.prior_turn_context: [{\"tool_use_ids\":[\"toolu_01VGuzYB6zLTGDRAMqLmUo7G\"],\"context\":{\"git_state\":{\"cwd\":\"/tmp/tower-proof/midturn/cwd\",\"root\":null,\"branch\":null,\"… vs undefined"
+    ],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "banana"
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "banana"
+     },
+     "publishedRead": 24,
+     "entriesLoaded": 19
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,wire,origin,system,model/probe.request.json"
+   },
+   {
     "method": "msg-msgid,reqid,turnpos,extras@",
     "status": "differs",
     "differences": [
@@ -1926,6 +2484,54 @@
     "requestFile": "methods/msg-msgid,reqid,turnpos,extras@/probe.request.json"
    },
    {
+    "method": "msg-parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 24,
+     "entriesLoaded": 19
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model/probe.request.json"
+   },
+   {
     "method": "msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras",
     "status": "differs",
     "differences": [
@@ -1974,6 +2580,54 @@
      "promptId": 1
     },
     "requestFile": "methods/msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras/probe.request.json"
+   },
+   {
+    "method": "msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Banana"
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Banana"
+     },
+     "publishedRead": 24,
+     "entriesLoaded": 19
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras/probe.request.json"
    },
    {
     "method": "raw",
@@ -2412,6 +3066,314 @@
     "requestFile": "methods/msg-msgid,reqid,turnpos,extras,model/probe.request.json"
    },
    {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,origin,system,model",
+    "status": "differs",
+    "differences": [
+     "messages[2] assistant[tool_use(Bash tL599k)] vs assistant[tool_use(Bash tL599k)]",
+     "messages[6] user[string(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")] vs user[text(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")]",
+     "    messages[6].content: \"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message from the user.\\nDo NOT… vs [{\"type\":\"text\",\"text\":\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message…"
+    ],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 28,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,origin,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,model",
+    "status": "differs",
+    "differences": [
+     "messages[6] user[string(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")] vs user[text(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")]",
+     "    messages[6].content: \"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message from the user.\\nDo NOT… vs [{\"type\":\"text\",\"text\":\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message…"
+    ],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 28,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+    "status": "differs",
+    "differences": [
+     "messages[6] user[string(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")] vs user[text(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")]",
+     "    messages[6].content: \"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message from the user.\\nDo NOT… vs [{\"type\":\"text\",\"text\":\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message…"
+    ],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 28,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@",
+    "status": "differs",
+    "differences": [
+     "messages[6] user[string(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")] vs user[text(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")]",
+     "    messages[6].content: \"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message from the user.\\nDo NOT… vs [{\"type\":\"text\",\"text\":\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message…"
+    ],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@",
+     "resumeSessionAt": "ef7de77f-36fd-40a1-bb2b-4f371eeb52de",
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 28,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,system,model",
+    "status": "differs",
+    "differences": [
+     "messages[6] user[string(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")] vs user[text(\"<task-notification>\\n<task-id>baqmnyz51</task-id>\\n<…\")]",
+     "    messages[6].content: \"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message from the user.\\nDo NOT… vs [{\"type\":\"text\",\"text\":\"<task-notification>\\n<task-id>baqmnyz51</task-id>\\n<tool-use-id>toolu_013sBHj3Jk443vmoJ8tL599k</tool-use-id>\\n<outpu…"
+    ],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 28,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,wire,origin,system,model",
+    "status": "differs",
+    "differences": [
+     "safeguards.0.classifier_context.prior_turn_context: [{\"tool_use_ids\":[\"toolu_013sBHj3Jk443vmoJ8tL599k\"],\"context\":{\"git_state\":{\"cwd\":\"/tmp/tower-proof/background/cwd\",\"root\":null,\"branch\":nul… vs undefined",
+     "messages[6] user[string(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")] vs user[text(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")]",
+     "    messages[6].content: \"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message from the user.\\nDo NOT… vs [{\"type\":\"text\",\"text\":\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message…"
+    ],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 28,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,wire,origin,system,model/probe.request.json"
+   },
+   {
     "method": "msg-msgid,reqid,turnpos,extras@",
     "status": "differs",
     "differences": [
@@ -2465,6 +3427,57 @@
     "requestFile": "methods/msg-msgid,reqid,turnpos,extras@/probe.request.json"
    },
    {
+    "method": "msg-parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+    "status": "differs",
+    "differences": [
+     "messages[6] user[string(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")] vs user[text(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")]",
+     "    messages[6].content: \"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message from the user.\\nDo NOT… vs [{\"type\":\"text\",\"text\":\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message…"
+    ],
+    "result": {
+     "method": "msg:parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 28,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model/probe.request.json"
+   },
+   {
     "method": "msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras",
     "status": "differs",
     "differences": [
@@ -2516,6 +3529,57 @@
      "promptId": 1
     },
     "requestFile": "methods/msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras/probe.request.json"
+   },
+   {
+    "method": "msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras",
+    "status": "differs",
+    "differences": [
+     "messages[6] user[string(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")] vs user[text(\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER …\")]",
+     "    messages[6].content: \"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message from the user.\\nDo NOT… vs [{\"type\":\"text\",\"text\":\"<system-reminder>\\n[SYSTEM NOTIFICATION - NOT USER INPUT]\\nThis is an automated background-task event, NOT a message…"
+    ],
+    "result": {
+     "method": "msg:parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 28,
+     "entriesLoaded": 20
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 78,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras/probe.request.json"
    },
    {
     "method": "raw",
@@ -2648,13 +3712,13 @@
      ],
      "assistant": [
       {
-       "text": "Done."
+       "text": "Acknowledged"
       }
      ],
      "result": {
       "subtype": "success",
       "is_error": false,
-      "text": "Done."
+      "text": "Acknowledged"
      }
     },
     "replaced": {
@@ -2668,11 +3732,8 @@
    },
    {
     "method": "local2",
-    "status": "same, noise only",
-    "differences": [
-     "[noise, also local vs local2] system.2.text: \"\\nYou are an interactive agent that helps users with software engineering tasks.\\n\\nIMPORTANT: Assist with authorized security testing, def… vs \"\\nYou are an agent working with the user toward their goals, using your own judgment along the way.\\n\\nIMPORTANT: Assist with authorized se…",
-     "[noise, also local vs local2] system.3.text: \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the … vs \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the …"
-    ],
+    "status": "same",
+    "differences": [],
     "result": {
      "method": "local2",
      "resumeSessionAt": null,
@@ -2720,8 +3781,8 @@
     "status": "differs",
     "differences": [
      "system.0.text: \"x-anthropic-billing-header: cc_version=2.1.285.1c6; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdkGzLnHziMySHZbf19w; cc_prompt_id… vs \"x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;\"",
-     "[noise, also local vs local2] system.2.text: \"\\nYou are an interactive agent that helps users with software engineering tasks.\\n\\nIMPORTANT: Assist with authorized security testing, def… vs \"\\nYou are an agent working with the user toward their goals, using your own judgment along the way.\\n\\nIMPORTANT: Assist with authorized se…",
-     "[noise, also local vs local2] system.3.text: \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the … vs \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the …",
+     "system.2.text: \"\\nYou are an interactive agent that helps users with software engineering tasks.\\n\\nIMPORTANT: Assist with authorized security testing, def… vs \"\\nYou are an agent working with the user toward their goals, using your own judgment along the way.\\n\\nIMPORTANT: Assist with authorized se…",
+     "system.3.text: \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the … vs \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the …",
      "diagnostics.previous_message_id: \"msg_011CfdkGziMYfJMsUVcuo8Cu\" vs null",
      "messages: 5 vs 9",
      "messages[0] user[string(\"This session is being continued from a previous co…\")] vs user[text(\"Reply with exactly one word: one. Do not use any t…\")]",
@@ -3002,6 +4063,325 @@
     "requestFile": "methods/msg-msgid,reqid,turnpos,extras,model/probe.request.json"
    },
    {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,origin,system,model",
+    "status": "differs",
+    "differences": [
+     "system.2.text: \"\\nYou are an interactive agent that helps users with software engineering tasks.\\n\\nIMPORTANT: Assist with authorized security testing, def… vs \"\\nYou are an agent working with the user toward their goals, using your own judgment along the way.\\n\\nIMPORTANT: Assist with authorized se…",
+     "system.3.text: \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the … vs \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the …"
+    ],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Done."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Done."
+     },
+     "publishedRead": 38,
+     "entriesLoaded": 28
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 79,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,origin,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,model",
+    "status": "differs",
+    "differences": [
+     "system.0.text: \"x-anthropic-billing-header: cc_version=2.1.285.1c6; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdkGzLnHziMySHZbf19w; cc_prompt_id… vs \"x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdkGzLnHziMySHZbf19w; cc_prompt_id…",
+     "messages: 5 vs 8",
+     "messages[0] user[string(\"This session is being continued from a previous co…\")] vs user[text(\"<system-reminder>\\nAs you answer the user's questio…\") + text(\"<system-reminder>\\nAttribution for git commits and …\") + text(\"Reply with exactly one word: one. Do not use any t…\")]",
+     "    messages[0].content: \"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the c… vs [{\"type\":\"text\",\"text\":\"<system-reminder>\\nAs you answer the user's questions, you can use the following context:\\n# userEmail\\nThe user's e…",
+     "messages[1] system[] vs system[string(\"## Bash command sandbox\\nBy default, Bash commands …\")]",
+     "    messages[1].content: [] vs \"## Bash command sandbox\\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…",
+     "messages[2] assistant[text(\"two\")] vs assistant[text(\"one\")]",
+     "    messages[2].content.0.text: \"two\" vs \"one\"",
+     "messages[3] user[text(\"<system-reminder>\\nAs you answer the user's questio…\") + text(\"<system-reminder>\\nAttribution for git commits and …\") + text(\"<local-command-caveat>The command below was run di…\") + text(\"<command-name>/compact</command-name>\\n            …\") + text(\"<local-command-stdout>Compacted </local-command-st…\") + text(\"PROBE-COMPACT: reply with exactly one word, no too…\")] vs user[text(\"Reply with exactly one word: two. Do not use any t…\")]",
+     "    messages[3].content.0.text: \"<system-reminder>\\nAs you answer the user's questions, you can use the following context:\\n# userEmail\\nThe user's email address is stephen… vs \"Reply with exactly one word: two. Do not use any tools.\"",
+     "    messages[3].content.1: {\"type\":\"text\",\"text\":\"<system-reminder>\\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined",
+     "    messages[3].content.2: {\"type\":\"text\",\"text\":\"<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request, and its output… vs undefined",
+     "    messages[3].content.3: {\"type\":\"text\",\"text\":\"<command-name>/compact</command-name>\\n            <command-message>compact</command-message>\\n            <command-a… vs undefined",
+     "messages[4] system[text+cc(\"The following deferred tools are now available via…\")] vs system[string(\"<total_tokens>15000000 tokens left</total_tokens>\")]",
+     "    messages[4].content: [{\"type\":\"text\",\"text\":\"The following deferred tools are now available via ToolSearch. Their schemas are NOT loaded — calling them directly … vs \"<total_tokens>15000000 tokens left</total_tokens>\"",
+     "messages[5] (none) vs assistant[text(\"two\")]",
+     "    messages[5]: undefined vs {\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"two\"}]}",
+     "messages[6] (none) vs user[text(\"This session is being continued from a previous co…\") + text(\"<local-command-caveat>The command below was run di…\") + text(\"<command-name>/compact</command-name>\\n            …\") + text(\"<local-command-stdout>Compacted </local-command-st…\") + text(\"PROBE-COMPACT: reply with exactly one word, no too…\")]",
+     "    messages[6]: undefined vs {\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"This session is being continued from a previous conversation that ran out of context. The s…",
+     "messages[7] (none) vs system[text+cc(\"The following deferred tools are now available via…\")]",
+     "    messages[7]: undefined vs {\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"The following deferred tools are now available via ToolSearch. Their schemas are NOT load…"
+    ],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 38,
+     "entriesLoaded": 28
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 117,
+     "privateHome": 16,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Done."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Done."
+     },
+     "publishedRead": 38,
+     "entriesLoaded": 28
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 79,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@",
+    "status": "differs",
+    "differences": [
+     "system.2.text: \"\\nYou are an interactive agent that helps users with software engineering tasks.\\n\\nIMPORTANT: Assist with authorized security testing, def… vs \"\\nYou are an agent working with the user toward their goals, using your own judgment along the way.\\n\\nIMPORTANT: Assist with authorized se…",
+     "system.3.text: \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the … vs \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the …"
+    ],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@",
+     "resumeSessionAt": "d70f1b22-2578-4120-8152-b89798026667",
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Done."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Done."
+     },
+     "publishedRead": 38,
+     "entriesLoaded": 28
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 79,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model@/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,toolresult,wire,system,model",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,toolresult,wire,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Acknowledged."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Acknowledged."
+     },
+     "publishedRead": 38,
+     "entriesLoaded": 28
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 79,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,toolresult,wire,system,model/probe.request.json"
+   },
+   {
+    "method": "msg-msgid,reqid,turnpos,extras,wire,origin,system,model",
+    "status": "differs",
+    "differences": [
+     "system.2.text: \"\\nYou are an interactive agent that helps users with software engineering tasks.\\n\\nIMPORTANT: Assist with authorized security testing, def… vs \"\\nYou are an agent working with the user toward their goals, using your own judgment along the way.\\n\\nIMPORTANT: Assist with authorized se…",
+     "system.3.text: \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the … vs \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the …"
+    ],
+    "result": {
+     "method": "msg:msgid,reqid,turnpos,extras,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "three"
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "three"
+     },
+     "publishedRead": 38,
+     "entriesLoaded": 28
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 79,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-msgid,reqid,turnpos,extras,wire,origin,system,model/probe.request.json"
+   },
+   {
     "method": "msg-msgid,reqid,turnpos,extras@",
     "status": "differs",
     "differences": [
@@ -3072,12 +4452,63 @@
     "requestFile": "methods/msg-msgid,reqid,turnpos,extras@/probe.request.json"
    },
    {
+    "method": "msg-parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+    "status": "differs",
+    "differences": [
+     "system.2.text: \"\\nYou are an interactive agent that helps users with software engineering tasks.\\n\\nIMPORTANT: Assist with authorized security testing, def… vs \"\\nYou are an agent working with the user toward their goals, using your own judgment along the way.\\n\\nIMPORTANT: Assist with authorized se…",
+     "system.3.text: \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the … vs \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the …"
+    ],
+    "result": {
+     "method": "msg:parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Done."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Done."
+     },
+     "publishedRead": 38,
+     "entriesLoaded": 28
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 79,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-parent,msgid,reqid,turnpos,extras,toolresult,wire,origin,system,model/probe.request.json"
+   },
+   {
     "method": "msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras",
     "status": "differs",
     "differences": [
      "system.0.text: \"x-anthropic-billing-header: cc_version=2.1.285.1c6; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdkGzLnHziMySHZbf19w; cc_prompt_id… vs \"x-anthropic-billing-header: cc_version=2.1.285.1c6; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk; cc_promp…",
-     "[noise, also local vs local2] system.2.text: \"\\nYou are an interactive agent that helps users with software engineering tasks.\\n\\nIMPORTANT: Assist with authorized security testing, def… vs \"\\nYou are an agent working with the user toward their goals, using your own judgment along the way.\\n\\nIMPORTANT: Assist with authorized se…",
-     "[noise, also local vs local2] system.3.text: \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the … vs \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the …",
+     "system.2.text: \"\\nYou are an interactive agent that helps users with software engineering tasks.\\n\\nIMPORTANT: Assist with authorized security testing, def… vs \"\\nYou are an agent working with the user toward their goals, using your own judgment along the way.\\n\\nIMPORTANT: Assist with authorized se…",
+     "system.3.text: \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the … vs \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the …",
      "diagnostics.previous_message_id: \"msg_011CfdkGziMYfJMsUVcuo8Cu\" vs null",
      "messages: 5 vs 2",
      "messages[0] user[string(\"This session is being continued from a previous co…\")] vs user[text(\"<system-reminder>\\nAs you answer the user's questio…\") + text(\"<system-reminder>\\nAttribution for git commits and …\") + text(\"This session is being continued from a previous co…\") + text(\"<local-command-caveat>The command below was run di…\") + text(\"<command-name>/compact</command-name>\\n            …\") + text(\"<local-command-stdout>Compacted </local-command-st…\") + text(\"PROBE-COMPACT: reply with exactly one word, no too…\")]",
@@ -3136,11 +4567,59 @@
     "requestFile": "methods/msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras/probe.request.json"
    },
    {
+    "method": "msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras",
+    "status": "same",
+    "differences": [],
+    "result": {
+     "method": "msg:parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras",
+     "resumeSessionAt": null,
+     "controlReplies": [
+      {
+       "model": {
+        "name": "claude-sonnet-5-5",
+        "maxTokens": 120000,
+        "thinking": "adaptive",
+        "thinkingDisplay": "summarized",
+        "effort": "medium"
+       }
+      },
+      {
+       "system": "set"
+      },
+      {
+       "permissionMode": "auto"
+      },
+      {
+       "claudeSettings": "set"
+      }
+     ],
+     "assistant": [
+      {
+       "text": "Done."
+      }
+     ],
+     "result": {
+      "subtype": "success",
+      "is_error": false,
+      "text": "Done."
+     },
+     "publishedRead": 38,
+     "entriesLoaded": 28
+    },
+    "replaced": {
+     "deviceId": 1,
+     "configDir": 79,
+     "privateHome": 11,
+     "promptId": 1
+    },
+    "requestFile": "methods/msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,origin,toolresult,wire,asstmeta,system,extras/probe.request.json"
+   },
+   {
     "method": "raw",
-    "status": "same, noise only",
+    "status": "differs",
     "differences": [
-     "[noise, also local vs local2] system.2.text: \"\\nYou are an interactive agent that helps users with software engineering tasks.\\n\\nIMPORTANT: Assist with authorized security testing, def… vs \"\\nYou are an agent working with the user toward their goals, using your own judgment along the way.\\n\\nIMPORTANT: Assist with authorized se…",
-     "[noise, also local vs local2] system.3.text: \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the … vs \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the …"
+     "system.2.text: \"\\nYou are an interactive agent that helps users with software engineering tasks.\\n\\nIMPORTANT: Assist with authorized security testing, def… vs \"\\nYou are an agent working with the user toward their goals, using your own judgment along the way.\\n\\nIMPORTANT: Assist with authorized se…",
+     "system.3.text: \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the … vs \"Write code that reads like the surrounding code: match its comment density, naming, and idiom.\\n\\nWhen you use a pronoun for someone — the …"
     ],
     "result": {
      "method": "raw",
