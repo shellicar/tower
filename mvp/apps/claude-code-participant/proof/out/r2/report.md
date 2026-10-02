@@ -1,0 +1,426 @@
+# Resume comparison, run r2
+
+Reference: the `local` method (Claude Code reads its own record). Each other method is compared with it, request for request.
+
+## text
+
+Summary (what differs, by location):
+
+- `local`: same
+- `local2`: same
+- `msg`: differs; differs at system.0.text, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-envelope`: differs; differs at system.0.text, system.2.text, system.3.text, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-extras`: differs; differs at system.0.text, diagnostics.previous_message_id
+- `msg-model`: differs; differs at system.0.text, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-msgid`: differs; differs at system.0.text, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-msgid,reqid,extras`: differs; differs at system.0.text
+- `msg-msgid,reqid,turnpos`: differs; differs at messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-msgid,reqid,turnpos,extras`: same
+- `msg-msgid,reqid,turnpos,extras,-agent_listing_delta`: differs; differs at messages[1], messages[7]
+- `msg-msgid,reqid,turnpos,extras,-credential_org`: same
+- `msg-msgid,reqid,turnpos,extras,-date`: differs; differs at messages[1], messages[7]
+- `msg-msgid,reqid,turnpos,extras,-deferred_tools_delta`: differs; differs at messages[1], messages[7]
+- `msg-msgid,reqid,turnpos,extras,-environment`: differs; differs at messages[1], messages[7]
+- `msg-msgid,reqid,turnpos,extras,-model`: differs; differs at messages[1], messages[7]
+- `msg-msgid,reqid,turnpos,extras,-sandbox_instructions`: differs; differs at messages[1]
+- `msg-msgid,reqid,turnpos,extras,-session_context`: differs; differs at messages[0], messages[6]
+- `msg-msgid,reqid,turnpos,extras,-skill_listing`: differs; differs at messages[1], messages[7]
+- `msg-msgid,reqid,turnpos,extras,-total_tokens_reminder`: differs; differs at messages, messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-msgid,reqid,turnpos,extras@`: same
+- `msg-msgid,turnpos,extras`: differs; differs at system.0.text
+- `msg-msgmeta`: differs; differs at system.0.text, system.2.text, system.3.text, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-parent`: differs; differs at system.0.text, system.2.text, system.3.text, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-parent,msgid,model,reqid,msgmeta,extras`: differs; differs at system.0.text
+- `msg-parent,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras`: same
+- `msg-parent,time,model,reqid,msgmeta,extras`: differs; differs at system.0.text, diagnostics.previous_message_id
+- `msg-parent,time,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras`: differs; differs at diagnostics.previous_message_id
+- `msg-parent,time,msgid,model,msgmeta,extras`: differs; differs at system.0.text
+- `msg-parent,time,msgid,model,reqid,extras`: differs; differs at system.0.text
+- `msg-parent,time,msgid,model,reqid,msgmeta`: differs; differs at system.0.text, system.2.text, system.3.text, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-parent,time,msgid,model,reqid,msgmeta,extras`: differs; differs at system.0.text
+- `msg-parent,time,msgid,model,reqid,msgmeta,extras@`: differs; differs at system.0.text
+- `msg-parent,time,msgid,model,reqid,promptmeta,envelope,msgmeta,extras`: differs; differs at system.0.text
+- `msg-parent,time,msgid,model,reqid,turnpos,envelope,msgmeta,extras`: same
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,extras`: same
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta`: differs; differs at system.2.text, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras`: same
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-agent_listing_delta`: differs; differs at messages[1], messages[7]
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-credential_org`: differs; differs at messages[1], messages[7]
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-date`: differs; differs at messages[1], messages[7]
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-deferred_tools_delta`: differs; differs at messages[1], messages[7]
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-environment`: differs; differs at messages[1], messages[7]
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-model`: differs; differs at messages[1], messages[7]
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-sandbox_instructions`: differs; differs at system.0.text, messages[0], messages[1]
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-session_context`: differs; differs at messages[0], messages[1], messages[6], messages[7]
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-skill_listing`: differs; differs at messages[1], messages[7]
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-total_tokens_reminder`: differs; differs at messages, messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras@`: same
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,msgmeta,extras`: same
+- `msg-parent,time,msgid,model,turnpos,promptmeta,envelope,msgmeta,extras`: differs; differs at system.0.text
+- `msg-parent,time,msgid,reqid,msgmeta,extras`: differs; differs at system.0.text
+- `msg-parent,time,msgid,reqid,turnpos,promptmeta,envelope,msgmeta,extras`: same
+- `msg-promptmeta`: differs; differs at system.0.text, system.2.text, system.3.text, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-reqid`: differs; differs at system.0.text, system.2.text, system.3.text, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-reqid,turnpos,extras`: differs; differs at diagnostics.previous_message_id
+- `msg-time`: differs; differs at system.0.text, system.2.text, system.3.text, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `msg-time,msgid,model,reqid,msgmeta,extras`: differs; differs at system.0.text
+- `msg-time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras`: same
+- `msg-turnpos`: differs; differs at system.0.text, diagnostics.previous_message_id, messages, messages[0], messages[1], messages[4], messages[5], messages[6], messages[7]
+- `raw`: same
+- `raw@`: same
+
+Detail:
+
+- `local`: same (the reference)
+- `local2`: same
+- `msg`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>15000000 tokens left</total_tokens>" vs [{"type":"text","text":"harbour"}]
+    - … 11 more lines in report.json
+- `msg-envelope`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    - … 13 more lines in report.json
+- `msg-extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+- `msg-model`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>15000000 tokens left</total_tokens>" vs [{"type":"text","text":"harbour"}]
+    - … 11 more lines in report.json
+- `msg-msgid`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>15000000 tokens left</total_tokens>" vs [{"type":"text","text":"harbour"}]
+    - messages[5] assistant[text("harbour")] vs user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("PROBE-TEXT: reply with exactly one word, no tools.")]
+    - … 10 more lines in report.json
+- `msg-msgid,reqid,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
+- `msg-msgid,reqid,turnpos`: differs
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>15000000 tokens left</total_tokens>" vs [{"type":"text","text":"harbour"}]
+    - messages[5] assistant[text("harbour")] vs user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("PROBE-TEXT: reply with exactly one word, no tools.")]
+    -     messages[5].role: "assistant" vs "user"
+    - … 9 more lines in report.json
+- `msg-msgid,reqid,turnpos,extras`: same
+- `msg-msgid,reqid,turnpos,extras,-agent_listing_delta`: differs
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[7] system[text+cc("## Bash command sandbox\nBy default, Bash commands …")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[7].content.0.text: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+- `msg-msgid,reqid,turnpos,extras,-credential_org`: same
+- `msg-msgid,reqid,turnpos,extras,-date`: differs
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[7] system[text+cc("## Bash command sandbox\nBy default, Bash commands …")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[7].content.0.text: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+- `msg-msgid,reqid,turnpos,extras,-deferred_tools_delta`: differs
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[7] system[text+cc("## Bash command sandbox\nBy default, Bash commands …")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[7].content.0.text: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+- `msg-msgid,reqid,turnpos,extras,-environment`: differs
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[7] system[text+cc("## Bash command sandbox\nBy default, Bash commands …")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[7].content.0.text: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+- `msg-msgid,reqid,turnpos,extras,-model`: differs
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[7] system[text+cc("## Bash command sandbox\nBy default, Bash commands …")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[7].content.0.text: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+- `msg-msgid,reqid,turnpos,extras,-sandbox_instructions`: differs
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("# Environment\nYou have been invoked in the followi…")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "# Environment\nYou have been invoked in the following environment: \n - Primary working directory: /tmp/tower-proof/text/cwd\n - Is a git r…
+- `msg-msgid,reqid,turnpos,extras,-session_context`: differs
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's own earlier attributi…
+    -     messages[0].content.1.text: "<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's own earlier attributi… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[6] user[text("PROBE-TEXT: reply with exactly one word, no tools.")] vs user[text("<system-reminder>\nAs you answer the user's questio…") + text("PROBE-TEXT: reply with exactly one word, no tools.")]
+    -     messages[6].content.0.text: "PROBE-TEXT: reply with exactly one word, no tools." vs "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen…
+    -     messages[6].content.1: undefined vs {"type":"text","text":"PROBE-TEXT: reply with exactly one word, no tools."}
+- `msg-msgid,reqid,turnpos,extras,-skill_listing`: differs
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[7] system[text+cc("## Bash command sandbox\nBy default, Bash commands …")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[7].content.0.text: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+- `msg-msgid,reqid,turnpos,extras,-total_tokens_reminder`: differs
+    - messages: 8 vs 7
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>15000000 tokens left</total_tokens>" vs [{"type":"text","text":"harbour"}]
+    - messages[5] assistant[text("harbour")] vs user[text("PROBE-TEXT: reply with exactly one word, no tools.")]
+    -     messages[5].role: "assistant" vs "user"
+    -     messages[5].content.0.text: "harbour" vs "PROBE-TEXT: reply with exactly one word, no tools."
+    - messages[6] user[text("PROBE-TEXT: reply with exactly one word, no tools.")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[6].role: "user" vs "system"
+    -     messages[6].content.0.text: "PROBE-TEXT: reply with exactly one word, no tools." vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - … 3 more lines in report.json
+- `msg-msgid,reqid,turnpos,extras@`: same
+- `msg-msgid,turnpos,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk; cc_promp…
+- `msg-msgmeta`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    - … 13 more lines in report.json
+- `msg-parent`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    - … 13 more lines in report.json
+- `msg-parent,msgid,model,reqid,msgmeta,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
+- `msg-parent,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras`: same
+- `msg-parent,time,model,reqid,msgmeta,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+- `msg-parent,time,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras`: differs
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+- `msg-parent,time,msgid,model,msgmeta,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+- `msg-parent,time,msgid,model,reqid,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
+- `msg-parent,time,msgid,model,reqid,msgmeta`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
+    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    -     messages[4].role: "system" vs "assistant"
+    - … 12 more lines in report.json
+- `msg-parent,time,msgid,model,reqid,msgmeta,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
+- `msg-parent,time,msgid,model,reqid,msgmeta,extras@`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
+- `msg-parent,time,msgid,model,reqid,promptmeta,envelope,msgmeta,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
+- `msg-parent,time,msgid,model,reqid,turnpos,envelope,msgmeta,extras`: same
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,extras`: same
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta`: differs
+    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>15000000 tokens left</total_tokens>" vs [{"type":"text","text":"harbour"}]
+    - messages[5] assistant[text("harbour")] vs user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("PROBE-TEXT: reply with exactly one word, no tools.")]
+    - … 10 more lines in report.json
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras`: same
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-agent_listing_delta`: differs
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[7] system[text+cc("## Bash command sandbox\nBy default, Bash commands …")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[7].content.0.text: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-credential_org`: differs
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[7] system[text+cc("## Bash command sandbox\nBy default, Bash commands …")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[7].content.0.text: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-date`: differs
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[7] system[text+cc("## Bash command sandbox\nBy default, Bash commands …")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[7].content.0.text: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-deferred_tools_delta`: differs
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[7] system[text+cc("## Bash command sandbox\nBy default, Bash commands …")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[7].content.0.text: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-environment`: differs
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[7] system[text+cc("## Bash command sandbox\nBy default, Bash commands …")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[7].content.0.text: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-model`: differs
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[7] system[text+cc("## Bash command sandbox\nBy default, Bash commands …")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[7].content.0.text: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-sandbox_instructions`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.cf8; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …")]
+    -     messages[0].content.1.text: "<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's own earlier attributi… vs "<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's own earlier attributi…
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("# Environment\nYou have been invoked in the followi…")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "# Environment\nYou have been invoked in the following environment: \n - Primary working directory: /tmp/tower-proof/text/cwd\n - Is a git r…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-session_context`: differs
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's own earlier attributi…
+    -     messages[0].content.1.text: "<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's own earlier attributi… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("Today's date is 2026-10-02.")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "Today's date is 2026-10-02."
+    - messages[6] user[text("PROBE-TEXT: reply with exactly one word, no tools.")] vs user[text("<system-reminder>\nAs you answer the user's questio…") + text("PROBE-TEXT: reply with exactly one word, no tools.")]
+    -     messages[6].content.0.text: "PROBE-TEXT: reply with exactly one word, no tools." vs "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen…
+    -     messages[6].content.1: undefined vs {"type":"text","text":"PROBE-TEXT: reply with exactly one word, no tools."}
+    - messages[7] system[text+cc("## Bash command sandbox\nBy default, Bash commands …")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[7].content.0.text: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-skill_listing`: differs
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - messages[7] system[text+cc("## Bash command sandbox\nBy default, Bash commands …")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[7].content.0.text: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-total_tokens_reminder`: differs
+    - messages: 8 vs 7
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[string("Today's date is 2026-10-02.")]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs "Today's date is 2026-10-02."
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>15000000 tokens left</total_tokens>" vs [{"type":"text","text":"harbour"}]
+    - messages[5] assistant[text("harbour")] vs user[text("PROBE-TEXT: reply with exactly one word, no tools.")]
+    -     messages[5].role: "assistant" vs "user"
+    -     messages[5].content.0.text: "harbour" vs "PROBE-TEXT: reply with exactly one word, no tools."
+    - messages[6] user[text("PROBE-TEXT: reply with exactly one word, no tools.")] vs system[text+cc("## Bash command sandbox\nBy default, Bash commands …")]
+    -     messages[6].role: "user" vs "system"
+    -     messages[6].content.0.text: "PROBE-TEXT: reply with exactly one word, no tools." vs "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no…
+    - … 3 more lines in report.json
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras@`: same
+- `msg-parent,time,msgid,model,reqid,turnpos,promptmeta,msgmeta,extras`: same
+- `msg-parent,time,msgid,model,turnpos,promptmeta,envelope,msgmeta,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk; cc_promp…
+- `msg-parent,time,msgid,reqid,msgmeta,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
+- `msg-parent,time,msgid,reqid,turnpos,promptmeta,envelope,msgmeta,extras`: same
+- `msg-promptmeta`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    - … 13 more lines in report.json
+- `msg-reqid`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
+    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    - … 13 more lines in report.json
+- `msg-reqid,turnpos,extras`: differs
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+- `msg-time`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk;"
+    - system.2.text: "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, def… vs "\nYou are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized se…
+    - system.3.text: "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the … vs "Write code that reads like the surrounding code: match its comment density, naming, and idiom.\n\nWhen you use a pronoun for someone — the …
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    - … 13 more lines in report.json
+- `msg-time,msgid,model,reqid,msgmeta,extras`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id…
+- `msg-time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras`: same
+- `msg-turnpos`: differs
+    - system.0.text: "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prev_req=req_011CfdjRRYgusd6rn9WEMRRD; cc_prompt_id… vs "x-anthropic-billing-header: cc_version=2.1.285.01a; cc_entrypoint=sdk-ts; cch=00000; cc_prompt_id=<PROMPT_ID>; cc_turn_origin=sdk; cc_promp…
+    - diagnostics.previous_message_id: "msg_011CfdjRSH75jpkM4G7ikqTF" vs null
+    - messages: 8 vs 7
+    - messages[0] user[text("<system-reminder>\nAs you answer the user's questio…") + text("<system-reminder>\nAttribution for git commits and …") + text("Reply with exactly one word: lighthouse. Do not us…")] vs user[text("Reply with exactly one word: lighthouse. Do not us…")]
+    -     messages[0].content.0.text: "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# userEmail\nThe user's email address is stephen… vs "Reply with exactly one word: lighthouse. Do not use any tools."
+    -     messages[0].content.1: {"type":"text","text":"<system-reminder>\nAttribution for git commits and pull requests you create from here on (this replaces Claude Code's… vs undefined
+    -     messages[0].content.2: {"type":"text","text":"Reply with exactly one word: lighthouse. Do not use any tools."} vs undefined
+    - messages[1] system[string("## Bash command sandbox\nBy default, Bash commands …")] vs system[]
+    -     messages[1].content: "## Bash command sandbox\nBy default, Bash commands run inside an OS-level sandbox (Linux bubblewrap) applied to each command separately, no… vs []
+    - messages[4] system[string("<total_tokens>15000000 tokens left</total_tokens>")] vs assistant[text("harbour")]
+    -     messages[4].role: "system" vs "assistant"
+    -     messages[4].content: "<total_tokens>15000000 tokens left</total_tokens>" vs [{"type":"text","text":"harbour"}]
+    - … 11 more lines in report.json
+- `raw`: same
+- `raw@`: same
+

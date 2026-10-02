@@ -192,6 +192,9 @@ export function compareShape(run: string, shape: string): { shape: string; refer
   return { shape, ...(reference === undefined ? {} : { reference: 'local' }), methods: reports.sort((x, y) => x.method.localeCompare(y.method)) };
 }
 
+/** How many difference lines per method the markdown report shows. */
+const SHOWN = 12;
+
 export function compareRun(plan: Plan): void {
   const lines: string[] = [`# Resume comparison, run ${plan.run}`, '', 'Reference: the `local` method (Claude Code reads its own record). Each other method is compared with it, request for request.', ''];
   const all: unknown[] = [];
@@ -202,11 +205,20 @@ export function compareRun(plan: Plan): void {
     }
     const report = compareShape(plan.run, shape);
     all.push(report);
-    lines.push(`## ${shape}`, '');
+    lines.push(`## ${shape}`, '', 'Summary (what differs, by location):', '');
+    for (const m of report.methods) {
+      const where = [...new Set(m.differences.filter((d) => !d.startsWith(' ') && !d.startsWith('[noise')).map((d) => d.replace(/^(messages\[\d+\]|[^:\s]+).*$/, '$1')))];
+      lines.push(`- \`${m.method}\`: ${m.status}${where.length === 0 ? '' : `; differs at ${where.join(', ')}`}`);
+    }
+    lines.push('', 'Detail:', '');
     for (const m of report.methods) {
       lines.push(`- \`${m.method}\`: ${m.status}${m.note === undefined ? '' : ` (${m.note})`}${m.result?.error === undefined ? '' : ` ERROR ${String(m.result.error).split('\n')[0]}`}`);
-      for (const d of m.differences) {
+      // The full list is in report.json.
+      for (const d of m.differences.slice(0, SHOWN)) {
         lines.push(`    - ${d}`);
+      }
+      if (m.differences.length > SHOWN) {
+        lines.push(`    - … ${m.differences.length - SHOWN} more lines in report.json`);
       }
     }
     lines.push('');

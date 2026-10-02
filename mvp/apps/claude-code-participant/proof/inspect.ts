@@ -2,9 +2,15 @@
 //   node --import tsx proof/inspect.ts <a.json> <b.json>
 import { readFileSync } from 'node:fs';
 
-const [a, b] = process.argv.slice(2).map((path) => JSON.parse(readFileSync(path as string, 'utf8')) as unknown);
+const [a, b] = process.argv.slice(2, 4).map((path) => JSON.parse(readFileSync(path as string, 'utf8')) as unknown);
+
+// An optional third argument limits the walk to paths under it, e.g. $.system
+const only = process.argv[4];
 
 function walk(x: unknown, y: unknown, at: string): void {
+  if (only !== undefined && !at.startsWith(only) && !only.startsWith(at)) {
+    return;
+  }
   if (typeof x === 'string' && typeof y === 'string') {
     if (x !== y) {
       let i = 0;

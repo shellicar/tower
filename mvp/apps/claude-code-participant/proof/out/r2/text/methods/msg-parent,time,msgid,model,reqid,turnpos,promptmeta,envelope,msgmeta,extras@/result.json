@@ -1,0 +1,36 @@
+{
+ "method": "msg:parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras@",
+ "resumeSessionAt": "670bbfc6-eb9f-4279-9686-744de77f1155",
+ "controlReplies": [
+  {
+   "model": {
+    "name": "claude-sonnet-5-5",
+    "maxTokens": 120000,
+    "thinking": "adaptive",
+    "thinkingDisplay": "summarized",
+    "effort": "medium"
+   }
+  },
+  {
+   "system": "set"
+  },
+  {
+   "permissionMode": "auto"
+  },
+  {
+   "claudeSettings": "set"
+  }
+ ],
+ "assistant": [
+  {
+   "text": "Beacon"
+  }
+ ],
+ "result": {
+  "subtype": "success",
+  "is_error": false,
+  "text": "Beacon"
+ },
+ "publishedRead": 24,
+ "entriesLoaded": 18
+}

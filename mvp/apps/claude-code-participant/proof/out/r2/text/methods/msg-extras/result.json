@@ -1,0 +1,36 @@
+{
+ "method": "msg:extras",
+ "resumeSessionAt": null,
+ "controlReplies": [
+  {
+   "model": {
+    "name": "claude-sonnet-5-5",
+    "maxTokens": 120000,
+    "thinking": "adaptive",
+    "thinkingDisplay": "summarized",
+    "effort": "medium"
+   }
+  },
+  {
+   "system": "set"
+  },
+  {
+   "permissionMode": "auto"
+  },
+  {
+   "claudeSettings": "set"
+  }
+ ],
+ "assistant": [
+  {
+   "text": "Probe"
+  }
+ ],
+ "result": {
+  "subtype": "success",
+  "is_error": false,
+  "text": "Probe"
+ },
+ "publishedRead": 24,
+ "entriesLoaded": 18
+}

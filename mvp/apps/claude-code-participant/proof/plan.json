@@ -1,6 +1,25 @@
 {
-  "run": "r1",
+  "run": "r2",
   "phase": "resume",
   "shapes": ["text"],
-  "methods": ["local", "local2", "raw", "msg", "msg:parent", "msg:time", "msg:msgid", "msg:model", "msg:msgmeta", "msg:extras", "msg:parent,time,msgid,model,msgmeta,extras", "msg:parent,time,msgid,model,msgmeta,extras@"]
+  "methods": [
+    "local",
+    "local2",
+    "msg:msgid,reqid,turnpos,extras",
+    "msg:msgid,reqid,turnpos,extras@",
+    "msg:reqid,turnpos,extras",
+    "msg:msgid,turnpos,extras",
+    "msg:msgid,reqid,extras",
+    "msg:msgid,reqid,turnpos",
+    "msg:msgid,reqid,turnpos,extras,-sandbox_instructions",
+    "msg:msgid,reqid,turnpos,extras,-environment",
+    "msg:msgid,reqid,turnpos,extras,-model",
+    "msg:msgid,reqid,turnpos,extras,-deferred_tools_delta",
+    "msg:msgid,reqid,turnpos,extras,-agent_listing_delta",
+    "msg:msgid,reqid,turnpos,extras,-skill_listing",
+    "msg:msgid,reqid,turnpos,extras,-total_tokens_reminder",
+    "msg:msgid,reqid,turnpos,extras,-session_context",
+    "msg:msgid,reqid,turnpos,extras,-date",
+    "msg:msgid,reqid,turnpos,extras,-credential_org"
+  ]
 }

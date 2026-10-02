@@ -1,0 +1,36 @@
+{
+ "method": "msg:msgid,reqid,turnpos,extras,-sandbox_instructions",
+ "resumeSessionAt": null,
+ "controlReplies": [
+  {
+   "model": {
+    "name": "claude-sonnet-5-5",
+    "maxTokens": 120000,
+    "thinking": "adaptive",
+    "thinkingDisplay": "summarized",
+    "effort": "medium"
+   }
+  },
+  {
+   "system": "set"
+  },
+  {
+   "permissionMode": "auto"
+  },
+  {
+   "claudeSettings": "set"
+  }
+ ],
+ "assistant": [
+  {
+   "text": "Understood."
+  }
+ ],
+ "result": {
+  "subtype": "success",
+  "is_error": false,
+  "text": "Understood."
+ },
+ "publishedRead": 24,
+ "entriesLoaded": 17
+}

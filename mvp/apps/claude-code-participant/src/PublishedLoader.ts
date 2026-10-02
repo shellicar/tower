@@ -18,7 +18,15 @@ import type { ISessionLoader } from './SessionStore.js';
  * TODO(claude): undecided: every choice of which published fields `load()`
  * uses, and what it supplies itself, is the experiment's; none is decided.
  */
-export type LoadMode = { source: 'raw' } | { source: 'messages'; add: ReadonlySet<LoadField>; cwd: string };
+export type LoadMode =
+  | { source: 'raw' }
+  | {
+      source: 'messages';
+      add: ReadonlySet<LoadField>;
+      /** Raw entries `extras` leaves out: an attachment's type (`environment`) or a system entry's subtype (`system:compact_boundary`). */
+      exclude: ReadonlySet<string>;
+      cwd: string;
+    };
 
 /** A field of a raw entry that `messages` mode can take back, one at a time. */
 export type LoadField =
@@ -30,18 +38,37 @@ export type LoadField =
   | 'msgid'
   /** `message.model` on assistant entries. */
   | 'model'
+  /** `requestId` on assistant entries. */
+  | 'reqid'
+  /** `turnPosition` on user entries. */
+  | 'turnpos'
+  /** `promptId`, `promptSource`, `turnOrigin` and `permissionMode` on user entries. */
+  | 'promptmeta'
+  /** `entrypoint`, `version` and `gitBranch` on every entry. */
+  | 'envelope'
   /** `message.stop_reason`, `stop_sequence`, `usage` and `type` on assistant entries. */
   | 'msgmeta'
   /** The raw entries that are not messages: attachments, compaction boundary and summary, meta users. */
   | 'extras';
 
-export const LOAD_FIELDS: readonly LoadField[] = ['parent', 'time', 'msgid', 'model', 'msgmeta', 'extras'];
+export const LOAD_FIELDS: readonly LoadField[] = ['parent', 'time', 'msgid', 'model', 'reqid', 'turnpos', 'promptmeta', 'envelope', 'msgmeta', 'extras'];
 
 type Json = Record<string, unknown>;
 
 function entryOf(change: PublishedChange): SessionStoreEntry | undefined {
   const { entry } = change.body;
   return isObject(entry) && typeof entry.type === 'string' ? (entry as SessionStoreEntry) : undefined;
+}
+
+/** What an entry is, for leaving kinds out: an attachment's type, `system:<subtype>`, or the entry's type (`user:meta` for a meta user entry). */
+function kindOf(entry: SessionStoreEntry): string {
+  if (entry.type === 'attachment' && isObject(entry.attachment) && typeof entry.attachment.type === 'string') {
+    return entry.attachment.type;
+  }
+  if (entry.type === 'system') {
+    return `system:${String(entry.subtype)}`;
+  }
+  return entry.type === 'user' && entry.isMeta === true ? 'user:meta' : entry.type === 'user' && entry.isCompactSummary === true ? 'user:compact_summary' : entry.type;
 }
 
 /** The first entry for each uuid, in published order: an entry Claude Code appended again is not repeated. */
@@ -112,7 +139,7 @@ export class PublishedLoader implements ISessionLoader {
         }
       } else if (change.leaf === 'entry' && mode.add.has('extras')) {
         const entry = entryOf(change);
-        if (entry?.uuid !== undefined && !messageIds.has(entry.uuid) && !seen.has(entry.uuid)) {
+        if (entry?.uuid !== undefined && !messageIds.has(entry.uuid) && !seen.has(entry.uuid) && !mode.exclude.has(kindOf(entry))) {
           seen.add(entry.uuid);
           built.push(entry);
         }
@@ -143,6 +170,20 @@ export class PublishedLoader implements ISessionLoader {
       isSidechain: false,
       userType: 'external',
     };
+    const take = (field: LoadField, names: string[]) => {
+      if (mode.add.has(field) && raw !== undefined) {
+        for (const name of names) {
+          if (raw[name] !== undefined) {
+            envelope[name] = raw[name];
+          }
+        }
+      }
+    };
+    take('envelope', ['entrypoint', 'version', 'gitBranch']);
+    if (role === 'user') {
+      take('turnpos', ['turnPosition']);
+      take('promptmeta', ['promptId', 'promptSource', 'turnOrigin', 'permissionMode']);
+    }
     if (role === 'system') {
       return { type: 'system', subtype: 'informational', level: 'info', content: body.content, ...envelope } as SessionStoreEntry;
     }
@@ -163,6 +204,7 @@ export class PublishedLoader implements ISessionLoader {
         }
       }
     }
-    return { type: 'assistant', ...envelope, message } as SessionStoreEntry;
+    const requestId = mode.add.has('reqid') && raw?.requestId !== undefined ? { requestId: raw.requestId } : {};
+    return { type: 'assistant', ...envelope, ...requestId, message } as SessionStoreEntry;
   }
 }

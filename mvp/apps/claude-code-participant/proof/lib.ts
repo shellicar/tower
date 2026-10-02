@@ -7,8 +7,12 @@ export type Json = Record<string, unknown>;
 /** The participant app's directory. */
 export const APP = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '');
 
-/** Where config dirs, snapshots and working directories live; not committed. */
-export const WORK = join(APP, 'proof', 'work');
+/**
+ * Where config dirs, snapshots and working directories live; not committed.
+ * Outside any git repository, so the git state Claude Code puts in a request
+ * (gitStatus, safeguards.git_state) does not change with the checkout.
+ */
+export const WORK = '/tmp/tower-proof';
 
 /** Where each run's results go; committed, but for the raw body logs. */
 export const OUT = join(APP, 'proof', 'out');
@@ -16,8 +20,8 @@ export const OUT = join(APP, 'proof', 'out');
 /** What a run is asked to do, read from proof/plan.json at start. */
 export type Plan = {
   run: string;
-  /** `live`: drive the shapes and snapshot; `resume`: republish the saved changes and resume; `both`. */
-  phase: 'live' | 'resume' | 'both';
+  /** `live`: drive the shapes and snapshot; `resume`: republish the saved changes and resume; `both`; `compare`: only rewrite the report from the saved requests. */
+  phase: 'live' | 'resume' | 'both' | 'compare';
   shapes: string[];
   /**
    * Resume methods, each `local`, `raw` or `msg[:field,...]`, with a trailing

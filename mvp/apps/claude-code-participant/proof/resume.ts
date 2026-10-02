@@ -43,13 +43,18 @@ function modeOf(): LoadMode | undefined {
     return { source: 'raw' };
   }
   const add = new Set<LoadField>();
+  const exclude = new Set<string>();
   for (const field of (fieldList ?? '').split(',').filter((f) => f !== '')) {
+    if (field.startsWith('-')) {
+      exclude.add(field.slice(1));
+      continue;
+    }
     if (!LOAD_FIELDS.includes(field as LoadField)) {
       throw new Error(`unknown load field ${field}`);
     }
     add.add(field as LoadField);
   }
-  return { source: 'messages', add, cwd: meta.cwd };
+  return { source: 'messages', add, exclude, cwd: meta.cwd };
 }
 
 // Restore the snapshot to the path it had live.

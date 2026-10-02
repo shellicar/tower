@@ -228,6 +228,11 @@ async function resume(shape: Shape, method: string): Promise<void> {
   log(`${shape.name}: resume ${method} exited ${String(code)} ${JSON.stringify(result).slice(0, 200)}`);
 }
 
+if (plan.phase === 'compare') {
+  compareRun(plan);
+  process.exit(0);
+}
+
 const nc = await connect({ servers: natsUrl });
 try {
   const shapes = plan.shapes.map((name) => {

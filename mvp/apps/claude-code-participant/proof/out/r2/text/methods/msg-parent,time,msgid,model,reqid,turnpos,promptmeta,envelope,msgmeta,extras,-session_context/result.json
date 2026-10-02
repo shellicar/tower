@@ -1,0 +1,36 @@
+{
+ "method": "msg:parent,time,msgid,model,reqid,turnpos,promptmeta,envelope,msgmeta,extras,-session_context",
+ "resumeSessionAt": null,
+ "controlReplies": [
+  {
+   "model": {
+    "name": "claude-sonnet-5-5",
+    "maxTokens": 120000,
+    "thinking": "adaptive",
+    "thinkingDisplay": "summarized",
+    "effort": "medium"
+   }
+  },
+  {
+   "system": "set"
+  },
+  {
+   "permissionMode": "auto"
+  },
+  {
+   "claudeSettings": "set"
+  }
+ ],
+ "assistant": [
+  {
+   "text": "harbour"
+  }
+ ],
+ "result": {
+  "subtype": "success",
+  "is_error": false,
+  "text": "harbour"
+ },
+ "publishedRead": 24,
+ "entriesLoaded": 17
+}
