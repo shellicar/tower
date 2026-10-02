@@ -21,6 +21,11 @@ export type LaunchRequest = {
   additionalDirectories: string[];
   /** Whether Claude Code's own local record of this conversation is resumed. */
   resume: boolean;
+  /**
+   * Prototype (resume-from-published): resume only up to this entry uuid.
+   * TODO(claude): undecided: whether a resume uses resumeSessionAt.
+   */
+  resumeSessionAt?: string;
 };
 
 export class NotConfiguredError extends Error {
@@ -127,7 +132,7 @@ export class ConversationLauncher {
         // set it through its `env`, which Claude Code ranks above this.
         CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(settings.model.maxTokens),
       },
-      ...(request.resume ? { resume: request.id } : { sessionId: request.id }),
+      ...(request.resume ? { resume: request.id, ...(request.resumeSessionAt === undefined ? {} : { resumeSessionAt: request.resumeSessionAt }) } : { sessionId: request.id }),
       sessionStore: this.sessionStore,
       sessionStoreFlush: 'eager',
       spawnClaudeCodeProcess: (options) => {

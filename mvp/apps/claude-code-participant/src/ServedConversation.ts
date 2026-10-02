@@ -75,6 +75,9 @@ export class ServedConversation {
       instanceId: instance.instanceId,
       durableBucket: instance.durableBucket,
       abort: () => this.interrupt('aborting the query'),
+      // Prototype (resume-from-published). TODO(claude): undecided: read
+      // from the environment at a call site only so the proof can switch it.
+      publishEntries: process.env.PROOF_PUBLISH_ENTRIES === '1',
     });
     this.unroute = instance.publisher.route(conversation.id, this.changes);
     this.subscription = instance.broker.subscribe(`${this.requestPrefix}>`, (request) => this.handle(request));
@@ -131,6 +134,13 @@ export class ServedConversation {
     // transit store. Until then they're rejected unsupported.
     if (say.data.attachments !== undefined && say.data.attachments.length > 0) {
       return rejected('unsupported', 'attachments are not supported');
+    }
+    // Prototype (resume-from-published): a say while a query runs is passed
+    // to Claude Code, which queues it, so the proof can type mid-turn.
+    // TODO(claude): undecided: whether a say is ever accepted mid-turn.
+    if (this.live !== undefined && process.env.PROOF_SAY_WHILE_LIVE === '1') {
+      this.conversation.send(say.data.text);
+      return { accepted: true, id: this.live };
     }
     if (this.live !== undefined) {
       return rejected('stale');

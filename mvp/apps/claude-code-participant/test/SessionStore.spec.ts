@@ -58,6 +58,6 @@ describe('PublishingSessionStore', () => {
 
   it('loads nothing, so a resume reads the local record', async () => {
     const services = testServices();
-    expect(await services.provider.resolve(PublishingSessionStore).load()).toBeNull();
+    expect(await services.provider.resolve(PublishingSessionStore).load({ projectKey: 'p', sessionId: ID })).toBeNull();
   });
 });

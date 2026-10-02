@@ -40,21 +40,34 @@ export class BusPublisher implements IPublisher {
   }
 }
 
+/** Where a resume's entries come from: null leaves a resume to Claude Code's own record. */
+export abstract class ISessionLoader {
+  public abstract load(sessionId: string): Promise<SessionStoreEntry[] | null>;
+}
+
+/** Today's behaviour: a resume reads Claude Code's own record. */
+export class LocalRecordLoader implements ISessionLoader {
+  public load(): Promise<null> {
+    return Promise.resolve(null);
+  }
+}
+
 /**
  * The SDK's session store is the commit signal: `append` receives each entry
  * as soon as Claude Code has written it locally (with eager flushing).
  */
 export class PublishingSessionStore implements SessionStore {
   @dependsOn(IPublisher) private readonly publisher!: IPublisher;
+  @dependsOn(ISessionLoader) private readonly loader!: ISessionLoader;
 
   public append(key: SessionKey, entries: SessionStoreEntry[]): Promise<void> {
     return this.publisher.publish(key, entries);
   }
 
   // Returning null makes a resume read Claude Code's own local record in the
-  // agent's config dir. Returning entries would resume from a temporary copy
-  // the SDK writes instead.
-  public load(): Promise<null> {
-    return Promise.resolve(null);
+  // agent's config dir. Returning entries resumes from a temporary copy the
+  // SDK writes instead. A subagent's record is never loaded.
+  public load(key: SessionKey): Promise<SessionStoreEntry[] | null> {
+    return key.subpath === undefined ? this.loader.load(key.sessionId) : Promise.resolve(null);
   }
 }

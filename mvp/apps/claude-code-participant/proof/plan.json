@@ -1,0 +1,6 @@
+{
+  "run": "r1",
+  "phase": "resume",
+  "shapes": ["text"],
+  "methods": ["local", "local2", "raw", "msg", "msg:parent", "msg:time", "msg:msgid", "msg:model", "msg:msgmeta", "msg:extras", "msg:parent,time,msgid,model,msgmeta,extras", "msg:parent,time,msgid,model,msgmeta,extras@"]
+}

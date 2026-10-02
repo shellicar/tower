@@ -18,6 +18,15 @@ export type ChangeSources = {
   durableBucket: string;
   /** Stops the running query, when one of its files can't be stored. */
   abort(): void;
+  /**
+   * Prototype (resume-from-published): also publishes every main-chain entry
+   * with a uuid, as Claude Code wrote it, on `changes.entry`, beside the
+   * message it may also be published as.
+   * TODO(claude): undecided: where the data a resume needs travels (a new
+   * leaf like this, a field on `changes.message`, or system-role messages)
+   * and whether it is the raw entry or selected fields.
+   */
+  publishEntries?: boolean;
 };
 
 type OpenQuery = {
@@ -104,6 +113,9 @@ export class ConversationChanges {
   private async take(entry: RecordEntry): Promise<void> {
     if (!isMainChain(entry)) {
       return;
+    }
+    if (this.sources.publishEntries === true && typeof entry.uuid === 'string') {
+      this.publish('entry', { id: entry.uuid, entry });
     }
     const role = roleOf(entry);
     // No query is open (none was asked for, or the last one has closed): the message opens one of its own.
