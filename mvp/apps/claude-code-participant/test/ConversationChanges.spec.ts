@@ -16,6 +16,7 @@ function publishing() {
   let aborts = 0;
   const changes = new ConversationChanges(ID, {
     broker: services.broker,
+    outbox: services.outbox,
     timer: services.timer,
     ids: services.ids,
     host: services.host,
@@ -299,16 +300,17 @@ describe('ConversationChanges', () => {
 
   it('keeps publishing the rest of a batch when one entry fails', async () => {
     const services = publishing();
-    const publish = services.broker.publish.bind(services.broker);
+    const enqueue = services.outbox.enqueue.bind(services.outbox);
     let calls = 0;
-    services.broker.publish = (subject, body) => {
+    services.outbox.enqueue = (subject, msgId, payload) => {
       calls += 1;
       if (calls === 1) {
-        throw new Error('not connected to NATS');
+        throw new Error('the outbox is full');
       }
-      publish(subject, body);
+      enqueue(subject, msgId, payload);
     };
     await services.changes.commit([PROMPT, THINKING]);
+    await settle();
     expect(messages(services).map((body) => body.id)).toEqual([THINKING.uuid]);
   });
 });

@@ -3,13 +3,17 @@ import { contentBlocksOf, isMainChain, isObject, isPrompt, type RecordEntry, res
 import { describeError } from './describeError.js';
 import type { IHost } from './Host.js';
 import type { IIds } from './Ids.js';
+import type { Outbox } from './Outbox.js';
 import type { ITimer } from './Timer.js';
 
 export type QueryReason = 'completed' | 'cancelled' | 'aborted';
 
 /** What a conversation's change stream is published with. */
 export type ChangeSources = {
+  /** Where files are stored. */
   broker: IBroker;
+  /** Every change is queued here, to be published once the stream has acknowledged it. */
+  outbox: Outbox;
   timer: ITimer;
   ids: IIds;
   host: IHost;
@@ -38,7 +42,7 @@ type ObjectSource = { type: 'object'; id: string; bucket: string; mediaType: str
  * One conversation's `changes`: each entry Claude Code appends that is a
  * message goes out on `changes.message`, with the query and turn it belongs
  * to, and each query's end on `changes.query.closed`. Everything is
- * published in the order it is handed over.
+ * handed to the outbox in the order it is handed over.
  */
 export class ConversationChanges {
   private readonly conversationId: string;
@@ -63,7 +67,7 @@ export class ConversationChanges {
     });
   }
 
-  /** Publishes the messages among `entries`. Never rejects: a failure is logged. */
+  /** Queues the messages among `entries` in the outbox. Never rejects: a failure is logged. */
   public commit(entries: readonly RecordEntry[]): Promise<void> {
     return this.enqueue(async () => {
       for (const entry of entries) {
@@ -76,7 +80,7 @@ export class ConversationChanges {
     });
   }
 
-  /** Publishes the open query's closure, after everything handed over before it; `aborted` if it was given up. */
+  /** Queues the open query's closure, after everything handed over before it; `aborted` if it was given up. */
   public close(reason: QueryReason): Promise<void> {
     return this.enqueue(() => {
       const { query } = this;
@@ -84,7 +88,8 @@ export class ConversationChanges {
         return;
       }
       this.query = undefined;
-      this.publish('query.closed', { queryId: query.id, reason: query.aborted ? 'aborted' : reason });
+      // TODO(claude): undecided: the message id a query's closure is published with. As built, the query id and `.closed`.
+      this.publish('query.closed', `${query.id}.closed`, { queryId: query.id, reason: query.aborted ? 'aborted' : reason });
     });
   }
 
@@ -131,7 +136,8 @@ export class ConversationChanges {
       from = query.from;
       query.from = undefined;
     }
-    this.publish('message', { id, queryId: query.id, turnId: turn.id, role, ...(from === undefined ? {} : { from }), content });
+    // TODO(claude): undecided: what id keys the publish dedupe. As built, the entry's `uuid`, which is also the message's `id`.
+    this.publish('message', id, { id, queryId: query.id, turnId: turn.id, role, ...(from === undefined ? {} : { from }), content });
   }
 
   /**
@@ -191,7 +197,9 @@ export class ConversationChanges {
     return { type: 'object', id, bucket, mediaType, size: bytes.length };
   }
 
-  private publish(leaf: string, fields: Record<string, unknown>): void {
-    this.sources.broker.publish(`${this.subjectPrefix}.${leaf}`, { ts: this.sources.timer.timestamp(), instanceId: this.sources.instanceId, ...fields });
+  private publish(leaf: string, msgId: string, fields: Record<string, unknown>): void {
+    // TODO(claude): undecided: what `ts` means for a message that is published late. As built, it is the time the message was queued.
+    const body = { ts: this.sources.timer.timestamp(), instanceId: this.sources.instanceId, ...fields };
+    this.sources.outbox.enqueue(`${this.subjectPrefix}.${leaf}`, msgId, JSON.stringify(body));
   }
 }

@@ -8,6 +8,7 @@ import { participantServices } from '../src/container.js';
 import { IHost } from '../src/Host.js';
 import { IIds } from '../src/Ids.js';
 import { MessageChannel } from '../src/MessageChannel.js';
+import { Outbox } from '../src/Outbox.js';
 import { ParticipantConfig } from '../src/ParticipantConfig.js';
 import { type ChildProcessHandle, IProcessSpawner, type ProcessOptions } from '../src/ProcessSpawner.js';
 import { IProcessTable, type ProcessIdentity, ProcessListUnreadable, type TaggedProcess } from '../src/ProcessTable.js';
@@ -367,6 +368,21 @@ class FakeBroker implements IBroker {
     this.published.push({ subject, body: structuredClone(body) });
   }
 
+  /** What each acknowledged publish failed with, one error per attempt, oldest first; an attempt with none left is acknowledged. */
+  public readonly ackFailures: Error[] = [];
+  /** The message ids of every acknowledged publish, in order. */
+  public readonly ackedIds: string[] = [];
+
+  public publishAcked(subject: string, payload: string, msgId: string): Promise<void> {
+    const failure = this.ackFailures.shift();
+    if (failure !== undefined) {
+      return Promise.reject(failure);
+    }
+    this.published.push({ subject, body: JSON.parse(payload) as Record<string, unknown> });
+    this.ackedIds.push(msgId);
+    return Promise.resolve();
+  }
+
   public subscribe(subject: string, handle: (request: BrokerRequest) => void, options: { queue?: string } = {}): BrokerSubscription {
     const subscription: FakeSubscription = { subject, queue: options.queue, handle, active: true };
     this.subscriptions.push(subscription);
@@ -431,7 +447,12 @@ export function testServices(config: ParticipantConfig = testConfig(), options: 
   services.register(FakeHost).as(IHost);
   services.register(FakeBroker).as(IBroker);
   services.register(FakeIds).as(IIds);
+  services
+    .register(Outbox)
+    .using((provider) => new Outbox(':memory:', { broker: provider.resolve(IBroker), host: provider.resolve(IHost), timer: provider.resolve(ITimer) }))
+    .asSelf();
   const provider = services.buildProvider();
+  provider.resolve(Outbox).start();
   if (options.gateShut !== true) {
     provider.resolve(ServingGate).open();
   }
@@ -443,6 +464,7 @@ export function testServices(config: ParticipantConfig = testConfig(), options: 
     timer: provider.resolve(ITimer) as FakeTimer,
     host: provider.resolve(IHost) as FakeHost,
     broker: provider.resolve(IBroker) as FakeBroker,
+    outbox: provider.resolve(Outbox),
     ids: provider.resolve(IIds) as FakeIds,
     /** Sends control lines, as stdin would, and returns their replies. */
     control: (...lines: unknown[]) => lines.map((line) => provider.resolve(ControlLines).handle(typeof line === 'string' ? line : JSON.stringify(line))),

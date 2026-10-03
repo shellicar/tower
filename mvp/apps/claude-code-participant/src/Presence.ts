@@ -8,6 +8,7 @@ import { ConversationLauncher, NotConfiguredError } from './ConversationLauncher
 import { describeError } from './describeError.js';
 import { IHost } from './Host.js';
 import { IIds } from './Ids.js';
+import { Outbox } from './Outbox.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
 import { rejected, ServedConversation, type ServingInstance } from './ServedConversation.js';
 import { ServingGate } from './ServingGate.js';
@@ -47,6 +48,7 @@ export class Presence {
   @dependsOn(ConversationLauncher) private readonly launcher!: ConversationLauncher;
   @dependsOn(ServingGate) private readonly gate!: ServingGate;
   @dependsOn(IPublisher) private readonly publisher!: IPublisher;
+  @dependsOn(Outbox) private readonly outbox!: Outbox;
 
   private state: State = 'idle';
   private instanceId: string | undefined;
@@ -67,6 +69,7 @@ export class Presence {
    */
   public async start(): Promise<void> {
     await this.broker.connect();
+    this.outbox.start();
     await this.gate.wait();
     if (this.state !== 'idle') {
       return;
@@ -112,9 +115,10 @@ export class Presence {
     }
   }
 
-  /** Ends the connection: `drain` lets what was received finish; `close` doesn't wait for it. */
+  /** Lets the outbox publish what it can, then ends the connection: `drain` lets what was received finish; `close` doesn't wait for it. */
   public async disconnect(how: 'drain' | 'close'): Promise<void> {
     try {
+      await this.outbox.stop();
       await (how === 'drain' ? this.broker.drain() : this.broker.close());
     } catch (err) {
       this.host.log(`closing the NATS connection failed: ${describeError(err)}`);
@@ -215,6 +219,7 @@ export class Presence {
   private servingInstance(instanceId: string): ServingInstance {
     return {
       broker: this.broker,
+      outbox: this.outbox,
       timer: this.timer,
       ids: this.ids,
       host: this.host,

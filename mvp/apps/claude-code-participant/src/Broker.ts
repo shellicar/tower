@@ -1,6 +1,7 @@
 import { type ObjectStore, Objm } from '@nats-io/obj';
 import { connect, type Msg, type NatsConnection } from '@nats-io/transport-node';
 import { dependsOn } from '@shellicar/core-di';
+import { ackedPublish } from './AckedPublish.js';
 import { describeError } from './describeError.js';
 import { IHost } from './Host.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
@@ -21,6 +22,12 @@ export type BrokerSubscription = { unsubscribe(): void };
 export abstract class IBroker {
   public abstract connect(): Promise<void>;
   public abstract publish(subject: string, body: Record<string, unknown>): void;
+  /**
+   * Publishes `payload` to the stream that covers `subject`; resolves once the stream has stored it.
+   * `msgId` makes a repeat of the same message a no-op within the stream's duplicate window.
+   * Rejects with `PublishRejected` when the message itself is refused, and with any other error when it may succeed later.
+   */
+  public abstract publishAcked(subject: string, payload: string, msgId: string): Promise<void>;
   /** Hands each request on `subject` to `handle`; with `queue`, as one member of that queue group. */
   public abstract subscribe(subject: string, handle: (request: BrokerRequest) => void, options?: { queue?: string }): BrokerSubscription;
   /** Stores `data` as the object `name` in the object store `bucket`; resolves once the store has it. */
@@ -47,7 +54,8 @@ export class NatsBroker implements IBroker {
   private ended = false;
 
   public async connect(): Promise<void> {
-    const connection = await connect({ servers: this.config.natsUrl });
+    // TODO(claude): undecided: the connection options. As built, reconnecting never gives up; every other option is the client's default.
+    const connection = await connect({ servers: this.config.natsUrl, maxReconnectAttempts: -1 });
     const shutDownWhileConnecting = this.ended;
     if (shutDownWhileConnecting) {
       await connection.close();
@@ -58,6 +66,10 @@ export class NatsBroker implements IBroker {
 
   public publish(subject: string, body: Record<string, unknown>): void {
     this.connected().publish(subject, JSON.stringify(body));
+  }
+
+  public publishAcked(subject: string, payload: string, msgId: string): Promise<void> {
+    return ackedPublish(this.connected(), subject, payload, msgId);
   }
 
   public subscribe(subject: string, handle: (request: BrokerRequest) => void, options: { queue?: string } = {}): BrokerSubscription {
