@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isObject, type RecordEntry, roleOf } from './ConversationEntries.js';
+import { isObject, type RecordEntry } from './ConversationEntries.js';
+import { roleOf } from './ConversationKinds.js';
 
 /** Claude Code's own record of a conversation: its transcript in the agent's config dir. */
 export type ClaudeCodeRecord = {

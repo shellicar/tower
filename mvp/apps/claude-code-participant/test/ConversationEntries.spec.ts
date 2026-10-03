@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { contentBlocksOf, isPrompt, roleOf } from '../src/ConversationEntries.js';
-import { AI_TITLE, ANSWER, DATE_ATTACHMENT, IMAGE_TOOL_RESULT, INTERRUPT_MARKER, PARTIAL_REPLY, PROMPT, QUEUE_OPERATION, THINKING, TOOL_USE } from './entries.js';
+import { contentBlocksOf, isPrompt } from '../src/ConversationEntries.js';
+import { roleOf } from '../src/ConversationKinds.js';
+import { AI_TITLE, ANSWER, IMAGE_TOOL_RESULT, INTERRUPT_MARKER, PARTIAL_REPLY, PROMPT, QUEUE_OPERATION, TASK_NOTICE, THINKING, TOOL_USE } from './entries.js';
 
 function userText(text: unknown, fields: Record<string, unknown> = {}) {
   return { type: 'user', uuid: 'u1', message: { role: 'user', content: text }, ...fields };
@@ -39,24 +40,12 @@ describe('roleOf', () => {
     expect(roleOf({ type: 'system', subtype: 'compact_boundary', uuid: 's1', content: 'Conversation compacted' })).toBe('system');
   });
 
-  it('leaves out an interrupt marker', () => {
-    expect(roleOf(INTERRUPT_MARKER)).toBeUndefined();
-  });
-
-  it('leaves out a marker written as a plain string', () => {
-    expect(roleOf(userText('[Request interrupted by user for tool use]'))).toBeUndefined();
-  });
-
-  it('leaves out a reminder', () => {
+  it('leaves out a user entry only the model is sent that has no kind here', () => {
     expect(roleOf(userText('Continue from where you left off.', { isMeta: true }))).toBeUndefined();
   });
 
-  it('leaves out a compaction summary', () => {
-    expect(roleOf(userText('This session is being continued from a previous conversation.', { isCompactSummary: true }))).toBeUndefined();
-  });
-
-  it('leaves out an attachment', () => {
-    expect(roleOf(DATE_ATTACHMENT)).toBeUndefined();
+  it('leaves out an attachment with nothing rendered', () => {
+    expect(roleOf({ type: 'attachment', uuid: 'a1', attachment: { type: 'credential_org', organizationUuid: 'org-1' } })).toBeUndefined();
   });
 
   it('leaves out bookkeeping with no uuid', () => {
@@ -87,6 +76,14 @@ describe('isPrompt', () => {
 
   it('is false for a reply', () => {
     expect(isPrompt(ANSWER)).toBe(false);
+  });
+
+  it('is false for an interrupt marker', () => {
+    expect(isPrompt(INTERRUPT_MARKER)).toBe(false);
+  });
+
+  it('is false for the notice of a finished task', () => {
+    expect(isPrompt(TASK_NOTICE)).toBe(false);
   });
 });
 

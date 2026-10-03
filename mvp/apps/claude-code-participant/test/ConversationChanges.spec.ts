@@ -1,7 +1,30 @@
 import { describe, expect, it } from 'vitest';
 import { ConversationChanges } from '../src/ConversationChanges.js';
 import type { RecordEntry } from '../src/ConversationEntries.js';
-import { ANSWER, CALL_A, CALL_B, DATE_ATTACHMENT, IMAGE_TOOL_RESULT, INTERRUPT_MARKER, PARALLEL_ANSWER, PARTIAL_REPLY, PNG_BASE64, PROMPT, QUEUE_OPERATION, RESULT_A, RESULT_B, SECOND_PROMPT, THINKING, TOKENS_REMINDER, TOOL_USE } from './entries.js';
+import {
+  ANSWER,
+  CALL_A,
+  CALL_B,
+  COMPACT_BOUNDARY,
+  COMPACT_SUMMARY,
+  DATE_ATTACHMENT,
+  IMAGE_TOOL_RESULT,
+  INTERRUPT_MARKER,
+  PARALLEL_ANSWER,
+  PARTIAL_REPLY,
+  PNG_BASE64,
+  PROMPT,
+  QUEUE_OPERATION,
+  RESULT_A,
+  RESULT_B,
+  SECOND_PROMPT,
+  TASK_NOTICE,
+  TASK_NOTICE_REPLY,
+  THINKING,
+  TOKENS_REMINDER,
+  TOOL_USE,
+  TURN_DURATION,
+} from './entries.js';
 import { FAKE_TIMESTAMP, settle, testServices } from './support.js';
 
 const ID = '0c77fb4e-655e-41f2-be80-558ad2aaf6dc';
@@ -50,7 +73,7 @@ describe('ConversationChanges', () => {
   describe('a query', () => {
     it('publishes the prompt, each piece of the reply and the tool result, in order', async () => {
       const services = await firstQuery();
-      expect(messages(services).map((body) => body.id)).toEqual([PROMPT.uuid, THINKING.uuid, TOOL_USE.uuid, IMAGE_TOOL_RESULT.uuid, ANSWER.uuid]);
+      expect(messages(services).map((body) => body.id)).toEqual([PROMPT.uuid, DATE_ATTACHMENT.uuid, THINKING.uuid, TOOL_USE.uuid, IMAGE_TOOL_RESULT.uuid, ANSWER.uuid]);
     });
 
     it('publishes the prompt with its ids, role, the say’s from and its content', async () => {
@@ -173,13 +196,30 @@ describe('ConversationChanges', () => {
       return services;
     }
 
-    it('publishes the prompt and the partial reply Claude Code kept, not the marker', async () => {
+    it('publishes the prompt, the partial reply Claude Code kept and the marker', async () => {
       const services = await cancelled();
       expect(
         messages(services)
           .filter((body) => body.queryId === 'q2')
           .map((body) => body.id),
-      ).toEqual([SECOND_PROMPT.uuid, PARTIAL_REPLY.uuid]);
+      ).toEqual([SECOND_PROMPT.uuid, PARTIAL_REPLY.uuid, INTERRUPT_MARKER.uuid]);
+    });
+
+    it('publishes the marker as interrupted, with the entry’s time', async () => {
+      const services = await cancelled();
+      expect(message(services, INTERRUPT_MARKER.uuid)).toEqual({
+        ts: FAKE_TIMESTAMP,
+        instanceId: 'inst-1',
+        id: INTERRUPT_MARKER.uuid,
+        queryId: 'q2',
+        turnId: 'id-5',
+        role: 'user',
+        kind: 'interrupted',
+        fields: { during: 'turn' },
+        userContent: [{ type: 'text', text: 'Interrupted' }],
+        at: INTERRUPT_MARKER.timestamp,
+        content: [{ type: 'text', text: '[Request interrupted by user]' }],
+      });
     });
 
     it('begins a new turn with the new query', async () => {
@@ -268,7 +308,7 @@ describe('ConversationChanges', () => {
 
       it('publishes nothing more of the query', async () => {
         const services = await failing();
-        expect(messages(services).map((body) => body.id)).toEqual([PROMPT.uuid, THINKING.uuid, TOOL_USE.uuid]);
+        expect(messages(services).map((body) => body.id)).toEqual([PROMPT.uuid, DATE_ATTACHMENT.uuid, THINKING.uuid, TOOL_USE.uuid]);
       });
 
       it('closes the query aborted', async () => {
@@ -294,6 +334,56 @@ describe('ConversationChanges', () => {
       const services = publishing();
       await services.changes.commit([{ type: 'user', uuid: 'u1', message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', data: PNG_BASE64 } }] } }]);
       expect(message(services, 'u1')).toBeUndefined();
+    });
+  });
+
+  describe('extras', () => {
+    it('publishes a reminder for the model only, with the rendered text as its content', async () => {
+      const services = await firstQuery();
+      expect(message(services, DATE_ATTACHMENT.uuid)).toEqual({
+        ts: FAKE_TIMESTAMP,
+        instanceId: 'inst-1',
+        id: DATE_ATTACHMENT.uuid,
+        queryId: 'q1',
+        turnId: 'id-1',
+        role: 'user',
+        kind: 'date',
+        fields: { date: '2026-10-01' },
+        audience: { model: true, user: false },
+        at: DATE_ATTACHMENT.timestamp,
+        content: [{ type: 'text', text: "<system-reminder>\nToday's date is 2026-10-01.\n</system-reminder>" }],
+      });
+    });
+
+    it('publishes the notice of a finished task from the orchestrator, in a query of its own', async () => {
+      const services = publishing();
+      await services.changes.commit([TASK_NOTICE, TASK_NOTICE_REPLY]);
+      expect(message(services, TASK_NOTICE.uuid)).toMatchObject({ queryId: 'id-1', kind: 'task-finished', from: { kind: 'orchestrator' } });
+    });
+
+    it('leaves the say’s from for the prompt when a notice comes first', async () => {
+      const services = publishing();
+      await services.changes.openQuery('q1', HUMAN);
+      await services.changes.commit([TASK_NOTICE, PROMPT]);
+      expect(message(services, PROMPT.uuid)?.from).toEqual(HUMAN);
+    });
+
+    it('publishes the summary of a compaction with the figures of its boundary', async () => {
+      const services = publishing();
+      await services.changes.commit([COMPACT_BOUNDARY, COMPACT_SUMMARY]);
+      expect(message(services, COMPACT_SUMMARY.uuid)).toMatchObject({ kind: 'compaction', fields: { trigger: 'manual', durationMs: 4996 }, scope: { replaces: 'before', except: ['2dde7688-fff7-4af9-ab6b-5220712f1002'] } });
+    });
+
+    it('publishes the compaction boundary as an ordinary system message', async () => {
+      const services = publishing();
+      await services.changes.commit([COMPACT_BOUNDARY]);
+      expect(message(services, COMPACT_BOUNDARY.uuid)).toMatchObject({ role: 'system', content: [{ type: 'text', text: 'Conversation compacted' }] });
+    });
+
+    it('publishes the turn-finished line for the person only', async () => {
+      const services = publishing();
+      await services.changes.commit([TURN_DURATION]);
+      expect(message(services, TURN_DURATION.uuid)).toMatchObject({ role: 'system', kind: 'turn-finished', audience: { model: false, user: true }, content: [{ type: 'text', text: 'Worked for 2s' }] });
     });
   });
 

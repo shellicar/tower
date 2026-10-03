@@ -1,5 +1,6 @@
 import type { IBroker } from './Broker.js';
-import { contentBlocksOf, isMainChain, isObject, isPrompt, type RecordEntry, responseIdOf, roleOf } from './ConversationEntries.js';
+import { contentBlocksOf, isMainChain, isObject, type RecordEntry, responseIdOf } from './ConversationEntries.js';
+import { type Classified, classify, isPlainPrompt } from './ConversationKinds.js';
 import { describeError } from './describeError.js';
 import type { IHost } from './Host.js';
 import type { IIds } from './Ids.js';
@@ -31,6 +32,26 @@ type OpenQuery = {
 /** One API round; its id is minted with its first published message. */
 type Turn = { id?: string };
 
+/**
+ * The envelope fields an extra message carries beside its content: its
+ * `kind` and `fields`, who it is for (`audience`), what the person is shown
+ * (`userContent`), what it replaces for the model (`scope`) and the entry's
+ * own time (`at`). A plain message carries none.
+ */
+function extrasOf(entry: RecordEntry, classified: Classified): Record<string, unknown> {
+  if (classified.kind === undefined) {
+    return {};
+  }
+  return {
+    kind: classified.kind,
+    fields: classified.fields ?? {},
+    ...(classified.audience === undefined ? {} : { audience: classified.audience }),
+    ...(classified.userContent === undefined ? {} : { userContent: classified.userContent }),
+    ...(classified.scope === undefined ? {} : { scope: classified.scope }),
+    ...(typeof entry.timestamp === 'string' ? { at: entry.timestamp } : {}),
+  };
+}
+
 /** A reference block's source: the durable object holding a file's bytes. */
 type ObjectSource = { type: 'object'; id: string; bucket: string; mediaType: string; size: number };
 
@@ -48,6 +69,7 @@ export class ConversationChanges {
   private currentTurn: Turn = {};
   private latestResponseId: string | undefined;
   private pendingTurn: Turn | undefined;
+  private readonly compactions = new Map<string, Record<string, unknown>>();
   private queue: Promise<void> = Promise.resolve();
 
   public constructor(conversationId: string, sources: ChangeSources) {
@@ -105,33 +127,44 @@ export class ConversationChanges {
     if (!isMainChain(entry)) {
       return;
     }
-    const role = roleOf(entry);
+    if (entry.type === 'system' && entry.subtype === 'compact_boundary' && typeof entry.uuid === 'string' && isObject(entry.compactMetadata)) {
+      this.compactions.set(entry.uuid, entry.compactMetadata);
+    }
+    const classified = classify(entry, this.compactions);
     // No query is open (none was asked for, or the last one has closed): the message opens one of its own.
-    if (role !== undefined && this.query === undefined) {
+    if (classified !== undefined && this.query === undefined) {
       this.startQuery(this.sources.ids.mint(), undefined);
     }
     const turn = this.place(entry);
     const { query } = this;
-    if (role === undefined || query === undefined || query.aborted) {
+    if (classified === undefined || query === undefined || query.aborted) {
       return;
     }
     turn.id ??= this.sources.ids.mint();
     const id = entry.uuid as string;
     let content: unknown[];
     try {
-      content = await this.storeFiles(id, contentBlocksOf(entry));
+      content = await this.storeFiles(id, classified.content ?? contentBlocksOf(entry));
     } catch (err) {
       query.aborted = true;
       this.sources.host.log(`conversation ${this.conversationId}: storing a file of message ${id} failed, so query ${query.id} is aborted: ${describeError(err)}`);
       this.sources.abort();
       return;
     }
-    let from: unknown;
-    if (isPrompt(entry) && query.from !== undefined) {
+    let from: unknown = classified.from;
+    if (isPlainPrompt(entry, classified) && query.from !== undefined) {
       from = query.from;
       query.from = undefined;
     }
-    this.publish('message', { id, queryId: query.id, turnId: turn.id, role, ...(from === undefined ? {} : { from }), content });
+    this.publish('message', {
+      id,
+      queryId: query.id,
+      turnId: turn.id,
+      role: classified.role,
+      ...(from === undefined ? {} : { from }),
+      ...extrasOf(entry, classified),
+      content,
+    });
   }
 
   /**
