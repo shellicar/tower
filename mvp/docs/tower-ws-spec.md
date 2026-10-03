@@ -253,6 +253,20 @@ tool result, a system message or a reminder, and never fabricated),
 boundary may overlap what the client already holds when `after` is a shared
 timestamp: dedupe by message `id`; rendering a known id again is a no-op.
 
+An extra message (a reminder, a subagent's hand-back, the notice of a
+finished task, an interrupt marker, a compaction, a turn-finished line, an
+API error) carries further optional fields beside `content`, forwarded as the
+producer sent them; a message of plain chat carries none of them.
+`kind` is an open string naming what the message is, and `fields` the values
+it was made from. `audience` is `{ "model": bool, "user": bool }`: a
+message with `user: false` is not shown to the person; absent means both.
+`userContent` is what to show the person in place of `content`. `scope` is
+`{ "replaces": "before", "except": [message ids] }`: the model is no longer
+sent the messages before this one, except those named. `at` is the time of
+the entry the message was made from. A client that does not know a `kind`
+shows `userContent` when it has it, else `content`, for a message it is to
+show.
+
 ### `approvals`: once, on connect
 
 ```json

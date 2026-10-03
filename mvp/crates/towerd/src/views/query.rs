@@ -65,7 +65,7 @@ impl Views {
         after: Option<i64>,
     ) -> anyhow::Result<Vec<ConversationMessage>> {
         let mut stmt = self.db.prepare_cached(
-            "SELECT message_id, query_id, turn_id, role, sender, content, ts
+            "SELECT message_id, query_id, turn_id, role, sender, content, ts, extras
              FROM messages WHERE conv = ?1 AND ts >= ?2 ORDER BY ts",
         )?;
         // `after` None = from the start. The boundary is INCLUSIVE (`>=`): a
@@ -85,11 +85,12 @@ impl Views {
                     r.get::<_, Option<String>>(4)?,
                     r.get::<_, String>(5)?,
                     r.get::<_, i64>(6)?,
+                    r.get::<_, Option<String>>(7)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter()
-            .map(|(id, query, turn, role, sender, content, ts)| {
+            .map(|(id, query, turn, role, sender, content, ts, extras)| {
                 Ok(ConversationMessage {
                     id: MessageId(id),
                     query: QueryId(query),
@@ -97,6 +98,12 @@ impl Views {
                     role,
                     from: sender.map(|s| serde_json::from_str(&s)).transpose()?,
                     content: serde_json::from_str(&content)?,
+                    extras: Box::new(
+                        extras
+                            .map(|e| serde_json::from_str(&e))
+                            .transpose()?
+                            .unwrap_or_default(),
+                    ),
                     ts,
                 })
             })

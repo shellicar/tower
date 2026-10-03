@@ -1435,3 +1435,63 @@ fn a_user_message_is_not_a_qualifying_event() {
             .is_none()
     );
 }
+
+const MSG_TASK_FINISHED: &str = r#"{"ts":"2026-10-03T14:22:40.902+10:00","id":"e1","queryId":"q9","turnId":"t9","role":"user","from":{"kind":"orchestrator"},"kind":"task-finished","fields":{"taskId":"a3f8","durationMs":39000},"audience":{"model":true,"user":true},"userContent":[{"type":"text","text":"Agent finished"}],"at":"2026-10-03T14:22:40.880+10:00","content":[{"type":"text","text":"<task-notification/>"}]}"#;
+
+#[test]
+fn an_extra_messages_envelope_fields_are_stored_and_read_back() {
+    let (mut views, _rx) = fresh();
+    views.apply(
+        "conv-approval",
+        1,
+        &event("conv.v2.conv-abc.changes.message", MSG_TASK_FINISHED),
+    );
+    let msgs = views
+        .conversation(&ConversationId("conv-abc".into()), None)
+        .unwrap();
+    let extras = &msgs[0].extras;
+    assert_eq!(
+        (
+            extras.kind.as_deref(),
+            extras.fields.as_ref().unwrap()["durationMs"].clone(),
+            extras.user_content.as_ref().unwrap()[0]["text"].clone(),
+            extras.at.as_deref(),
+        ),
+        (
+            Some("task-finished"),
+            serde_json::json!(39000),
+            serde_json::json!("Agent finished"),
+            Some("2026-10-03T14:22:40.880+10:00"),
+        )
+    );
+}
+
+#[test]
+fn plain_chat_has_no_extras() {
+    let (mut views, _rx) = fresh();
+    views.apply(
+        "conv-approval",
+        1,
+        &event("conv.v2.conv-abc.changes.message", MSG_M1),
+    );
+    let msgs = views
+        .conversation(&ConversationId("conv-abc".into()), None)
+        .unwrap();
+    assert!(msgs[0].extras.is_empty());
+}
+
+#[test]
+fn an_assistant_message_the_person_is_not_shown_mints_no_unread() {
+    let (mut views, _rx) = fresh();
+    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.changes.message",
+        r#"{"ts":"2026-10-03T14:30:01+10:00","id":"n1","queryId":"q1","turnId":"t1","role":"assistant","kind":"no-response","fields":{},"audience":{"model":true,"user":false},"content":[{"type":"text","text":"No response requested."}]}"#));
+    assert!(
+        views
+            .db
+            .query_row("SELECT 1 FROM unread WHERE conv = 'conv-abc'", [], |r| r
+                .get::<_, i64>(0))
+            .optional()
+            .unwrap()
+            .is_none()
+    );
+}

@@ -217,6 +217,7 @@ mod tests {
             role: role.into(),
             from: None,
             content,
+            extras: Default::default(),
         }
     }
 

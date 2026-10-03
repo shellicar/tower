@@ -301,7 +301,35 @@ pub struct WsMessage {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub from: Option<Value>,
     pub content: Vec<Value>,
+    /// What an extra message carries beside its content; empty for plain chat.
+    #[serde(flatten, default)]
+    pub extras: Box<WsExtras>,
     pub ts: i64,
+}
+
+/// The envelope fields of an extra message (a reminder, a hand-back, a
+/// turn-finished line, ...), forwarded as the producer sent them. See
+/// mvp/docs/tower-ws-spec.md, `conversation`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WsExtras {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Value>,
+    /// `{ "model": bool, "user": bool }`; absent means both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audience: Option<Value>,
+    #[serde(
+        default,
+        rename = "userContent",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub user_content: Option<Vec<Value>>,
+    /// `{ "replaces": "before", "except": [message ids] }`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
 }
 
 /// One conversation's unread-episode state — a ticket-system signal ("has

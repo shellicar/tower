@@ -248,6 +248,10 @@ const MIGRATIONS: &[&str] = &[
          since_ts    INTEGER NOT NULL,
          PRIMARY KEY (world, instance_id)
      );",
+    // 16 - extra messages: the envelope fields beside a message's content
+    // (kind, fields, audience, userContent, scope, at) as one JSON object,
+    // NULL for plain chat. Rows stored before it read as plain.
+    "ALTER TABLE messages ADD COLUMN extras TEXT;",
 ];
 
 pub fn apply_schema(db: &Connection) -> anyhow::Result<()> {

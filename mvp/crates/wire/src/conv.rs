@@ -190,6 +190,51 @@ pub struct Message {
     #[serde(default)]
     pub from: Option<Value>,
     pub content: Vec<Value>,
+    /// What an extra message carries beside its content; empty for plain chat.
+    #[serde(flatten)]
+    pub extras: Box<MessageExtras>,
+}
+
+/// The envelope fields of an extra message (a reminder, a hand-back, a
+/// turn-finished line, ...): what kind it is and the values it was made from,
+/// who it is for, what the person is shown instead of its content, what it
+/// replaces for the model, and the entry's own time. All optional, each held
+/// as sent.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct MessageExtras {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Value>,
+    /// `{ "model": bool, "user": bool }`; absent means both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audience: Option<Value>,
+    #[serde(
+        default,
+        rename = "userContent",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub user_content: Option<Vec<Value>>,
+    /// `{ "replaces": "before", "except": [message ids] }`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+}
+
+impl MessageExtras {
+    pub fn is_empty(&self) -> bool {
+        *self == MessageExtras::default()
+    }
+
+    /// False only when the message says the person is not shown it.
+    pub fn shown_to_user(&self) -> bool {
+        self.audience
+            .as_ref()
+            .and_then(|a| a.get("user"))
+            .and_then(Value::as_bool)
+            != Some(false)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

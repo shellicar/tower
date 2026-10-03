@@ -501,6 +501,7 @@ mod tests {
             role: role.into(),
             from: Some(json!({ "kind": "human" })),
             content: vec![json!({ "type": "text", "text": "hi" })],
+            extras: Default::default(),
             ts,
         }
     }

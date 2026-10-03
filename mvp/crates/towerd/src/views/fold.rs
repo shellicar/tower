@@ -581,10 +581,13 @@ impl Views {
                     let mut content = content.clone();
                     store_refs(&tx, &mut content)?;
                     let sender = from.as_ref().map(serde_json::to_string).transpose()?;
+                    let extras = (!m.extras.is_empty())
+                        .then(|| serde_json::to_string(&*m.extras))
+                        .transpose()?;
                     tx.execute(
                         "INSERT OR REPLACE INTO messages
-                             (conv, message_id, query_id, turn_id, role, sender, content, ts)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                             (conv, message_id, query_id, turn_id, role, sender, content, ts, extras)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                         rusqlite::params![
                             conv.0,
                             id.0,
@@ -594,6 +597,7 @@ impl Views {
                             sender,
                             serde_json::to_string(&content)?,
                             ts_ms,
+                            extras,
                         ],
                     )?;
                     stored_message = Some(ConversationMessage {
@@ -603,11 +607,13 @@ impl Views {
                         role: role.clone(),
                         from: from.clone(),
                         content,
+                        extras: m.extras.clone(),
                         ts: ts_ms,
                     });
                     // The qualifying event for the unread signal: an
-                    // assistant turn landing is new content nobody's seen.
-                    if role == "assistant" {
+                    // assistant turn landing is new content nobody's seen,
+                    // unless the person is not shown the message at all.
+                    if role == "assistant" && m.extras.shown_to_user() {
                         minted_unread = super::unread::note_turn_finished(&tx, conv)?;
                     }
                 }

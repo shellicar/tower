@@ -19,8 +19,8 @@ pub use approval::{
 };
 pub use conv::{
     ConvAttached, ConvAttachment, ConvBlock, ConvChange, ConvDelta, ConvDetached, ConvMoved,
-    ConvTelemetry, Message, Query, Revision, TipMoved, Tolerant, ToolUse, TurnAborted,
-    TurnCancelled, TurnEnded, TurnStarted, Usage,
+    ConvTelemetry, Message, MessageExtras, Query, Revision, TipMoved, Tolerant, ToolUse,
+    TurnAborted, TurnCancelled, TurnEnded, TurnStarted, Usage,
 };
 pub use ids::{ApprovalId, ConversationId, InstanceId, MessageId, QueryId, TurnId, WorldId};
 pub use ingest::{

@@ -5,7 +5,9 @@
 use serde_json::Value;
 use tokio::sync::oneshot;
 
-use wire::{ApprovalId, ConversationId, InstanceId, MessageId, QueryId, TurnId, WorldId};
+use wire::{
+    ApprovalId, ConversationId, InstanceId, MessageExtras, MessageId, QueryId, TurnId, WorldId,
+};
 
 #[derive(Debug, Clone)]
 pub enum ViewEvent {
@@ -182,6 +184,7 @@ pub struct ConversationMessage {
     /// See mvp/docs/tower-ws-spec.md, `conversation`: response to `open`.
     pub from: Option<Value>,
     pub content: Vec<Value>,
+    pub extras: Box<MessageExtras>,
     pub ts: i64,
 }
 

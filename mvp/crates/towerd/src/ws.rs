@@ -24,8 +24,8 @@ use crate::views::{
 // sides: towerd serialises ServerMsg and parses ClientMsg, the frontend does
 // the mirror. The From impls below adapt towerd's internal view types into it.
 use ws_types::{
-    ClientMsg, ServerMsg, WsAgent, WsAgentAttachment, WsAgentInstance, WsApproval, WsMessage,
-    WsRow, WsSettled, WsTab, WsUnread, WsUsage,
+    ClientMsg, ServerMsg, WsAgent, WsAgentAttachment, WsAgentInstance, WsApproval, WsExtras,
+    WsMessage, WsRow, WsSettled, WsTab, WsUnread, WsUsage,
 };
 
 impl From<ApprovalState> for WsApproval {
@@ -175,6 +175,14 @@ impl From<ConversationMessage> for WsMessage {
             role: m.role,
             from: m.from,
             content: m.content,
+            extras: Box::new(WsExtras {
+                kind: m.extras.kind,
+                fields: m.extras.fields,
+                audience: m.extras.audience,
+                user_content: m.extras.user_content,
+                scope: m.extras.scope,
+                at: m.extras.at,
+            }),
             ts: m.ts,
         }
     }
@@ -788,6 +796,7 @@ mod tests {
                 role: "user".into(),
                 from: Some(serde_json::json!({ "kind": "human" })),
                 content: vec![serde_json::json!({ "type": "text", "text": "hi" })],
+                extras: Default::default(),
                 ts: 1,
             },
         }
