@@ -302,6 +302,18 @@ pub struct WsMessage {
     pub from: Option<Value>,
     pub content: Vec<Value>,
     pub ts: i64,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub audience: Option<Value>,
+    #[serde(
+        rename = "userContent",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub user_content: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub at: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub scope: Option<Value>,
 }
 
 /// One conversation's unread-episode state — a ticket-system signal ("has

@@ -502,6 +502,10 @@ mod tests {
             from: Some(json!({ "kind": "human" })),
             content: vec![json!({ "type": "text", "text": "hi" })],
             ts,
+            audience: None,
+            user_content: None,
+            at: None,
+            scope: None,
         }
     }
 

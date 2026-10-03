@@ -65,7 +65,8 @@ impl Views {
         after: Option<i64>,
     ) -> anyhow::Result<Vec<ConversationMessage>> {
         let mut stmt = self.db.prepare_cached(
-            "SELECT message_id, query_id, turn_id, role, sender, content, ts
+            "SELECT message_id, query_id, turn_id, role, sender, content, ts,
+                    audience, user_content, at, scope
              FROM messages WHERE conv = ?1 AND ts >= ?2 ORDER BY ts",
         )?;
         // `after` None = from the start. The boundary is INCLUSIVE (`>=`): a
@@ -85,11 +86,18 @@ impl Views {
                     r.get::<_, Option<String>>(4)?,
                     r.get::<_, String>(5)?,
                     r.get::<_, i64>(6)?,
+                    [
+                        r.get::<_, Option<String>>(7)?,
+                        r.get::<_, Option<String>>(8)?,
+                        r.get::<_, Option<String>>(9)?,
+                        r.get::<_, Option<String>>(10)?,
+                    ],
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter()
-            .map(|(id, query, turn, role, sender, content, ts)| {
+            .map(|(id, query, turn, role, sender, content, ts, extras)| {
+                let [audience, user_content, at, scope] = extras;
                 Ok(ConversationMessage {
                     id: MessageId(id),
                     query: QueryId(query),
@@ -98,6 +106,10 @@ impl Views {
                     from: sender.map(|s| serde_json::from_str(&s)).transpose()?,
                     content: serde_json::from_str(&content)?,
                     ts,
+                    audience: audience.map(|s| serde_json::from_str(&s)).transpose()?,
+                    user_content: user_content.map(|s| serde_json::from_str(&s)).transpose()?,
+                    at: at.map(|s| serde_json::from_str(&s)).transpose()?,
+                    scope: scope.map(|s| serde_json::from_str(&s)).transpose()?,
                 })
             })
             .collect()

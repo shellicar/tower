@@ -217,6 +217,10 @@ mod tests {
             role: role.into(),
             from: None,
             content,
+            audience: None,
+            user_content: None,
+            at: None,
+            scope: None,
         }
     }
 

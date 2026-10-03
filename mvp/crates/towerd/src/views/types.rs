@@ -183,6 +183,10 @@ pub struct ConversationMessage {
     pub from: Option<Value>,
     pub content: Vec<Value>,
     pub ts: i64,
+    pub audience: Option<Value>,
+    pub user_content: Option<Value>,
+    pub at: Option<Value>,
+    pub scope: Option<Value>,
 }
 
 /// One conversation's usage fold: cumulative token totals + turn count, plus

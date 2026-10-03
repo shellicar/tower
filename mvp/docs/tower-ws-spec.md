@@ -253,6 +253,16 @@ tool result, a system message or a reminder, and never fabricated),
 boundary may overlap what the client already holds when `after` is a shared
 timestamp: dedupe by message `id`; rendering a known id again is a no-op.
 
+A message (here and in the live `message` event) may also carry four optional
+fields, each present only when the wire message carried it, under the same
+names and with the wire's values verbatim:
+`audience` (`{ "model": bool, "user": bool }`; absent means both), the
+parties the message is for; `userContent`, an array of content blocks to show
+the person instead of `content`; `at`, an RFC 3339 string, the entry's own time
+as distinct from `ts`; and `scope` (`{ "replaces": "before", "except": [message
+ids] }`). A message whose `audience.user` is `false` does not start an unread
+episode.
+
 ### `approvals`: once, on connect
 
 ```json
@@ -725,6 +735,10 @@ const conversationMessage = z.looseObject({
   from: sender.optional(),
   content: contentBlocks,
   ts: millis,
+  audience: z.looseObject({ model: z.boolean().optional(), user: z.boolean().optional() }).optional(),
+  userContent: contentBlocks.optional(),
+  at: z.string().optional(),
+  scope: z.looseObject({ replaces: z.string(), except: z.array(z.string()).optional() }).optional(),
 });
 
 const rowState = z.looseObject({

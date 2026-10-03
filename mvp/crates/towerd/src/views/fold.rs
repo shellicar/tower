@@ -581,10 +581,23 @@ impl Views {
                     let mut content = content.clone();
                     store_refs(&tx, &mut content)?;
                     let sender = from.as_ref().map(serde_json::to_string).transpose()?;
+                    let mut user_content = m.user_content.clone();
+                    if let Some(Value::Array(blocks)) = user_content.as_mut() {
+                        store_refs(&tx, blocks)?;
+                    }
+                    let audience_json =
+                        m.audience.as_ref().map(serde_json::to_string).transpose()?;
+                    let user_content_json = user_content
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()?;
+                    let at_json = m.at.as_ref().map(serde_json::to_string).transpose()?;
+                    let scope_json = m.scope.as_ref().map(serde_json::to_string).transpose()?;
                     tx.execute(
                         "INSERT OR REPLACE INTO messages
-                             (conv, message_id, query_id, turn_id, role, sender, content, ts)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                             (conv, message_id, query_id, turn_id, role, sender, content, ts,
+                              audience, user_content, at, scope)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                         rusqlite::params![
                             conv.0,
                             id.0,
@@ -594,6 +607,10 @@ impl Views {
                             sender,
                             serde_json::to_string(&content)?,
                             ts_ms,
+                            audience_json,
+                            user_content_json,
+                            at_json,
+                            scope_json,
                         ],
                     )?;
                     stored_message = Some(ConversationMessage {
@@ -604,10 +621,22 @@ impl Views {
                         from: from.clone(),
                         content,
                         ts: ts_ms,
+                        audience: m.audience.clone(),
+                        user_content,
+                        at: m.at.clone(),
+                        scope: m.scope.clone(),
                     });
                     // The qualifying event for the unread signal: an
                     // assistant turn landing is new content nobody's seen.
-                    if role == "assistant" {
+                    // A message the person is not shown (`audience.user`
+                    // false) is not new content for them.
+                    let shown_to_user = m
+                        .audience
+                        .as_ref()
+                        .and_then(|a| a.get("user"))
+                        .and_then(Value::as_bool)
+                        != Some(false);
+                    if role == "assistant" && shown_to_user {
                         minted_unread = super::unread::note_turn_finished(&tx, conv)?;
                     }
                 }

@@ -176,6 +176,10 @@ impl From<ConversationMessage> for WsMessage {
             from: m.from,
             content: m.content,
             ts: m.ts,
+            audience: m.audience,
+            user_content: m.user_content,
+            at: m.at,
+            scope: m.scope,
         }
     }
 }
@@ -789,6 +793,10 @@ mod tests {
                 from: Some(serde_json::json!({ "kind": "human" })),
                 content: vec![serde_json::json!({ "type": "text", "text": "hi" })],
                 ts: 1,
+                audience: None,
+                user_content: None,
+                at: None,
+                scope: None,
             },
         }
     }

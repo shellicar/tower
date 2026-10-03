@@ -248,6 +248,12 @@ const MIGRATIONS: &[&str] = &[
          since_ts    INTEGER NOT NULL,
          PRIMARY KEY (world, instance_id)
      );",
+    // 16: the optional message envelope fields (audience, userContent, at,
+    // scope), each stored as the JSON text received; NULL when absent.
+    "ALTER TABLE messages ADD COLUMN audience TEXT;
+     ALTER TABLE messages ADD COLUMN user_content TEXT;
+     ALTER TABLE messages ADD COLUMN at TEXT;
+     ALTER TABLE messages ADD COLUMN scope TEXT;",
 ];
 
 pub fn apply_schema(db: &Connection) -> anyhow::Result<()> {

@@ -190,6 +190,19 @@ pub struct Message {
     #[serde(default)]
     pub from: Option<Value>,
     pub content: Vec<Value>,
+    /// `{ "model": bool, "user": bool }`; absent means both. Carried as
+    /// received: an unexpected shape is a value, not a parse error.
+    #[serde(default)]
+    pub audience: Option<Value>,
+    /// Content blocks shown to the person in place of `content`.
+    #[serde(rename = "userContent", default)]
+    pub user_content: Option<Value>,
+    /// The entry's own RFC3339 time, distinct from `ts` (the publish time).
+    #[serde(default)]
+    pub at: Option<Value>,
+    /// `{ "replaces": "before", "except": [message ids] }`.
+    #[serde(default)]
+    pub scope: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

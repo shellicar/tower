@@ -58,6 +58,195 @@ fn message_lands_in_views_and_row() {
     assert_eq!(read_cursor(&views.db, "conv-approval").unwrap(), 1);
 }
 
+const MSG_USER_ONLY: &str = r#"{"ts":"2026-07-07T21:00:00+10:00","id":"m2","queryId":"q1","turnId":"t1","role":"user","content":[{"type":"text","text":"<reminder>x</reminder>"}],"audience":{"model":false,"user":true},"userContent":[{"type":"text","text":"Reminder: x"}],"at":"2026-07-07T20:59:30+10:00"}"#;
+
+const MSG_SCOPED: &str = r#"{"ts":"2026-07-07T21:00:00+10:00","id":"m3","queryId":"q1","turnId":"t1","role":"user","content":[{"type":"text","text":"summary"}],"scope":{"replaces":"before","except":["m1"]}}"#;
+
+const MSG_ASSISTANT_HIDDEN: &str = r#"{"ts":"2026-07-07T21:00:00+10:00","id":"m4","queryId":"q1","turnId":"t1","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"internal"}],"audience":{"model":true,"user":false}}"#;
+
+const MSG_ODD_EXTRAS: &str = r#"{"ts":"2026-07-07T21:00:00+10:00","id":"m5","queryId":"q1","turnId":"t1","role":"user","content":[],"audience":"everyone","userContent":7,"at":12,"scope":[1]}"#;
+
+/// Applies one message and reads it back through the history query.
+fn stored(views: &mut Views, payload: &str) -> ConversationMessage {
+    views.apply(
+        "conv-approval",
+        1,
+        &event("conv.v2.conv-abc.changes.message", payload),
+    );
+    views
+        .conversation(&ConversationId("conv-abc".into()), None)
+        .unwrap()
+        .remove(0)
+}
+
+mod message_extras {
+    use super::*;
+
+    #[test]
+    fn audience_is_read_back() {
+        let (mut views, _rx) = fresh();
+        let expected = Some(serde_json::json!({ "model": false, "user": true }));
+
+        let actual = stored(&mut views, MSG_USER_ONLY).audience;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn user_content_is_read_back() {
+        let (mut views, _rx) = fresh();
+        let expected = Some(serde_json::json!([{ "type": "text", "text": "Reminder: x" }]));
+
+        let actual = stored(&mut views, MSG_USER_ONLY).user_content;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn at_is_read_back() {
+        let (mut views, _rx) = fresh();
+        let expected = Some(serde_json::json!("2026-07-07T20:59:30+10:00"));
+
+        let actual = stored(&mut views, MSG_USER_ONLY).at;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn scope_is_read_back() {
+        let (mut views, _rx) = fresh();
+        let expected = Some(serde_json::json!({ "replaces": "before", "except": ["m1"] }));
+
+        let actual = stored(&mut views, MSG_SCOPED).scope;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn absent_fields_stay_absent() {
+        let (mut views, _rx) = fresh();
+
+        let actual = stored(&mut views, MSG_M1);
+
+        assert_eq!(
+            (
+                actual.audience,
+                actual.user_content,
+                actual.at,
+                actual.scope
+            ),
+            (None, None, None, None)
+        );
+    }
+
+    #[test]
+    fn odd_values_do_not_make_the_event_an_error() {
+        let (mut views, _rx) = fresh();
+        let expected = Some(serde_json::json!("everyone"));
+
+        let actual = stored(&mut views, MSG_ODD_EXTRAS).audience;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn live_message_event_carries_the_fields() {
+        let (mut views, mut rx) = fresh();
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_SCOPED),
+        );
+        let _row = rx.try_recv().unwrap();
+
+        let ViewEvent::Message { message, .. } = rx.try_recv().unwrap() else {
+            panic!("expected a message event");
+        };
+
+        assert_eq!(
+            message.scope,
+            Some(serde_json::json!({ "replaces": "before", "except": ["m1"] }))
+        );
+    }
+
+    #[test]
+    fn ws_message_omits_absent_fields() {
+        let (mut views, _rx) = fresh();
+        let msg = stored(&mut views, MSG_M1);
+
+        let actual = serde_json::to_value(ws_types::WsMessage::from(msg)).unwrap();
+
+        assert!(actual.get("audience").is_none() && actual.get("userContent").is_none());
+    }
+
+    #[test]
+    fn ws_message_names_user_content_in_camel_case() {
+        let (mut views, _rx) = fresh();
+        let msg = stored(&mut views, MSG_USER_ONLY);
+
+        let actual = serde_json::to_value(ws_types::WsMessage::from(msg)).unwrap();
+
+        assert_eq!(actual["userContent"][0]["text"], "Reminder: x");
+    }
+
+    #[test]
+    fn an_assistant_message_hidden_from_the_user_mints_no_unread() {
+        let (mut views, _rx) = fresh();
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_ASSISTANT_HIDDEN),
+        );
+
+        let actual = views
+            .db
+            .query_row("SELECT COUNT(*) FROM unread", [], |r| r.get::<_, i64>(0))
+            .unwrap();
+
+        assert_eq!(actual, 0);
+    }
+
+    #[test]
+    fn a_visible_assistant_message_still_mints_unread() {
+        let (mut views, _rx) = fresh();
+        let msg = MSG_ASSISTANT_HIDDEN.replace(
+            r#""audience":{"model":true,"user":false}"#,
+            r#""audience":{"model":true,"user":true}"#,
+        );
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", &msg),
+        );
+
+        let actual = views
+            .db
+            .query_row("SELECT COUNT(*) FROM unread", [], |r| r.get::<_, i64>(0))
+            .unwrap();
+
+        assert_eq!(actual, 1);
+    }
+
+    #[test]
+    fn migration_16_adds_the_columns_to_an_existing_v15_db() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        apply_schema(&db).unwrap();
+        db.execute_batch(
+            "ALTER TABLE messages DROP COLUMN audience; ALTER TABLE messages DROP COLUMN user_content;
+             ALTER TABLE messages DROP COLUMN at; ALTER TABLE messages DROP COLUMN scope;
+             PRAGMA user_version = 15;",
+        )
+        .unwrap();
+
+        apply_schema(&db).unwrap();
+
+        let actual = db
+            .query_row("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name IN ('audience','user_content','at','scope')", [], |r| r.get::<_, i64>(0))
+            .unwrap();
+        assert_eq!(actual, 4);
+    }
+}
+
 const QUERY_CLOSED_Q1: &str = r#"{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","queryId":"q1","reason":"completed"}"#;
 
 #[test]
