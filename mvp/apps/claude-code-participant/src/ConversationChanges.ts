@@ -1,5 +1,5 @@
 import type { IBroker } from './Broker.js';
-import { contentBlocksOf, isMainChain, isObject, isPrompt, type RecordEntry, responseIdOf, roleOf } from './ConversationEntries.js';
+import { type ClassifyContext, classify, contentBlocksOf, isMainChain, isObject, isPrompt, preservedUuidsOf, type RecordEntry, responseIdOf } from './ConversationEntries.js';
 import { describeError } from './describeError.js';
 import type { IHost } from './Host.js';
 import type { IIds } from './Ids.js';
@@ -16,6 +16,8 @@ export type ChangeSources = {
   instanceId: string;
   /** The durable object store bucket files are stored in. */
   durableBucket: string;
+  /** The IANA zone a turn-finished line's time is written in; undefined is the machine's own. */
+  timeZone?: string;
   /** Stops the running query, when one of its files can't be stored. */
   abort(): void;
 };
@@ -49,6 +51,8 @@ export class ConversationChanges {
   private latestResponseId: string | undefined;
   private pendingTurn: Turn | undefined;
   private queue: Promise<void> = Promise.resolve();
+  /** The uuids each compaction boundary seen kept, for the summary that follows it. */
+  private readonly preserved = new Map<string, readonly string[]>();
 
   public constructor(conversationId: string, sources: ChangeSources) {
     this.conversationId = conversationId;
@@ -105,33 +109,41 @@ export class ConversationChanges {
     if (!isMainChain(entry)) {
       return;
     }
-    const role = roleOf(entry);
+    if (entry.type === 'system' && entry.subtype === 'compact_boundary' && typeof entry.uuid === 'string') {
+      this.preserved.set(entry.uuid, preservedUuidsOf(entry));
+    }
+    const classified = classify(entry, this.classifyContext());
+    const role = classified?.role;
     // No query is open (none was asked for, or the last one has closed): the message opens one of its own.
     if (role !== undefined && this.query === undefined) {
       this.startQuery(this.sources.ids.mint(), undefined);
     }
     const turn = this.place(entry);
     const { query } = this;
-    if (role === undefined || query === undefined || query.aborted) {
+    if (classified === undefined || query === undefined || query.aborted) {
       return;
     }
     turn.id ??= this.sources.ids.mint();
     const id = entry.uuid as string;
     let content: unknown[];
     try {
-      content = await this.storeFiles(id, contentBlocksOf(entry));
+      content = await this.storeFiles(id, classified.content ?? contentBlocksOf(entry));
     } catch (err) {
       query.aborted = true;
       this.sources.host.log(`conversation ${this.conversationId}: storing a file of message ${id} failed, so query ${query.id} is aborted: ${describeError(err)}`);
       this.sources.abort();
       return;
     }
-    let from: unknown;
-    if (isPrompt(entry) && query.from !== undefined) {
+    let from = classified.from;
+    if (from === undefined && isPrompt(entry) && query.from !== undefined) {
       from = query.from;
       query.from = undefined;
     }
-    this.publish('message', { id, queryId: query.id, turnId: turn.id, role, ...(from === undefined ? {} : { from }), content });
+    this.publish('message', { id, queryId: query.id, turnId: turn.id, role: classified.role, ...(from === undefined ? {} : { from }), ...classified.extras, content });
+  }
+
+  private classifyContext(): ClassifyContext {
+    return { now: new Date(this.sources.timer.timestamp()), timeZone: this.sources.timeZone, preservedBy: (uuid) => this.preserved.get(uuid) };
   }
 
   /**

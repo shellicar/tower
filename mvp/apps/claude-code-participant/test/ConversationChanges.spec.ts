@@ -1,7 +1,30 @@
 import { describe, expect, it } from 'vitest';
 import { ConversationChanges } from '../src/ConversationChanges.js';
 import type { RecordEntry } from '../src/ConversationEntries.js';
-import { ANSWER, CALL_A, CALL_B, DATE_ATTACHMENT, IMAGE_TOOL_RESULT, INTERRUPT_MARKER, PARALLEL_ANSWER, PARTIAL_REPLY, PNG_BASE64, PROMPT, QUEUE_OPERATION, RESULT_A, RESULT_B, SECOND_PROMPT, THINKING, TOKENS_REMINDER, TOOL_USE } from './entries.js';
+import {
+  ANSWER,
+  API_ERROR,
+  CALL_A,
+  CALL_B,
+  COMPACT_BOUNDARY,
+  COMPACT_SUMMARY,
+  DATE_ATTACHMENT,
+  IMAGE_TOOL_RESULT,
+  INTERRUPT_MARKER,
+  PARALLEL_ANSWER,
+  PARTIAL_REPLY,
+  PNG_BASE64,
+  PROMPT,
+  QUEUE_OPERATION,
+  RESULT_A,
+  RESULT_B,
+  SECOND_PROMPT,
+  TASK_NOTICE,
+  THINKING,
+  TOKENS_REMINDER,
+  TOOL_USE,
+  TURN_FINISHED,
+} from './entries.js';
 import { FAKE_TIMESTAMP, settle, testServices } from './support.js';
 
 const ID = '0c77fb4e-655e-41f2-be80-558ad2aaf6dc';
@@ -50,7 +73,7 @@ describe('ConversationChanges', () => {
   describe('a query', () => {
     it('publishes the prompt, each piece of the reply and the tool result, in order', async () => {
       const services = await firstQuery();
-      expect(messages(services).map((body) => body.id)).toEqual([PROMPT.uuid, THINKING.uuid, TOOL_USE.uuid, IMAGE_TOOL_RESULT.uuid, ANSWER.uuid]);
+      expect(messages(services).map((body) => body.id)).toEqual([PROMPT.uuid, DATE_ATTACHMENT.uuid, THINKING.uuid, TOOL_USE.uuid, IMAGE_TOOL_RESULT.uuid, ANSWER.uuid]);
     });
 
     it('publishes the prompt with its ids, role, the say’s from and its content', async () => {
@@ -173,13 +196,29 @@ describe('ConversationChanges', () => {
       return services;
     }
 
-    it('publishes the prompt and the partial reply Claude Code kept, not the marker', async () => {
+    it('publishes the prompt, the partial reply Claude Code kept and the marker', async () => {
       const services = await cancelled();
       expect(
         messages(services)
           .filter((body) => body.queryId === 'q2')
           .map((body) => body.id),
-      ).toEqual([SECOND_PROMPT.uuid, PARTIAL_REPLY.uuid]);
+      ).toEqual([SECOND_PROMPT.uuid, PARTIAL_REPLY.uuid, INTERRUPT_MARKER.uuid]);
+    });
+
+    it('publishes the marker with the interruption text for the person', async () => {
+      const services = await cancelled();
+      expect(message(services, INTERRUPT_MARKER.uuid)).toEqual({
+        ts: FAKE_TIMESTAMP,
+        instanceId: 'inst-1',
+        id: INTERRUPT_MARKER.uuid,
+        queryId: 'q2',
+        turnId: 'id-5',
+        role: 'user',
+        audience: { model: true, user: true },
+        at: '2026-09-30T18:45:34.916Z',
+        userContent: [{ type: 'text', text: 'Interrupted · What should Claude do instead?' }],
+        content: [{ type: 'text', text: '[Request interrupted by user]' }],
+      });
     });
 
     it('begins a new turn with the new query', async () => {
@@ -190,6 +229,38 @@ describe('ConversationChanges', () => {
     it('closes it cancelled', async () => {
       const services = await cancelled();
       expect(services.broker.published.at(-1)?.body).toEqual({ ts: FAKE_TIMESTAMP, instanceId: 'inst-1', queryId: 'q2', reason: 'cancelled' });
+    });
+  });
+
+  describe('extras', () => {
+    it('publishes a reminder as a system message the person is not shown', async () => {
+      const services = await firstQuery();
+      expect(message(services, DATE_ATTACHMENT.uuid)).toMatchObject({ role: 'system', audience: { model: true, user: false }, at: '2026-09-30T18:45:18.780Z' });
+    });
+
+    it('publishes a task-finished notice from the orchestrator and leaves the say’s from for the next prompt', async () => {
+      const services = publishing();
+      await services.changes.openQuery('q1', HUMAN);
+      await services.changes.commit([TASK_NOTICE, PROMPT]);
+      expect([message(services, TASK_NOTICE.uuid)?.from, message(services, PROMPT.uuid)?.from]).toEqual([{ kind: 'orchestrator' }, HUMAN]);
+    });
+
+    it('publishes a compaction summary with the uuids its boundary kept', async () => {
+      const services = publishing();
+      await services.changes.commit([COMPACT_BOUNDARY, COMPACT_SUMMARY]);
+      expect(message(services, COMPACT_SUMMARY.uuid)?.scope).toEqual({ replaces: 'before', except: ['2dde7688-fff7-4af9-ab6b-5220712f1002'] });
+    });
+
+    it('publishes the turn-finished line as text for the person', async () => {
+      const services = publishing();
+      await services.changes.commit([TURN_FINISHED]);
+      expect(message(services, TURN_FINISHED.uuid)?.content).toEqual([{ type: 'text', text: expect.stringMatching(/^Worked for 2s · done /) }]);
+    });
+
+    it('publishes an API error as system, not as a reply', async () => {
+      const services = publishing();
+      await services.changes.commit([API_ERROR]);
+      expect(message(services, API_ERROR.uuid)).toMatchObject({ role: 'system', audience: { model: false, user: true } });
     });
   });
 
@@ -268,7 +339,7 @@ describe('ConversationChanges', () => {
 
       it('publishes nothing more of the query', async () => {
         const services = await failing();
-        expect(messages(services).map((body) => body.id)).toEqual([PROMPT.uuid, THINKING.uuid, TOOL_USE.uuid]);
+        expect(messages(services).map((body) => body.id)).toEqual([PROMPT.uuid, DATE_ATTACHMENT.uuid, THINKING.uuid, TOOL_USE.uuid]);
       });
 
       it('closes the query aborted', async () => {

@@ -32,8 +32,8 @@ describe('lastMessageId', () => {
     expect(lastMessageId(lines({ type: 'user', uuid: 'u1' }, { type: 'assistant', uuid: 'a1', isSidechain: true }))).toBe('u1');
   });
 
-  it('skips an interrupt marker', () => {
-    expect(lastMessageId(lines(SECOND_PROMPT, PARTIAL_REPLY, INTERRUPT_MARKER))).toBe(PARTIAL_REPLY.uuid);
+  it('counts an interrupt marker', () => {
+    expect(lastMessageId(lines(SECOND_PROMPT, PARTIAL_REPLY, INTERRUPT_MARKER))).toBe(INTERRUPT_MARKER.uuid);
   });
 
   it('skips a reminder', () => {

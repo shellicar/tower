@@ -173,3 +173,98 @@ export const PARALLEL_ANSWER: RecordEntry = {
   type: 'assistant',
   uuid: 'c0000000-0000-4000-8000-00000000000c',
 };
+
+// The entries below were recorded from Claude Code 2.1.285 driven through the
+// SDK (proof run r4), with bookkeeping fields left out and long values cut.
+
+export const ENVIRONMENT_ATTACHMENT: RecordEntry = {
+  parentUuid: '228e4d8f-3fe8-42db-898f-7a3de626a876',
+  isSidechain: false,
+  attachment: { type: 'environment', snapshot: { workingDirectory: '/tmp/tower-proof/background/cwd', isWorktree: false, isGitRepo: false, platform: 'linux', shell: 'bash' } },
+  type: 'attachment',
+  uuid: '6dbc32e2-9a7e-488a-84c9-de1accfba356',
+  timestamp: '2026-10-02T16:43:26.877Z',
+  rendered: [{ content: '<system-reminder>\n# Environment\nYou have been invoked in the following environment: \n - Primary working directory: /tmp/tower-proof/background/cwd\n - Platform: linux\n</system-reminder>' }],
+  renderedRole: 'system',
+};
+
+export const TASK_NOTICE: RecordEntry = {
+  parentUuid: '3a432afb-158c-4fe5-a36e-cd54300a2d52',
+  isSidechain: false,
+  promptId: '3d9ec827-1d5b-438e-afcb-e2d931078c1e',
+  type: 'user',
+  message: {
+    role: 'user',
+    content: '<task-notification>\n<task-id>baqmnyz51</task-id>\n<tool-use-id>toolu_013sBHj3Jk443vmoJ8tL599k</tool-use-id>\n<status>completed</status>\n<summary>Background command "Run background sleep and echo" completed (exit code 0)</summary>\n</task-notification>',
+  },
+  uuid: 'c965e8a6-b09f-4026-bb4e-0c4995d70fe7',
+  timestamp: '2026-10-02T16:43:34.129Z',
+  origin: { kind: 'task-notification', producer: 'session-task' },
+  promptSource: 'system',
+  turnOrigin: 'task_notification',
+};
+
+export const COMPACT_BOUNDARY: RecordEntry = {
+  parentUuid: null,
+  logicalParentUuid: '2dde7688-fff7-4af9-ab6b-5220712f1002',
+  isSidechain: false,
+  type: 'system',
+  subtype: 'compact_boundary',
+  content: 'Conversation compacted',
+  isMeta: false,
+  timestamp: '2026-10-02T16:44:29.019Z',
+  uuid: 'b20cac5c-f1d1-48ac-b8a3-6bc56039a478',
+  level: 'info',
+  compactMetadata: {
+    trigger: 'manual',
+    preTokens: 18557,
+    durationMs: 4996,
+    preservedMessages: { anchorUuid: 'a03a05a6-426e-412b-ab5c-7fb8c6c42737', uuids: ['2dde7688-fff7-4af9-ab6b-5220712f1002'], allUuids: ['2dde7688-fff7-4af9-ab6b-5220712f1002'] },
+    postTokens: 2756,
+  },
+};
+
+export const COMPACT_SUMMARY: RecordEntry = {
+  parentUuid: 'b20cac5c-f1d1-48ac-b8a3-6bc56039a478',
+  isSidechain: false,
+  type: 'user',
+  message: { role: 'user', content: 'This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. Primary Request and Intent: ...' },
+  isVisibleInTranscriptOnly: true,
+  isCompactSummary: true,
+  uuid: 'a03a05a6-426e-412b-ab5c-7fb8c6c42737',
+  timestamp: '2026-10-02T16:44:29.018Z',
+};
+
+// The entries below are written by hand in the shape the transcript notes
+// describe; no recording holds one.
+
+export const HAND_BACK: RecordEntry = {
+  isSidechain: false,
+  type: 'user',
+  message: { role: 'user', content: 'Review done: 3 findings, none blocking.' },
+  isMeta: true,
+  origin: { kind: 'peer' },
+  uuid: 'c19f4e8a-26b7-4d03-a5e1-7f30b9c8d246',
+  timestamp: '2026-10-03T04:22:40.731Z',
+};
+
+export const TURN_FINISHED: RecordEntry = { isSidechain: false, type: 'system', subtype: 'turn_duration', durationMs: 2000, uuid: '9b4e2d70-3a85-4c16-8f07-6d1c0a5e3b92', timestamp: '2026-10-03T04:22:44.187Z' };
+
+export const NO_RESPONSE_REQUESTED: RecordEntry = {
+  isSidechain: false,
+  type: 'assistant',
+  message: { model: '<synthetic>', id: 'msg_synthetic_1', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'No response requested.' }] },
+  uuid: '4b1d7c52-9e03-4a68-b5f1-8c2a0d6e3f19',
+  timestamp: '2026-10-03T04:25:00.100Z',
+};
+
+export const API_ERROR: RecordEntry = {
+  isSidechain: false,
+  type: 'assistant',
+  message: { model: '<synthetic>', id: 'msg_synthetic_2', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'API Error: 529 Overloaded' }] },
+  isApiErrorMessage: true,
+  error: 'overloaded',
+  apiErrorStatus: 529,
+  uuid: '7e2a9f04-1c58-4d37-a6b0-3f8d5c1e9a42',
+  timestamp: '2026-10-03T04:26:10.200Z',
+};

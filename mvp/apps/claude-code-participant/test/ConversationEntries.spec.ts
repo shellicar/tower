@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { contentBlocksOf, isPrompt, roleOf } from '../src/ConversationEntries.js';
-import { AI_TITLE, ANSWER, DATE_ATTACHMENT, IMAGE_TOOL_RESULT, INTERRUPT_MARKER, PARTIAL_REPLY, PROMPT, QUEUE_OPERATION, THINKING, TOOL_USE } from './entries.js';
+import { classify, contentBlocksOf, isPrompt, type RecordEntry, roleOf } from '../src/ConversationEntries.js';
+import { AI_TITLE, ANSWER, API_ERROR, COMPACT_BOUNDARY, COMPACT_SUMMARY, DATE_ATTACHMENT, ENVIRONMENT_ATTACHMENT, HAND_BACK, IMAGE_TOOL_RESULT, INTERRUPT_MARKER, NO_RESPONSE_REQUESTED, PARTIAL_REPLY, PROMPT, QUEUE_OPERATION, TASK_NOTICE, THINKING, TOKENS_REMINDER, TOOL_USE, TURN_FINISHED } from './entries.js';
+
+const NOW = new Date('2026-10-03T05:00:00Z');
+
+function classified(entry: RecordEntry, preserved: Record<string, string[]> = {}) {
+  return classify(entry, { now: NOW, timeZone: 'UTC', preservedBy: (uuid) => preserved[uuid] });
+}
 
 function userText(text: unknown, fields: Record<string, unknown> = {}) {
   return { type: 'user', uuid: 'u1', message: { role: 'user', content: text }, ...fields };
@@ -39,24 +45,16 @@ describe('roleOf', () => {
     expect(roleOf({ type: 'system', subtype: 'compact_boundary', uuid: 's1', content: 'Conversation compacted' })).toBe('system');
   });
 
-  it('leaves out an interrupt marker', () => {
-    expect(roleOf(INTERRUPT_MARKER)).toBeUndefined();
+  it('publishes an interrupt marker as user', () => {
+    expect(roleOf(INTERRUPT_MARKER)).toBe('user');
   });
 
-  it('leaves out a marker written as a plain string', () => {
-    expect(roleOf(userText('[Request interrupted by user for tool use]'))).toBeUndefined();
-  });
-
-  it('leaves out a reminder', () => {
+  it('leaves out other isMeta text', () => {
     expect(roleOf(userText('Continue from where you left off.', { isMeta: true }))).toBeUndefined();
   });
 
-  it('leaves out a compaction summary', () => {
-    expect(roleOf(userText('This session is being continued from a previous conversation.', { isCompactSummary: true }))).toBeUndefined();
-  });
-
-  it('leaves out an attachment', () => {
-    expect(roleOf(DATE_ATTACHMENT)).toBeUndefined();
+  it('leaves out an attachment with no rendered form', () => {
+    expect(roleOf(TOKENS_REMINDER)).toBeUndefined();
   });
 
   it('leaves out bookkeeping with no uuid', () => {
@@ -73,6 +71,109 @@ describe('roleOf', () => {
 
   it('publishes a prompt that only starts like a marker further in', () => {
     expect(roleOf(userText('Why did I see [Request interrupted by user]?'))).toBe('user');
+  });
+});
+
+describe('classify', () => {
+  describe('a prompt', () => {
+    it('has no extras', () => {
+      expect(classified(PROMPT)).toEqual({ role: 'user' });
+    });
+  });
+
+  describe('a reminder', () => {
+    it('is published as its rendered text, in the rendered role', () => {
+      expect(classified(DATE_ATTACHMENT)).toMatchObject({ role: 'system', content: [{ type: 'text', text: "<system-reminder>\nToday's date is 2026-10-01.\n</system-reminder>" }] });
+    });
+
+    it('is seen by the model and not the person', () => {
+      expect(classified(ENVIRONMENT_ATTACHMENT)?.extras).toEqual({ audience: { model: true, user: false }, at: '2026-10-02T16:43:26.877Z' });
+    });
+  });
+
+  describe('a task-finished notice', () => {
+    it('is from the orchestrator', () => {
+      expect(classified(TASK_NOTICE)?.from).toEqual({ kind: 'orchestrator' });
+    });
+
+    it('is shown to the person as its summary line', () => {
+      expect(classified(TASK_NOTICE)?.extras?.userContent).toEqual([{ type: 'text', text: 'Background command "Run background sleep and echo" completed (exit code 0)' }]);
+    });
+
+    it('adds the duration to the summary line when the notice has one', () => {
+      const withUsage = { ...TASK_NOTICE, message: { role: 'user', content: '<task-notification><summary>Agent "reviewer" finished</summary><usage><duration_ms>39000</duration_ms></usage></task-notification>' } };
+      expect(classified(withUsage)?.extras?.userContent).toEqual([{ type: 'text', text: 'Agent "reviewer" finished · 39s' }]);
+    });
+
+    it('is not a prompt, so it does not take the say’s from', () => {
+      expect(isPrompt(TASK_NOTICE)).toBe(false);
+    });
+  });
+
+  describe('a subagent hand-back', () => {
+    it('is user text from an agent, seen by both', () => {
+      expect(classified(HAND_BACK)).toEqual({ role: 'user', from: { kind: 'agent' }, extras: { audience: { model: true, user: true }, at: '2026-10-03T04:22:40.731Z' } });
+    });
+  });
+
+  describe('an interrupt marker', () => {
+    it('is shown to the person as an interruption', () => {
+      expect(classified(INTERRUPT_MARKER)?.extras?.userContent).toEqual([{ type: 'text', text: 'Interrupted · What should Claude do instead?' }]);
+    });
+
+    it('keeps the stored text for the model', () => {
+      expect(classified(INTERRUPT_MARKER)?.content).toBeUndefined();
+    });
+
+    it('is seen by the model only when it marks a skipped tool call', () => {
+      expect(classified(userText('[Tool call skipped: the turn ended to deliver the message that follows before this call ran. Nothing refused it; re-run it if still needed.]'))?.extras?.audience).toEqual({ model: true, user: false });
+    });
+  });
+
+  describe('a compaction', () => {
+    it('publishes the boundary to the person only', () => {
+      expect(classified(COMPACT_BOUNDARY)?.extras?.audience).toEqual({ model: false, user: true });
+    });
+
+    it('publishes the summary with a scope that keeps what the boundary kept', () => {
+      expect(classified(COMPACT_SUMMARY, { [COMPACT_BOUNDARY.uuid as string]: ['2dde7688-fff7-4af9-ab6b-5220712f1002'] })?.extras?.scope).toEqual({ replaces: 'before', except: ['2dde7688-fff7-4af9-ab6b-5220712f1002'] });
+    });
+
+    it('publishes the summary with nothing kept when its boundary is unknown', () => {
+      expect(classified(COMPACT_SUMMARY)?.extras?.scope).toEqual({ replaces: 'before', except: [] });
+    });
+
+    it('is not a prompt', () => {
+      expect(isPrompt(COMPACT_SUMMARY)).toBe(false);
+    });
+  });
+
+  describe('the turn-finished line', () => {
+    it('is user-only text with the turn’s duration and end time', () => {
+      expect(classified(TURN_FINISHED)).toEqual({
+        role: 'system',
+        content: [{ type: 'text', text: 'Worked for 2s · done 04:22' }],
+        extras: { audience: { model: false, user: true }, at: '2026-10-03T04:22:44.187Z' },
+      });
+    });
+
+    it('names the weekday when the turn ended on another day', () => {
+      expect(classified({ ...TURN_FINISHED, timestamp: '2026-10-02T04:22:44.187Z' })?.content).toEqual([{ type: 'text', text: 'Worked for 2s · done Friday 04:22' }]);
+    });
+
+    it('reads a duration in minutes', () => {
+      expect(classified({ ...TURN_FINISHED, durationMs: 65000 })?.content).toEqual([{ type: 'text', text: 'Worked for 1m 5s · done 04:22' }]);
+    });
+  });
+
+  describe('a synthetic reply', () => {
+    it('keeps "No response requested." as assistant, seen by the model only', () => {
+      expect(classified(NO_RESPONSE_REQUESTED)).toMatchObject({ role: 'assistant', extras: { audience: { model: true, user: false } } });
+    });
+
+    it('publishes an API error as system, seen by the person only', () => {
+      expect(classified(API_ERROR)).toMatchObject({ role: 'system', extras: { audience: { model: false, user: true } } });
+    });
   });
 });
 
