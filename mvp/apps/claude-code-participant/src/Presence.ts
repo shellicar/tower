@@ -8,6 +8,7 @@ import { ConversationLauncher, NotConfiguredError } from './ConversationLauncher
 import { describeError } from './describeError.js';
 import { IHost } from './Host.js';
 import { IIds } from './Ids.js';
+import { Outbox } from './Outbox.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
 import { rejected, ServedConversation, type ServingInstance } from './ServedConversation.js';
 import { ServingGate } from './ServingGate.js';
@@ -40,6 +41,7 @@ type State = 'idle' | 'serving' | 'unavailable' | 'offline';
  */
 export class Presence {
   @dependsOn(IBroker) private readonly broker!: IBroker;
+  @dependsOn(Outbox) private readonly outbox!: Outbox;
   @dependsOn(ParticipantConfig) private readonly config!: ParticipantConfig;
   @dependsOn(IIds) private readonly ids!: IIds;
   @dependsOn(ITimer) private readonly timer!: ITimer;
@@ -61,12 +63,18 @@ export class Presence {
   }
 
   /**
-   * Connects, waits for the serving gate, then joins the world's queue group
-   * and announces itself: `ready`, then a first `pulse`, then one every
-   * interval. Shutdown beginning first stops it where it is.
+   * Connects and starts delivering what an earlier run left in the outbox,
+   * waits for the serving gate, then joins the world's queue group and
+   * announces itself: `ready`, then a first `pulse`, then one every interval.
+   * Shutdown beginning first stops it where it is.
    */
   public async start(): Promise<void> {
     await this.broker.connect();
+    // Shutdown beginning while connecting leaves no connection to deliver on.
+    if (this.state !== 'idle') {
+      return;
+    }
+    await this.outbox.resume();
     await this.gate.wait();
     if (this.state !== 'idle') {
       return;
@@ -92,10 +100,24 @@ export class Presence {
     }
   }
 
-  /** Publishes `detached` for every conversation still held. */
-  public detachAll(): void {
-    for (const conversation of this.served.values()) {
-      conversation.detach();
+  /**
+   * Publishes `detached` for every conversation still held, and delivers what
+   * the stream will take now: the messages still waiting and `detached` itself.
+   * What it won't take stays on disk for the next run.
+   */
+  public async detachAll(): Promise<void> {
+    const detaching = [...this.served.entries()].map(async ([id, conversation]) => {
+      try {
+        await conversation.detach();
+      } catch (err) {
+        this.host.log(`conversation ${id}: detached is not recorded: ${describeError(err)}`);
+      }
+    });
+    await Promise.all(detaching);
+    try {
+      await this.outbox.flush();
+    } catch (err) {
+      this.host.log(`delivering what is waiting in the outbox failed: ${describeError(err)}`);
     }
   }
 
@@ -200,14 +222,17 @@ export class Presence {
       }
       throw err;
     }
-    this.served.set(conversationId, new ServedConversation(conversation, this.servingInstance(instanceId)));
-    this.broker.publish(`conv.v2.${conversationId}.attachment.attached`, {
-      ts: this.timer.timestamp(),
-      instanceId,
-      world: this.config.world,
-      cwd,
-      intervalS: PULSE_INTERVAL_S,
-    });
+    const served = new ServedConversation(conversation, this.servingInstance(instanceId));
+    this.served.set(conversationId, served);
+    try {
+      await served.attach(cwd, PULSE_INTERVAL_S);
+    } catch (err) {
+      // `attached` is not recorded, so the conversation is not served: the
+      // service request is rejected and Claude Code's input is closed.
+      this.served.delete(conversationId);
+      served.abandon();
+      throw err;
+    }
     this.host.log(`serving conversation ${conversationId} in ${cwd}${resume ? ', resumed' : ''}`);
     return { accepted: true };
   }
@@ -215,6 +240,7 @@ export class Presence {
   private servingInstance(instanceId: string): ServingInstance {
     return {
       broker: this.broker,
+      outbox: this.outbox,
       timer: this.timer,
       ids: this.ids,
       host: this.host,

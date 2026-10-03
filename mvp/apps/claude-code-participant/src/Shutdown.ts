@@ -134,7 +134,7 @@ export class Shutdown {
       return;
     }
     this.host.log('shutdown stage 1: every Claude Code has exited');
-    this.presence.detachAll();
+    await this.presence.detachAll();
     this.presence.goOffline();
     // Every Claude Code has gone, so nothing tagged still descends from this
     // process: what is left outlived its Claude Code.
@@ -196,7 +196,7 @@ export class Shutdown {
       return;
     }
     this.host.log('shutdown stage 2: every Claude Code it signalled has exited');
-    this.presence.detachAll();
+    await this.presence.detachAll();
     this.presence.goOffline();
     // This process's own descendants are included: a Claude Code that
     // couldn't be signalled above is still one, and gets SIGTERM here.

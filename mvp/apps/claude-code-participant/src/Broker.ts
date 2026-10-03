@@ -1,3 +1,4 @@
+import { type JetStreamClient, jetstream } from '@nats-io/jetstream';
 import { type ObjectStore, Objm } from '@nats-io/obj';
 import { connect, type Msg, type NatsConnection } from '@nats-io/transport-node';
 import { dependsOn } from '@shellicar/core-di';
@@ -17,10 +18,36 @@ export type BrokerRequest = {
 
 export type BrokerSubscription = { unsubscribe(): void };
 
+/** The message is larger than the broker accepts, so no stream can ever take it. */
+export class MessageTooLarge extends Error {
+  public override name = 'MessageTooLarge';
+  public readonly size: number;
+  public readonly limit: number;
+
+  public constructor(size: number, limit: number) {
+    super(`message of ${size} bytes is over the broker's limit of ${limit} bytes`);
+    this.size = size;
+    this.limit = limit;
+  }
+}
+
+/** A stream acknowledges a publish within this long, or the publish has failed. */
+const STREAM_PUBLISH_TIMEOUT_MS = 10_000;
+
 /** Tower's bus: the edge between the participant and NATS. */
 export abstract class IBroker {
   public abstract connect(): Promise<void>;
+  /** Publishes without waiting for the broker: a message sent while the connection is down may be lost. */
   public abstract publish(subject: string, body: Record<string, unknown>): void;
+  /**
+   * Publishes to the stream that stores `subject` and resolves once the stream
+   * has acknowledged it, rejecting when it hasn't (no connection, no answer, no
+   * stream for the subject, or the stream refusing the message). The stream
+   * drops a publish of an `id` it has already stored within its duplicate
+   * window, so the same call can be repeated safely. Rejects with
+   * `MessageTooLarge` when the broker would never accept the message.
+   */
+  public abstract publishToStream(subject: string, body: Record<string, unknown>, id: string): Promise<void>;
   /** Hands each request on `subject` to `handle`; with `queue`, as one member of that queue group. */
   public abstract subscribe(subject: string, handle: (request: BrokerRequest) => void, options?: { queue?: string }): BrokerSubscription;
   /** Stores `data` as the object `name` in the object store `bucket`; resolves once the store has it. */
@@ -43,21 +70,40 @@ export class NatsBroker implements IBroker {
   @dependsOn(ParticipantConfig) private readonly config!: ParticipantConfig;
   @dependsOn(IHost) private readonly host!: IHost;
   private connection: NatsConnection | undefined;
+  private stream: JetStreamClient | undefined;
   private readonly objectStores = new Map<string, Promise<ObjectStore>>();
   private ended = false;
 
+  /** Rejects when the broker can't be reached; once connected, reconnects without limit. */
   public async connect(): Promise<void> {
-    const connection = await connect({ servers: this.config.natsUrl });
+    const connection = await connect({ servers: this.config.natsUrl, maxReconnectAttempts: -1 });
     const shutDownWhileConnecting = this.ended;
     if (shutDownWhileConnecting) {
       await connection.close();
       return;
     }
     this.connection = connection;
+    this.stream = jetstream(connection);
   }
 
   public publish(subject: string, body: Record<string, unknown>): void {
     this.connected().publish(subject, JSON.stringify(body));
+  }
+
+  public async publishToStream(subject: string, body: Record<string, unknown>, id: string): Promise<void> {
+    const connection = this.connected();
+    const { stream } = this;
+    if (stream === undefined) {
+      throw new Error('not connected to NATS');
+    }
+    const payload = JSON.stringify(body);
+    // The limit counts the headers too: the version line, the id header and the closing blank line.
+    const size = Buffer.byteLength(payload) + Buffer.byteLength(`NATS/1.0\r\nNats-Msg-Id: ${id}\r\n\r\n`);
+    const limit = connection.info?.max_payload;
+    if (limit !== undefined && size > limit) {
+      throw new MessageTooLarge(size, limit);
+    }
+    await stream.publish(subject, payload, { msgID: id, timeout: STREAM_PUBLISH_TIMEOUT_MS });
   }
 
   public subscribe(subject: string, handle: (request: BrokerRequest) => void, options: { queue?: string } = {}): BrokerSubscription {
