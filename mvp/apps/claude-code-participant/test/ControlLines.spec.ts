@@ -64,9 +64,14 @@ describe('control lines', () => {
       expect(reply).toEqual({ model: { ...FULL_MODEL, effort: 'low' } });
     });
 
-    it('clears a field sent as null', () => {
-      const [, reply] = testServices().control({ model: FULL_MODEL }, { model: { effort: null } });
-      expect(reply).toEqual({ model: { name: 'claude-sonnet-5', maxTokens: 32000, thinking: 'adaptive', thinkingDisplay: 'summarized' } });
+    it.each(['name', 'maxTokens', 'thinking', 'thinkingDisplay', 'effort'])('rejects %s sent as null', (field) => {
+      const [, reply] = testServices().control({ model: FULL_MODEL }, { model: { [field]: null } });
+      expect(reply).toEqual({ error: expect.stringMatching(new RegExp(`^invalid model: ${field}: `)) });
+    });
+
+    it('leaves the cell as it was when a field is sent as null', () => {
+      const [, , reply] = testServices().control({ model: FULL_MODEL }, { model: { effort: null } }, { settings: {} });
+      expect((reply as ReadBack).settings.model).toEqual(FULL_MODEL);
     });
 
     it('rejects an unknown field', () => {
@@ -112,9 +117,13 @@ describe('control lines', () => {
       expect(testServices().control({ system: { preset: true, name: 'claude_code' } })).toEqual([{ error: 'invalid system: Unrecognized key: "name"' }]);
     });
 
-    it('is cleared by null', () => {
+    it('rejects null', () => {
+      expect(testServices().control({ system: null })).toEqual([{ error: 'invalid system: Invalid input: expected object, received null' }]);
+    });
+
+    it('leaves the value as it was when null is sent', () => {
       const [, , reply] = testServices().control({ system: { preset: true } }, { system: null }, { settings: {} });
-      expect((reply as ReadBack).settings.system).toBeNull();
+      expect((reply as ReadBack).settings.system).toEqual({ preset: true });
     });
   });
 
@@ -125,6 +134,17 @@ describe('control lines', () => {
 
     it('rejects a mode it does not know', () => {
       expect(testServices().control({ permissionMode: 'yolo' })).toEqual([{ error: 'invalid permissionMode: Invalid option: expected one of "default"|"acceptEdits"|"bypassPermissions"|"plan"|"dontAsk"|"auto"' }]);
+    });
+  });
+
+  describe('permissionMode null', () => {
+    it('rejects null', () => {
+      expect(testServices().control({ permissionMode: null })).toEqual([{ error: expect.stringMatching(/^invalid permissionMode: /) }]);
+    });
+
+    it('leaves the mode as it was when null is sent', () => {
+      const [, , reply] = testServices().control({ permissionMode: 'plan' }, { permissionMode: null }, { settings: {} });
+      expect((reply as ReadBack).settings.permissionMode).toBe('plan');
     });
   });
 
