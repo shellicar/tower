@@ -75,8 +75,7 @@ export class NatsBroker implements IBroker {
   private ended = false;
 
   public async connect(): Promise<void> {
-    // Reconnects for as long as it takes: the client's default gives up after
-    // ten attempts, and every call after that throws.
+    // Reconnects without limit.
     const connection = await connect({ servers: this.config.natsUrl, maxReconnectAttempts: -1 });
     const shutDownWhileConnecting = this.ended;
     if (shutDownWhileConnecting) {

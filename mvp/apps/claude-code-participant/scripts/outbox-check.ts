@@ -81,6 +81,7 @@ async function until<T>(what: string, timeoutMs: number, read: () => Promise<T |
       if (value !== undefined) {
         return value;
       }
+      last = undefined;
     } catch (err) {
       last = err;
     }
@@ -191,6 +192,12 @@ async function expectStream(conversationId: string, entries: Entries, expected: 
   await until(`the stream to hold ${expected.join(', ')}`, timeoutMs, async () => {
     const held = labels(await stored(conversationId), entries.names);
     return held.length >= expected.length ? held : undefined;
+  }).catch(async (err: Error) => {
+    const held = await stored(conversationId).then(
+      (messages) => labels(messages, entries.names).join(', ') || 'nothing',
+      () => 'unreadable',
+    );
+    throw new Error(`${err.message}; it holds ${held}`);
   });
   // Longer than the stream's duplicate window is not needed: anything sent twice arrives within seconds.
   await delay(3000);
