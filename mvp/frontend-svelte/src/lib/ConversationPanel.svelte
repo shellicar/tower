@@ -7,6 +7,7 @@
   import { formatTokens, formatUsd, parseModelName, priceUsage } from './core/pricing';
   import { uploadAttachment } from './core/uploads';
   import { measurePlainTextHeight } from './core/textHeight';
+  import { visibleRows } from './core/visibleRows';
   import type { ConversationState } from './concerns/conversation.svelte';
   import type { AttachmentRef } from './types';
 
@@ -92,6 +93,10 @@
     if (Date.now() - lastPersist >= 2_000) write();
     else draftTimer = setTimeout(write, 300);
   });
+
+  // The messages meant for the person, with dimming/collapse info; the
+  // virtual list indexes these, so a hidden message takes no row.
+  const rows = $derived(visibleRows(oc.messages));
 
   let scroller: HTMLDivElement | undefined = $state();
   let editor: HTMLTextAreaElement | undefined = $state();
@@ -297,11 +302,14 @@
     <!-- px-3 (24px) on the scroller + MessageView's border-l-2 pl-2 (10px)
          eat into the row's content width before text wraps. -->
     <VirtualList
-      items={oc.messages}
+      items={rows}
       bind:scroller
       {pinning}
       {onscroll}
-      measureHeight={(message, contentWidth) => measurePlainTextHeight(message, contentWidth - 34)}
+      measureHeight={(r, contentWidth) =>
+        r.collapsed || r.scopeNote
+          ? undefined
+          : measurePlainTextHeight({ ...r.message, content: r.content }, contentWidth - 34)}
       class="h-full overflow-y-auto px-3 py-2"
     >
       {#snippet header()}
@@ -309,8 +317,8 @@
           <p class="text-neutral-500">loading…</p>
         {/if}
       {/snippet}
-      {#snippet row(message)}
-        <MessageView {message} />
+      {#snippet row(r)}
+        <MessageView row={r} />
       {/snippet}
       {#snippet footer()}
         {#if oc.pendingSay}

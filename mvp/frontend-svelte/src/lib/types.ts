@@ -32,6 +32,25 @@ export interface ConversationMessage {
   from?: Sender;
   content: ContentBlock[];
   ts: Millis;
+  /** Who the message is for; absent means both the model and the person. */
+  audience?: Audience;
+  /** What the person is shown instead of `content`. */
+  userContent?: ContentBlock[];
+  /** The entry's own time, RFC3339; `ts` is the publish time. */
+  at?: string;
+  /** Present on a message that replaces, for the model, everything before it
+   *  except the listed message ids. */
+  scope?: MessageScope;
+}
+
+export interface Audience {
+  model: boolean;
+  user: boolean;
+}
+
+export interface MessageScope {
+  replaces: 'before';
+  except: string[];
 }
 
 export interface RowState {

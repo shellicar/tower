@@ -26,6 +26,22 @@ describe('senderLabel', () => {
     expect(actual).toBe(expected);
   });
 
+  it('names an orchestrator by its kind', () => {
+    const expected = 'orchestrator';
+
+    const actual = senderLabel(message({ kind: 'orchestrator', userId: 'x' }, [text]));
+
+    expect(actual).toBe(expected);
+  });
+
+  it('names an agent by its kind', () => {
+    const expected = 'agent';
+
+    const actual = senderLabel(message({ kind: 'agent' }, [text]));
+
+    expect(actual).toBe(expected);
+  });
+
   it('reads no sender delivering tool results as tool', () => {
     const expected = 'tool';
 
