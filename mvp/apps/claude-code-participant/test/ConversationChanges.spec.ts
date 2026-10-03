@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { ConversationChanges } from '../src/ConversationChanges.js';
+import { ConversationChanges, type QueryReason } from '../src/ConversationChanges.js';
 import type { RecordEntry } from '../src/ConversationEntries.js';
 import { ANSWER, CALL_A, CALL_B, DATE_ATTACHMENT, IMAGE_TOOL_RESULT, INTERRUPT_MARKER, PARALLEL_ANSWER, PARTIAL_REPLY, PNG_BASE64, PROMPT, QUEUE_OPERATION, RESULT_A, RESULT_B, SECOND_PROMPT, THINKING, TOKENS_REMINDER, TOOL_USE } from './entries.js';
-import { FAKE_TIMESTAMP, settle, testServices } from './support.js';
+import { delivered, FAKE_TIMESTAMP, settle, testServices } from './support.js';
 
 const ID = '0c77fb4e-655e-41f2-be80-558ad2aaf6dc';
 const CHANGES = `conv.v2.${ID}.changes`;
@@ -13,9 +13,10 @@ const FIRST_QUERY = [QUEUE_OPERATION, PROMPT, DATE_ATTACHMENT, THINKING, TOOL_US
 
 function publishing() {
   const services = testServices();
+  services.timer.holdSleeps = true;
   let aborts = 0;
-  const changes = new ConversationChanges(ID, {
-    broker: services.broker,
+  const raw = new ConversationChanges(ID, {
+    lane: services.outbox.lane(ID),
     timer: services.timer,
     ids: services.ids,
     host: services.host,
@@ -25,7 +26,22 @@ function publishing() {
       aborts += 1;
     },
   });
-  return { ...services, changes, aborts: () => aborts };
+  // Each call returns once the outbox has delivered what the fakes will take.
+  const changes = {
+    openQuery: async (queryId: string, from: unknown) => {
+      await raw.openQuery(queryId, from);
+      await delivered();
+    },
+    commit: async (entries: readonly RecordEntry[]) => {
+      await raw.commit(entries);
+      await delivered();
+    },
+    close: async (reason: QueryReason) => {
+      await raw.close(reason);
+      await delivered();
+    },
+  };
+  return { ...services, changes, raw, aborts: () => aborts };
 }
 
 type Publishing = ReturnType<typeof publishing>;
@@ -161,7 +177,17 @@ describe('ConversationChanges', () => {
     await settle();
     held.resolve();
     await Promise.all([committed, closed]);
+    await delivered();
     expect(services.broker.subjects()).toEqual([`${CHANGES}.message`, `${CHANGES}.query.closed`]);
+  });
+
+  it('publishes a detached after the messages handed over before it', async () => {
+    const services = publishing();
+    services.broker.storeFailure = new Error('no responders');
+    await services.changes.openQuery('q1', HUMAN);
+    await services.changes.commit([IMAGE_TOOL_RESULT]);
+    await services.raw.announce('detached', {});
+    expect(services.outboxStore.waiting(ID)).toEqual([IMAGE_TOOL_RESULT.uuid, expect.any(String)]);
   });
 
   describe('a cancelled query', () => {
@@ -210,7 +236,7 @@ describe('ConversationChanges', () => {
   describe('files', () => {
     it('stores the image in the durable bucket, named under the conversation', async () => {
       const services = await firstQuery();
-      expect(services.broker.objects.map(({ bucket, name }) => ({ bucket, name }))).toEqual([{ bucket: 'durable-test', name: `${ID}/id-3` }]);
+      expect(services.broker.objects.map(({ bucket, name }) => ({ bucket, name }))).toEqual([{ bucket: 'durable-test', name: `${ID}/${IMAGE_TOOL_RESULT.uuid}.0` }]);
     });
 
     it("stores the image's bytes", async () => {
@@ -235,7 +261,7 @@ describe('ConversationChanges', () => {
         {
           tool_use_id: 'toolu_018yQgWWFdcauitggzkBdjjb',
           type: 'tool_result',
-          content: [{ type: 'image', source: { type: 'object', id: `${ID}/id-3`, bucket: 'durable-test', mediaType: 'image/png', size: 98 } }],
+          content: [{ type: 'image', source: { type: 'object', id: `${ID}/${IMAGE_TOOL_RESULT.uuid}.0`, bucket: 'durable-test', mediaType: 'image/png', size: 98 } }],
         },
       ]);
     });
@@ -243,11 +269,11 @@ describe('ConversationChanges', () => {
     it('stores a file at the top of the content too', async () => {
       const services = publishing();
       await services.changes.commit([{ type: 'user', uuid: 'u1', message: { role: 'user', content: [{ type: 'document', source: { type: 'base64', data: 'JVBERg==', media_type: 'application/pdf' } }] } }]);
-      expect(message(services, 'u1')?.content).toEqual([{ type: 'document', source: { type: 'object', id: `${ID}/id-3`, bucket: 'durable-test', mediaType: 'application/pdf', size: 4 } }]);
+      expect(message(services, 'u1')?.content).toEqual([{ type: 'document', source: { type: 'object', id: `${ID}/u1.0`, bucket: 'durable-test', mediaType: 'application/pdf', size: 4 } }]);
     });
 
-    describe('that cannot be stored', () => {
-      async function failing() {
+    describe('while the object store cannot take it', () => {
+      async function unreachable() {
         const services = publishing();
         services.broker.storeFailure = new Error('no responders');
         await services.changes.openQuery('q1', HUMAN);
@@ -256,59 +282,98 @@ describe('ConversationChanges', () => {
         return services;
       }
 
-      it('does not publish the message', async () => {
-        const services = await failing();
-        expect(message(services, IMAGE_TOOL_RESULT.uuid)).toBeUndefined();
+      it('does not abort the query', async () => {
+        const services = await unreachable();
+        expect(services.aborts()).toBe(0);
       });
 
-      it('aborts the query', async () => {
-        const services = await failing();
-        expect(services.aborts()).toBe(1);
+      it('keeps the message, with its bytes, on disk', async () => {
+        const services = await unreachable();
+        expect(services.outboxStore.waiting(ID)).toEqual([IMAGE_TOOL_RESULT.uuid, ANSWER.uuid, expect.any(String)]);
       });
 
-      it('publishes nothing more of the query', async () => {
-        const services = await failing();
+      it('publishes nothing behind it', async () => {
+        const services = await unreachable();
         expect(messages(services).map((body) => body.id)).toEqual([PROMPT.uuid, THINKING.uuid, TOOL_USE.uuid]);
       });
 
-      it('closes the query aborted', async () => {
-        const services = await failing();
-        expect(services.broker.published.at(-1)?.body).toEqual({ ts: FAKE_TIMESTAMP, instanceId: 'inst-1', queryId: 'q1', reason: 'aborted' });
+      it('says why, once', async () => {
+        const services = await unreachable();
+        expect(services.host.logs).toEqual([`conversation ${ID}: delivering message ${IMAGE_TOOL_RESULT.uuid} on ${CHANGES}.message failed, so it is kept and tried again: no responders`]);
       });
 
-      it('says why', async () => {
-        const services = await failing();
-        expect(services.host.logs).toEqual([`conversation ${ID}: storing a file of message ${IMAGE_TOOL_RESULT.uuid} failed, so query q1 is aborted: no responders`]);
-      });
-
-      it('publishes the next query', async () => {
-        const services = await failing();
+      it('stores the file, then publishes the message and what follows it, in order, once the store works', async () => {
+        const services = await unreachable();
         services.broker.storeFailure = undefined;
-        await services.changes.openQuery('q2', HUMAN);
-        await services.changes.commit([SECOND_PROMPT]);
-        expect(message(services, SECOND_PROMPT.uuid)?.queryId).toBe('q2');
+        services.timer.wake();
+        await delivered();
+        expect(services.broker.subjects().slice(3)).toEqual([`${CHANGES}.message`, `${CHANGES}.message`, `${CHANGES}.query.closed`]);
+      });
+
+      it('has stored the file before it publishes the message', async () => {
+        const services = await unreachable();
+        services.broker.storeFailure = undefined;
+        services.timer.wake();
+        await delivered();
+        const referencing = services.broker.published.findIndex((published) => published.body.id === IMAGE_TOOL_RESULT.uuid);
+        expect(services.broker.objects[0]?.publishedBefore).toBe(referencing);
+      });
+
+      it('removes what it delivered from disk', async () => {
+        const services = await unreachable();
+        services.broker.storeFailure = undefined;
+        services.timer.wake();
+        await delivered();
+        expect(services.outboxStore.waiting(ID)).toEqual([]);
       });
     });
 
-    it('treats a file with no media type as one that cannot be stored', async () => {
+    it('treats a file with no media type as one that cannot be referenced', async () => {
       const services = publishing();
       await services.changes.commit([{ type: 'user', uuid: 'u1', message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', data: PNG_BASE64 } }] } }]);
       expect(message(services, 'u1')).toBeUndefined();
     });
   });
 
-  it('keeps publishing the rest of a batch when one entry fails', async () => {
-    const services = publishing();
-    const publish = services.broker.publish.bind(services.broker);
-    let calls = 0;
-    services.broker.publish = (subject, body) => {
-      calls += 1;
-      if (calls === 1) {
-        throw new Error('not connected to NATS');
-      }
-      publish(subject, body);
-    };
-    await services.changes.commit([PROMPT, THINKING]);
-    expect(messages(services).map((body) => body.id)).toEqual([THINKING.uuid]);
+  describe('a message that cannot be written to disk', () => {
+    it('rejects the commit, so Claude Code hands the entries over again', async () => {
+      const services = publishing();
+      services.outboxStore.writeFailure = new Error('no space left on device');
+      await expect(services.raw.commit([PROMPT])).rejects.toThrow('writing message');
+    });
+
+    it('does not reject the commit of the next batch once it can be written', async () => {
+      const services = publishing();
+      services.outboxStore.writeFailure = new Error('no space left on device');
+      await services.raw.commit([PROMPT]).catch(() => undefined);
+      services.outboxStore.writeFailure = undefined;
+      await expect(services.raw.commit([PROMPT])).resolves.toBeUndefined();
+    });
+  });
+
+  describe('a stream that refuses a message', () => {
+    it('does not reject the commit', async () => {
+      const services = publishing();
+      services.broker.streamFailure = new Error('message size exceeds maximum allowed');
+      await expect(services.raw.commit([PROMPT, THINKING])).resolves.toBeUndefined();
+    });
+
+    it('keeps it and every message behind it, in order', async () => {
+      const services = publishing();
+      services.broker.streamFailure = new Error('message size exceeds maximum allowed');
+      await services.changes.commit([PROMPT, THINKING]);
+      expect(services.outboxStore.waiting(ID)).toEqual([PROMPT.uuid, THINKING.uuid]);
+    });
+
+    it('delivers them in order once the cause is removed', async () => {
+      const services = publishing();
+      services.broker.streamFailure = new Error('message size exceeds maximum allowed');
+      await services.changes.commit([PROMPT, THINKING]);
+      await services.changes.commit([TOOL_USE]);
+      services.broker.streamFailure = undefined;
+      services.timer.wake();
+      await delivered();
+      expect(messages(services).map((body) => body.id)).toEqual([PROMPT.uuid, THINKING.uuid, TOOL_USE.uuid]);
+    });
   });
 });

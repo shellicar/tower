@@ -1,13 +1,15 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { Options, Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { type BrokerRequest, type BrokerSubscription, IBroker, type Reply } from '../src/Broker.js';
+import { type BrokerRequest, type BrokerSubscription, IBroker, MessageTooLarge, type Reply } from '../src/Broker.js';
 import { IClaudeCode } from '../src/ClaudeCode.js';
 import { ControlLines } from '../src/ControlLines.js';
 import { participantServices } from '../src/container.js';
 import { IHost } from '../src/Host.js';
 import { IIds } from '../src/Ids.js';
 import { MessageChannel } from '../src/MessageChannel.js';
+import { Outbox } from '../src/Outbox.js';
+import { IOutboxStore, type OutboxRecord, type StoredRecord } from '../src/OutboxStore.js';
 import { ParticipantConfig } from '../src/ParticipantConfig.js';
 import { type ChildProcessHandle, IProcessSpawner, type ProcessOptions } from '../src/ProcessSpawner.js';
 import { IProcessTable, type ProcessIdentity, ProcessListUnreadable, type TaggedProcess } from '../src/ProcessTable.js';
@@ -57,6 +59,13 @@ type FakeLaunch = {
 /** Lets every pending promise callback run. */
 export function settle(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+/** Lets the outbox deliver everything the fakes will take: its work is promises, which a few turns of the event loop finish. */
+export async function delivered(): Promise<void> {
+  for (let turn = 0; turn < 5; turn += 1) {
+    await settle();
+  }
 }
 
 /** The `result` Claude Code sends when a query ends, with only the fields the participant reads. */
@@ -289,10 +298,27 @@ class FakeTimer implements ITimer {
     return this.time;
   }
 
-  public sleep(ms: number): Promise<void> {
+  /** While set, a sleep waits until `wake` is called instead of ending at once. */
+  public holdSleeps = false;
+  private readonly sleepers: (() => void)[] = [];
+
+  public sleep(ms: number, wake?: AbortSignal): Promise<void> {
     this.time += ms;
+    const held = this.holdSleeps
+      ? new Promise<void>((resolve) => {
+          this.sleepers.push(resolve);
+          wake?.addEventListener('abort', () => resolve(), { once: true });
+        })
+      : Promise.resolve();
     this.onSleep?.(this.time);
-    return Promise.resolve();
+    return held;
+  }
+
+  /** Ends every sleep that is being held. */
+  public wake(): void {
+    for (const resolve of this.sleepers.splice(0)) {
+      resolve();
+    }
   }
 
   public timestamp(): string {
@@ -349,9 +375,59 @@ type StoredObject = {
   publishedBefore: number;
 };
 
+/** The outbox's directory held in memory; a test reads and writes `conversations` to stand for what is on disk. */
+export class FakeOutboxStore implements IOutboxStore {
+  public readonly conversationsOnDisk = new Map<string, Map<number, { record: OutboxRecord; blobs: Uint8Array[] }>>();
+  /** Makes every write fail with this error, as a full disk does. */
+  public writeFailure: Error | undefined;
+
+  public conversations(): Promise<string[]> {
+    return Promise.resolve([...this.conversationsOnDisk.keys()].filter((id) => (this.conversationsOnDisk.get(id)?.size ?? 0) > 0));
+  }
+
+  public load(conversationId: string): Promise<StoredRecord[]> {
+    const records = [...(this.conversationsOnDisk.get(conversationId) ?? [])].sort(([a], [b]) => a - b);
+    return Promise.resolve(records.map(([seq, { record }]) => ({ seq, record: structuredClone(record) })));
+  }
+
+  public write(conversationId: string, seq: number, record: OutboxRecord, blobs: readonly Uint8Array[]): Promise<void> {
+    if (this.writeFailure !== undefined) {
+      return Promise.reject(this.writeFailure);
+    }
+    const directory = this.conversationsOnDisk.get(conversationId) ?? new Map();
+    directory.set(seq, { record: structuredClone(record), blobs: [...blobs] });
+    this.conversationsOnDisk.set(conversationId, directory);
+    return Promise.resolve();
+  }
+
+  public readBlob(conversationId: string, seq: number, index: number): Promise<Uint8Array> {
+    const blob = this.conversationsOnDisk.get(conversationId)?.get(seq)?.blobs[index];
+    return blob === undefined ? Promise.reject(new Error('no such blob')) : Promise.resolve(blob);
+  }
+
+  public remove(conversationId: string, seq: number): Promise<void> {
+    this.conversationsOnDisk.get(conversationId)?.delete(seq);
+    return Promise.resolve();
+  }
+
+  /** The ids of what is waiting for the conversation, in order. */
+  public waiting(conversationId: string): string[] {
+    return [...(this.conversationsOnDisk.get(conversationId) ?? [])].sort(([a], [b]) => a - b).map(([, { record }]) => record.id);
+  }
+}
+
 /** Records what is published, stored and subscribed, and delivers a test's requests to whatever subscribes to them. */
 class FakeBroker implements IBroker {
+  /** Everything published, to the stream or not, in the order the broker took it. */
   public readonly published: { subject: string; body: Record<string, unknown> }[] = [];
+  /** The id of each message the stream took, in order. A repeat of one already taken is acknowledged and not taken again. */
+  public readonly streamIds: string[] = [];
+  /** Makes every publish to the stream fail with this error, as a broker that is down or a stream that refuses does. */
+  public streamFailure: Error | undefined;
+  /** The largest message the fake broker takes, in the size of its JSON body. */
+  public maxPayload = Number.POSITIVE_INFINITY;
+  /** Called after the stream has taken a message and before it is acknowledged: a test throws here to lose the acknowledgement. */
+  public afterTaken: ((id: string) => void) | undefined;
   public readonly objects: StoredObject[] = [];
   public readonly subscriptions: FakeSubscription[] = [];
   public connectFailure: Error | undefined;
@@ -365,6 +441,22 @@ class FakeBroker implements IBroker {
 
   public publish(subject: string, body: Record<string, unknown>): void {
     this.published.push({ subject, body: structuredClone(body) });
+  }
+
+  public publishToStream(subject: string, body: Record<string, unknown>, id: string): Promise<void> {
+    if (this.streamFailure !== undefined) {
+      return Promise.reject(this.streamFailure);
+    }
+    const size = JSON.stringify(body).length;
+    if (size > this.maxPayload) {
+      return Promise.reject(new MessageTooLarge(size, this.maxPayload));
+    }
+    if (!this.streamIds.includes(id)) {
+      this.streamIds.push(id);
+      this.published.push({ subject, body: structuredClone(body) });
+    }
+    this.afterTaken?.(id);
+    return Promise.resolve();
   }
 
   public subscribe(subject: string, handle: (request: BrokerRequest) => void, options: { queue?: string } = {}): BrokerSubscription {
@@ -430,6 +522,7 @@ export function testServices(config: ParticipantConfig = testConfig(), options: 
   services.register(FakeTimer).as(ITimer);
   services.register(FakeHost).as(IHost);
   services.register(FakeBroker).as(IBroker);
+  services.register(FakeOutboxStore).as(IOutboxStore);
   services.register(FakeIds).as(IIds);
   const provider = services.buildProvider();
   if (options.gateShut !== true) {
@@ -443,6 +536,8 @@ export function testServices(config: ParticipantConfig = testConfig(), options: 
     timer: provider.resolve(ITimer) as FakeTimer,
     host: provider.resolve(IHost) as FakeHost,
     broker: provider.resolve(IBroker) as FakeBroker,
+    outboxStore: provider.resolve(IOutboxStore) as FakeOutboxStore,
+    outbox: provider.resolve(Outbox),
     ids: provider.resolve(IIds) as FakeIds,
     /** Sends control lines, as stdin would, and returns their replies. */
     control: (...lines: unknown[]) => lines.map((line) => provider.resolve(ControlLines).handle(typeof line === 'string' ? line : JSON.stringify(line))),

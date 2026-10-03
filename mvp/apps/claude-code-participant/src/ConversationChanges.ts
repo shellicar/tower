@@ -1,22 +1,23 @@
-import type { IBroker } from './Broker.js';
 import { contentBlocksOf, isMainChain, isObject, isPrompt, type RecordEntry, responseIdOf, roleOf } from './ConversationEntries.js';
 import { describeError } from './describeError.js';
 import type { IHost } from './Host.js';
 import type { IIds } from './Ids.js';
+import { type OutboxLane, OutboxWriteError, type OutgoingFile } from './Outbox.js';
 import type { ITimer } from './Timer.js';
 
 export type QueryReason = 'completed' | 'cancelled' | 'aborted';
 
 /** What a conversation's change stream is published with. */
 export type ChangeSources = {
-  broker: IBroker;
+  /** Where everything published goes: kept on disk until the stream has it. */
+  lane: OutboxLane;
   timer: ITimer;
   ids: IIds;
   host: IHost;
   instanceId: string;
   /** The durable object store bucket files are stored in. */
   durableBucket: string;
-  /** Stops the running query, when one of its files can't be stored. */
+  /** Stops the running query, when one of its files can't be turned into a reference. */
   abort(): void;
 };
 
@@ -24,7 +25,7 @@ type OpenQuery = {
   id: string;
   /** The `from` of the say that opened it, for its prompt; spent once the prompt is published. */
   from: unknown;
-  /** A file of one of its messages couldn't be stored: nothing more of it is published. */
+  /** A file of one of its messages couldn't be turned into a reference: nothing more of it is published. */
   aborted: boolean;
 };
 
@@ -37,8 +38,9 @@ type ObjectSource = { type: 'object'; id: string; bucket: string; mediaType: str
 /**
  * One conversation's `changes`: each entry Claude Code appends that is a
  * message goes out on `changes.message`, with the query and turn it belongs
- * to, and each query's end on `changes.query.closed`. Everything is
- * published in the order it is handed over.
+ * to, and each query's end on `changes.query.closed`. Everything, attachment
+ * events included, is handed to the conversation's outbox in the order it is
+ * handed over here, and reaches the stream in that order.
  */
 export class ConversationChanges {
   private readonly conversationId: string;
@@ -60,16 +62,24 @@ export class ConversationChanges {
   public openQuery(queryId: string, from: unknown): Promise<void> {
     return this.enqueue(() => {
       this.startQuery(queryId, from);
-    });
+    }).catch(() => undefined);
   }
 
-  /** Publishes the messages among `entries`. Never rejects: a failure is logged. */
+  /**
+   * Hands the messages among `entries` to the outbox, and resolves once they
+   * are safe on disk. Rejects when one couldn't be written, so that Claude
+   * Code's record hands the entries over again; an entry that can't be
+   * turned into a message is logged and skipped.
+   */
   public commit(entries: readonly RecordEntry[]): Promise<void> {
     return this.enqueue(async () => {
       for (const entry of entries) {
         try {
           await this.take(entry);
         } catch (err) {
+          if (err instanceof OutboxWriteError) {
+            throw err;
+          }
           this.sources.host.log(`conversation ${this.conversationId}: publishing entry ${entry.uuid ?? entry.type} failed: ${describeError(err)}`);
         }
       }
@@ -78,19 +88,27 @@ export class ConversationChanges {
 
   /** Publishes the open query's closure, after everything handed over before it; `aborted` if it was given up. */
   public close(reason: QueryReason): Promise<void> {
-    return this.enqueue(() => {
+    return this.enqueue(async () => {
       const { query } = this;
       if (query === undefined) {
         return;
       }
       this.query = undefined;
-      this.publish('query.closed', { queryId: query.id, reason: query.aborted ? 'aborted' : reason });
-    });
+      await this.publish('query.closed', { queryId: query.id, reason: query.aborted ? 'aborted' : reason });
+    }).catch(() => undefined);
   }
 
+  /** Publishes an attachment event (`attached`, `detached`), after everything handed over before it. */
+  public announce(leaf: 'attached' | 'detached', fields: Record<string, unknown>): Promise<void> {
+    const body = { ts: this.sources.timer.timestamp(), instanceId: this.sources.instanceId, ...fields };
+    return this.enqueue(() => this.sources.lane.enqueue({ subject: `conv.v2.${this.conversationId}.attachment.${leaf}`, body, id: this.sources.ids.mint() })).catch(() => undefined);
+  }
+
+  /** Runs `work` after everything queued before it. A failure is logged and rejects the returned promise, and never stops the work queued after it. */
   private enqueue(work: () => void | Promise<void>): Promise<void> {
-    this.queue = this.queue.then(work).catch((err: unknown) => this.sources.host.log(`conversation ${this.conversationId}: publishing changes failed: ${describeError(err)}`));
-    return this.queue;
+    const result = this.queue.then(work);
+    this.queue = result.catch((err: unknown) => this.sources.host.log(`conversation ${this.conversationId}: publishing changes failed: ${describeError(err)}`));
+    return result;
   }
 
   private startQuery(id: string, from: unknown): OpenQuery {
@@ -117,12 +135,13 @@ export class ConversationChanges {
     }
     turn.id ??= this.sources.ids.mint();
     const id = entry.uuid as string;
+    const files: OutgoingFile[] = [];
     let content: unknown[];
     try {
-      content = await this.storeFiles(id, contentBlocksOf(entry));
+      content = this.referenceFiles(id, contentBlocksOf(entry), files);
     } catch (err) {
       query.aborted = true;
-      this.sources.host.log(`conversation ${this.conversationId}: storing a file of message ${id} failed, so query ${query.id} is aborted: ${describeError(err)}`);
+      this.sources.host.log(`conversation ${this.conversationId}: a file of message ${id} can't be referenced, so query ${query.id} is aborted: ${describeError(err)}`);
       this.sources.abort();
       return;
     }
@@ -131,7 +150,7 @@ export class ConversationChanges {
       from = query.from;
       query.from = undefined;
     }
-    this.publish('message', { id, queryId: query.id, turnId: turn.id, role, ...(from === undefined ? {} : { from }), content });
+    await this.publish('message', { id, queryId: query.id, turnId: turn.id, role, ...(from === undefined ? {} : { from }), content }, { id, files });
   }
 
   /**
@@ -160,38 +179,41 @@ export class ConversationChanges {
   }
 
   /**
-   * The content with each file's bytes stored in the durable store and its
-   * block pointing there instead, files inside tool results included.
+   * The content with each file's block pointing at the object its bytes will
+   * be stored as, files inside tool results included. The files are added to
+   * `files`, to be stored before the message is published. An object is named
+   * by its message and its place in it, so storing it again replaces it.
    */
-  private async storeFiles(messageId: string, blocks: readonly unknown[]): Promise<unknown[]> {
-    const stored: unknown[] = [];
+  private referenceFiles(messageId: string, blocks: readonly unknown[], files: OutgoingFile[]): unknown[] {
+    const referenced: unknown[] = [];
     for (const block of blocks) {
       if (!isObject(block)) {
-        stored.push(block);
+        referenced.push(block);
       } else if (isObject(block.source) && block.source.type === 'base64' && typeof block.source.data === 'string') {
-        stored.push({ ...block, source: await this.storeFile(messageId, block.source) });
+        referenced.push({ ...block, source: this.referenceFile(messageId, block.source, files) });
       } else if (block.type === 'tool_result' && Array.isArray(block.content)) {
-        stored.push({ ...block, content: await this.storeFiles(messageId, block.content) });
+        referenced.push({ ...block, content: this.referenceFiles(messageId, block.content, files) });
       } else {
-        stored.push(block);
+        referenced.push(block);
       }
     }
-    return stored;
+    return referenced;
   }
 
-  private async storeFile(messageId: string, source: Record<string, unknown>): Promise<ObjectSource> {
+  private referenceFile(messageId: string, source: Record<string, unknown>, files: OutgoingFile[]): ObjectSource {
     const mediaType = source.media_type;
     if (typeof mediaType !== 'string') {
       throw new Error('the file has no media type');
     }
     const bytes = Buffer.from(source.data as string, 'base64');
     const { durableBucket: bucket } = this.sources;
-    const id = `${this.conversationId}/${this.sources.ids.mint()}`;
-    await this.sources.broker.storeObject(bucket, id, bytes, { messageId, mediaType });
+    const id = `${this.conversationId}/${messageId}.${files.length}`;
+    files.push({ objectId: id, bucket, metadata: { messageId, mediaType }, bytes });
     return { type: 'object', id, bucket, mediaType, size: bytes.length };
   }
 
-  private publish(leaf: string, fields: Record<string, unknown>): void {
-    this.sources.broker.publish(`${this.subjectPrefix}.${leaf}`, { ts: this.sources.timer.timestamp(), instanceId: this.sources.instanceId, ...fields });
+  private publish(leaf: string, fields: Record<string, unknown>, delivery: { id?: string; files?: readonly OutgoingFile[] } = {}): Promise<void> {
+    const body = { ts: this.sources.timer.timestamp(), instanceId: this.sources.instanceId, ...fields };
+    return this.sources.lane.enqueue({ subject: `${this.subjectPrefix}.${leaf}`, body, id: delivery.id ?? this.sources.ids.mint(), files: delivery.files ?? [] });
   }
 }

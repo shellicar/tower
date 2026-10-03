@@ -7,6 +7,7 @@ import { ConversationChanges, type QueryReason } from './ConversationChanges.js'
 import { describeError } from './describeError.js';
 import type { IHost } from './Host.js';
 import type { IIds } from './Ids.js';
+import type { Outbox } from './Outbox.js';
 import type { IPublisher } from './SessionStore.js';
 import type { ITimer } from './Timer.js';
 
@@ -25,6 +26,7 @@ export function rejected(reason: string, detail?: string): Reply {
 /** What a served conversation shares with the instance serving it. */
 export type ServingInstance = {
   broker: IBroker;
+  outbox: Outbox;
   timer: ITimer;
   ids: IIds;
   host: IHost;
@@ -68,7 +70,7 @@ export class ServedConversation {
     this.instance = instance;
     this.requestPrefix = `conv.v2.${conversation.id}.requests.`;
     this.changes = new ConversationChanges(conversation.id, {
-      broker: instance.broker,
+      lane: instance.outbox.lane(conversation.id),
       timer: instance.timer,
       ids: instance.ids,
       host: instance.host,
@@ -85,15 +87,24 @@ export class ServedConversation {
     return this.conversation.id;
   }
 
-  /** Stops answering the conversation's requests and publishing its changes, and publishes `detached`, once. */
-  public detach(): void {
+  /** Publishes `attached`, ahead of everything the conversation publishes after it. */
+  public attach(cwd: string, intervalS: number): Promise<void> {
+    return this.changes.announce('attached', { world: this.instance.world, cwd, intervalS });
+  }
+
+  /**
+   * Stops answering the conversation's requests and publishing its changes, and
+   * publishes `detached`, once, after every message handed over before it.
+   * Resolves once `detached` is safe on disk.
+   */
+  public detach(): Promise<void> {
     if (this.isDetached) {
-      return;
+      return Promise.resolve();
     }
     this.isDetached = true;
     this.subscription.unsubscribe();
     this.unroute();
-    this.instance.broker.publish(`conv.v2.${this.id}.attachment.detached`, { ts: this.instance.timer.timestamp(), instanceId: this.instance.instanceId, world: this.instance.world });
+    return this.changes.announce('detached', { world: this.instance.world });
   }
 
   private handle(request: BrokerRequest): void {
