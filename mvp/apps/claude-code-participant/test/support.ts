@@ -380,6 +380,9 @@ export class FakeOutboxStore implements IOutboxStore {
   public readonly conversationsOnDisk = new Map<string, Map<number, { record: OutboxRecord; blobs: Uint8Array[] }>>();
   /** Makes every write fail with this error, as a full disk does. */
   public writeFailure: Error | undefined;
+  /** Makes the write with this number (counting from 1, once) fail with `writeFailure`'s default error. */
+  public failOnWrite: number | undefined;
+  private writes = 0;
 
   public conversations(): Promise<string[]> {
     return Promise.resolve([...this.conversationsOnDisk.keys()].filter((id) => (this.conversationsOnDisk.get(id)?.size ?? 0) > 0));
@@ -391,6 +394,10 @@ export class FakeOutboxStore implements IOutboxStore {
   }
 
   public write(conversationId: string, seq: number, record: OutboxRecord, blobs: readonly Uint8Array[]): Promise<void> {
+    this.writes += 1;
+    if (this.failOnWrite === this.writes) {
+      return Promise.reject(new Error('no space left on device'));
+    }
     if (this.writeFailure !== undefined) {
       return Promise.reject(this.writeFailure);
     }
@@ -435,8 +442,29 @@ class FakeBroker implements IBroker {
   public storeFailure: Error | undefined;
   public ended: 'drain' | 'close' | undefined;
 
-  public connect(): Promise<void> {
-    return this.connectFailure === undefined ? Promise.resolve() : Promise.reject(this.connectFailure);
+  /** While set, `connect` waits for `connectable`, as a broker that is unreachable does; `drain` and `close` end the wait. */
+  public unreachable = false;
+  private readonly connectWaiters: (() => void)[] = [];
+
+  public async connect(): Promise<void> {
+    if (this.connectFailure !== undefined) {
+      throw this.connectFailure;
+    }
+    if (this.unreachable) {
+      await new Promise<void>((resolve) => this.connectWaiters.push(resolve));
+    }
+  }
+
+  /** The broker becomes reachable: a waiting `connect` resolves connected. */
+  public becomeReachable(): void {
+    this.unreachable = false;
+    this.endConnectWait();
+  }
+
+  private endConnectWait(): void {
+    for (const resolve of this.connectWaiters.splice(0)) {
+      resolve();
+    }
   }
 
   public publish(subject: string, body: Record<string, unknown>): void {
@@ -482,11 +510,13 @@ class FakeBroker implements IBroker {
 
   public drain(): Promise<void> {
     this.ended = 'drain';
+    this.endConnectWait();
     return Promise.resolve();
   }
 
   public close(): Promise<void> {
     this.ended = 'close';
+    this.endConnectWait();
     return Promise.resolve();
   }
 

@@ -356,6 +356,87 @@ run('detached published while earlier messages are still waiting', async () => {
   await harness.kill();
 });
 
+const MAIN = fileURLToPath(new URL('../src/main.ts', import.meta.url));
+
+type Participant = { stderr: string[]; exited: Promise<number | null>; running(): boolean; interrupt(): void; kill(): Promise<void> };
+
+/** The participant as `main.ts` runs it, with stdin held open, in a config dir and world of its own. */
+function startParticipant(configDir: string, world: string): Participant {
+  const child = spawn(process.execPath, ['--import', 'tsx', MAIN], {
+    cwd: APP,
+    env: { ...process.env, NATS_URL: natsUrl, PARTICIPANT_WORLD: world, PARTICIPANT_DURABLE_BUCKET: BUCKET, PARTICIPANT_CONFIG_DIR: configDir },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const stderr: string[] = [];
+  createInterface({ input: child.stderr }).on('line', (line) => {
+    stderr.push(line);
+    console.error(`    participant: ${line}`);
+  });
+  const exited = new Promise<number | null>((resolve) => child.once('exit', (code) => resolve(code)));
+  return {
+    stderr,
+    exited,
+    running: () => child.exitCode === null && child.signalCode === null,
+    interrupt: () => child.kill('SIGINT'),
+    kill: async () => {
+      child.kill('SIGKILL');
+      await exited;
+    },
+  };
+}
+
+run('a start while the broker is unreachable, with entries left on disk by a run that was killed', async () => {
+  const { configDir, conversationId, entries } = scratch();
+  const world = `outbox-check-${randomUUID()}`;
+  const earlier = await startHarness(configDir, conversationId);
+  compose('stop', 'nats');
+  await append(earlier, entries.text('h1'), entries.text('h2'));
+  await earlier.kill();
+  let ready = false;
+  connection.subscribe(`agent.v1.${world}.telemetry.ready`, {
+    callback: () => {
+      ready = true;
+    },
+  });
+  const participant = startParticipant(configDir, world);
+  try {
+    await delay(8000);
+    assert.ok(participant.running(), 'the participant is still waiting, not ended');
+    assert.ok(
+      participant.stderr.some((line) => line.includes('connecting to NATS failed')),
+      'it says it is waiting for the broker',
+    );
+    compose('start', 'nats');
+    await until('the participant to announce itself', 60_000, async () => (ready ? true : undefined));
+    await expectStream(conversationId, entries, ['h1', 'h2'], 60_000);
+    assert.deepEqual(emptyOutbox(configDir, conversationId), []);
+    participant.interrupt();
+    assert.equal(await participant.exited, 0, 'it shuts down normally');
+  } finally {
+    if (participant.running()) {
+      await participant.kill();
+    }
+  }
+});
+
+run('a shutdown while the broker is unreachable', async () => {
+  const { configDir } = scratch();
+  compose('stop', 'nats');
+  const participant = startParticipant(configDir, `outbox-check-${randomUUID()}`);
+  try {
+    await delay(8000);
+    assert.ok(participant.running(), 'the participant is still waiting, not ended');
+    participant.interrupt();
+    const code = await Promise.race([participant.exited, delay(30_000).then(() => 'still running')]);
+    assert.equal(code, 0, 'it shuts down normally');
+  } finally {
+    if (participant.running()) {
+      await participant.kill();
+    }
+    compose('start', 'nats');
+  }
+});
+
 let failed = 0;
 try {
   for (const { name, run: body } of cases) {

@@ -335,6 +335,69 @@ describe('ConversationChanges', () => {
     });
   });
 
+  describe('a batch handed over again after a write failed', () => {
+    it("gives the prompt the say's from", async () => {
+      const services = publishing();
+      await services.changes.openQuery('q1', HUMAN);
+      services.outboxStore.failOnWrite = 1;
+      await services.raw.commit([PROMPT, THINKING]).catch(() => undefined);
+      await services.changes.commit([PROMPT, THINKING]);
+      expect(message(services, PROMPT.uuid)?.from).toEqual(HUMAN);
+    });
+
+    it('does not keep a second row for an entry it already kept', async () => {
+      const services = publishing();
+      services.broker.streamFailure = new Error('not connected to NATS');
+      await services.changes.openQuery('q1', HUMAN);
+      services.outboxStore.failOnWrite = 3;
+      await services.raw.commit([PROMPT, THINKING, TOOL_USE]).catch(() => undefined);
+      await services.raw.commit([PROMPT, THINKING, TOOL_USE]);
+      expect(services.outboxStore.waiting(ID)).toEqual([PROMPT.uuid, THINKING.uuid, TOOL_USE.uuid]);
+    });
+
+    it('does not keep a second row for an entry handed over twice', async () => {
+      const services = publishing();
+      services.broker.streamFailure = new Error('not connected to NATS');
+      await services.raw.commit([PROMPT]);
+      await services.raw.commit([PROMPT]);
+      expect(services.outboxStore.waiting(ID)).toEqual([PROMPT.uuid]);
+    });
+
+    it('does not publish an entry again once the stream has it', async () => {
+      const services = publishing();
+      await services.changes.commit([PROMPT]);
+      await services.changes.commit([PROMPT]);
+      expect(messages(services).map((body) => body.id)).toEqual([PROMPT.uuid]);
+    });
+  });
+
+  describe('a closure that cannot be written to disk', () => {
+    it('rejects, so the caller knows it is not recorded', async () => {
+      const services = publishing();
+      await services.changes.openQuery('q1', HUMAN);
+      services.outboxStore.writeFailure = new Error('no space left on device');
+      await expect(services.raw.close('completed')).rejects.toThrow('writing message');
+    });
+
+    it('can be written again, as the same query', async () => {
+      const services = publishing();
+      await services.changes.openQuery('q1', HUMAN);
+      services.outboxStore.writeFailure = new Error('no space left on device');
+      await services.raw.close('completed').catch(() => undefined);
+      services.outboxStore.writeFailure = undefined;
+      await services.changes.close('completed');
+      expect(services.broker.published.at(-1)?.body).toMatchObject({ queryId: 'q1', reason: 'completed' });
+    });
+  });
+
+  describe('an attachment event that cannot be written to disk', () => {
+    it('rejects, so the caller knows it is not recorded', async () => {
+      const services = publishing();
+      services.outboxStore.writeFailure = new Error('no space left on device');
+      await expect(services.raw.announce('detached', {})).rejects.toThrow('writing message');
+    });
+  });
+
   describe('a message that cannot be written to disk', () => {
     it('rejects the commit, so Claude Code hands the entries over again', async () => {
       const services = publishing();

@@ -627,6 +627,52 @@ Parked, not decided:
   does not resolve. The spec has no rule for it since the rewrite removed
   its placeholder rule.
 
+## Delivery to the stream
+
+How what the participant publishes about a conversation reaches the stream,
+as built.
+
+- **One outbox per conversation, on disk.** `<config dir>/outbox/<conversation
+  id>/`, owner-only. Everything published about the conversation goes through
+  it: each `changes.message`, `changes.query.closed`, `attachment.attached` and
+  `attachment.detached`. The world-level `ready`, `pulse`, `unavailable` and
+  `offline` do not; they are plain publishes.
+- **Written before the call returns.** The session store's `append` returns
+  once its entries are written (file synced, renamed, directory synced), not
+  once the stream has them. A write that fails makes `append` reject, so the
+  SDK hands the batch over again. An entry whose uuid was already handed over
+  is skipped.
+- **Published until acknowledged.** A lane per conversation publishes its
+  oldest message to the stream with the entry's uuid (or, for the other
+  events, a minted id) as `Nats-Msg-Id`, waits for the acknowledgement, deletes
+  the file, and goes on to the next. A publish that fails for any reason
+  (no connection, no answer, no stream for the subject, the stream refusing the
+  message) is tried again after 250 ms, doubling to 5 s, without end, and the
+  messages behind it wait. Delivery order is the order the messages were
+  handed over.
+- **Files.** A message whose entry carries base64 files is written with the
+  files' bytes beside it. The message already names each file's object
+  (`<conversation id>/<message id>.<n>` in the durable bucket). Before the
+  message is published the lane stores the objects, and tries again with the
+  rest if the store or the broker is unreachable.
+- **Larger than the broker accepts.** A message over the broker's `max_payload`
+  is dropped and logged, and the messages behind it go on.
+- **Restart.** When the participant connects it delivers whatever an earlier
+  run left in the outbox, ahead of anything new for the same conversation.
+- **The connection.** The NATS client reconnects without limit. At start, a
+  broker that is unreachable is tried again every 500 ms doubling to 5 s; the
+  participant announces itself once connected, and a shutdown that begins
+  while it waits ends it.
+- **Shutdown.** After `detached` is written, each lane delivers what the
+  stream takes now and stops at the first message it won't; what is left stays
+  on disk for the next run.
+- **A write that fails** for `attached` rejects the service request (`failed`)
+  and the conversation is not served; for `detached` and a query's closure it
+  is logged.
+
+`apps/claude-code-participant/scripts/outbox-check.sh` checks this against the
+test broker.
+
 ## Shutdown
 
 - **Each Ctrl-C escalates** (24 Sep, confirmed 26 Sep). In Stephen's words:

@@ -5,6 +5,7 @@ import { dependsOn } from '@shellicar/core-di';
 import { describeError } from './describeError.js';
 import { IHost } from './Host.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
+import { ITimer } from './Timer.js';
 
 export type Reply = { accepted: true; id?: string } | { rejected: true; reason: string; detail?: string };
 
@@ -33,6 +34,11 @@ export class MessageTooLarge extends Error {
 
 /** A stream acknowledges a publish within this long, or the publish has failed. */
 const STREAM_PUBLISH_TIMEOUT_MS = 10_000;
+
+/** The first wait between attempts to connect; each further failure doubles it. */
+const CONNECT_RETRY_FIRST_MS = 500;
+/** The longest wait between attempts to connect. */
+const CONNECT_RETRY_LONGEST_MS = 5_000;
 
 /** Tower's bus: the edge between the participant and NATS. */
 export abstract class IBroker {
@@ -69,21 +75,43 @@ function parse(msg: Msg): unknown {
 export class NatsBroker implements IBroker {
   @dependsOn(ParticipantConfig) private readonly config!: ParticipantConfig;
   @dependsOn(IHost) private readonly host!: IHost;
+  @dependsOn(ITimer) private readonly timer!: ITimer;
   private connection: NatsConnection | undefined;
   private stream: JetStreamClient | undefined;
   private readonly objectStores = new Map<string, Promise<ObjectStore>>();
   private ended = false;
+  /** Aborted once `drain` or `close` is called, which ends the wait between connection attempts. */
+  private readonly stopWaiting = new AbortController();
 
+  /**
+   * Resolves once connected, trying again for as long as the broker is
+   * unreachable. Resolves unconnected when `drain` or `close` is called
+   * first.
+   */
   public async connect(): Promise<void> {
-    // Reconnects without limit.
-    const connection = await connect({ servers: this.config.natsUrl, maxReconnectAttempts: -1 });
-    const shutDownWhileConnecting = this.ended;
-    if (shutDownWhileConnecting) {
-      await connection.close();
-      return;
+    let wait = CONNECT_RETRY_FIRST_MS;
+    let lastFailure: string | undefined;
+    while (!this.ended) {
+      try {
+        // Reconnects without limit.
+        const connection = await connect({ servers: this.config.natsUrl, maxReconnectAttempts: -1 });
+        if (this.ended) {
+          await connection.close();
+          return;
+        }
+        this.connection = connection;
+        this.stream = jetstream(connection);
+        return;
+      } catch (err) {
+        const failure = describeError(err);
+        if (failure !== lastFailure) {
+          lastFailure = failure;
+          this.host.log(`connecting to NATS failed, trying again until it is reachable: ${failure}`);
+        }
+        await this.timer.sleep(wait, this.stopWaiting.signal);
+        wait = Math.min(wait * 2, CONNECT_RETRY_LONGEST_MS);
+      }
     }
-    this.connection = connection;
-    this.stream = jetstream(connection);
   }
 
   public publish(subject: string, body: Record<string, unknown>): void {
@@ -127,11 +155,13 @@ export class NatsBroker implements IBroker {
 
   public async drain(): Promise<void> {
     this.ended = true;
+    this.stopWaiting.abort();
     await this.connection?.drain();
   }
 
   public async close(): Promise<void> {
     this.ended = true;
+    this.stopWaiting.abort();
     await this.connection?.close();
   }
 

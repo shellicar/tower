@@ -87,15 +87,29 @@ export class ServedConversation {
     return this.conversation.id;
   }
 
-  /** Publishes `attached`, ahead of everything the conversation publishes after it. */
+  /** Publishes `attached`, ahead of everything the conversation publishes after it. Rejects when it couldn't be written. */
   public attach(cwd: string, intervalS: number): Promise<void> {
     return this.changes.announce('attached', { world: this.instance.world, cwd, intervalS });
   }
 
   /**
+   * Gives the conversation up without publishing anything: stops answering its
+   * requests and publishing its changes, and closes Claude Code's input.
+   */
+  public abandon(): void {
+    if (this.isDetached) {
+      return;
+    }
+    this.isDetached = true;
+    this.subscription.unsubscribe();
+    this.unroute();
+    this.conversation.close();
+  }
+
+  /**
    * Stops answering the conversation's requests and publishing its changes, and
    * publishes `detached`, once, after every message handed over before it.
-   * Resolves once `detached` is safe on disk.
+   * Resolves once `detached` is safe on disk, and rejects when it couldn't be written.
    */
   public detach(): Promise<void> {
     if (this.isDetached) {
@@ -205,6 +219,6 @@ export class ServedConversation {
       this.ended.add(this.live);
       this.live = undefined;
     }
-    void this.changes.close(cancelled ? 'cancelled' : reason);
+    this.changes.close(cancelled ? 'cancelled' : reason).catch((err: unknown) => this.instance.host.log(`conversation ${this.id}: the closure of the query is not recorded: ${describeError(err)}`));
   }
 }

@@ -29,6 +29,4 @@ try {
 }
 
 runParticipant(provider);
-// TODO: undecided: what the participant does when NATS can't be reached at
-// start. As built, the rejected connect ends the process as a crash.
 void provider.resolve(Presence).start();

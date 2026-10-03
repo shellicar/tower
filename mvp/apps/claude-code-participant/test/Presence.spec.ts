@@ -100,6 +100,38 @@ describe('Presence', () => {
       expect(broker.subjects()).toEqual([`${WORLD}.telemetry.ready`, `${WORLD}.telemetry.pulse`]);
     });
 
+    describe('while the broker is unreachable', () => {
+      function unreachable() {
+        const services = testServices(testConfig({ configDir: scratch('participant-config-') }));
+        services.broker.unreachable = true;
+        services.outboxStore.conversationsOnDisk.set(ID, new Map([[1, { record: { id: 'left-behind', subject: `${CONV}.changes.message`, body: { id: 'left-behind' }, files: [] }, blobs: [] }]]));
+        const start = services.provider.resolve(Presence).start();
+        return { ...services, start };
+      }
+
+      it('waits, announcing nothing', async () => {
+        const { broker } = unreachable();
+        await delivered();
+        expect(broker.published).toEqual([]);
+      });
+
+      it('announces itself and serves once the broker is reachable', async () => {
+        const { broker, start } = unreachable();
+        await delivered();
+        broker.becomeReachable();
+        await start;
+        expect(broker.subjects().sort()).toEqual([`${WORLD}.telemetry.pulse`, `${WORLD}.telemetry.ready`, `${CONV}.changes.message`]);
+      });
+
+      it('ends without serving or delivering when shutdown begins first', async () => {
+        const { broker, start, provider } = unreachable();
+        provider.resolve(Shutdown).ask('SIGINT');
+        await start;
+        await delivered();
+        expect({ published: broker.published, responders: broker.subscriptions.length, ended: broker.ended }).toEqual({ published: [], responders: 0, ended: 'drain' });
+      });
+    });
+
     it('delivers what an earlier run left in the outbox', async () => {
       const services = testServices(testConfig({ configDir: scratch('participant-config-') }));
       services.outboxStore.conversationsOnDisk.set(ID, new Map([[1, { record: { id: 'left-behind', subject: `${CONV}.changes.message`, body: { id: 'left-behind' }, files: [] }, blobs: [] }]]));
@@ -219,6 +251,37 @@ describe('Presence', () => {
       held.resolve();
       await detached;
       expect(services.broker.subjects().filter((subject) => subject.startsWith(CONV))).toEqual([`${CONV}.attachment.attached`, `${CONV}.changes.message`, `${CONV}.attachment.detached`]);
+    });
+
+    describe('when attached cannot be written to disk', () => {
+      async function unwritable() {
+        const services = await started();
+        services.outboxStore.writeFailure = new Error('no space left on device');
+        const reply = await service(services, { conversationId: ID, cwd: services.cwd });
+        return { ...services, reply };
+      }
+
+      it('is rejected failed, with the reason', async () => {
+        const { reply } = await unwritable();
+        expect(reply).toMatchObject({ rejected: true, reason: 'failed' });
+      });
+
+      it('does not answer the conversation’s requests', async () => {
+        const { broker } = await unwritable();
+        expect(broker.hasResponder(`${CONV}.requests.say`)).toBe(false);
+      });
+
+      it('closes the input of the Claude Code it launched', async () => {
+        const services = await unwritable();
+        const input = await Promise.race([services.claudeCode.launches[0]?.done.then(() => 'closed'), delivered().then(() => 'open')]);
+        expect(input).toBe('closed');
+      });
+
+      it('can be asked for again once it can be written', async () => {
+        const services = await unwritable();
+        services.outboxStore.writeFailure = undefined;
+        expect(await service(services, { conversationId: ID, cwd: services.cwd })).toEqual({ accepted: true });
+      });
     });
 
     it("answers the conversation's requests once accepted", async () => {
@@ -546,6 +609,29 @@ describe('Presence', () => {
         .filter(({ subject }) => subject.endsWith('.message'))
         .at(-1)?.body.id;
       expect(await say(services, 'again', lastPublished as string)).toMatchObject({ accepted: true });
+    });
+
+    it('does not stop detaching the others, or deliver what is waiting, when detached cannot be written', async () => {
+      const services = await serving();
+      await acceptedQuery(services, 'hello', null);
+      services.outboxStore.writeFailure = new Error('no space left on device');
+      await expect(services.presence.detachAll()).resolves.toBeUndefined();
+    });
+
+    it('says when detached is not recorded', async () => {
+      const services = await serving();
+      services.outboxStore.writeFailure = new Error('no space left on device');
+      await services.presence.detachAll();
+      expect(services.host.logs.filter((line) => line.includes('detached is not recorded'))).toHaveLength(1);
+    });
+
+    it('says when the closure of a query is not recorded, and carries on', async () => {
+      const services = await serving();
+      await acceptedQuery(services, 'hello', null);
+      services.outboxStore.writeFailure = new Error('no space left on device');
+      services.launch.replies.push(resultMessage());
+      await delivered();
+      expect(services.host.logs.filter((line) => line.includes('the closure of the query is not recorded'))).toHaveLength(1);
     });
 
     it('publishes nothing once detached', async () => {

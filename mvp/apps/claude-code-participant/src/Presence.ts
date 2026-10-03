@@ -63,13 +63,17 @@ export class Presence {
   }
 
   /**
-   * Connects and starts delivering what an earlier run left in the outbox,
+   * Connects (waiting for the broker as long as it is unreachable) and starts delivering what an earlier run left in the outbox,
    * waits for the serving gate, then joins the world's queue group and
    * announces itself: `ready`, then a first `pulse`, then one every interval.
    * Shutdown beginning first stops it where it is.
    */
   public async start(): Promise<void> {
     await this.broker.connect();
+    // Shutdown beginning while the broker was unreachable ends the wait with no connection.
+    if (this.state !== 'idle') {
+      return;
+    }
     await this.outbox.resume();
     await this.gate.wait();
     if (this.state !== 'idle') {
@@ -102,7 +106,14 @@ export class Presence {
    * What it won't take stays on disk for the next run.
    */
   public async detachAll(): Promise<void> {
-    await Promise.all([...this.served.values()].map((conversation) => conversation.detach()));
+    const detaching = [...this.served.entries()].map(async ([id, conversation]) => {
+      try {
+        await conversation.detach();
+      } catch (err) {
+        this.host.log(`conversation ${id}: detached is not recorded: ${describeError(err)}`);
+      }
+    });
+    await Promise.all(detaching);
     try {
       await this.outbox.flush();
     } catch (err) {
@@ -213,7 +224,15 @@ export class Presence {
     }
     const served = new ServedConversation(conversation, this.servingInstance(instanceId));
     this.served.set(conversationId, served);
-    await served.attach(cwd, PULSE_INTERVAL_S);
+    try {
+      await served.attach(cwd, PULSE_INTERVAL_S);
+    } catch (err) {
+      // `attached` is not recorded, so the conversation is not served: the
+      // service request is rejected and Claude Code's input is closed.
+      this.served.delete(conversationId);
+      served.abandon();
+      throw err;
+    }
     this.host.log(`serving conversation ${conversationId} in ${cwd}${resume ? ', resumed' : ''}`);
     return { accepted: true };
   }

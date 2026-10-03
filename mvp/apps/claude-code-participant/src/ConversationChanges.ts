@@ -51,6 +51,8 @@ export class ConversationChanges {
   private latestResponseId: string | undefined;
   private pendingTurn: Turn | undefined;
   private queue: Promise<void> = Promise.resolve();
+  /** The uuids of entries already handed to the outbox (or passed over); an entry handed over again is skipped. */
+  private readonly handled = new Set<string>();
 
   public constructor(conversationId: string, sources: ChangeSources) {
     this.conversationId = conversationId;
@@ -69,13 +71,21 @@ export class ConversationChanges {
    * Hands the messages among `entries` to the outbox, and resolves once they
    * are safe on disk. Rejects when one couldn't be written, so that Claude
    * Code's record hands the entries over again; an entry that can't be
-   * turned into a message is logged and skipped.
+   * turned into a message is logged and skipped. An entry whose uuid was
+   * handed over before is skipped, so a batch handed over again changes
+   * nothing for the entries that were already taken.
    */
   public commit(entries: readonly RecordEntry[]): Promise<void> {
     return this.enqueue(async () => {
       for (const entry of entries) {
+        if (entry.uuid !== undefined && this.handled.has(entry.uuid)) {
+          continue;
+        }
         try {
           await this.take(entry);
+          if (entry.uuid !== undefined) {
+            this.handled.add(entry.uuid);
+          }
         } catch (err) {
           if (err instanceof OutboxWriteError) {
             throw err;
@@ -86,22 +96,29 @@ export class ConversationChanges {
     });
   }
 
-  /** Publishes the open query's closure, after everything handed over before it; `aborted` if it was given up. */
+  /**
+   * Publishes the open query's closure, after everything handed over before
+   * it; `aborted` if it was given up. Rejects when the closure couldn't be
+   * written, and the query stays open for the next call.
+   */
   public close(reason: QueryReason): Promise<void> {
     return this.enqueue(async () => {
       const { query } = this;
       if (query === undefined) {
         return;
       }
-      this.query = undefined;
       await this.publish('query.closed', { queryId: query.id, reason: query.aborted ? 'aborted' : reason });
-    }).catch(() => undefined);
+      this.query = undefined;
+    });
   }
 
-  /** Publishes an attachment event (`attached`, `detached`), after everything handed over before it. */
+  /**
+   * Publishes an attachment event (`attached`, `detached`), after everything
+   * handed over before it. Rejects when it couldn't be written.
+   */
   public announce(leaf: 'attached' | 'detached', fields: Record<string, unknown>): Promise<void> {
     const body = { ts: this.sources.timer.timestamp(), instanceId: this.sources.instanceId, ...fields };
-    return this.enqueue(() => this.sources.lane.enqueue({ subject: `conv.v2.${this.conversationId}.attachment.${leaf}`, body, id: this.sources.ids.mint() })).catch(() => undefined);
+    return this.enqueue(() => this.sources.lane.enqueue({ subject: `conv.v2.${this.conversationId}.attachment.${leaf}`, body, id: this.sources.ids.mint() }));
   }
 
   /** Runs `work` after everything queued before it. A failure is logged and rejects the returned promise, and never stops the work queued after it. */
@@ -145,12 +162,11 @@ export class ConversationChanges {
       this.sources.abort();
       return;
     }
-    let from: unknown;
-    if (isPrompt(entry) && query.from !== undefined) {
-      from = query.from;
+    const from = isPrompt(entry) ? query.from : undefined;
+    await this.publish('message', { id, queryId: query.id, turnId: turn.id, role, ...(from === undefined ? {} : { from }), content }, { id, files });
+    if (from !== undefined) {
       query.from = undefined;
     }
-    await this.publish('message', { id, queryId: query.id, turnId: turn.id, role, ...(from === undefined ? {} : { from }), content }, { id, files });
   }
 
   /**
