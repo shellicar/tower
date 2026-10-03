@@ -4,6 +4,7 @@
   import VirtualList from './VirtualList.svelte';
   import { approvals, conversations, rail, usage, view } from './app';
   import { age } from './core/time';
+  import { replacedForModel, shownToUser } from './core/extras';
   import { formatTokens, formatUsd, parseModelName, priceUsage } from './core/pricing';
   import { uploadAttachment } from './core/uploads';
   import { measurePlainTextHeight } from './core/textHeight';
@@ -11,6 +12,14 @@
   import type { AttachmentRef } from './types';
 
   let { oc }: { oc: ConversationState } = $props();
+
+  // What the person is shown: a message flagged for the model only is left
+  // out, unless the reader asks to see it. A compaction dims what it took out
+  // of the model's view.
+  let showModelOnly = $state(false);
+  const visible = $derived(showModelOnly ? oc.messages : oc.messages.filter(shownToUser));
+  const replaced = $derived(replacedForModel(oc.messages));
+  const hiddenCount = $derived(oc.messages.length - oc.messages.filter(shownToUser).length);
 
   // Attachments ride as chips beside the editor: uploaded eagerly (the
   // transit store's TTL cleans up abandons), included in the next say,
@@ -287,6 +296,14 @@
         {row?.title ?? oc.conv}
       </button>
     {/if}
+    {#if hiddenCount > 0}
+      <button
+        class="shrink-0 cursor-pointer rounded border border-neutral-700 px-1.5 text-neutral-400 hover:text-neutral-200"
+        title="messages only the model is sent"
+        onclick={() => (showModelOnly = !showModelOnly)}
+        >{showModelOnly ? 'hide' : 'show'} {hiddenCount} model-only</button
+      >
+    {/if}
     <button
       class="cursor-pointer text-base text-neutral-400 hover:text-neutral-200"
       onclick={() => view.closeConversation(oc.conv)}>×</button
@@ -297,7 +314,7 @@
     <!-- px-3 (24px) on the scroller + MessageView's border-l-2 pl-2 (10px)
          eat into the row's content width before text wraps. -->
     <VirtualList
-      items={oc.messages}
+      items={visible}
       bind:scroller
       {pinning}
       {onscroll}
@@ -310,7 +327,7 @@
         {/if}
       {/snippet}
       {#snippet row(message)}
-        <MessageView {message} />
+        <MessageView {message} replaced={replaced.has(message.id)} />
       {/snippet}
       {#snippet footer()}
         {#if oc.pendingSay}

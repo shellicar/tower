@@ -54,6 +54,11 @@ export function measurePlainTextHeight(
   if (message.content.length === 0 || message.content.some((b) => b.type !== 'text')) {
     return undefined;
   }
+  // An extra message is drawn as a row of its own kind, not as a plain
+  // article: measure the mounted row.
+  if (message.kind !== undefined) {
+    return undefined;
+  }
   // Assistant text renders as markdown, whose non-uniform line heights
   // (headings, lists, code fences, tables) the plain-line model below
   // doesn't cover — bail to measure-after-mount rather than teach it.

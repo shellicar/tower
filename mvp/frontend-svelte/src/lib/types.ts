@@ -31,6 +31,18 @@ export interface ConversationMessage {
   /** See mvp/docs/tower-ws-spec.md, `conversation`: response to `open`. */
   from?: Sender;
   content: ContentBlock[];
+  /** An extra message (a reminder, a hand-back, a turn-finished line, ...) carries
+   *  the fields below; plain chat carries none. See `conversation` in the spec. */
+  kind?: string;
+  fields?: Record<string, unknown>;
+  /** Absent means both. */
+  audience?: { model: boolean; user: boolean };
+  /** What the person is shown in place of `content`. */
+  userContent?: ContentBlock[];
+  /** The model is no longer sent the messages before this one, except `except`. */
+  scope?: { replaces: 'before'; except: string[] };
+  /** The time of the entry the message was made from. */
+  at?: string;
   ts: Millis;
 }
 
