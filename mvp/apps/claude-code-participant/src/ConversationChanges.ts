@@ -1,4 +1,4 @@
-import { contentBlocksOf, isMainChain, isObject, isPrompt, type RecordEntry, responseIdOf, roleOf } from './ConversationEntries.js';
+import { contentBlocksOf, isMainChain, isObject, kindOf, type MessageKind, type RecordEntry, responseIdOf, roleOf } from './ConversationEntries.js';
 import { describeError } from './describeError.js';
 import type { IHost } from './Host.js';
 import type { IIds } from './Ids.js';
@@ -34,6 +34,65 @@ type Turn = { id?: string };
 
 /** A reference block's source: the durable object holding a file's bytes. */
 type ObjectSource = { type: 'object'; id: string; bucket: string; mediaType: string; size: number };
+
+/**
+ * Who wrote a message of each kind, as its `from`; undefined publishes it
+ * with none. A prompt carries the `from` of the say that opened its query,
+ * spent by the first prompt published in it.
+ */
+function fromOf(kind: MessageKind, query: OpenQuery): unknown {
+  switch (kind) {
+    case 'prompt':
+      return query.from;
+    case 'reply':
+      return { kind: 'agent' };
+    case 'toolResult':
+      return undefined;
+    case 'claudeCodeText':
+      return undefined;
+    case 'backgroundTask':
+      return { kind: 'orchestrator' };
+    case 'backgroundAgentReport':
+      return { kind: 'agent' };
+    case 'scheduledTrigger':
+      return undefined;
+    case 'peerSendMessage':
+      return undefined;
+    case 'projectsRelay':
+      return undefined;
+    case 'sessionInbox':
+      return undefined;
+    case 'goalCheckin':
+      return undefined;
+    case 'workerCheckin':
+      return undefined;
+    case 'artifactEvent':
+      return undefined;
+    case 'peer':
+      return undefined;
+    case 'channel':
+      return undefined;
+    case 'coordinator':
+      return undefined;
+    case 'plugin':
+      return undefined;
+    case 'autoContinuation':
+      return undefined;
+    case 'observer':
+      return undefined;
+    case 'observerActivity':
+      return undefined;
+    case 'slackPing':
+      return undefined;
+    case 'unclassified':
+      return undefined;
+    case 'system':
+      return undefined;
+    case 'unknownOrigin':
+      // The catch-all never has an author: a kind that needs one gets a case of its own.
+      return undefined;
+  }
+}
 
 /**
  * One conversation's `changes`: each entry Claude Code appends that is a
@@ -141,13 +200,14 @@ export class ConversationChanges {
       return;
     }
     const role = roleOf(entry);
+    const kind = kindOf(entry);
     // No query is open (none was asked for, or the last one has closed): the message opens one of its own.
     if (role !== undefined && this.query === undefined) {
       this.startQuery(this.sources.ids.mint(), undefined);
     }
     const turn = this.place(entry);
     const { query } = this;
-    if (role === undefined || query === undefined || query.aborted) {
+    if (role === undefined || kind === undefined || query === undefined || query.aborted) {
       return;
     }
     turn.id ??= this.sources.ids.mint();
@@ -162,9 +222,9 @@ export class ConversationChanges {
       this.sources.abort();
       return;
     }
-    const from = isPrompt(entry) ? query.from : undefined;
+    const from = fromOf(kind, query);
     await this.publish('message', { id, queryId: query.id, turnId: turn.id, role, ...(from === undefined ? {} : { from }), content }, { id, files });
-    if (from !== undefined) {
+    if (kind === 'prompt') {
       query.from = undefined;
     }
   }

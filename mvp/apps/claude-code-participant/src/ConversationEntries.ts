@@ -1,8 +1,10 @@
-// Which of the entries Claude Code writes to its record are the
+// Which of the entries Claude Code writes to its record are published as the
 // conversation's messages on tower: the prompts, every piece of each reply,
-// the tool results, and Claude Code's system entries. Reminders, compaction
-// summaries, attachments, interrupt markers, bookkeeping and subagent entries
-// stay in Claude Code's own record.
+// the tool results, background agents' reports and Claude Code's system
+// entries. Reminders, compaction summaries, attachments and interrupt markers
+// are not published yet, although the model sees them; what the model sees is
+// to be published (the Goal in docs/design/claude-code-participant.md).
+// Bookkeeping entries and subagent entries are not published.
 
 /** One line of Claude Code's record, as the session store and the transcript file both hold it. */
 export type RecordEntry = { type: string; uuid?: string; [field: string]: unknown };
@@ -60,7 +62,17 @@ export function isPrompt(entry: RecordEntry): boolean {
   return !isMarker(messageContent(entry));
 }
 
-/** The role a published entry has on tower, or undefined for an entry tower never gets. */
+/**
+ * A background agent's report, handed back to the session that started it:
+ * Claude Code writes it as a meta user entry with
+ * `origin: { kind: "peer", handback: true, ... }`, its content framing the
+ * agent's result as the model received it.
+ */
+function isHandback(entry: RecordEntry): boolean {
+  return entry.type === 'user' && isObject(entry.origin) && entry.origin.kind === 'peer' && entry.origin.handback === true;
+}
+
+/** The role a published entry has on tower, or undefined for an entry that isn't published. */
 export function roleOf(entry: RecordEntry): Role | undefined {
   if (typeof entry.uuid !== 'string' || !isMainChain(entry)) {
     return undefined;
@@ -71,7 +83,151 @@ export function roleOf(entry: RecordEntry): Role | undefined {
     case 'system':
       return 'system';
     case 'user':
-      return isPrompt(entry) || isToolResult(entry) ? 'user' : undefined;
+      return isPrompt(entry) || isToolResult(entry) || isHandback(entry) ? 'user' : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * What a published entry is, which decides who wrote it. Claude Code stamps
+ * user text it writes itself with an `origin` (Claude Code 2.1.285); text that
+ * came in through the SDK carries none.
+ * - `prompt`: something said through a say (no origin, or a `human` one);
+ * - `reply`: a piece of Claude's reply, written by the model;
+ * - `toolResult`: a tool's result;
+ * - `claudeCodeText`: an assistant entry Claude Code wrote itself, such as an API error;
+ * - `backgroundTask`: the notice that a background task (a command or an agent) has ended;
+ * - `backgroundAgentReport`: a background agent's report, handed back (a meta entry, published all the same);
+ * - `scheduledTrigger`, `peerSendMessage`, `projectsRelay`, `sessionInbox`:
+ *   a task notification with that `subkind`;
+ * - `goalCheckin`, `workerCheckin`, `artifactEvent`: a task notification
+ *   with that `source`;
+ * - `peer`, `channel`, `coordinator`, `plugin`, `autoContinuation`,
+ *   `observer`, `observerActivity`, `slackPing`, `unclassified`: user text
+ *   with that origin kind;
+ * - `unknownOrigin`: user text with an origin none of the above recognise;
+ * - `system`: one of Claude Code's system entries.
+ */
+export type MessageKind =
+  | 'prompt'
+  | 'reply'
+  | 'toolResult'
+  | 'claudeCodeText'
+  | 'backgroundTask'
+  | 'backgroundAgentReport'
+  | 'scheduledTrigger'
+  | 'peerSendMessage'
+  | 'projectsRelay'
+  | 'sessionInbox'
+  | 'goalCheckin'
+  | 'workerCheckin'
+  | 'artifactEvent'
+  | 'peer'
+  | 'channel'
+  | 'coordinator'
+  | 'plugin'
+  | 'autoContinuation'
+  | 'observer'
+  | 'observerActivity'
+  | 'slackPing'
+  | 'unclassified'
+  | 'unknownOrigin'
+  | 'system';
+
+/**
+ * An assistant entry Claude Code wrote itself rather than the model, such as
+ * an API error or "No response requested.": its model is "<synthetic>".
+ */
+function isSynthetic(entry: RecordEntry): boolean {
+  return entry.type === 'assistant' && isObject(entry.message) && entry.message.model === '<synthetic>';
+}
+
+/**
+ * Which task notification an origin of kind `task-notification` is: by its
+ * `subkind`, else its `source`, else its `producer`. A background task's
+ * notice has producer "session-task" and neither of the others.
+ */
+function taskNotificationKind(origin: Record<string, unknown>): MessageKind {
+  switch (origin.subkind) {
+    case 'scheduled-trigger':
+      return 'scheduledTrigger';
+    case 'peer-send-message':
+      return 'peerSendMessage';
+    case 'projects-relay':
+      return 'projectsRelay';
+    case 'session-inbox':
+      return 'sessionInbox';
+    default:
+      break;
+  }
+  switch (origin.source) {
+    case 'goal-checkin':
+      return 'goalCheckin';
+    case 'worker-checkin':
+      return 'workerCheckin';
+    default:
+      break;
+  }
+  if (typeof origin.source === 'string' && origin.source.startsWith('artifact-')) {
+    // TODO(claude): undecided: whether each artifact source (artifact-changed, artifact-auto-react, artifact-watch-lifecycle, artifact-auto-react-stop-disclosure and any other) is a case of its own. One case for every source starting "artifact-" for now.
+    return 'artifactEvent';
+  }
+  if (origin.producer === 'session-task') {
+    return 'backgroundTask';
+  }
+  // TODO(claude): undecided: what a task notification with no recognised subkind, source or producer is (Claude Code writes a bare { kind: "task-notification" } for some deliveries, such as webhooks). The catch-all for now.
+  return 'unknownOrigin';
+}
+
+/** The kind of a prompt-shaped user entry, from the `origin` Claude Code stamps on it. */
+function promptKind(entry: RecordEntry): MessageKind {
+  if (entry.origin === undefined) {
+    return 'prompt';
+  }
+  if (!isObject(entry.origin)) {
+    return 'unknownOrigin';
+  }
+  switch (entry.origin.kind) {
+    case 'human':
+      return 'prompt';
+    case 'task-notification':
+      return taskNotificationKind(entry.origin);
+    case 'peer':
+      return 'peer';
+    case 'channel':
+      return 'channel';
+    case 'coordinator':
+      return 'coordinator';
+    case 'plugin':
+      return 'plugin';
+    case 'auto-continuation':
+      return 'autoContinuation';
+    case 'observer':
+      return 'observer';
+    case 'observer-activity':
+      return 'observerActivity';
+    case 'slack-ping':
+      return 'slackPing';
+    case 'unclassified':
+      return 'unclassified';
+    default:
+      return 'unknownOrigin';
+  }
+}
+
+/** The kind of a published entry, or undefined for an entry that isn't published. */
+export function kindOf(entry: RecordEntry): MessageKind | undefined {
+  switch (roleOf(entry)) {
+    case 'assistant':
+      return isSynthetic(entry) ? 'claudeCodeText' : 'reply';
+    case 'system':
+      return 'system';
+    case 'user':
+      if (isHandback(entry)) {
+        return 'backgroundAgentReport';
+      }
+      return isToolResult(entry) ? 'toolResult' : promptKind(entry);
     default:
       return undefined;
   }

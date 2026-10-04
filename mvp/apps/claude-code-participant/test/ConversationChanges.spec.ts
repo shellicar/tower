@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ConversationChanges, type QueryReason } from '../src/ConversationChanges.js';
 import type { RecordEntry } from '../src/ConversationEntries.js';
-import { ANSWER, CALL_A, CALL_B, DATE_ATTACHMENT, IMAGE_TOOL_RESULT, INTERRUPT_MARKER, PARALLEL_ANSWER, PARTIAL_REPLY, PNG_BASE64, PROMPT, QUEUE_OPERATION, RESULT_A, RESULT_B, SECOND_PROMPT, THINKING, TOKENS_REMINDER, TOOL_USE } from './entries.js';
+import { ANSWER, CALL_A, CALL_B, DATE_ATTACHMENT, HANDBACK, IMAGE_TOOL_RESULT, INTERRUPT_MARKER, PARALLEL_ANSWER, PARTIAL_REPLY, PNG_BASE64, PROMPT, QUEUE_OPERATION, RESULT_A, RESULT_B, SECOND_PROMPT, TASK_NOTIFICATION, THINKING, TOKENS_REMINDER, TOOL_USE } from './entries.js';
 import { delivered, FAKE_TIMESTAMP, settle, testServices } from './support.js';
 
 const ID = '0c77fb4e-655e-41f2-be80-558ad2aaf6dc';
@@ -83,7 +83,7 @@ describe('ConversationChanges', () => {
       });
     });
 
-    it('publishes a reply piece as assistant, with no from', async () => {
+    it('publishes a reply piece as assistant, from the agent', async () => {
       const services = await firstQuery();
       expect(message(services, THINKING.uuid)).toEqual({
         ts: FAKE_TIMESTAMP,
@@ -92,6 +92,7 @@ describe('ConversationChanges', () => {
         queryId: 'q1',
         turnId: 'id-1',
         role: 'assistant',
+        from: { kind: 'agent' },
         content: [{ type: 'thinking', thinking: "No user memory is relevant here, so I'll just read the file directly.\n\n", signature: 'Et0CCrwBCBIYAipA' }],
       });
     });
@@ -109,6 +110,13 @@ describe('ConversationChanges', () => {
     it('gives the tool result no from', async () => {
       const services = await firstQuery();
       expect(message(services, IMAGE_TOOL_RESULT.uuid)).not.toHaveProperty('from');
+    });
+
+    it('gives a system entry no from', async () => {
+      const services = publishing();
+      const system: RecordEntry = { type: 'system', subtype: 'informational', uuid: 's0000000-0000-4000-8000-00000000000s', content: 'Tool finished' };
+      await services.changes.commit([system]);
+      expect(message(services, system.uuid)).not.toHaveProperty('from');
     });
 
     it('closes the query after its messages', async () => {
@@ -199,7 +207,7 @@ describe('ConversationChanges', () => {
       return services;
     }
 
-    it('publishes the prompt and the partial reply Claude Code kept, not the marker', async () => {
+    it('publishes the prompt and the partial reply Claude Code kept, not the marker, which is not published yet', async () => {
       const services = await cancelled();
       expect(
         messages(services)
@@ -226,11 +234,101 @@ describe('ConversationChanges', () => {
       expect(message(services, ANSWER.uuid)?.queryId).toBe('id-1');
     });
 
+    it('publishes its reply from the agent', async () => {
+      const services = publishing();
+      await services.changes.commit([ANSWER]);
+      expect(message(services, ANSWER.uuid)?.from).toEqual({ kind: 'agent' });
+    });
+
+    it('gives an assistant entry Claude Code wrote itself no from', async () => {
+      const services = publishing();
+      const synthetic: RecordEntry = {
+        type: 'assistant',
+        uuid: 'a0000000-0000-4000-8000-00000000000a',
+        message: { id: 'msg-synthetic', model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: 'No response requested.' }] },
+      };
+      await services.changes.commit([synthetic]);
+      expect(message(services, synthetic.uuid)).not.toHaveProperty('from');
+    });
+
     it('carries no from on a prompt', async () => {
       const services = publishing();
       await services.changes.commit([PROMPT]);
       expect(message(services, PROMPT.uuid)).not.toHaveProperty('from');
     });
+
+    it('publishes a task-finished notice from the orchestrator', async () => {
+      const services = publishing();
+      await services.changes.commit([TASK_NOTIFICATION]);
+      expect(message(services, TASK_NOTIFICATION.uuid)?.from).toEqual({ kind: 'orchestrator' });
+    });
+  });
+
+  it('gives the say’s from to its first prompt only', async () => {
+    const services = publishing();
+    await services.changes.openQuery('q1', HUMAN);
+    await services.changes.commit([PROMPT, SECOND_PROMPT]);
+    expect(message(services, SECOND_PROMPT.uuid)).not.toHaveProperty('from');
+  });
+
+  describe("a background agent's handed-back report", () => {
+    async function handedBack() {
+      const services = publishing();
+      await services.changes.commit([HANDBACK]);
+      return services;
+    }
+
+    it('is published as user, with its content', async () => {
+      const services = await handedBack();
+      expect(message(services, HANDBACK.uuid)).toMatchObject({ role: 'user', content: [{ type: 'text', text: (HANDBACK.message as { content: string }).content }] });
+    });
+
+    it('is from the agent', async () => {
+      const services = await handedBack();
+      expect(message(services, HANDBACK.uuid)?.from).toEqual({ kind: 'agent' });
+    });
+  });
+
+  describe('a task-finished notice written after a say is accepted and before its prompt', () => {
+    async function noticeFirst() {
+      const services = publishing();
+      await services.changes.openQuery('q1', HUMAN);
+      await services.changes.commit([TASK_NOTIFICATION, PROMPT]);
+      return services;
+    }
+
+    it('publishes the notice from the orchestrator', async () => {
+      const services = await noticeFirst();
+      expect(message(services, TASK_NOTIFICATION.uuid)?.from).toEqual({ kind: 'orchestrator' });
+    });
+
+    it('leaves the say’s from for its prompt', async () => {
+      const services = await noticeFirst();
+      expect(message(services, PROMPT.uuid)?.from).toEqual(HUMAN);
+    });
+  });
+
+  it('gives a task notification that is not a background task’s no from', async () => {
+    const services = publishing();
+    const trigger: RecordEntry = { type: 'user', uuid: 't0000000-0000-4000-8000-00000000000t', origin: { kind: 'task-notification', subkind: 'scheduled-trigger' }, message: { role: 'user', content: '<task-notification>' } };
+    await services.changes.commit([trigger]);
+    expect(message(services, trigger.uuid)).not.toHaveProperty('from');
+  });
+
+  it('gives user text with an origin it does not recognise no from, even in a say’s query', async () => {
+    const services = publishing();
+    const unknown: RecordEntry = { type: 'user', uuid: 'k0000000-0000-4000-8000-00000000000k', origin: { kind: 'carrier-pigeon' }, message: { role: 'user', content: 'coo' } };
+    await services.changes.openQuery('q1', HUMAN);
+    await services.changes.commit([unknown]);
+    expect(message(services, unknown.uuid)).not.toHaveProperty('from');
+  });
+
+  it('gives user text Claude Code wrote with another origin no from, even in a say’s query', async () => {
+    const services = publishing();
+    const peer: RecordEntry = { type: 'user', uuid: 'p0000000-0000-4000-8000-00000000000p', origin: { kind: 'peer', from: 'other-session' }, message: { role: 'user', content: 'hello from another session' } };
+    await services.changes.openQuery('q1', HUMAN);
+    await services.changes.commit([peer]);
+    expect(message(services, peer.uuid)).not.toHaveProperty('from');
   });
 
   describe('files', () => {

@@ -24,7 +24,7 @@ describe('lastMessageId', () => {
     expect(lastMessageId(lines({ type: 'assistant', uuid: 'a1' }, { type: 'system', uuid: 's1' }))).toBe('s1');
   });
 
-  it('skips entries that are not messages', () => {
+  it('skips bookkeeping and an attachment, which is not published yet', () => {
     expect(lastMessageId(lines({ type: 'user', uuid: 'u1' }, { type: 'attachment', uuid: 'x1' }, { type: 'summary', leafUuid: 'u1' }))).toBe('u1');
   });
 
@@ -32,11 +32,11 @@ describe('lastMessageId', () => {
     expect(lastMessageId(lines({ type: 'user', uuid: 'u1' }, { type: 'assistant', uuid: 'a1', isSidechain: true }))).toBe('u1');
   });
 
-  it('skips an interrupt marker', () => {
+  it('skips an interrupt marker, which is not published yet', () => {
     expect(lastMessageId(lines(SECOND_PROMPT, PARTIAL_REPLY, INTERRUPT_MARKER))).toBe(PARTIAL_REPLY.uuid);
   });
 
-  it('skips a reminder', () => {
+  it('skips a reminder, which is not published yet', () => {
     expect(lastMessageId(lines(PROMPT, { type: 'user', uuid: 'm1', isMeta: true, message: { role: 'user', content: 'Continue.' } }))).toBe(PROMPT.uuid);
   });
 
