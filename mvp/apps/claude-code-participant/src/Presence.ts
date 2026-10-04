@@ -10,6 +10,7 @@ import { IHost } from './Host.js';
 import { IIds } from './Ids.js';
 import { Outbox } from './Outbox.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
+import { ParticipantSettings } from './ParticipantSettings.js';
 import { rejected, ServedConversation, type ServingInstance } from './ServedConversation.js';
 import { ServingGate } from './ServingGate.js';
 import { IPublisher } from './SessionStore.js';
@@ -48,6 +49,7 @@ export class Presence {
   @dependsOn(IHost) private readonly host!: IHost;
   @dependsOn(ConversationLauncher) private readonly launcher!: ConversationLauncher;
   @dependsOn(ServingGate) private readonly gate!: ServingGate;
+  @dependsOn(ParticipantSettings) private readonly settings!: ParticipantSettings;
   @dependsOn(IPublisher) private readonly publisher!: IPublisher;
 
   private state: State = 'idle';
@@ -64,9 +66,12 @@ export class Presence {
 
   /**
    * Connects and starts delivering what an earlier run left in the outbox,
-   * waits for the serving gate, then joins the world's queue group and
-   * announces itself: `ready`, then a first `pulse`, then one every interval.
-   * Shutdown beginning first stops it where it is.
+   * waits for the serving gate and for every required setting to be set
+   * (control lines can arrive after the connection), then joins the world's
+   * queue group and announces itself: `ready`, then a first `pulse`, then one
+   * every interval. `ready` means the instance can receive requests, so
+   * neither happens before it can launch a conversation. Shutdown beginning
+   * first stops it where it is.
    */
   public async start(): Promise<void> {
     await this.broker.connect();
@@ -75,7 +80,13 @@ export class Presence {
       return;
     }
     await this.outbox.resume();
+    // Shutdown beginning before the gate opens or before every required
+    // setting is set leaves these waits unresolved, and `start()` pending for
+    // the rest of the process. Nothing awaits `start()` (main.ts starts it with
+    // `void`), so it holds nothing open and shutdown completes without it. A
+    // wait that resolves after shutdown has begun returns at the check below.
     await this.gate.wait();
+    await this.settings.whenReady();
     if (this.state !== 'idle') {
       return;
     }

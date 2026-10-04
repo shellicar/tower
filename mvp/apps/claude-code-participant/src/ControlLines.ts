@@ -95,7 +95,9 @@ export class ControlLines {
     if (key === undefined || handler === undefined) {
       return { error: 'unsupported' };
     }
-    return handler(parsed[key]);
+    const reply = handler(parsed[key]);
+    this.settings.settled();
+    return reply;
   }
 
   private model(value: unknown): Reply {

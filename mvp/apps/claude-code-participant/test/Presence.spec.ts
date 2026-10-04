@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { RecordEntry } from '../src/ConversationEntries.js';
 import { EXITS } from '../src/ExitCodes.js';
+import { ParticipantSettings } from '../src/ParticipantSettings.js';
 import { Presence } from '../src/Presence.js';
 import { ServingGate } from '../src/ServingGate.js';
 import { PublishingSessionStore } from '../src/SessionStore.js';
@@ -34,12 +35,10 @@ function writeEntries(configDir: string, ...entries: RecordEntry[]): void {
 }
 
 /** A configured participant that has announced itself on the bus. */
-async function started(options: { configure?: boolean } = {}) {
+async function started() {
   const configDir = scratch('participant-config-');
   const services = testServices(testConfig({ configDir }));
-  if (options.configure !== false) {
-    services.control(...CONFIGURED);
-  }
+  services.control(...CONFIGURED);
   const presence = services.provider.resolve(Presence);
   await presence.start();
   return { ...services, configDir, presence, cwd: scratch('participant-cwd-') };
@@ -117,6 +116,7 @@ describe('Presence', () => {
     it('delivers what an earlier run left in the outbox', async () => {
       const services = testServices(testConfig({ configDir: scratch('participant-config-') }));
       services.outboxStore.conversationsOnDisk.set(ID, new Map([[1, { record: { id: 'left-behind', subject: `${CONV}.changes.message`, body: { id: 'left-behind' }, files: [] }, blobs: [] }]]));
+      services.control(...CONFIGURED);
       await services.provider.resolve(Presence).start();
       await delivered();
       expect(services.broker.published.filter(({ subject }) => subject.startsWith(CONV)).map(({ body }) => body.id)).toEqual(['left-behind']);
@@ -145,6 +145,7 @@ describe('Presence', () => {
 
     it('subscribes to nothing while the serving gate is shut', async () => {
       const services = testServices(testConfig(), { gateShut: true });
+      services.control(...CONFIGURED);
       void services.provider.resolve(Presence).start();
       await delivered();
       expect(services.broker.subscriptions).toEqual([]);
@@ -152,6 +153,7 @@ describe('Presence', () => {
 
     it('announces itself once the serving gate opens', async () => {
       const services = testServices(testConfig(), { gateShut: true });
+      services.control(...CONFIGURED);
       const starting = services.provider.resolve(Presence).start();
       services.provider.resolve(ServingGate).open();
       await starting;
@@ -160,11 +162,39 @@ describe('Presence', () => {
 
     it('never announces itself once shutdown has begun', async () => {
       const services = testServices(testConfig(), { gateShut: true });
+      services.control(...CONFIGURED);
       const starting = services.provider.resolve(Presence).start();
       services.provider.resolve(Shutdown).ask('SIGINT');
       services.provider.resolve(ServingGate).open();
       await starting;
       expect(services.broker.published).toEqual([]);
+    });
+
+    it('joins no queue group and publishes nothing while a required setting is missing', async () => {
+      const services = testServices();
+      services.control(...CONFIGURED.slice(0, 2));
+      void services.provider.resolve(Presence).start();
+      await delivered();
+      expect([services.broker.subscriptions, services.broker.published]).toEqual([[], []]);
+    });
+
+    it('announces itself as soon as the last required setting is set', async () => {
+      const services = testServices();
+      services.control(...CONFIGURED.slice(0, 2));
+      const starting = services.provider.resolve(Presence).start();
+      await delivered();
+      services.control(...CONFIGURED.slice(2));
+      await starting;
+      expect(services.broker.subjects()).toEqual([`${WORLD}.telemetry.ready`, `${WORLD}.telemetry.pulse`]);
+    });
+
+    it('joins the queue group as soon as the last required setting is set', async () => {
+      const services = testServices();
+      const starting = services.provider.resolve(Presence).start();
+      await delivered();
+      services.control(...CONFIGURED);
+      await starting;
+      expect(services.broker.subscriptions.map(({ queue }) => queue)).toEqual(['servicers']);
     });
 
     it('fails when NATS cannot be reached', async () => {
@@ -331,9 +361,11 @@ describe('Presence', () => {
       expect(await service(services, { conversationId: ID, cwd: services.cwd })).toEqual({ accepted: true });
     });
 
-    it('is rejected failed, saying what is missing, until configured', async () => {
-      const services = await started({ configure: false });
-      expect(await service(services, { conversationId: ID, cwd: services.cwd })).toMatchObject({ rejected: true, reason: 'failed', detail: expect.stringContaining('model.name') });
+    it('is rejected failed, saying what is missing, while a required setting is unset', async () => {
+      const services = await started();
+      // No control line unsets a required value, so this unsets one on the settings directly.
+      services.provider.resolve(ParticipantSettings).system = undefined;
+      expect(await service(services, { conversationId: ID, cwd: services.cwd })).toMatchObject({ rejected: true, reason: 'failed', detail: expect.stringContaining('system') });
     });
 
     it('is rejected unsupported when it names a model', async () => {

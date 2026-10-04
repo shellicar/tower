@@ -70,6 +70,23 @@ export class ParticipantSettings {
   public claudeSettings: ClaudeSettings | undefined;
   public shutdownPolicy: ShutdownPolicy = { gracefulMs: 30_000, teardownMs: 10_000 };
 
+  private release: () => void = () => {};
+  private readonly configured = new Promise<void>((resolve) => {
+    this.release = resolve;
+  });
+
+  /** Resolves once `settled()` has found every required value set. */
+  public whenReady(): Promise<void> {
+    return this.configured;
+  }
+
+  /** Called after a control line may have changed a value: resolves `whenReady` if every required value is now set. */
+  public settled(): void {
+    if (this.readiness().ready) {
+      this.release();
+    }
+  }
+
   /** The values a conversation launched now would get, or what's missing. */
   public readiness(): Readiness {
     const { name, maxTokens, thinking, thinkingDisplay, effort } = this.model;
