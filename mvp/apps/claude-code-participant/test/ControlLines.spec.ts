@@ -207,7 +207,8 @@ describe('control lines', () => {
   describe('required values stay set', () => {
     const MODEL_FIELDS = ['name', 'maxTokens', 'thinking', 'thinkingDisplay', 'effort'];
     const SETTINGS_BEFORE = { advisorModel: 'm' };
-    const UNSETTING_CLAUDE_SETTINGS = [{ model: null }, { model: '' }, { effortLevel: null }, { permissions: null }, { permissions: { defaultMode: null } }];
+    const PADDED_NAMES = [' ', '\t', ' claude-opus-5-5', 'claude-opus-5-5 ', 'claude-opus-5-5\n'];
+    const UNSETTING_CLAUDE_SETTINGS = [{ model: null }, { model: '' }, ...PADDED_NAMES.map((model) => ({ model })), { effortLevel: null }, { alwaysThinkingEnabled: null }, { permissions: null }, { permissions: { defaultMode: null } }];
 
     it.each(MODEL_FIELDS)('model line: leaves %s as it was when sent as null', (field) => {
       const [, , reply] = testServices().control({ model: FULL_MODEL }, { model: { [field]: null } }, { settings: {} });
@@ -221,6 +222,16 @@ describe('control lines', () => {
 
     it('model line: leaves the name as it was when an empty name is sent', () => {
       const [, , reply] = testServices().control({ model: FULL_MODEL }, { model: { name: '' } }, { settings: {} });
+      expect((reply as ReadBack).settings.model).toEqual(FULL_MODEL);
+    });
+
+    it.each(PADDED_NAMES)('model line: rejects the name %j', (name) => {
+      const [, reply] = testServices().control({ model: FULL_MODEL }, { model: { name } });
+      expect(reply).toEqual({ error: expect.stringMatching(/^invalid model: name: /) });
+    });
+
+    it.each(PADDED_NAMES)('model line: leaves the name as it was when %j is sent', (name) => {
+      const [, , reply] = testServices().control({ model: FULL_MODEL }, { model: { name } }, { settings: {} });
       expect((reply as ReadBack).settings.model).toEqual(FULL_MODEL);
     });
 
