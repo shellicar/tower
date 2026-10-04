@@ -112,7 +112,7 @@ for (const line of CONTROL_LINES) {
     process.exit(1);
   }
 }
-console.log('start: every control line accepted; the participant publishes ready once it has connected');
+console.log('start: every control line accepted; the participant publishes ready once it has connected and every required setting is set');
 
 // Each line typed in this terminal goes to the participant's stdin as it is.
 // The terminal stays in line mode so Ctrl-C still reaches the signal handlers above.

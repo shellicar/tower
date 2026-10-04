@@ -178,6 +178,22 @@ once the stream has yielded anything the turn is past retrying. Classify by
 class, never by enumerated status code — 4xx never except 429, 5xx always, no
 response always — because the documentation has already moved under this once.
 
+## Running commands
+
+Agents run in a sandbox, and a few commands are allowed outside it. An allowed command matches by its exact text, so how it is written decides where it runs.
+
+- **Plain and literal, one command per call.** No `cd`, `&&`, `;`, pipes, redirects, heredocs, `$VAR` or `$(...)` in the call. A call that is "too complex to verify" is refused. Multi-step logic goes in a script file run by its literal path. A foreground `sleep` is blocked: use `timeout N sh -c 'until ...; do sleep 5; done'` or the Monitor tool.
+- **Run from the directory you were started in**, the repo root or your worktree root. The commands below match only from there, and a session started elsewhere cannot run them against another worktree.
+- **A run against the test broker** needs docker, which the sandbox cannot reach. Run exactly this, plain and unpiped:
+  `just --justfile mvp/justfile --working-directory mvp broker-run '<command or script path>'`
+  A prefix such as `cd ... &&`, a redirect or a pipe makes it run inside the sandbox, where it fails with `permission denied while trying to connect to the docker API at unix:///var/run/docker.sock`. The test broker is port 31416, never the default 4222. The recipe brings the broker down when the run ends. To bring it down by hand: `docker compose -f mvp/compose.test.yaml down`.
+- **Allowed outside the sandbox**, matched as text: `git commit *`, `git merge *`, `git rebase --continue` and `git push *` (each its own command), `docker compose -f compose.test.yaml *`, `docker compose -f mvp/compose.test.yaml *`, `just broker-run *`, `just --justfile mvp/justfile --working-directory mvp broker-run *`.
+- **Commits are signed, and only a plain `git commit -m "..."`, `git merge <branch>` or `git rebase --continue` can sign.** Signing needs gpg, which only the excluded forms reach. `git -C <path> commit`, a chained `git add ... && git commit`, and any other git command that makes a commit (`cherry-pick`, `revert`, starting a `rebase`, `am`, `pull`) run inside the sandbox and fail to sign. Agents don't rebase; `git rebase --continue` is there to finish a rebase Stephen started.
+- **Refused:** `python3 *` (write a `.mjs` script and run it with `node`), `git worktree add` (an agent starts in a worktree already), any command containing `--unsafe`. The Write and Edit tools refuse a file containing an em dash.
+- **TypeScript scripts:** `pnpm --dir mvp/apps/claude-code-participant exec node --import tsx <absolute path>`. `node --import tsx` run directly from a worktree root was refused.
+- **Participant checks:** `pnpm --dir mvp/apps/claude-code-participant lint`, and the same with `type-check`, `knip` and `test`. There is no `ci` script.
+- **When a command is blocked.** Blocked means a refusal (a permission rule, a hook or auto mode) or a failure in the sandbox (it ran and the sandbox denied something, for example "Read-only file system", "Operation not permitted" or the docker socket) prevented what you were trying to do, whether or not you then finished another way. Stop that line of work. Do not run it another way, with the sandbox off or otherwise. Report it first, to whoever started you, with the exact command, the error as it appeared, and what you were doing.
+
 ## helm
 
 The terminal client (`mvp/crates/helm`): one bridge, spawned as a child,
@@ -231,7 +247,9 @@ mkdir -p /tmp/cc-try && cd mvp/apps/claude-code-participant && NATS_URL=nats://1
 
 The run commands above, the usage lines of `start.ts`, `new-conversation.ts` and `say.ts`, and `pnpm claude-login` (`login.ts`) all pass `--env-file-if-exists=.env`, which loads an optional `.env` in the app directory (git-ignored) when it is there; a variable already in the environment wins over the file. It can set any variable those scripts read: `NATS_URL`, `PARTICIPANT_WORLD`, `PARTICIPANT_DURABLE_BUCKET`, and `PARTICIPANT_LOGIN_DIR` (absolute; the same value reaches `start.ts` and `login.ts`, so both name the same Keychain entry). With `NATS_URL` in the `.env`, the commands need no inline variable, so they run unchanged from PowerShell or cmd: `node --env-file-if-exists=.env --import tsx scripts/start.ts` (or set it first in PowerShell: `$env:NATS_URL='nats://127.0.0.1:31416'`).
 
-The new conversation shows in tower; say into it there. `start.ts` configures the participant (model, system prompt, permission mode, sandbox) and keeps it running; each line you then type in its terminal is forwarded to the participant's stdin (control lines, e.g. `{"settings":{}}`) and the reply prints as `start: participant stdout <line>`; end of terminal input (Ctrl-D) closes the participant's stdin, which starts its shutdown; Ctrl-C stops it, and a second Ctrl-C forces it. Its config dir is `${XDG_DATA_HOME:-~/.local/share}/tower/worlds/<world>`. `just dev` needs `trunk` (`cargo install trunk --locked`). When done, stop the test broker with `cd mvp && docker compose -f compose.test.yaml down`.
+The new conversation shows in tower; say into it there. `start.ts` configures the participant (model, system prompt, permission mode, sandbox) and keeps it running; each line you then type in its terminal is forwarded to the participant's stdin (control lines, e.g. `{"settings":{}}`) and the reply prints as `start: participant stdout <line>`; end of terminal input (Ctrl-D) closes the participant's stdin, which starts its shutdown; Ctrl-C stops it, and a second Ctrl-C forces it. Its config dir is `${XDG_DATA_HOME:-~/.local/share}/tower/worlds/<world>`; the outbox is its `outbox/<conversation id>/` directory (see Delivery to the stream in `docs/design/claude-code-participant.md`). `just dev` needs `trunk` (`cargo install trunk --locked`). When done, stop the test broker with `cd mvp && docker compose -f compose.test.yaml down`.
+
+The participant's delivery to the stream (outbox, drops, restarts, refusals, oversize messages) is checked against the test broker by `scripts/outbox-check.sh`, which stops, pauses and restarts the broker itself; run it through the recipe that brings the broker up and down, from the repo root: `just --justfile mvp/justfile --working-directory mvp broker-run 'apps/claude-code-participant/scripts/outbox-check.sh'`.
 
 ### macOS
 

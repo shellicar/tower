@@ -6,7 +6,8 @@ export abstract class ITimer {
   public abstract now(): number;
   /** The wall-clock time, as the `ts` every published message carries. */
   public abstract timestamp(): string;
-  public abstract sleep(ms: number): Promise<void>;
+  /** Resolves after `ms`, or as soon as `wake` aborts; a sleep that is woken leaves no timer behind. */
+  public abstract sleep(ms: number, wake?: AbortSignal): Promise<void>;
   /**
    * Calls `tick` every `ms`, without keeping the process alive for it.
    * Returns what stops it.
@@ -23,8 +24,14 @@ export class RealTimer implements ITimer {
     return new Date().toISOString();
   }
 
-  public sleep(ms: number): Promise<void> {
-    return delay(ms);
+  public async sleep(ms: number, wake?: AbortSignal): Promise<void> {
+    try {
+      await delay(ms, undefined, wake === undefined ? {} : { signal: wake });
+    } catch (err) {
+      if ((err as { name?: string }).name !== 'AbortError') {
+        throw err;
+      }
+    }
   }
 
   public every(ms: number, tick: () => void): () => void {

@@ -8,6 +8,8 @@ import { Conversations } from './Conversations.js';
 import { IHost, NodeHost } from './Host.js';
 import { IIds, RandomIds } from './Ids.js';
 import { Leftovers } from './Leftovers.js';
+import { Outbox } from './Outbox.js';
+import { DiskOutboxStore, IOutboxStore } from './OutboxStore.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
 import { ParticipantLock } from './ParticipantLock.js';
 import { ParticipantSettings } from './ParticipantSettings.js';
@@ -58,6 +60,8 @@ export function participantServices(config: ParticipantConfig, platform: NodeJS.
   services.register(NodeHost).as(IHost);
   services.register(NatsBroker).as(IBroker);
   services.register(RandomIds).as(IIds);
+  services.register(DiskOutboxStore).as(IOutboxStore);
+  services.register(Outbox).asSelf();
   services.register(Presence).asSelf();
   services.register(Shutdown).asSelf();
   return services;

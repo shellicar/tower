@@ -148,10 +148,12 @@ Not at all:
 - **Turns Claude Code starts itself** (a background task finishing,
   proof 5): the participant mints the query id, as the spec allows for input
   that didn't come through a `say` ("yes it is, how is it not?", 26 Sep).
-  The opening notice the model saw is published on `changes` with `from`
-  absent, the same as a tool result: "the message didnt originate from the
-  user / but the message to the model still comes from the machine, just
-  like a tool result" (26 Sep).
+  The opening notice the model saw is published on `changes` from the
+  orchestrator, `from: {kind: "orchestrator"}` (3 Oct; narrowed on 4 Oct
+  to a background task's notice). Until then it was
+  published with `from` absent, the same as a tool result: "the message
+  didnt originate from the user / but the message to the model still comes
+  from the machine, just like a tool result" (26 Sep).
 - **Additional working directories** (26 Sep): the standard add, the SDK's
   documented `additionalDirectories` (passed as `--add-dir`), set when a
   conversation is served and sent again on every resume, since resume drops
@@ -627,6 +629,50 @@ Parked, not decided:
   does not resolve. The spec has no rule for it since the rewrite removed
   its placeholder rule.
 
+## Delivery to the stream
+
+How what the participant publishes about a conversation reaches the stream,
+as built.
+
+- **One outbox per conversation, on disk.** `<config dir>/outbox/<conversation
+  id>/`, owner-only. Everything published about the conversation goes through
+  it: each `changes.message`, `changes.query.closed`, `attachment.attached` and
+  `attachment.detached`. The world-level `ready`, `pulse`, `unavailable` and
+  `offline` do not; they are plain publishes.
+- **Written before the call returns.** The session store's `append` returns
+  once its entries are written (file synced, renamed, directory synced), not
+  once the stream has them. A write that fails makes `append` reject, so the
+  SDK hands the batch over again. An entry whose uuid was already handed over
+  is skipped.
+- **Published until acknowledged.** A lane per conversation publishes its
+  oldest message to the stream with the entry's uuid (or, for the other
+  events, a minted id) as `Nats-Msg-Id`, waits for the acknowledgement, deletes
+  the file, and goes on to the next. A publish that fails for any reason
+  (no connection, no answer, no stream for the subject, the stream refusing the
+  message) is tried again after 250 ms, doubling to 5 s, without end, and the
+  messages behind it wait. Delivery order is the order the messages were
+  handed over.
+- **Files.** A message whose entry carries base64 files is written with the
+  files' bytes beside it. The message already names each file's object
+  (`<conversation id>/<message id>.<n>` in the durable bucket). Before the
+  message is published the lane stores the objects, and tries again with the
+  rest if the store or the broker is unreachable.
+- **Larger than the broker accepts.** A message over the broker's `max_payload`
+  is dropped and logged, and the messages behind it go on.
+- **Restart.** When the participant connects it delivers whatever an earlier
+  run left in the outbox, ahead of anything new for the same conversation.
+- **The connection.** Once connected, the NATS client reconnects without
+  limit.
+- **Shutdown.** After `detached` is written, each lane delivers what the
+  stream takes now and stops at the first message it won't; what is left stays
+  on disk for the next run.
+- **A write that fails** for `attached` rejects the service request (`failed`)
+  and the conversation is not served; for `detached` and a query's closure it
+  is logged.
+
+`apps/claude-code-participant/scripts/outbox-check.sh` checks this against the
+test broker.
+
 ## Shutdown
 
 - **Each Ctrl-C escalates** (24 Sep, confirmed 26 Sep). In Stephen's words:
@@ -883,11 +929,11 @@ separately, they can go in this branch" (26 Sep).
 
 ## Frontend work owed
 
-- **Done:** messages with no `from` get a generic "system" label, not "tool",
-  in both frontends (27 Sep). Both frontends labelled every message without
-  `from` as "tool". Stephen: "we can change this to create *generic* category
-  or something to show 'system'". A message with no `from` and no tool result
-  gets "system". The label is decided on the message, not its blocks: "it's
+- **Done:** a message with no `from` is labelled by what it is, not "tool"
+  for all of them, in both frontends (27 Sep). Both frontends labelled every
+  message without `from` as "tool". Stephen: "we can change this to create
+  *generic* category or something to show 'system'". The label is decided on
+  the message, not its blocks: "it's
   tool result, system reminder is *text* in a tool result / an isolated
   message of *role* system is system / this is what i mean, it's on the
   *message*, not the *content*". The label now lives in `sender_label`
@@ -898,6 +944,41 @@ separately, they can go in this branch" (26 Sep).
   or an orchestrator); anything the harness generated has none
   (`mvp/docs/tower-ws-spec.md` for the browser, `docs/spec/conversation.md`
   for the wire).
+- **Done (2 Oct):** both frontends label a message the same way:
+  - it has a `from`: the author;
+  - no `from`, and it holds a tool result: "tool";
+  - no `from`, and its role is `system`: "system";
+  - no `from`, anything else: "unknown".
+- **Done (4 Oct):** the participant tells apart each kind of message it
+  publishes (`kindOf`, `src/ConversationEntries.ts`) and sets each kind's
+  `from` in one place (`fromOf`, `src/ConversationChanges.ts`):
+  - a prompt (user text with no `origin`, or a `human` one): the `from` of
+    the say that opened its query, spent by the first prompt in it;
+  - a piece of Claude's reply: `{kind: "agent"}`, as bridge does;
+  - a tool result: none;
+  - an assistant entry Claude Code writes itself (model `<synthetic>`, such
+    as an API error or "No response requested."): none;
+  - Claude Code's notice that a background task (a command or an agent)
+    ended (`origin.kind` `task-notification` with `producer`
+    `session-task`): `{kind: "orchestrator"}`;
+  - a background agent's report, handed back (a meta user entry with
+    `origin.kind` `peer` and `origin.handback` true): `{kind: "agent"}`,
+    the background agent having written it; its case tells it apart from
+    Claude's replies. Other meta entries (reminders), compaction summaries,
+    attachments and interrupt markers are not published yet, although the
+    model sees them; under the Goal they are to be published;
+  - every other task notification, each its own case by its `subkind`
+    (scheduled-trigger, peer-send-message, projects-relay, session-inbox)
+    or its `source` (goal-checkin, worker-checkin, and one case for every
+    source starting `artifact-`): none;
+  - user text with each other `origin` kind, each its own case (peer,
+    channel, coordinator, plugin, auto-continuation, observer,
+    observer-activity, slack-ping, unclassified): none;
+  - a Claude Code `system` entry: none;
+  - anything with an origin none of these recognise: none, always.
+
+  Neither frontend needed a change for this: both label by `from` first, so
+  the notice reads "orchestrator".
 
 ## Open
 

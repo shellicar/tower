@@ -8,7 +8,9 @@ import { ConversationLauncher, NotConfiguredError } from './ConversationLauncher
 import { describeError } from './describeError.js';
 import { IHost } from './Host.js';
 import { IIds } from './Ids.js';
+import { Outbox } from './Outbox.js';
 import { ParticipantConfig } from './ParticipantConfig.js';
+import { ParticipantSettings } from './ParticipantSettings.js';
 import { rejected, ServedConversation, type ServingInstance } from './ServedConversation.js';
 import { ServingGate } from './ServingGate.js';
 import { IPublisher } from './SessionStore.js';
@@ -40,12 +42,14 @@ type State = 'idle' | 'serving' | 'unavailable' | 'offline';
  */
 export class Presence {
   @dependsOn(IBroker) private readonly broker!: IBroker;
+  @dependsOn(Outbox) private readonly outbox!: Outbox;
   @dependsOn(ParticipantConfig) private readonly config!: ParticipantConfig;
   @dependsOn(IIds) private readonly ids!: IIds;
   @dependsOn(ITimer) private readonly timer!: ITimer;
   @dependsOn(IHost) private readonly host!: IHost;
   @dependsOn(ConversationLauncher) private readonly launcher!: ConversationLauncher;
   @dependsOn(ServingGate) private readonly gate!: ServingGate;
+  @dependsOn(ParticipantSettings) private readonly settings!: ParticipantSettings;
   @dependsOn(IPublisher) private readonly publisher!: IPublisher;
 
   private state: State = 'idle';
@@ -61,13 +65,28 @@ export class Presence {
   }
 
   /**
-   * Connects, waits for the serving gate, then joins the world's queue group
-   * and announces itself: `ready`, then a first `pulse`, then one every
-   * interval. Shutdown beginning first stops it where it is.
+   * Connects and starts delivering what an earlier run left in the outbox,
+   * waits for the serving gate and for every required setting to be set
+   * (control lines can arrive after the connection), then joins the world's
+   * queue group and announces itself: `ready`, then a first `pulse`, then one
+   * every interval. `ready` means the instance can receive requests, so
+   * neither happens before it can launch a conversation. Shutdown beginning
+   * first stops it where it is.
    */
   public async start(): Promise<void> {
     await this.broker.connect();
+    // Shutdown beginning while connecting leaves no connection to deliver on.
+    if (this.state !== 'idle') {
+      return;
+    }
+    await this.outbox.resume();
+    // Shutdown beginning before the gate opens or before every required
+    // setting is set leaves these waits unresolved, and `start()` pending for
+    // the rest of the process. Nothing awaits `start()` (main.ts starts it with
+    // `void`), so it holds nothing open and shutdown completes without it. A
+    // wait that resolves after shutdown has begun returns at the check below.
     await this.gate.wait();
+    await this.settings.whenReady();
     if (this.state !== 'idle') {
       return;
     }
@@ -92,10 +111,24 @@ export class Presence {
     }
   }
 
-  /** Publishes `detached` for every conversation still held. */
-  public detachAll(): void {
-    for (const conversation of this.served.values()) {
-      conversation.detach();
+  /**
+   * Publishes `detached` for every conversation still held, and delivers what
+   * the stream will take now: the messages still waiting and `detached` itself.
+   * What it won't take stays on disk for the next run.
+   */
+  public async detachAll(): Promise<void> {
+    const detaching = [...this.served.entries()].map(async ([id, conversation]) => {
+      try {
+        await conversation.detach();
+      } catch (err) {
+        this.host.log(`conversation ${id}: detached is not recorded: ${describeError(err)}`);
+      }
+    });
+    await Promise.all(detaching);
+    try {
+      await this.outbox.flush();
+    } catch (err) {
+      this.host.log(`delivering what is waiting in the outbox failed: ${describeError(err)}`);
     }
   }
 
@@ -200,14 +233,17 @@ export class Presence {
       }
       throw err;
     }
-    this.served.set(conversationId, new ServedConversation(conversation, this.servingInstance(instanceId)));
-    this.broker.publish(`conv.v2.${conversationId}.attachment.attached`, {
-      ts: this.timer.timestamp(),
-      instanceId,
-      world: this.config.world,
-      cwd,
-      intervalS: PULSE_INTERVAL_S,
-    });
+    const served = new ServedConversation(conversation, this.servingInstance(instanceId));
+    this.served.set(conversationId, served);
+    try {
+      await served.attach(cwd, PULSE_INTERVAL_S);
+    } catch (err) {
+      // `attached` is not recorded, so the conversation is not served: the
+      // service request is rejected and Claude Code's input is closed.
+      this.served.delete(conversationId);
+      served.abandon();
+      throw err;
+    }
     this.host.log(`serving conversation ${conversationId} in ${cwd}${resume ? ', resumed' : ''}`);
     return { accepted: true };
   }
@@ -215,6 +251,7 @@ export class Presence {
   private servingInstance(instanceId: string): ServingInstance {
     return {
       broker: this.broker,
+      outbox: this.outbox,
       timer: this.timer,
       ids: this.ids,
       host: this.host,
