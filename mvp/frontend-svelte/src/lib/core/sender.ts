@@ -9,6 +9,7 @@ import type { ConversationMessage } from '../types';
  */
 export function senderLabel(message: ConversationMessage): string {
   if (message.from) {
+    // TODO(claude): undecided: for agent and orchestrator the kind is the label, ahead of `userId`.
     if (message.from.kind === 'orchestrator' || message.from.kind === 'agent') {
       return message.from.kind;
     }

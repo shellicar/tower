@@ -197,7 +197,8 @@ pub struct Message {
     /// Content blocks shown to the person in place of `content`.
     #[serde(rename = "userContent", default)]
     pub user_content: Option<Value>,
-    /// The entry's own RFC3339 time, distinct from `ts` (the publish time).
+    /// When the thing the message records happened, in `ts`'s format;
+    /// `ts` is the publish time.
     #[serde(default)]
     pub at: Option<Value>,
     /// `{ "replaces": "before", "except": [message ids] }`.

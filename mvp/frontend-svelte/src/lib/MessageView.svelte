@@ -7,6 +7,8 @@
 
   const message = $derived(row.message);
   const who = $derived(senderLabel(message));
+  // The message's own time (`at`, else `ts`) in the viewer's zone.
+  // TODO(claude): undecided: whether the header names the day for a message not from today (Claude Code's turn-finished line does); it shows the time only, as for every message.
   const time = $derived(
     new Date(row.time).toLocaleTimeString(undefined, { hour12: false }),
   );
@@ -28,6 +30,7 @@
     <span class="text-neutral-300">{who}</span>
     <span>{time}</span>
   </header>
+  <!-- TODO(claude): undecided: the scope note's wording. -->
   {#if row.scopeNote}
     <p class="mb-1 text-amber-300">Earlier messages are no longer sent to the model</p>
   {/if}

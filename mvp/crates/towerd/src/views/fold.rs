@@ -630,6 +630,8 @@ impl Views {
                     // assistant turn landing is new content nobody's seen.
                     // A message the person is not shown (`audience.user`
                     // false) is not new content for them.
+                    // TODO(claude): undecided: whether unread keys on
+                    // `audience.user`; it still keys on role assistant too.
                     let shown_to_user = m
                         .audience
                         .as_ref()

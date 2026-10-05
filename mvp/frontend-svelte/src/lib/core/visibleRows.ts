@@ -61,12 +61,15 @@ export function firstLine(content: ContentBlock[]): string {
  *  are dropped, and each remaining one carries how it is presented. */
 export function visibleRows(messages: ConversationMessage[]): MessageRow[] {
   const dimmedIds = scopedOutIds(messages);
+  // TODO(claude): undecided: a message the person is not shown takes no row at all, rather than a placeholder or a "model sees" toggle.
   return messages.filter(shownToUser).map((message) => ({
     id: message.id,
     message,
     content: message.userContent ?? message.content,
+    // TODO(claude): undecided: messages a later scope removed from the model are dimmed.
     dimmed: dimmedIds.has(message.id),
     scopeNote: message.scope !== undefined,
+    // TODO(claude): undecided: collapsing is keyed on role user with an agent `from`, the only generic sign of a subagent hand-back.
     collapsed: message.role === 'user' && message.from?.kind === 'agent',
     time: messageTime(message),
   }));
