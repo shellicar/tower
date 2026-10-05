@@ -46,7 +46,8 @@
   `interrupt()` that fails against a Claude Code already stopping or gone is
   expected and tolerated (someone may have signalled it directly). The spawn
   uses Node's `detached: true` (its own group and session on Linux and macOS)
-  with `windowsHide: true`.
+  with `windowsHide: true`. How Claude Code reacts to each signal is in
+  the [attempt 3 code review](../participant-findings/integration-attempt-3-review.md).
 - **Running as a service** (and what SIGHUP means then) comes later.
 
 ## Orphans after a hard kill
@@ -70,7 +71,8 @@
   (`node:sqlite`) on a file in the config dir, held for the process's life;
   the kernel releases it however the holder dies. A second participant on the
   same dir refuses to start (exit 67). Sqlite closes the race a pid file
-  would leave.
+  would leave, and nothing in Claude Code refuses a second process on one
+  session ([proof 17b](../participant-findings/proof-17b-shared-dir.md)).
 - **The config dir is owner-only:** a missing one is created `0o700`; one that
   isn't a directory, is a symlink, or isn't the user's is refused; the user's
   own with group or other access is tightened to `0o700`. No ACL check.

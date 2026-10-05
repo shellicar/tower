@@ -41,7 +41,9 @@ What the model sees, entry kind by entry kind, is in
 ## Roles
 
 - `user` and `assistant` as the API has them: the user's side of the API and
-  the model's side.
+  the model's side. No single flag marks what Claude Code wrote itself, so
+  the classifier works kind by kind
+  ([proof 15](../participant-findings/proof-15-machine-messages.md)).
 - **`system` is Claude Code's own notes:** the `system` entries in its record,
   such as a compaction notice or a turn's duration, which the model mostly
   never sees. The spec's role is an open set and now names `system`.

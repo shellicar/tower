@@ -44,9 +44,10 @@ it does not by itself put something after the MVP.
 | Approvals | Answering what auto mode escalates | Not built ([approvals.md](approvals.md)) |
 | Subagents | What is running, what each is doing, for how long; stopping a runaway or hung one | Not built ([subagents.md](subagents.md)) |
 
-These replace older lines that put approvals and skills under "later",
-images as "deferred until the lack of them hurts", subagent display as v1,
-and a tower action to start a conversation as parked.
+These replace older lines that put approvals and skills under later work,
+images as deferred until their lack hurt, subagent display as v1, and a
+tower action to start a conversation as parked. Each built item was checked
+against the test broker ([piece live checks](../participant-findings/piece-live-checks.md)).
 
 **Not in the MVP:**
 
@@ -70,7 +71,9 @@ the status line, Claude Code exiting on its own, images, approvals,
 subagents. The reasoning: cancel destroyed work on every cancel; the next
 three were cheap correctness; a lost message broke a conversation for good;
 skills and live replies touch every conversation; serving comes before
-recovery because automatic re-serving turns a recovery failure into a blip.
+recovery because automatic re-serving turns a recovery failure into a blip
+([cadence](../participant-findings/cadence.md),
+[the gap against bridge](../participant-findings/bridge-gap.md)).
 
 Errors in tower (see [errors.md](errors.md)) and the extras design (see
 [publishing.md](publishing.md)) are not placed in the order.
@@ -95,8 +98,8 @@ instance, and the Files API for images.
   blocker, then restated the minimum rule as a must without saying MVP.
   Resuming from the bus is not MVP throughout.
 - Archive: MVP or not.
-- How firm re-serving after a restart is ("potentially an auto-service
-  option").
+- How firm re-serving after a restart is: it was put as a possible
+  automatic option.
 - Where the items from the earlier post-v0 list that the MVP list doesn't
   name now sit: publishing `query.started` and tower reading it; the
   permission mode, effort and sandbox state per query (the permission mode is

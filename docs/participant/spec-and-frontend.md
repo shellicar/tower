@@ -34,7 +34,7 @@ for the participant have gone on the epic branch rather than as separate PRs.
     query messages follow in order, and a single Claude Code was never seen
     to branch inside a query. A per-message parent (like Claude Code's
     `parentUuid`) can be added later as an extension; taking it away later
-    couldn't be done.
+    couldn't be done ([branch analysis](../participant-findings/branch-analysis.md)).
   - Why a start event: the query's only other change on the wire is its
     closure, which comes too late to place its messages as they stream. A
     parent on the query's first message was rejected: that is a parent on a

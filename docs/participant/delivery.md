@@ -6,7 +6,7 @@ How what the participant publishes about a conversation reaches the stream.
 
 **Losing a message is the failure.** Tower is meant to hold the whole
 conversation, so a message that never reaches the stream defeats the point
-of publishing at all. There is no such thing as "cannot be delivered": what
+of publishing at all. Nothing counts as undeliverable: what
 can't be delivered now is delivered later, and the design changes until that
 holds. A broker that is down, a stream that refuses, a store that can't be
 reached: each is retried, never dropped. The one exception today is a message

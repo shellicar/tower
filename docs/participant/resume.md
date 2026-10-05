@@ -35,7 +35,8 @@ each findings file made is stated in it.
 **How strict "the same" is** is stated two ways, both Stephen's, 3 Oct: the
 requests must be identical (what is sent to the API is the same), and the
 target is that the conversation is the same as resuming from the local
-transcript, with "this is not MVP if some things differ". This is open.
+transcript, with some things differing not holding up the MVP. This is
+open.
 
 ## What is known
 
@@ -63,6 +64,19 @@ transcript, with "this is not MVP if some things differ". This is open.
 - **Nothing pins publishing for resume.** `load()` returning null is pinned by
   a test; no test shows that what is published is enough to resume, so
   nothing stops a change to the publisher from breaking it.
+
+## Earlier work
+
+The proofs that resumed from published or reduced records, and which
+comparison each made: [proof 8](../participant-findings/proof-08-resume-store.md),
+[proof 9](../participant-findings/proof-09-resume-spec.md),
+[proof 13](../participant-findings/proof-13-resume-cwd.md),
+[proof 16](../participant-findings/proof-16-semantic-form.md),
+[proof 20](../participant-findings/proof-20-body-copy.md),
+[proof 24](../participant-findings/proof-24-next-query.md),
+[the reconcile](../participant-findings/reconcile-tower-holding.md),
+[the integration attempts](../participant-findings/integration-attempts.md),
+[trailing thinking](../participant-findings/trailing-thinking.md).
 
 ## Open
 

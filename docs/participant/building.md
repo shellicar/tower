@@ -62,6 +62,8 @@ any of this ([participant updates](../participant-findings/participant-updates.m
 
 ## Conventions
 
+- **The agents' own sandbox** (signing, docker, refusals) is described in
+  [agent sandbox](../participant-findings/agent-sandbox.md) and CLAUDE.md.
 - **Research code goes to the remote as `feature/research/...`;** it is code,
   not docs.
 - **Fix only what the participant needs;** note and park the rest.

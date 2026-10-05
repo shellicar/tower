@@ -34,7 +34,8 @@
    per-model `effortLevel` or `env.CLAUDE_CODE_MAX_OUTPUT_TOKENS`, its value
    wins over the required one. Required means it has to be set, not that it
    beats Claude Code's own settings. The point of required fields is that
-   nothing is left to a default or to the ambient environment.
+   nothing is left to a default or to the ambient environment
+   ([foundation probes](../participant-findings/foundation-probes.md)).
 
 ## Environment variables
 
@@ -64,7 +65,8 @@ fail without them.
   Claude Code ranks some of them above its settings, so an inherited one
   would silently replace a declared value. The list is in
   `src/startup.ts`. A value set on purpose goes through `claudeSettings.env`,
-  which still wins.
+  which still wins
+  ([foundation probes](../participant-findings/foundation-probes.md)).
 - **A parent Claude Code session's variables are stripped too,** so a
   participant started from inside a Claude Code session doesn't hand them on.
 - Everything else passes through, including `NATS_URL` and the

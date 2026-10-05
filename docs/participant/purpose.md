@@ -79,7 +79,8 @@ Display).
   subjects are keyed by conversation id, so anything published to the live
   broker is permanent.
 - **Fix only what the participant needs.** Anything else found along the way
-  is noted and parked, not fixed in passing. How this sits with MVP items
+  is noted and parked, not fixed in passing
+  ([parked elsewhere](../participant-findings/parked-elsewhere.md)). How this sits with MVP items
   that change tower itself (serving from tower, the frontends) hasn't been
   said.
 

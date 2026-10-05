@@ -46,14 +46,16 @@
   transcript to recover from either.
   (Findings: [proof 3](../participant-findings/proof-03-session-store.md),
   [proof 23](../participant-findings/proof-23-commit-timing.md),
-  [cancel scenarios](../participant-findings/cancel-scenarios.md).)
+  [cancel scenarios](../participant-findings/cancel-scenarios.md),
+  [store commit and resume](../participant-findings/store-commit-resume.md).)
 
 ## Messages and turns
 
 - **Each piece of a reply is its own message:** thinking, text and each tool
   call are published as separate `changes.message`s with Claude Code's ids,
   as they are written. Every piece keeps its own id on tower, so a rewind to
-  any piece has an id to name.
+  any piece has an id to name
+  ([proof 2](../participant-findings/proof-02-entries-to-messages.md)).
 - **A turn is one API round:** what was sent to the API and what came back.
   Every message belongs to the turn it first appears in. The publisher groups
   a reply's pieces by the API response id they share (`message.id`), so
@@ -93,8 +95,8 @@
   reminders included. The bus is the storage of the conversation, just as the
   transcript on disk is.
 - **Open: whether tower (the published record) is the authority on what a
-  conversation holds.** A brief stated "tower is the authority and a commit is
-  a fact"; it rests only on that brief being sent. Stephen's own words are
+  conversation holds.** A brief stated that tower is the authority and a commit
+  is a fact; it rests only on that brief being sent. Stephen's own words are
   narrower: if the local conversation is gone, the bus is the authority
   anyway.
 
