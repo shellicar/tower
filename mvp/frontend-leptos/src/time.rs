@@ -79,6 +79,19 @@ pub fn format_time(_ts: Millis) -> String {
     String::new()
 }
 
+/// An ISO-8601 timestamp read to epoch millis by the browser's `Date.parse`;
+/// None when it does not parse.
+#[cfg(target_arch = "wasm32")]
+pub fn parse_iso_millis(s: &str) -> Option<Millis> {
+    let ms = js_sys::Date::parse(s);
+    (!ms.is_nan()).then_some(ms as Millis)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn parse_iso_millis(_s: &str) -> Option<Millis> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
