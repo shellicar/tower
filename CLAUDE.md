@@ -61,13 +61,37 @@ deviations land in the doc first, then the code.
   Agent Spec, herdr, firstmate; what each traded away, and what tower should
   take), `lookout.md` (the daemon that watches conversations and decides what
   reaches a handler; the six limits it holds, and why each is a choice).
-- A change to the wire contract (`docs/spec/`) rides its own PR, never bundled
-  with code. One owner per document per change; implementation PRs build to
-  merged spec text. Every other document, this file included, changes in the
-  same PR as the code it describes.
+- Every document except the spec, this file included, changes in the same PR
+  as the code it describes. One owner per document per change. The spec is
+  different: see Changing the spec below.
 
 You don't have to read them all. You do have to know they exist and reach for
 the right one instead of guessing.
+
+## Changing the spec
+
+The spec in `docs/spec/` is the contract every part of tower builds to, and
+Stephen decides what it says. This section exists because of PR #12. An agent
+building bridge's `service` request changed the spec as it went, reshaping the
+contract to fit its code, and none of it had been discussed with him. The spec
+text was pulled out into its own PR (#19) and discussed there, and so were the
+decisions that came after it. In #28 the code capped an out-of-range heartbeat
+interval at ten minutes; the spec discussion in #30 decided an out-of-range
+interval is invalid instead, never clamped, and the code was changed to match.
+
+So an agent doesn't change the spec on its own. When work needs a spec change,
+the agent says so, and Stephen discusses it and decides.
+
+Once he has decided, the spec change goes with the code, wherever the code is:
+an epic, a branch off it, a prototype. Leaving the spec out of that work
+protects nothing. The contract still gets designed, only now inside the code,
+with no spec text for anyone to discuss.
+
+The separate PR comes when the work goes to main. A spec change and a code
+change are reviewed for different reasons: one asks whether the contract is
+right, the other whether the code is. Mixed in one PR, either can block the
+other, and the objections tangle. So the spec changes are split out and
+reviewed on their own first, and the code follows what was merged.
 
 ## Rules with teeth
 
