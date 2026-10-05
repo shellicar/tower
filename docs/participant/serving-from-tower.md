@@ -12,15 +12,17 @@ the participant.
 - **Starting a new conversation is servicing.** Towerd sends `service` with a
   fresh conversation id and a cwd; the first message is an ordinary `say`.
 - **Towerd mints the id,** not the browser.
-- **What tower offers to serve on comes from the agents that are alive.** If
-  nothing is ready, nothing would receive the request either, so tower only
-  needs to know which agents are (potentially) ready.
+- **What tower offers to serve on comes from the agents that are alive.**
+  Tower only needs to know which agents are (potentially) ready.
 - **Continuing a conversation re-serves it in the world that served it
   last.** Moving a conversation to another world is a separate operation;
   the spec's `service` to another world is how that operation would be
   carried out.
 - **Towerd keeps which world (and directory) served a conversation after it
-  detaches.** Where it keeps it is a value, not a decision.
+  detaches.**
+
+If nothing is ready, nothing would receive the request either, so the
+agents that are alive are all tower needs to offer.
 
 ## Re-serving after a restart (MVP)
 
@@ -37,12 +39,11 @@ shutdown count; one setting or one per conversation.
 
 Wanted: unservicing a conversation (the terminal equivalent is ending the
 session, or `/clear`). The spec has no request to stop serving one
-conversation; `drain` stops a whole instance. Not talked through. Archive is
+conversation; `drain` stops a whole instance. Not designed. Archive is
 related, and whether archive is MVP is open.
 
 ## Open
 
-- How the UI groups the choice of where to serve (by world was proposed, not
-  agreed).
+- How the UI groups the choice of where to serve (by world is a candidate).
 - Whether tower suggests directories a world used before, beside a typed
-  path (proposed, not agreed).
+  path (a candidate).

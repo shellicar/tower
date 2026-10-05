@@ -1,8 +1,12 @@
 # Spec and frontend changes the participant brought
 
 The spec is reference only: it states the contract, with no argument,
-history or quotes. The reasons live in these participant docs. Spec changes
-for the participant have gone on the epic branch rather than as separate PRs.
+history or quotes. Where a change below has a reason, the reason is here.
+
+A spec change the participant needs is decided before it is made. Once
+decided, it goes with the code on the epic. When the work goes to main, the
+spec changes are split into their own PR and reviewed first, and the code
+follows what was merged.
 
 ## Done
 
@@ -27,22 +31,30 @@ for the participant have gone on the epic branch rather than as separate PRs.
   and an optional `parent` (a message id; absent means the query follows the
   tip; never `null`). The closure is renamed `changes.query.closed`;
   `changes.query` stays in v2 as its old name, read forever and never
-  published again. The rename stays inside v2 with no exception sentence,
-  because tower is the consumer. Towerd reads `query.closed`; the participant
+  published again. Conv stays v2, with no exception sentence for the rename.
+  Publishers that never send a start (claude-sdk-cli, and bridge until
+  updated) keep working. Towerd reads `query.closed`; the participant
   publishes `query.closed` but not yet `query.started`.
-  - Why the parent belongs to the query and not to every message: inside a
-    query messages follow in order, and a single Claude Code was never seen
-    to branch inside a query. A per-message parent (like Claude Code's
-    `parentUuid`) can be added later as an extension; taking it away later
-    couldn't be done ([branch analysis](../participant-findings/branch-analysis.md)).
-  - Why a start event: the query's only other change on the wire is its
-    closure, which comes too late to place its messages as they stream. A
-    parent on the query's first message was rejected: that is a parent on a
-    message, not on the query.
-  - `tip.moved` is for an isolated move, such as a rewind; you can't rewind
-    mid-query without aborting it.
-- **Not taken:** a `shutdown` query reason. A query cut by shutdown closes
-  `aborted`, which the spec already has.
+- **No `shutdown` query reason.** A query cut by shutdown closes `aborted`,
+  which the spec already has.
+
+### Why the query carries its parent
+
+Inside a query messages follow in order, and a single Claude Code was never
+seen to branch inside a query, so the parent belongs to the query and not to
+every message. A per-message parent (like Claude Code's `parentUuid`) can be
+added later as an extension; taking it away later couldn't be done
+([branch analysis](../participant-findings/branch-analysis.md)).
+
+The query needs a start event because its only other change on the wire is
+its closure, which comes too late to place its messages as they stream. A
+parent on the query's first message would be a parent on a message, not on
+the query.
+
+`tip.moved` is for an isolated move, such as a rewind; a rewind can't happen
+mid-query without aborting it.
+
+The rename stays inside v2 because tower is the consumer of `changes`.
 
 ## Frontends
 
@@ -59,8 +71,8 @@ for the participant have gone on the epic branch rather than as separate PRs.
   can't be expressed.
 - The code side of `query.started` (wire, towerd, bridge).
 - The spec doesn't say that a retried API request keeps its turn (one
-  sentence, its own spec PR, when wanted). A glossary line is owed too:
-  Anthropic's "turn" is tower's query.
+  sentence). A glossary line is owed too: Anthropic's "turn" is tower's
+  query.
 - From the agent events: fixtures for `unavailable`, `offline` and a repeated
   `ready`; `mvp/docs/tower-ws-spec.md`, `tower-v1-design.md` and CLAUDE.md
   still derive liveness from `lastPulse` alone; `scenarios.md` line 374.
@@ -72,4 +84,4 @@ for the participant have gone on the epic branch rather than as separate PRs.
 - Towerd shows the row's last kind as "query" for a `query.closed` (keep it,
   use the literal leaf, or "query_closed").
 - A glossary for model, harness, conversation, transcript, session, commit
-  and local state, worked out but not written.
+  and local state.

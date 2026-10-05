@@ -2,63 +2,66 @@
 
 ## The build
 
-- **Fresh, not from the proof code:** correctness over speed. The proofs are
-  reference; what they found is in [the findings](../participant-findings/).
+- **Fresh, not from the proof code.** The proofs are reference; what they
+  found is in [the findings](../participant-findings/).
 - **Where it lives:** `mvp/apps/claude-code-participant`. Inside `mvp/`,
   projects group by language: Rust in `crates/`, TypeScript apps in `apps/`,
   TypeScript libraries in `packages/`, so each workspace entry is a glob.
   Nothing else has moved yet.
-- **`@shellicar/core-di`,** its preview release, for dependency injection. Easy
-  to remove later if it proves overkill; harder to add afterwards.
+- **`@shellicar/core-di`,** its preview release, for dependency injection.
 - **Abstract classes (`abstract class IThing`) where something crosses a
   boundary,** and only there: the store (it writes to NATS), anything that
   reads or writes a file, and Claude Code only if testing needs it. The
   session store hands entries to an abstract publisher. The process list is
   read behind one too, per platform.
-- **Runs through `tsx`:** core-di uses TC39 decorators, which Node can't run
-  from type-stripped `.mts`. No build step.
-- **TypeScript 7** (the native compiler), accepted as long as it doesn't cause
-  problems.
-- **Tests on vitest 4,** which runs core-di's decorators; vitest 5 waits until
+- **Runs through `tsx`,** with no build step: core-di uses TC39 decorators,
+  which Node can't run from type-stripped `.mts`.
+- **TypeScript 7** (the native compiler). Provisional: kept while it causes
+  no problems.
+- **Tests on vitest 4,** which runs core-di's decorators. vitest 5 waits until
   it is checked with core-di.
-- **Checks:** type checking, Biome and knip, from the start
+- **Checks:** type checking, Biome and knip
   (`pnpm --dir mvp/apps/claude-code-participant lint`, `type-check`, `knip`,
   `test`).
 
-## Tooling decisions
+Starting fresh puts correctness ahead of speed. Dependency injection is easy to remove later if it proves
+overkill, and harder to add afterwards.
+
+## Tooling
 
 - **Biome is the linter and the formatter.** Its rules are `claude-cli`'s
   config plus `noUnusedFunctionParameters`, `noUnusedPrivateClassMembers` and
   `noUndeclaredDependencies`; `noExplicitAny` stays a warning, because `any`
-  is needed as a generic constraint. Line width 320: some lines should be
-  long and some short, and a wide limit stops the formatter wrapping
-  everything that doesn't need it
+  is needed as a generic constraint. Line width 320
   ([lint and format comparison](../participant-findings/lint-compare.md)).
-  This replaces the older line that Biome was being compared against Oxlint
-  and Oxfmt.
 - **The official NATS client,** `@nats-io/transport-node` 3.4.0 and its
-  `@nats-io/*` companions, never the deprecated `nats` package; issues get
-  addressed as they come. The object store is written through `@nats-io/obj`.
+  `@nats-io/*` companions, never the deprecated `nats` package. The object
+  store is written through `@nats-io/obj`.
 - **zod** for control-line validation (the version the SDK already uses).
-- **pnpm 12,** tried here as a test bed. Dependencies change only through pnpm
-  commands (`pnpm install`, `pnpm add`); `packageManager` is set directly.
-  `package.json` dependency lists are never edited by hand.
+- **pnpm 12,** with this workspace as its test bed. Dependencies change only
+  through pnpm commands (`pnpm install`, `pnpm add`); `packageManager` is set
+  directly. `package.json` dependency lists are never edited by hand.
 - **No exceptions for packages' build scripts** in the workspace's hardening;
   where something breaks, note it and find out what the script does.
-- **Node 26,** pinned by major only in `.node-version` (which replaced
-  `.nvmrc`); CI follows `.node-version`.
+- **Node 26,** pinned by major only in `.node-version`; CI follows
+  `.node-version`.
 - **Agent SDK `^0.3.285`.**
 - **A new dependency is a decision** (CLAUDE.md, Dependencies).
 
+The wide line width lets some lines be long and some short: the formatter
+doesn't wrap everything that doesn't need it.
+
 ## Keeping Claude Code current (after the MVP)
 
-Wanted: a participant that updates itself, since Stephen is the main user and
-manual releases were painful for claude-sdk-cli. Two routes to investigate:
-using the installed Claude Code, or updating the SDK automatically (a release
-on a version bump or nightly, the SDK bumped in its own PR, the running
+Wanted: a participant that updates itself. Two routes to investigate: using
+the installed Claude Code, or updating the SDK automatically (a release on a
+version bump or nightly, the SDK bumped in its own PR, the running
 participant detecting the update), the second only with tests covering the
 behaviour. CI doesn't check the participant today, and it would need to before
 any of this ([participant updates](../participant-findings/participant-updates.md)).
+
+The participant has one main user, and manual releases were painful for
+claude-sdk-cli.
 
 ## Conventions
 

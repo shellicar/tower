@@ -21,17 +21,14 @@ the app's optional `.env`), so it never defaults to the live broker.
 
 ## What `start.ts` declares
 
-These are Stephen's, except where marked:
-
 - model `claude-sonnet-5-5`;
-- max tokens 120000 (Claude's proposal, from bridge's example, never changed
-  by him);
+- max tokens 120000 (provisional);
 - effort `medium` (the docs say Sonnet 5.5 defaults to high, Claude Code says
   medium);
 - thinking `adaptive`, displayed `summarized`;
 - permission mode `auto`;
 - system prompt: the preset, with nothing appended;
-- Claude Code's sandbox on, through `claudeSettings` for now
+- Claude Code's sandbox on, through `claudeSettings`
   (`sandbox.enabled`, `autoAllowBashIfSandboxed`);
 - world `claude-code` (more agents in a world later, named like `agent1`);
 - config dir `${XDG_DATA_HOME:-~/.local/share}/tower/worlds/<world>`;
@@ -42,9 +39,11 @@ A script may default these; the participant itself never does.
 
 ## Open
 
-Builder choices nobody ruled on: the participant runs `detached` from the
-script (one Ctrl-C is one shutdown stage; Ctrl-Z stops only the script); the
-script exits with the participant's code or 128 plus the signal; a refused
-line closes stdin and exits 1; a rejected reply exits 0; a say carries
-`from: {kind: "human"}`; `service` carries no `from`; a 30 s request timeout.
+Undecided, each built one way for now: the participant runs `detached` from
+the script (one Ctrl-C is one shutdown stage; Ctrl-Z stops only the script);
+the script exits with the participant's code or 128 plus the signal; a
+refused line closes stdin and exits 1; a rejected reply exits 0; a say
+carries `from: {kind: "human"}`; `service` carries no `from`; a 30 s request
+timeout.
+
 Every say after the first needs the tip, which the kit doesn't print.

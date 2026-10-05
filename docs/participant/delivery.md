@@ -4,13 +4,16 @@ How what the participant publishes about a conversation reaches the stream.
 
 ## The rule
 
-**Losing a message is the failure.** Tower is meant to hold the whole
-conversation, so a message that never reaches the stream defeats the point
-of publishing at all. Nothing counts as undeliverable: what
-can't be delivered now is delivered later, and the design changes until that
-holds. A broker that is down, a stream that refuses, a store that can't be
-reached: each is retried, never dropped. The one exception today is a message
-over the broker's size limit, which is temporary (below).
+**No message is lost.** Nothing counts as undeliverable: what can't be
+delivered now is delivered later. A broker that is down, a stream that
+refuses, a store that can't be reached: each is retried, never dropped. The
+one exception today is a message over the broker's size limit, which is
+temporary (below).
+
+Tower is meant to hold the whole conversation, so a message that never
+reaches the stream defeats the point of publishing at all. Losing a message
+is the failure the design exists to prevent, and where it can't prevent one,
+the design changes.
 
 ## As built
 
@@ -47,8 +50,6 @@ over the broker's size limit, which is temporary (below).
 - **A write that fails** for `attached` rejects the `service` (`failed`) and
   the conversation is not served; for `detached` and a query's closure it is
   logged.
-- Where the outbox lives, how it is keyed, the duplicate window and the
-  connection options are values inside this design, not decisions.
 
 `apps/claude-code-participant/scripts/outbox-check.sh` checks this against the
 test broker, stopping, pausing and restarting it (run it through the recipe
@@ -56,24 +57,22 @@ in CLAUDE.md).
 
 ## A broker unreachable at start
 
-The participant exits; it doesn't sit waiting. As built it exits through the
-rejected connect, as a crash (Node's code 1). The `TODO: undecided` at
-`src/main.ts` still calls this undecided; it was settled, and the marker is
-stale. Whether it gets an exit code of its own has not been decided.
+The participant exits; it doesn't wait. It exits through the rejected
+connect, as a crash (Node's code 1). Undecided: whether it gets an exit code
+of its own.
 
 ## Messages over the broker's size limit (MVP)
 
 A message over the broker's `max_payload` (1 MB) is dropped and logged, and
-the messages behind it go on. That is temporary: delivering these must be done
-before the MVP; until then, throwing or dropping and logging is accepted,
-because an outbox can't help with a message the broker will never take.
+the messages behind it go on. Provisional until the MVP, which delivers
+them: an outbox can't help with a message the broker will never take.
 
-Since base64 files already move to the durable bucket before publishing, the
+Base64 files already move to the durable bucket before publishing, so the
 case left is large text, chiefly `tool_use.input`, which has no size limit.
-How a large value is carried is a spec design and open: reusing the spec's
-`object` source shape at those places, or splitting across publishes, were
-both named. How towerd would treat such a reference, given towerd already
-externalises heavy values into `$ref`s itself, isn't known.
+How a large value is carried is a spec design, and open. Candidates: the
+spec's `object` source shape at those places, or splitting across publishes.
+How towerd would treat such a reference, given towerd already externalises
+heavy values into `$ref`s itself, isn't known.
 
 ## Open
 

@@ -2,14 +2,12 @@
 
 ## Decided
 
-- **Approvals are part of the MVP.** Even in auto mode, Claude Code escalates
-  repeated denials to the user, so something has to answer. They are not the
-  top priority.
+- **Approvals are part of the MVP.** They are not the top priority.
 - **Each ask only has to work in one place:** answers on the bus and in a
   terminal aren't reconciled.
 
-This replaces the older line that anything auto mode couldn't approve could
-be dropped.
+Even in auto mode, Claude Code escalates repeated denials to the user, so
+something has to answer them.
 
 ## Where it stands
 
@@ -28,4 +26,4 @@ the whole permissions object rather than merging
 
 ## Open
 
-Everything about the design; it needs talking through before a brief.
+Undecided: the whole design.

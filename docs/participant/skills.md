@@ -4,32 +4,31 @@
 
 - **Skills are required for the MVP, from at least one skills directory.**
 - **Skills directories are declared in config,** and skills keep their plain
-  names: a plugin prefix on every skill is not acceptable.
+  names, with no plugin prefix.
 - **Skills are managed per process, not per conversation.** Two participants
-  with different skill configuration don't contest. Isolation, and the
-  available skills changing when the config changes, matter; the exact
-  config shape doesn't. Nothing is to be forced that Claude Code doesn't
+  with different skill configuration don't contest. What matters is
+  isolation, and the available skills changing when the config changes; the
+  exact config shape doesn't. Nothing is forced that Claude Code doesn't
   support.
-- **Skills are not ambient:** if they were, sessions couldn't be controlled or
-  compared (see [configuration.md](configuration.md)).
+- **Skills are not ambient** (see [configuration.md](configuration.md)):
+  ambient skills would leave sessions impossible to control or compare.
 
 ## Where it stands
 
 Not built. The participant runs Claude Code with `settingSources: []`, which
 loads no skills.
 
-The route proven so far, proposed by Claude and not confirmed: Claude Code's
-`user` setting source over the agent's config dir, with the spawn hook
-linking each declared skill folder into whichever config dir each Claude Code
-gets, skipping folders that carry `.claude-plugin`, and a private HOME
-keeping the housekeeping that opening `user` turns on out of the real home.
-The catch: opening the `user` source also opens CLAUDE.md, hooks,
-permissions, agents, commands and MCP from that dir. The question is how to
-declare a skills directory without opening Claude Code's whole `user` source.
+Undecided: the route. The one proven so far: Claude Code's `user` setting
+source over the agent's config dir, with the spawn hook linking each
+declared skill folder into whichever config dir each Claude Code gets,
+skipping folders that carry `.claude-plugin`, and a private HOME keeping the
+housekeeping that opening `user` turns on out of the real home. Opening the
+`user` source also opens CLAUDE.md, hooks, permissions, agents, commands and
+MCP from that dir. The question is how to declare a skills directory without
+opening Claude Code's whole `user` source.
 
-How skills are configured is not decided either. Bridge takes its skills
-directory on a stdio control line, and the no-ambient-config principle points
-the same way; nobody has decided it for the participant.
+Undecided: how skills are configured. Bridge takes its skills directory on a
+stdio control line, and the no-ambient-config principle points the same way.
 
 ## What is known
 
@@ -58,4 +57,5 @@ From proofs [12](../participant-findings/proof-12-skills-dir.md),
 - The route, and how a skills directory is declared.
 - Whether the participant needs to call `reloadSkills()` at all (Claude Code
   watches the directory itself).
-- `syncClaudeAiSkills` is left at Claude Code's default.
+- `syncClaudeAiSkills` is left at Claude Code's default (see
+  [configuration.md](configuration.md), Open).
