@@ -8,12 +8,12 @@ for a Mac.
 (downloaded from npm, sha512 checked), and a test script
 `proofs/macos-keychain.mts`, first run later on Stephen's Mac.
 
-**Versions.** Claude Code 2.1.282 (the code read; the design record names it
-as the darwin-arm64 binary of Agent SDK 0.3.282). The Mac run's versions are
+**Versions.** Claude Code 2.1.282 (the code read; `4294ad5:docs/design/claude-code-participant.md`
+names it as the darwin-arm64 binary of Agent SDK 0.3.282). The Mac run's versions are
 not recorded.
 
 **Runs.** No runs on Linux. The Mac run's results are recorded only here and
-in the old design record, not on the branch. Branch `research-macos-keychain`
+in `4294ad5:docs/design/claude-code-participant.md`, not on the branch. Branch `research-macos-keychain`
 (86b1dc5, 5575fb8), pushed as `origin/feature/research/macos-keychain`.
 
 **Found (code reading).**
