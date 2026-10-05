@@ -1,6 +1,6 @@
 # Tower's documentation: start here
 
-Tower is the one place to see and drive Stephen's fleet of AI conversations:
+Tower is the one place to see and drive a fleet of AI conversations:
 a NATS bus with a spec as the only coupling (`docs/spec/`), `towerd` and two
 browser frontends (`mvp/`), and agents that serve conversations on the bus.
 The work in progress is the **Claude Code participant**
@@ -17,27 +17,35 @@ The work in progress is the **Claude Code participant**
   reproduced. Beyond it nothing is decided, except that what the user needs to
   see is published too.
 - **Where it is:** v0 is reached (driving a conversation from tower). The goal
-  now is the MVP: Stephen using it every day instead of the terminal, with no
-  scripts outside tower.
+  now is the MVP: using it every day instead of the terminal, with no scripts
+  outside tower.
 
 ## Constraints
 
-- No ambient configuration: everything that changes the outcome is declared,
-  nothing is defaulted, nothing comes from the user's own Claude Code setup.
-- Trial runs use the test broker (31416), never the live one (4222).
-- Linux and macOS; Windows later.
-- Fix only what the participant needs; park the rest.
-- Stephen makes every design decision. What is open in these docs is open:
-  don't build it as if decided.
+- **No ambient configuration:** everything that changes the outcome is
+  declared, and nothing comes from the user's own Claude Code setup. A
+  default can change with any update, invisibly, so a default is accepted
+  one setting at a time, never silently (see
+  [configuration](participant/configuration.md)).
+- **Trial runs use the test broker (31416), never the live one (4222).** Conv
+  subjects are keyed by conversation id, not by world, so anything published
+  to the live broker is permanent.
+- **Linux and macOS;** Windows later.
+- **Fix only what the participant needs;** note and park the rest. A fix made
+  in passing changes another part of tower that nobody asked to change, and
+  it hides inside a participant change.
+- **Stephen makes every design decision.** A choice built as if decided reads
+  as decided in the code, where it is hard to see and harder to undo. What is
+  open in these docs is open: don't build it as if decided.
 
 ## Where each area stands
 
 | Area | Stands | File |
 |---|---|---|
 | Purpose, goals, the publish rule | Decided; model-seen kinds still unpublished | [purpose](participant/purpose.md) |
-| Scope: v0, the MVP, the order of work | MVP list set; 5 of 16 items built, one of them partly | [scope](participant/scope.md) |
+| Scope: v0, the MVP, the order of work | MVP list set; 5 of 16 items built | [scope](participant/scope.md) |
 | How it runs Claude Code | Built | [running](participant/running.md) |
-| Configuration and the login | Built; some send-it-only rules open | [configuration](participant/configuration.md) |
+| Configuration and the login | Built; some validation rules undecided | [configuration](participant/configuration.md) |
 | Presence and the requests | Built; `chdir`, model on `service`, the premise not | [presence](participant/presence.md) |
 | Serving from tower | MVP, not built | [serving-from-tower](participant/serving-from-tower.md) |
 | What is published | Built, short of the rule | [publishing](participant/publishing.md) |
@@ -63,9 +71,10 @@ versions, runs and what it found.
   how the unpublished kinds are carried.
 - How strict "the same request" is for a resume from the bus.
 - The skills route, the approvals design, the error message on the wire.
-- Rules that rest only on a brief being sent: one key per control line, the
-  reply to a blank line, `claudeSettings` checked only on the keys acted on,
-  no migration of transit history, "tower is the authority".
+- Undecided, each built one way for now: one key per control line, the reply
+  to a blank line, `claudeSettings` checked only on the keys acted on, no
+  migration of transit history, whether tower is the authority on what a
+  conversation holds.
 
 ## The rest of the documentation
 
@@ -73,11 +82,9 @@ versions, runs and what it found.
 - `mvp/docs/`: towerd's design and its browser contract, bridge's stdio spec,
   deployment.
 - `docs/design/`: live design work beyond the participant (`landscape.md`,
-  `lookout.md`). `docs/design/claude-code-participant.md` now only points
-  here.
+  `lookout.md`).
 - `docs/planning/`: the earlier design corpus; `docs/roadmap.md`,
   `docs/glossary.md`.
 
-Each of these files describes its area as it is now, with the reason for
-each thing. When work changes an area, the file for that area changes with
-it.
+Each of these files describes its area as it is now. When work changes an
+area, the file for that area changes with it.
