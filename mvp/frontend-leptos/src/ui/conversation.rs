@@ -273,7 +273,7 @@ pub fn ConversationView(
     });
     // The messages the person sees, as rows; the windowed list indexes
     // these, so a hidden message takes no space. Every recompute counts as
-    // a change (MessageRow has no equality).
+    // a change.
     let rows = Memo::new_with_compare(
         move |_| oc.with(|s| visible_rows(&s.messages, parse_iso_millis)),
         |_, _| true,
