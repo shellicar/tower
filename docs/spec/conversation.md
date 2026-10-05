@@ -225,6 +225,9 @@ message without them reads exactly as it did before they existed.
   says whether the model is sent the message; `user` whether the person is
   shown it. Absent means both. A message with `user: false` is part of the
   record a reader keeps, and it is not drawn.
+  TODO(claude): undecided: "not drawn" means no row at all in both frontends;
+  a placeholder or a "what the model sees" view are the other ways a reader
+  could keep it out of the person's way.
 - **`userContent`**: content blocks the person is shown in place of
   `content`, for a message whose words for the person differ from the
   model's. `content` stays what the model is sent. Only meaningful when the
@@ -233,14 +236,21 @@ message without them reads exactly as it did before they existed.
 - **`at`**: when the thing the message records happened, on the publisher's
   clock, in the same format as `ts`. `ts` stays the time the change was
   published, and ordering stays by `ts`. A reader that shows a time for the
-  message shows `at` when present, in the reader's own time zone. A publisher
-  never writes a clock reading into `content` or `userContent`: the instant
-  goes in `at`, and only the reader turns it into a wall-clock time.
+  message shows `at` when present, in the reader's own time zone. Text the
+  publisher writes itself (as opposed to text it forwards, such as a stored
+  error message) carries no clock reading: the instant goes in `at`, and only
+  the reader turns it into a wall-clock time.
+  TODO(claude): undecided: whether that rule binds every publisher, or only
+  covers the turn-finished line it was written for. Forwarded text (Claude
+  Code's usage-limit message names a time in the zone of its machine) is
+  outside it either way.
 - **`scope`**: `{ replaces: "before", except: [message ids] }` on a message
   that replaces, for the model, every message before it: from this message
   on the model is no longer sent those messages, except the ones `except`
   names. The earlier messages stay in the record and are shown as before;
-  what changed is only what the model is sent. `replaces` is an open set
+  what changed is only what the model is sent.
+  TODO(claude): undecided: how a reader marks the messages a scope replaced.
+  Both frontends dim them and put a note on the scope message. `replaces` is an open set
   with `before` its one value today.
 
 The reader's rule, with no knowledge of why a message carries these fields:

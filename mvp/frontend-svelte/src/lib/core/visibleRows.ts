@@ -65,7 +65,8 @@ export function visibleRows(messages: ConversationMessage[]): MessageRow[] {
   return messages.filter(shownToUser).map((message) => ({
     id: message.id,
     message,
-    content: message.userContent ?? message.content,
+    // TODO(claude): undecided: a `userContent` that is not an array falls back to `content`.
+    content: Array.isArray(message.userContent) ? message.userContent : message.content,
     // TODO(claude): undecided: messages a later scope removed from the model are dimmed.
     dimmed: dimmedIds.has(message.id),
     scopeNote: message.scope !== undefined,

@@ -266,6 +266,11 @@ an offset, when the thing the message records happened, as distinct from `ts`
 message only when `audience.user` is not `false`, draws `userContent` when
 present and `content` otherwise, and shows `at` (when present) as the
 message's time, in the viewer's own time zone.
+TODO(claude): undecided: a message the person is not shown takes no row;
+messages a scope replaced are dimmed, with a note on the scope message; a
+user-role message from an agent is collapsed to its first line; the time
+shows no day for a message not from today; a `userContent` that is not an
+array falls back to `content`.
 
 A message whose `audience.user` is `false` does not start an unread episode.
 TODO(claude): undecided: whether unread keys on `audience.user`. Today an

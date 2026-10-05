@@ -23,6 +23,14 @@ describe('visibleRows', () => {
     expect(actual).toEqual(expected);
   });
 
+  it('shows content when userContent is not an array', () => {
+    const expected = [{ type: 'text', text: 'body a' }];
+
+    const actual = visibleRows([msg('a', { userContent: 7 as unknown as ConversationMessage['userContent'] })])[0].content;
+
+    expect(actual).toEqual(expected);
+  });
+
   it('drops a message not meant for the user', () => {
     const expected = ['a'];
 
