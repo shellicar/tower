@@ -3,9 +3,8 @@
 ## Decided
 
 - **Subagents don't show up as conversations of their own,** and aren't
-  addressable on the bus. Their entries don't go onto the bus: they aren't
-  addressable. Making them addressable would likely need first-class support
-  in the spec.
+  addressable on the bus. Their entries don't go onto the bus. Addressable
+  subagents would likely need first-class support in the spec.
 - **Cancel doesn't cancel background subagents.** Cancel behaves like Esc:
   the turn and its foreground subagents stop, background ones keep running.
   Stopping one agent at a time is a future feature (see
