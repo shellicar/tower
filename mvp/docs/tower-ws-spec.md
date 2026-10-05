@@ -263,9 +263,30 @@ message with `user: false` is not shown to the person; absent means both.
 `userContent` is what to show the person in place of `content`. `scope` is
 `{ "replaces": "before", "except": [message ids] }`: the model is no longer
 sent the messages before this one, except those named. `at` is the time of
-the entry the message was made from. A client that does not know a `kind`
-shows `userContent` when it has it, else `content`, for a message it is to
-show.
+the entry the message was made from. towerd forwards each of these as the
+producer sent it, whatever its shape, and the client reads a value of the
+wrong shape as absent (a non-string `kind`, a `userContent` that is not a
+list of blocks, an `at` that is not a time). A client that does not know a
+`kind` shows `userContent` when it has it, else `content`, for a message it
+is to show.
+
+The kinds and the `fields` each carries (docs/spec/conversation.md, Extra
+messages, is the source; every field is optional unless marked):
+
+| `kind` | shown to | `fields` |
+|---|---|---|
+| `turn-finished` | person | `durationMs` (required), `endedAt` |
+| `interrupted` | both | `during`: `turn` \| `tool-use` |
+| `tool-call-note` | both | `reason`: `incomplete` \| `interrupted` \| `result-missing` \| `denied` \| `skipped` |
+| `api-error` | person | `error`, `status` |
+| `no-response` | model | none |
+| `task-finished` | both | `taskId`, `toolUseId`, `status`: `completed` \| `failed`, `summary`, `name`, `durationMs`, `toolUses`, `tokens` |
+| `subagent-report` | both | `agentType` |
+| `compaction` | both | `trigger`, `durationMs`, `preTokens`, `postTokens`, `preservedIds`; carries `scope` |
+| `date` | model | `date` |
+| `total-tokens-reminder` | model | `tokensLeft` |
+
+Enum values are open; any other `kind` is read by the rule above.
 
 ### `approvals`: once, on connect
 
@@ -462,7 +483,12 @@ One conversation's unread episode entering or leaving stale, a
 ticket-system signal ("has anyone on the fleet looked at this"), never a
 personal read marker; awareness, unconditional like `row`. An episode begins
 silently when an assistant turn lands in a conversation that's currently
-resolved (never seen, or already acked), so nothing broadcasts yet. Further
+resolved (an assistant message with no `kind`: an extra message, such as an
+API error or "No response requested.", begins none)
+<!-- TODO(claude): undecided: which messages begin an unread episode. An
+assistant message with no string `kind` for now; an API error the person is
+shown begins none. -->
+ (never seen, or already acked), so nothing broadcasts yet. Further
 activity while that episode is already open does nothing (no new `readId`,
 no timer reset, since a busy conversation must still eventually go stale). If
 nothing acks it within towerd's own delay (~60s), this frame fires with
@@ -738,6 +764,15 @@ const conversationMessage = z.looseObject({
   role: openEnum(['user', 'assistant', 'system']),
   from: sender.optional(),
   content: contentBlocks,
+  // An extra message's fields, forwarded as the producer sent them, so any
+  // shape can arrive; the client reads a value of the wrong shape as absent
+  // (`conversation`, above, gives each one's shape).
+  kind: z.unknown().optional(),
+  fields: z.unknown().optional(),
+  audience: z.unknown().optional(),
+  userContent: z.unknown().optional(),
+  scope: z.unknown().optional(),
+  at: z.unknown().optional(),
   ts: millis,
 });
 

@@ -176,7 +176,7 @@ impl From<ConversationMessage> for WsMessage {
             from: m.from,
             content: m.content,
             extras: Box::new(WsExtras {
-                kind: m.extras.kind,
+                kind: m.extras.kind_value,
                 fields: m.extras.fields,
                 audience: m.extras.audience,
                 user_content: m.extras.user_content,

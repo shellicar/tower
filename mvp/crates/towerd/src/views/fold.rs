@@ -611,9 +611,12 @@ impl Views {
                         ts: ts_ms,
                     });
                     // The qualifying event for the unread signal: an
-                    // assistant turn landing is new content nobody's seen,
-                    // unless the person is not shown the message at all.
-                    if role == "assistant" && m.extras.shown_to_user() {
+                    // assistant reply landing is new content nobody's seen.
+                    // An extra message (any `kind`) is not a reply.
+                    // TODO(claude): undecided: which messages begin an unread
+                    // episode. An assistant message with no string `kind` for
+                    // now, so an API error the person is shown begins none.
+                    if role == "assistant" && m.extras.kind().is_none() {
                         minted_unread = super::unread::note_turn_finished(&tx, conv)?;
                     }
                 }

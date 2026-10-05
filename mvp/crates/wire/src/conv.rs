@@ -195,31 +195,37 @@ pub struct Message {
     pub extras: Box<MessageExtras>,
 }
 
-/// The envelope fields of an extra message (a reminder, a hand-back, a
-/// turn-finished line, ...): what kind it is and the values it was made from,
-/// who it is for, what the person is shown instead of its content, what it
-/// replaces for the model, and the entry's own time. All optional, each held
-/// as sent.
+/// The fields of an extra message (docs/spec/conversation.md, Extra
+/// messages): what kind it is and the values it was made from, who it is
+/// for, what the person is shown instead of its content, what it replaces
+/// for the model, and the harness's own time. All optional. Each is held as
+/// the producer sent it, whatever its shape, so a misshaped one never costs
+/// the message; readers check the shape where they use it.
+// TODO(claude): undecided: whether a misshaped extra field is held as sent
+// (as now, forwarded to the browser to read as absent) or dropped here.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct MessageExtras {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
+    /// An open string; see [`MessageExtras::kind`].
+    #[serde(default, rename = "kind", skip_serializing_if = "Option::is_none")]
+    pub kind_value: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fields: Option<Value>,
     /// `{ "model": bool, "user": bool }`; absent means both.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audience: Option<Value>,
+    /// Content blocks.
     #[serde(
         default,
         rename = "userContent",
         skip_serializing_if = "Option::is_none"
     )]
-    pub user_content: Option<Vec<Value>>,
+    pub user_content: Option<Value>,
     /// `{ "replaces": "before", "except": [message ids] }`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<Value>,
+    /// An ISO-8601 time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub at: Option<String>,
+    pub at: Option<Value>,
 }
 
 impl MessageExtras {
@@ -227,13 +233,10 @@ impl MessageExtras {
         *self == MessageExtras::default()
     }
 
-    /// False only when the message says the person is not shown it.
-    pub fn shown_to_user(&self) -> bool {
-        self.audience
-            .as_ref()
-            .and_then(|a| a.get("user"))
-            .and_then(Value::as_bool)
-            != Some(false)
+    /// The message's kind, when it carries one as a string; any other shape
+    /// reads as no kind.
+    pub fn kind(&self) -> Option<&str> {
+        self.kind_value.as_ref().and_then(Value::as_str)
     }
 }
 

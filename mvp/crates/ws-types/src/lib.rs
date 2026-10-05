@@ -307,29 +307,33 @@ pub struct WsMessage {
     pub ts: i64,
 }
 
-/// The envelope fields of an extra message (a reminder, a hand-back, a
-/// turn-finished line, ...), forwarded as the producer sent them. See
-/// mvp/docs/tower-ws-spec.md, `conversation`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// The fields of an extra message (a reminder, a hand-back, a turn-finished
+/// line, ...), forwarded as the producer sent them, whatever their shape: a
+/// reader checks the shape where it uses one, and reads a misshaped value as
+/// absent. See mvp/docs/tower-ws-spec.md, `conversation`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct WsExtras {
+    /// An open string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
+    pub kind: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fields: Option<Value>,
     /// `{ "model": bool, "user": bool }`; absent means both.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audience: Option<Value>,
+    /// Content blocks.
     #[serde(
         default,
         rename = "userContent",
         skip_serializing_if = "Option::is_none"
     )]
-    pub user_content: Option<Vec<Value>>,
+    pub user_content: Option<Value>,
     /// `{ "replaces": "before", "except": [message ids] }`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<Value>,
+    /// An ISO-8601 time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub at: Option<String>,
+    pub at: Option<Value>,
 }
 
 /// One conversation's unread-episode state — a ticket-system signal ("has

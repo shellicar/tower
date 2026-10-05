@@ -1450,20 +1450,77 @@ fn an_extra_messages_envelope_fields_are_stored_and_read_back() {
         .conversation(&ConversationId("conv-abc".into()), None)
         .unwrap();
     let extras = &msgs[0].extras;
-    assert_eq!(
-        (
-            extras.kind.as_deref(),
-            extras.fields.as_ref().unwrap()["durationMs"].clone(),
-            extras.user_content.as_ref().unwrap()[0]["text"].clone(),
-            extras.at.as_deref(),
-        ),
-        (
-            Some("task-finished"),
-            serde_json::json!(39000),
-            serde_json::json!("Agent finished"),
-            Some("2026-10-03T14:22:40.880+10:00"),
-        )
+    let expected = (
+        Some("task-finished"),
+        serde_json::json!(39000),
+        serde_json::json!("Agent finished"),
+        Some(serde_json::json!("2026-10-03T14:22:40.880+10:00")),
     );
+
+    let actual = (
+        extras.kind(),
+        extras.fields.as_ref().unwrap()["durationMs"].clone(),
+        extras.user_content.as_ref().unwrap()[0]["text"].clone(),
+        extras.at.clone(),
+    );
+
+    assert_eq!(actual, expected);
+}
+
+/// An extra message whose `at`, `userContent`, `scope` and `kind` are all the
+/// wrong shape: a number, a string, a string and a number.
+const MSG_MISSHAPED_EXTRAS: &str = r#"{"ts":"2026-10-03T14:22:40.902+10:00","id":"x1","queryId":"q9","turnId":"t9","role":"assistant","kind":7,"fields":{},"audience":{"model":true,"user":true},"userContent":"not blocks","scope":"before","at":1727930560880,"content":[{"type":"text","text":"still here"}]}"#;
+
+mod misshaped_extras {
+    use super::*;
+
+    fn stored() -> (Views, Vec<ConversationMessage>) {
+        let (mut views, _rx) = fresh();
+        views.apply(
+            "conv-approval",
+            1,
+            &event("conv.v2.conv-abc.changes.message", MSG_MISSHAPED_EXTRAS),
+        );
+        let msgs = views
+            .conversation(&ConversationId("conv-abc".into()), None)
+            .unwrap();
+        (views, msgs)
+    }
+
+    #[test]
+    fn keep_the_message() {
+        let expected = vec![serde_json::json!({ "type": "text", "text": "still here" })];
+
+        let actual = stored().1[0].content.clone();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn are_held_as_sent() {
+        let expected = (
+            Some(serde_json::json!("not blocks")),
+            Some(serde_json::json!("before")),
+            Some(serde_json::json!(1727930560880_i64)),
+        );
+
+        let msgs = stored().1;
+        let actual = (
+            msgs[0].extras.user_content.clone(),
+            msgs[0].extras.scope.clone(),
+            msgs[0].extras.at.clone(),
+        );
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn read_a_non_string_kind_as_no_kind() {
+        let msgs = stored().1;
+        let actual = msgs[0].extras.kind();
+
+        assert!(actual.is_none());
+    }
 }
 
 #[test]
@@ -1480,18 +1537,44 @@ fn plain_chat_has_no_extras() {
     assert!(msgs[0].extras.is_empty());
 }
 
+fn unread_after(body: &str) -> bool {
+    let (mut views, _rx) = fresh();
+    views.apply(
+        "conv-approval",
+        1,
+        &event("conv.v2.conv-abc.changes.message", body),
+    );
+    views
+        .db
+        .query_row("SELECT 1 FROM unread WHERE conv = 'conv-abc'", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .optional()
+        .unwrap()
+        .is_some()
+}
+
 #[test]
 fn an_assistant_message_the_person_is_not_shown_mints_no_unread() {
-    let (mut views, _rx) = fresh();
-    views.apply("conv-approval", 1, &event("conv.v2.conv-abc.changes.message",
-        r#"{"ts":"2026-10-03T14:30:01+10:00","id":"n1","queryId":"q1","turnId":"t1","role":"assistant","kind":"no-response","fields":{},"audience":{"model":true,"user":false},"content":[{"type":"text","text":"No response requested."}]}"#));
-    assert!(
-        views
-            .db
-            .query_row("SELECT 1 FROM unread WHERE conv = 'conv-abc'", [], |r| r
-                .get::<_, i64>(0))
-            .optional()
-            .unwrap()
-            .is_none()
+    let actual = unread_after(
+        r#"{"ts":"2026-10-03T14:30:01+10:00","id":"n1","queryId":"q1","turnId":"t1","role":"assistant","kind":"no-response","fields":{},"audience":{"model":true,"user":false},"content":[{"type":"text","text":"No response requested."}]}"#,
     );
+
+    assert!(!actual);
+}
+
+#[test]
+fn an_api_error_mints_no_unread() {
+    let actual = unread_after(
+        r#"{"ts":"2026-10-03T14:31:12+10:00","id":"e1","queryId":"q1","turnId":"t1","role":"assistant","kind":"api-error","fields":{"error":"server_error","status":529},"audience":{"model":false,"user":true},"content":[{"type":"text","text":"API Error: 529 Overloaded."}]}"#,
+    );
+
+    assert!(!actual);
+}
+
+#[test]
+fn an_assistant_message_with_a_non_string_kind_mints_unread() {
+    let actual = unread_after(MSG_MISSHAPED_EXTRAS);
+
+    assert!(actual);
 }
