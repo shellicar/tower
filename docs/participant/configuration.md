@@ -1,5 +1,13 @@
 # Configuration
 
+This file covers how the participant is configured: the no-ambient-config
+principle, the environment variables, what Claude Code inherits, the login
+and the private HOME, the control lines, the required and other settings,
+and bridge's control lines as they apply here. What `start.ts` declares is
+in [kit.md](kit.md); `shutdownPolicy`'s stages are in
+[shutdown.md](shutdown.md); skills configuration is in
+[skills.md](skills.md).
+
 ## The principle: no ambient configuration
 
 - **What a session gets is controlled.** Nothing comes from config files at
@@ -24,9 +32,9 @@
 ### Why no ambient configuration
 
 A controlled session can be compared with another: A/B testing across
-sessions needs every input known. Config read from files became a
-maintenance burden in claude-sdk-cli. A default can be changed by any
-update, at any time, invisibly, so a default is config nobody declared.
+sessions needs every input known. Config read from files is a maintenance
+burden. A default can be changed by any update, at any time, invisibly, so a
+default is config nobody declared.
 Hot reload isn't needed, because launching or changing a session can be done
 remotely anyway.
 
@@ -74,10 +82,8 @@ broker.
 - **Claude Code's configuration variables are stripped** from the environment
   Claude Code inherits: those that would change a required value (the model,
   effort, thinking, max tokens, the system prompt, the permission mode).
-  Claude Code ranks some of them above its settings, so an inherited one
-  would silently replace a declared value. The list is in
-  `src/startup.ts`. A value set on purpose goes through `claudeSettings.env`,
-  which still wins
+  The list is in `src/startup.ts`. A value set on purpose goes through
+  `claudeSettings.env`, which still wins
   ([foundation probes](../participant-findings/foundation-probes.md)).
 - **A parent Claude Code session's variables are stripped too,** so a
   participant started from inside a Claude Code session doesn't hand them on.
@@ -85,6 +91,9 @@ broker.
   `PARTICIPANT_*` variables, which therefore reach the commands Claude Code
   runs. The `settings` reply hides `NATS_URL`, which can carry credentials.
 - Stripped variables don't reach the commands Claude Code runs either.
+
+Claude Code ranks some of its configuration variables above its settings, so
+an inherited one would silently replace a declared value.
 
 ## The login and the private HOME
 
@@ -199,16 +208,18 @@ Code only takes them at start anyway
   ([proof 10](../participant-findings/proof-10-directories-permissions.md)).
 
 A fixed thinking budget is deprecated and gives worse thinking, so only
-`adaptive` and `disabled` are accepted. Checking max tokens against each
-model's cap would need a hand-kept table, which goes stale silently, the same
-failure as ambient config.
+`adaptive` and `disabled` are accepted. Max tokens is required because Claude
+Code's default varies silently: an account experiment raised Sonnet's from
+64,000 to 128,000, and only after a start-up fetch had returned. One required
+value covers every model the process serves until the `overrides` map is
+built. Checking max tokens against each model's cap would need a hand-kept
+table, which goes stale silently, the same failure as ambient config.
 
 ## Other settings
 
 - **Account connectors are off by default:** the baseline sets Claude Code's
   `disableClaudeAiConnectors: true`, and `claudeSettings` can turn them back
-  on. It is the setting, not the environment variable, so that a setting can
-  re-enable them ([proof 18](../participant-findings/proof-18-connectors.md)).
+  on ([proof 18](../participant-findings/proof-18-connectors.md)).
 - **Claude Code's sandbox** is set through `claudeSettings`
   (`sandbox.enabled`, `autoAllowBashIfSandboxed`). Undecided: whether the
   sandbox becomes a setting of its own; that depends on whether the SDK can
@@ -242,10 +253,8 @@ failure as ambient config.
   "high"}}}`). It passes through `claudeSettings` unchanged, and it has
   nothing for max tokens: Claude Code's max tokens is one flat value.
 
-Max tokens is required because Claude Code's default varies silently: an
-account experiment raised Sonnet's from 64,000 to 128,000, and only after a
-start-up fetch had returned. One required value covers every model the
-process serves until the `overrides` map is built.
+Connectors are turned off with the setting rather than the environment
+variable so that a setting can re-enable them.
 
 ## Bridge's control lines, for this participant
 

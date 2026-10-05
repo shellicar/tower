@@ -1,5 +1,12 @@
 # How the participant runs Claude Code
 
+This file covers how the participant runs Claude Code: the shape, when a
+message counts as committed, messages and turns, resuming, state and
+authority, working directories and Claude Code's process. What it declares
+to Claude Code is in [configuration.md](configuration.md); what it publishes
+is in [publishing.md](publishing.md); how it stops is in
+[shutdown.md](shutdown.md).
+
 ## The shape
 
 - **Through the Agent SDK.**
@@ -57,8 +64,7 @@ its own, entry by entry as it writes
 
 - **Each piece of a reply is its own message:** thinking, text and each tool
   call are published as separate `changes.message`s with Claude Code's ids,
-  as they are written. Every piece keeps its own id on tower, so a rewind to
-  any piece has an id to name
+  as they are written. Every piece keeps its own id on tower
   ([proof 2](../participant-findings/proof-02-entries-to-messages.md)).
 - **A turn is one API round:** what was sent to the API and what came back.
   Every message belongs to the turn it first appears in. The publisher groups
@@ -73,6 +79,7 @@ its own, entry by entry as it writes
   participant mints the query id, as the spec allows for input that didn't
   come through a say.
 
+Each piece keeps its own id so that a rewind to any piece has an id to name.
 The unit is called a turn because cost scales with the turn count.
 
 ## Resuming
@@ -96,11 +103,13 @@ The unit is called a turn because cost scales with the turn count.
   different model; Claude Code checks `message.model` only loosely on resume
   ([proof 9](../participant-findings/proof-09-resume-spec.md)).
 - **Whatever Claude Code loads may go onto NATS,** the account email in
-  reminders included. The bus is the storage of the conversation, just as the
-  transcript on disk is.
+  reminders included.
 - **When the local conversation is gone, the bus is the authority.**
   Undecided: whether tower (the published record) is the authority beyond
   that, with a commit a fact.
+
+What Claude Code loads may go onto the bus because the bus is the storage of
+the conversation, as the transcript on disk is.
 
 ## Working directories
 
