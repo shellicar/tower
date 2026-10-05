@@ -37,6 +37,7 @@ use crate::concerns::approvals::{Approvals, ask_input, ask_label};
 use crate::concerns::conversation::{ConversationState, QueryState, sender_label};
 use crate::concerns::rail::Rail;
 use crate::concerns::usage::Usage;
+use crate::extras::{Row, Tone, replaced_for_model, row_of, shown_to_user};
 use crate::pricing::{format_tokens, format_usd, parse_model_name, price_usage};
 use crate::time::{Millis, age, format_time};
 use crate::ui::block::render_block;
@@ -208,6 +209,116 @@ fn price_usage_line(u: &ws_types::WsUsage) -> impl IntoView + use<> {
     }
 }
 
+/// One message, drawn by its `Row` (crate::extras): a dashed dim "model only"
+/// article, one dim line, a dot and a line, a folded `<details>`, an API
+/// error, or the plain article with its sender and time. `replaced` marks a
+/// message a compaction took out of what the model is sent. Markdown is only
+/// for an assistant's plain article.
+fn render_message_row(m: &WsMessage, now: Millis, replaced: Signal<bool>) -> AnyView {
+    let who = sender_label(m);
+    let time = format_time(m.ts);
+    let mark = move || {
+        replaced
+            .get()
+            .then(|| view! { <span class="dim">"· no longer sent to the model"</span> })
+    };
+    let plain =
+        |blocks: &[Value]| -> Vec<AnyView> { blocks.iter().map(|b| render_block(b, "")).collect() };
+    match row_of(m, &who, now) {
+        Row::ModelOnly { label, blocks } => {
+            let blocks: Vec<AnyView> = blocks
+                .iter()
+                .map(|b| {
+                    view! { <div class="model-only-block">{render_block(b, "")}</div> }.into_any()
+                })
+                .collect();
+            view! {
+                <div class="message model-only">
+                    <div class="who">
+                        <span>{format!("model only · {label}")}</span>
+                        <span>{time}</span>
+                        {mark}
+                    </div>
+                    {blocks}
+                </div>
+            }
+            .into_any()
+        }
+        Row::Line { text } => view! {
+            <div class="row-line">{text}" "{mark}</div>
+        }
+        .into_any(),
+        Row::Notice { failed, text } => view! {
+            <div class="row-notice">
+                <span class=if failed { "dot failed" } else { "dot" }>"●"</span>" "
+                <span class="notice-text">{text}</span>" "
+                <span class="dim">{time}</span>" "
+                {mark}
+            </div>
+        }
+        .into_any(),
+        Row::Folded {
+            tone,
+            label,
+            detail,
+            blocks,
+        } => {
+            let tone = match tone {
+                Tone::Compaction => "compaction",
+                Tone::Agent => "agent",
+            };
+            view! {
+                <details class=format!("row-folded {tone}")>
+                    <summary>
+                        {label}" "
+                        {(!detail.is_empty()).then(|| view! { <span class="dim">{detail}</span> })}" "
+                        <span class="dim">{time}</span>" "
+                        {mark}
+                    </summary>
+                    {plain(&blocks)}
+                </details>
+            }
+            .into_any()
+        }
+        Row::Error { detail, blocks } => {
+            let blocks: Vec<AnyView> = blocks
+                .iter()
+                .map(|b| view! { <div class="error-block">{render_block(b, "")}</div> }.into_any())
+                .collect();
+            view! {
+                <div class="message api-error">
+                    <div class="who">
+                        <span>"API error"</span>
+                        {(!detail.is_empty()).then(|| view! { <span class="dim">{detail}</span> })}
+                        <span class="dim">{time}</span>
+                    </div>
+                    {blocks}
+                </div>
+            }
+            .into_any()
+        }
+        Row::Message { blocks } => {
+            let cls = match m.role.as_str() {
+                "user" => "user",
+                "assistant" => "assistant",
+                _ => "other",
+            };
+            let blocks: Vec<AnyView> = blocks.iter().map(|b| render_block(b, &m.role)).collect();
+            view! {
+                <div class=format!("message {cls}")>
+                    <div class="who">
+                        <span class="who-name">{who}</span>
+                        <span class="who-time">{time}</span>
+                        {mark}
+                    </div>
+                    {blocks}
+                </div>
+            }
+            .into_any()
+        }
+    }
+}
+
 #[component]
 pub fn ConversationView(
     conv: String,
@@ -270,13 +381,34 @@ pub fn ConversationView(
             ro.disconnect();
         });
     });
+    // What the person is shown: a message flagged for the model only is left
+    // out, unless the reader asks to see it. Every windowing read below goes
+    // through `visible`, so the window's indices always address this list. A
+    // compaction dims what it took out of the model's view (`replaced`).
+    let show_model_only = RwSignal::new(false);
+    // `WsMessage` has no `PartialEq`, so every recompute counts as a change.
+    let visible = Memo::new_with_compare(
+        move |_| {
+            let show_all = show_model_only.get();
+            oc.with(|s| {
+                s.messages
+                    .iter()
+                    .filter(|m| show_all || shown_to_user(m))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+        },
+        |_, _| true,
+    );
+    let replaced = Memo::new(move |_| oc.with(|s| replaced_for_model(&s.messages)));
+    let hidden_count =
+        Memo::new(move |_| oc.with(|s| s.messages.iter().filter(|m| !shown_to_user(m)).count()));
     let message_offsets_signal = Memo::new(move |_| {
-        let full = oc.with(|s| s.messages.clone());
         let h = heights.get();
-        message_offsets(&full, &h)
+        visible.with(|v| message_offsets(v, &h))
     });
     let visible_range_signal = Memo::new(move |_| {
-        let len = oc.with(|s| s.messages.len());
+        let len = visible.with(Vec::len);
         let offs = message_offsets_signal.get();
         visible_range(&offs, len, scroll_top.get(), viewport_height.get())
     });
@@ -428,6 +560,19 @@ pub fn ConversationView(
                         .into_any()
                     }
                 }}
+                {move || {
+                    let n = hidden_count.get();
+                    (n > 0).then(|| {
+                        let label = format!("{} {n} model-only", if show_model_only.get() { "hide" } else { "show" });
+                        view! {
+                            <button
+                                class="model-only-toggle"
+                                title="messages only the model is sent"
+                                on:click=move |_| show_model_only.update(|s| *s = !*s)
+                            >{label}</button>
+                        }
+                    })
+                }}
                 <button class="close" on:click=move |_| on_close.run(())>"×"</button>
             </header>
             {move || {
@@ -461,20 +606,15 @@ pub fn ConversationView(
                 <For
                     each=move || {
                         let (start, end) = visible_range_signal.get();
-                        oc.with(|s| s.messages[start..end].to_vec())
+                        visible.with(|v| v[start..end].to_vec())
                     }
                     key=|m| m.id.clone()
                     let(m)
                 >
                     {
-                        let cls = match m.role.as_str() {
-                            "user" => "user",
-                            "assistant" => "assistant",
-                            _ => "other",
-                        };
-                        let who = sender_label(&m);
-                        let time = format_time(m.ts);
-                        let blocks: Vec<AnyView> = m.content.iter().map(|b| render_block(b, &m.role)).collect();
+                        let id = m.id.clone();
+                        let is_replaced = Signal::derive(move || replaced.with(|r| r.contains(&id)));
+                        let body = render_message_row(&m, now.get_untracked(), is_replaced);
                         let row_id = m.id.clone();
                         let row_ref = NodeRef::<html::Div>::new();
                         // Measures once mounted (mirrors VirtualList.svelte's
@@ -530,12 +670,8 @@ pub fn ConversationView(
                             });
                         });
                         view! {
-                            <div class=format!("message {cls}") node_ref=row_ref>
-                                <div class="who">
-                                    <span class="who-name">{who}</span>
-                                    <span class="who-time">{time}</span>
-                                </div>
-                                {blocks}
+                            <div class="row" class:replaced=move || is_replaced.get() node_ref=row_ref>
+                                {body}
                             </div>
                         }
                     }
@@ -543,7 +679,7 @@ pub fn ConversationView(
                 <div style=move || {
                     let (_, end) = visible_range_signal.get();
                     let offs = message_offsets_signal.get();
-                    let full = oc.with(|s| s.messages.clone());
+                    let full = visible.get();
                     let total = total_height(&full, &offs, &heights.get());
                     let mounted_bottom = if end == 0 {
                         0.0

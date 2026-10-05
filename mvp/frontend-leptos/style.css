@@ -235,6 +235,33 @@ html, body {
 .message .who-name { color: #d4d4d4; }
 .message .who-time { color: #737373; }
 .message.streaming { opacity: 0.9; }
+
+/* Extra messages, drawn by their row (src/extras.rs). */
+.row.replaced { opacity: 0.4; }
+.message.model-only { border-left-style: dashed; border-color: #404040; opacity: 0.7; }
+.message.model-only .who { color: #737373; }
+.model-only-block { max-height: 6rem; overflow: hidden; color: #737373; }
+.row-line { margin: 4px 0; padding-left: 8px; color: #737373; }
+.row-notice { margin: 4px 0; padding-left: 8px; }
+.row-notice .dot { color: #22c55e; }
+.row-notice .dot.failed { color: #ef4444; }
+.row-notice .notice-text { color: #d4d4d4; }
+.row-folded { margin: 8px 0; padding: 6px 0 6px 8px; border-left: 2px solid #3730a3; }
+.row-folded summary { cursor: pointer; color: #a3a3a3; }
+.row-folded.compaction { border-color: #92400e; }
+.row-folded.compaction summary { color: #fcd34d; }
+.message.api-error { border-color: #b91c1c; }
+.message.api-error .who { color: #f87171; }
+.error-block { color: #fca5a5; }
+.conversation-header .model-only-toggle {
+  flex-shrink: 0;
+  border: 1px solid #404040;
+  border-radius: 4px;
+  background: none;
+  color: #a3a3a3;
+  padding: 0 6px;
+}
+.conversation-header .model-only-toggle:hover { color: #e5e5e5; background: none; }
 .pending-say { color: #737373; }
 
 .block { white-space: pre-wrap; word-break: break-word; margin: 2px 0; }
