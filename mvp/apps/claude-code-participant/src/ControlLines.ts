@@ -12,9 +12,15 @@ type Reply = Record<string, unknown>;
 // was quietly ignored would leave the operator believing something is set
 // that isn't.
 
+/** Refused rather than trimmed: whitespace-only names nothing, and a trimmed name isn't the one that was sent. */
+const modelName = z
+  .string()
+  .min(1)
+  .refine((name) => name === name.trim(), 'must not start or end with whitespace');
+
 /** The model line merges: it sets the fields it names. Every field is a required setting, so none accepts null. */
 const modelLine = z.strictObject({
-  name: z.string().min(1).optional(),
+  name: modelName.optional(),
   maxTokens: z.number().int().min(1).optional(),
   thinking: z.enum(THINKING_TYPES).optional(),
   thinkingDisplay: z.enum(THINKING_DISPLAYS).optional(),
@@ -34,7 +40,7 @@ const contextLine = z.string().nullable();
 // would leave that value unset.
 const claudeSettingsLine = z
   .looseObject({
-    model: z.string().min(1).optional(),
+    model: modelName.optional(),
     effortLevel: z.enum(SETTINGS_EFFORT_LEVELS).optional(),
     alwaysThinkingEnabled: z.boolean().optional(),
     permissions: z.looseObject({ defaultMode: z.enum(PERMISSION_MODES).optional() }).optional(),
