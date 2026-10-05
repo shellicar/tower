@@ -2,20 +2,21 @@
 
 ## The shape
 
-- **Through the Agent SDK,** so the participant stays small: there has to be
-  code to translate to NATS anyway, and the SDK does the rest.
+- **Through the Agent SDK.**
 - **TypeScript, in `mvp/apps/claude-code-participant`,** inside the repo's
   pnpm workspace (not a submodule). See [building.md](building.md).
 - **One `query()` per served conversation, fed a stream of messages**
   (streaming input). Claude Code keeps running between messages, so
-  background tasks keep running and can report back. A `query()` per message
-  would exit after each reply.
+  background tasks keep running and can report back.
 - **Tower starts nothing itself.** Things happen through requests on NATS,
   such as `service`.
 - **The conversation id is Claude Code's session id.** The participant
-  rejects an id that isn't a UUID; the spec leaves the id a free string by
-  design.
+  rejects an id that isn't a UUID; the spec leaves the id a free string.
 - **Message ids are Claude Code's own entry ids.**
+
+The SDK keeps the participant small: there has to be code to translate to
+NATS anyway, and the SDK does the rest. A `query()` per message would exit
+after each reply, taking background tasks with it.
 
 ## When something counts as committed
 
@@ -25,29 +26,32 @@
   SDK runs Claude Code with `--session-mirror`; after each local write Claude
   Code emits a mirror frame and the SDK hands the entries to the store's
   `append()`, every entry, in order, with the same content as the transcript
-  file. A Ctrl-C is the case to get right, not Claude Code being killed with
-  no chance to act.
+  file.
 - **Eager flush:** each entry reaches `append()` as soon as Claude Code writes
-  it, within a few milliseconds, which is the closest match to how Claude
-  Code commits on its own. The SDK delivers a query's `result` only after
-  that query's appends.
+  it, within a few milliseconds. The SDK delivers a query's `result` only
+  after that query's appends.
 - **Entries come from `append()`.** Messages are never rebuilt by reading
   Claude Code's transcript file, which is an undocumented format.
 - **The conversation is what is published,** which is almost, but not
   exactly, Claude Code's transcript. What is committed is part of the
   conversation; what isn't committed yet is local state. The spec leaves a
   harness leeway here: publish a query and then its abort, or publish only
-  once something comes back. The participant takes the first:
+  once something comes back. The participant publishes the query and then
+  its abort. Provisional: which of the two the participant takes.
 - **What is committed follows Claude Code.** Whatever Claude Code keeps in
   its record is committed, including a cancelled prompt: over the SDK Claude
   Code keeps it in a straight line (prompt, interrupt marker, next prompt)
   and sends it merged with the next prompt. A killed host (no chance to
   flush) is the known gap; it loses only the end, and only when there is no
   transcript to recover from either.
-  (Findings: [proof 3](../participant-findings/proof-03-session-store.md),
-  [proof 23](../participant-findings/proof-23-commit-timing.md),
-  [cancel scenarios](../participant-findings/cancel-scenarios.md),
-  [store commit and resume](../participant-findings/store-commit-resume.md).)
+
+The case to get right is a Ctrl-C, not Claude Code being killed with no
+chance to act. Eager flush is the closest match to how Claude Code commits on
+its own, entry by entry as it writes
+([proof 3](../participant-findings/proof-03-session-store.md),
+[proof 23](../participant-findings/proof-23-commit-timing.md),
+[cancel scenarios](../participant-findings/cancel-scenarios.md),
+[store commit and resume](../participant-findings/store-commit-resume.md)).
 
 ## Messages and turns
 
@@ -63,12 +67,13 @@
   next turn.
 - **A retried API request keeps its turn;** retrying is internal to Claude
   Code. An abort followed by a resend is a new turn. If Claude Code has no id
-  for an API request, one may be minted. The name "turn" stays, because cost
-  scales with the turn count. (The spec doesn't yet say that retries share a
-  turn; see [spec-and-frontend.md](spec-and-frontend.md).)
+  for an API request, one may be minted. (The spec doesn't yet say that
+  retries share a turn; see [spec-and-frontend.md](spec-and-frontend.md).)
 - **Turns Claude Code starts itself,** when a background task finishes: the
   participant mints the query id, as the spec allows for input that didn't
   come through a say.
+
+The unit is called a turn because cost scales with the turn count.
 
 ## Resuming
 
@@ -79,9 +84,8 @@
   [resume.md](resume.md)).
 - **Resume goes through the session store,** the SDK's supported path, not
   Claude Code's undocumented `--resume` from files.
-- As built, whether a conversation is fresh or resumed is decided by whether
-  a local record exists for its id. That was the builder's choice; nobody
-  ruled on it.
+- **Fresh or resumed** is decided by whether a local record exists for the
+  conversation's id. Undecided: how fresh and resumed are told apart.
 
 ## State and authority
 
@@ -94,11 +98,9 @@
 - **Whatever Claude Code loads may go onto NATS,** the account email in
   reminders included. The bus is the storage of the conversation, just as the
   transcript on disk is.
-- **Open: whether tower (the published record) is the authority on what a
-  conversation holds.** A brief stated that tower is the authority and a commit
-  is a fact; it rests only on that brief being sent. Stephen's own words are
-  narrower: if the local conversation is gone, the bus is the authority
-  anyway.
+- Undecided: whether tower (the published record) is the authority on what
+  a conversation holds, with a commit a fact, or only once the local
+  conversation is gone.
 
 ## Working directories
 
@@ -109,8 +111,8 @@
   served and sent again on every resume, because a resume drops them
   ([proof 10](../participant-findings/proof-10-directories-permissions.md)).
   Removing one is not needed, and neither is adding one to a running
-  conversation. As built, the launcher takes the list but `service` passes
-  an empty one: nothing on the bus names additional directories yet.
+  conversation. The launcher takes the list, but `service` passes an empty
+  one: nothing on the bus names additional directories yet.
 
 ## Claude Code's process
 
