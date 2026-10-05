@@ -2,10 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { classify, contentBlocksOf, isPrompt, type RecordEntry, roleOf } from '../src/ConversationEntries.js';
 import { AI_TITLE, ANSWER, API_ERROR, COMPACT_BOUNDARY, COMPACT_SUMMARY, DATE_ATTACHMENT, ENVIRONMENT_ATTACHMENT, HAND_BACK, IMAGE_TOOL_RESULT, INTERRUPT_MARKER, NO_RESPONSE_REQUESTED, PARTIAL_REPLY, PROMPT, QUEUE_OPERATION, TASK_NOTICE, THINKING, TOKENS_REMINDER, TOOL_USE, TURN_FINISHED } from './entries.js';
 
-const NOW = new Date('2026-10-03T05:00:00Z');
-
 function classified(entry: RecordEntry, preserved: Record<string, string[]> = {}) {
-  return classify(entry, { now: NOW, timeZone: 'UTC', preservedBy: (uuid) => preserved[uuid] });
+  return classify(entry, { preservedBy: (uuid) => preserved[uuid] });
 }
 
 function userText(text: unknown, fields: Record<string, unknown> = {}) {
@@ -149,20 +147,34 @@ describe('classify', () => {
   });
 
   describe('the turn-finished line', () => {
-    it('is user-only text with the turn’s duration and end time', () => {
+    it('is user-only text with the turn’s duration, and its end time as `at`', () => {
       expect(classified(TURN_FINISHED)).toEqual({
         role: 'system',
-        content: [{ type: 'text', text: 'Worked for 2s · done 04:22' }],
+        content: [{ type: 'text', text: 'Worked for 2s' }],
         extras: { audience: { model: false, user: true }, at: '2026-10-03T04:22:44.187Z' },
       });
     });
 
-    it('names the weekday when the turn ended on another day', () => {
-      expect(classified({ ...TURN_FINISHED, timestamp: '2026-10-02T04:22:44.187Z' })?.content).toEqual([{ type: 'text', text: 'Worked for 2s · done Friday 04:22' }]);
+    it('writes no clock reading into the text', () => {
+      expect(classified({ ...TURN_FINISHED, timestamp: '2026-10-02T04:22:44.187Z' })?.content).toEqual([{ type: 'text', text: 'Worked for 2s' }]);
     });
 
     it('reads a duration in minutes', () => {
-      expect(classified({ ...TURN_FINISHED, durationMs: 65000 })?.content).toEqual([{ type: 'text', text: 'Worked for 1m 5s · done 04:22' }]);
+      expect(classified({ ...TURN_FINISHED, durationMs: 65000 })?.content).toEqual([{ type: 'text', text: 'Worked for 1m 5s' }]);
+    });
+
+    it('says only that the turn worked when the entry has no duration', () => {
+      expect(classified({ ...TURN_FINISHED, durationMs: undefined })?.content).toEqual([{ type: 'text', text: 'Worked' }]);
+    });
+  });
+
+  describe('the entry’s own time', () => {
+    it('is published in UTC whatever offset the entry wrote', () => {
+      expect(classified({ ...TURN_FINISHED, timestamp: '2026-10-03T14:22:44.187+10:00' })?.extras?.at).toBe('2026-10-03T04:22:44.187Z');
+    });
+
+    it('is left out when the entry’s timestamp does not parse', () => {
+      expect(classified({ ...TURN_FINISHED, timestamp: 'yesterday' })?.extras).not.toHaveProperty('at');
     });
   });
 

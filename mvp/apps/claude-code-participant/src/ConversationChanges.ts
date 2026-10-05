@@ -16,8 +16,6 @@ export type ChangeSources = {
   instanceId: string;
   /** The durable object store bucket files are stored in. */
   durableBucket: string;
-  /** The IANA zone a turn-finished line's time is written in; undefined is the machine's own. */
-  timeZone?: string;
   /** Stops the running query, when one of its files can't be stored. */
   abort(): void;
 };
@@ -143,7 +141,7 @@ export class ConversationChanges {
   }
 
   private classifyContext(): ClassifyContext {
-    return { now: new Date(this.sources.timer.timestamp()), timeZone: this.sources.timeZone, preservedBy: (uuid) => this.preserved.get(uuid) };
+    return { preservedBy: (uuid) => this.preserved.get(uuid) };
   }
 
   /**

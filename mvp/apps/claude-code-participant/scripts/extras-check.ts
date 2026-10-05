@@ -1,6 +1,7 @@
 // Publishes a sample conversation holding every kind of extra message through
 // ConversationChanges to a real broker, then reads back what the broker's
-// audit stream holds for it and checks each message against what was meant.
+// audit stream holds for it and checks each message against what was meant
+// and against the `changes.message` schema in docs/spec/conversation.md.
 // The entries are the recorded and hand-written ones in test/entries.ts, with
 // fresh uuids and timestamps near now so each run is a conversation of its own.
 //
@@ -13,6 +14,10 @@
 // Everything it prints goes to stdout as one JSON object per line.
 
 import { randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { connect } from '@nats-io/transport-node';
 import { IBroker } from '../src/Broker.js';
 import { ConversationChanges } from '../src/ConversationChanges.js';
@@ -27,6 +32,27 @@ if (natsUrl === undefined) {
   console.error('usage: NATS_URL=nats://127.0.0.1:31416 node --import tsx scripts/extras-check.ts');
   process.exit(2);
 }
+
+type SafeParse = { safeParse(value: unknown): { success: boolean; error?: { issues: { path: PropertyKey[]; message: string }[] } } };
+
+/**
+ * The `changes.message` schema exactly as docs/spec/conversation.md states it:
+ * the spec's zod block, written to a temporary module with its `zod` import
+ * pointed at the participant's own zod, and imported.
+ */
+async function specMessageSchema(): Promise<SafeParse> {
+  const spec = await readFile(new URL('../../../../docs/spec/conversation.md', import.meta.url), 'utf8');
+  const block = spec.slice(spec.indexOf('## Message schemas')).match(/```ts\n([\s\S]*?)\n```/)?.[1];
+  if (block === undefined) {
+    throw new Error('no zod block under "Message schemas" in docs/spec/conversation.md');
+  }
+  const module = join(await mkdtemp(join(tmpdir(), 'extras-check-')), 'conversation-schemas.ts');
+  await writeFile(module, block.replace("from 'zod'", `from '${import.meta.resolve('zod')}'`));
+  const schemas = (await import(pathToFileURL(module).href)) as { conversationChange: { message: SafeParse } };
+  return schemas.conversationChange.message;
+}
+
+const messageSchema = await specMessageSchema();
 
 const AUDIT_STREAM = 'conv-approval';
 const conversationId = randomUUID();
@@ -86,7 +112,7 @@ function text(entry: RecordEntry, content: string): RecordEntry {
 }
 
 // What each published entry should come out as, by label.
-type Expectation = { role: string; audience?: { model: boolean; user: boolean }; from?: unknown; has?: string[] };
+type Expectation = { role: string; audience?: { model: boolean; user: boolean }; from?: unknown; content?: unknown; has?: string[] };
 const expectations = new Map<string, Expectation>();
 const labels = new Map<string, string>();
 
@@ -108,7 +134,7 @@ const call = fresh(CALL_A);
 await publish('tool call', call, { role: 'assistant' });
 await publish('tool result', fresh(RESULT_A, { sourceToolAssistantUUID: call.uuid }), { role: 'user' });
 await publish('answer', fresh(text(ANSWER, 'a.txt says: alpha.')), { role: 'assistant' });
-await publish('turn finished', fresh(TURN_FINISHED, { durationMs: 7000 }), { role: 'system', audience: { model: false, user: true }, has: ['at'] });
+await publish('turn finished', fresh(TURN_FINISHED, { durationMs: 7000 }), { role: 'system', audience: { model: false, user: true }, content: [{ type: 'text', text: 'Worked for 7s' }], has: ['at'] });
 await changes.close('completed');
 
 // Query 2: a say cancelled mid-reply, the marker, and the synthetic reply Claude Code adds.
@@ -123,7 +149,7 @@ await changes.close('cancelled');
 await publish('subagent hand-back', fresh(HAND_BACK), { role: 'user', from: { kind: 'agent' }, audience: { model: true, user: true } });
 await publish('task finished', fresh(TASK_NOTICE), { role: 'user', from: { kind: 'orchestrator' }, audience: { model: true, user: true }, has: ['userContent'] });
 const kept = await publish('reply to the notice', fresh(text(PARALLEL_ANSWER, 'The background task finished; its output was fine.')), { role: 'assistant' });
-await publish('turn finished yesterday', fresh(TURN_FINISHED, { timestamp: ago(26 * 60 * 60 * 1000), durationMs: 65000 }), { role: 'system', audience: { model: false, user: true } });
+await publish('turn finished yesterday', fresh(TURN_FINISHED, { timestamp: ago(26 * 60 * 60 * 1000), durationMs: 65000 }), { role: 'system', audience: { model: false, user: true }, content: [{ type: 'text', text: 'Worked for 1m 5s' }], has: ['at'] });
 await publish('API error', fresh(API_ERROR), { role: 'system', audience: { model: false, user: true } });
 await changes.close('completed');
 
@@ -147,6 +173,10 @@ for (const body of messages) {
   const label = labels.get(body.id as string) ?? 'unlabelled';
   const expected = expectations.get(label);
   const problems: string[] = [];
+  const valid = messageSchema.safeParse(body);
+  if (!valid.success) {
+    problems.push(...(valid.error?.issues ?? []).map((issue) => `against the spec: ${issue.path.map(String).join('.')} ${issue.message}`));
+  }
   if (expected === undefined) {
     problems.push('not expected');
   } else {
@@ -158,6 +188,9 @@ for (const body of messages) {
     }
     if (expected.from !== undefined && JSON.stringify(body.from) !== JSON.stringify(expected.from)) {
       problems.push(`from ${JSON.stringify(body.from)} not ${JSON.stringify(expected.from)}`);
+    }
+    if (expected.content !== undefined && JSON.stringify(body.content) !== JSON.stringify(expected.content)) {
+      problems.push(`content ${JSON.stringify(body.content)} not ${JSON.stringify(expected.content)}`);
     }
     for (const field of expected.has ?? []) {
       if (body[field] === undefined) {

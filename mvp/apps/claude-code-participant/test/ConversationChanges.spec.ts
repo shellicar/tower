@@ -254,7 +254,7 @@ describe('ConversationChanges', () => {
     it('publishes the turn-finished line as text for the person', async () => {
       const services = publishing();
       await services.changes.commit([TURN_FINISHED]);
-      expect(message(services, TURN_FINISHED.uuid)?.content).toEqual([{ type: 'text', text: expect.stringMatching(/^Worked for 2s · done /) }]);
+      expect(message(services, TURN_FINISHED.uuid)?.content).toEqual([{ type: 'text', text: 'Worked for 2s' }]);
     });
 
     it('publishes an API error as system, not as a reply', async () => {
