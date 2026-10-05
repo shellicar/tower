@@ -318,8 +318,13 @@ commit, don't reach.
 
 - Commits: one imperative line, no prefixes, no trailer ceremony.
 - Stage by exact path; never `git add .`/`-A`.
-- Comments carry why, not what. Abstraction discipline lives in the Seams
+- A comment says what the code does, for a reader a month from now: no
+  justification, history or status. The one status note that belongs in
+  code is a `TODO(claude)` marker. Abstraction discipline lives in the Seams
   section: edges seamed at birth, no ceremony above them.
+- TypeScript uses async/await, not `.then` chains.
+- Tests read `const expected = ...; const actual = ...;
+  expect(actual).toEqual(expected)`.
 - Errors: the cause rides `#[source]` only — an `#[error("...")]` message
   never repeats it (chain-walkers would print it twice). Anything logged or
   shown renders the chain via anyhow's `{:#}` (wrap an owned error:
