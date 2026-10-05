@@ -250,7 +250,7 @@ fn render_message_row(m: &WsMessage, now: Millis, replaced: Signal<bool>) -> Any
         .into_any(),
         Row::Notice { failed, text } => view! {
             <div class="row-notice">
-                <span class=if failed { "dot failed" } else { "dot" }>"●"</span>" "
+                <span class=if failed { "notice-dot failed" } else { "notice-dot" }>"●"</span>" "
                 <span class="notice-text">{text}</span>" "
                 <span class="dim">{time}</span>" "
                 {mark}
@@ -670,7 +670,7 @@ pub fn ConversationView(
                             });
                         });
                         view! {
-                            <div class="row" class:replaced=move || is_replaced.get() node_ref=row_ref>
+                            <div class="message-row" class:replaced=move || is_replaced.get() node_ref=row_ref>
                                 {body}
                             </div>
                         }

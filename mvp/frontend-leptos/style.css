@@ -237,14 +237,14 @@ html, body {
 .message.streaming { opacity: 0.9; }
 
 /* Extra messages, drawn by their row (src/extras.rs). */
-.row.replaced { opacity: 0.4; }
+.message-row.replaced { opacity: 0.4; }
 .message.model-only { border-left-style: dashed; border-color: #404040; opacity: 0.7; }
 .message.model-only .who { color: #737373; }
 .model-only-block { max-height: 6rem; overflow: hidden; color: #737373; }
 .row-line { margin: 4px 0; padding-left: 8px; color: #737373; }
 .row-notice { margin: 4px 0; padding-left: 8px; }
-.row-notice .dot { color: #22c55e; }
-.row-notice .dot.failed { color: #ef4444; }
+.row-notice .notice-dot { color: #22c55e; }
+.row-notice .notice-dot.failed { color: #ef4444; }
 .row-notice .notice-text { color: #d4d4d4; }
 .row-folded { margin: 8px 0; padding: 6px 0 6px 8px; border-left: 2px solid #3730a3; }
 .row-folded summary { cursor: pointer; color: #a3a3a3; }
