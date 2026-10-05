@@ -31,14 +31,15 @@ use send_wrapper::SendWrapper;
 use serde_json::Value;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
-use ws_types::WsMessage;
 
 use crate::concerns::approvals::{Approvals, ask_input, ask_label};
-use crate::concerns::conversation::{ConversationState, QueryState, sender_label};
+use crate::concerns::conversation::{
+    ConversationState, MessageRow, QueryState, first_line, sender_label, visible_rows,
+};
 use crate::concerns::rail::Rail;
 use crate::concerns::usage::Usage;
 use crate::pricing::{format_tokens, format_usd, parse_model_name, price_usage};
-use crate::time::{Millis, age, format_time};
+use crate::time::{Millis, age, format_time, parse_iso_millis};
 use crate::ui::block::render_block;
 use crate::ui::truncate;
 use crate::uploads;
@@ -109,21 +110,21 @@ fn size_label(v: &Value) -> String {
 /// cache — unmeasured rows count as `ROW_ESTIMATE_PX`. Ported from
 /// VirtualList.svelte's `offsets` derivation: O(n) is fine, CLAUDE.md's
 /// workload facts cap n at a few thousand.
-fn message_offsets(messages: &[WsMessage], heights: &HashMap<String, f64>) -> Vec<f64> {
+fn message_offsets(rows: &[MessageRow], heights: &HashMap<String, f64>) -> Vec<f64> {
     let mut y = 0.0;
-    let mut out = Vec::with_capacity(messages.len());
-    for m in messages {
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
         out.push(y);
-        y += heights.get(&m.id).copied().unwrap_or(ROW_ESTIMATE_PX);
+        y += heights.get(&r.id).copied().unwrap_or(ROW_ESTIMATE_PX);
     }
     out
 }
 
-fn total_height(messages: &[WsMessage], offsets: &[f64], heights: &HashMap<String, f64>) -> f64 {
-    match messages.last() {
+fn total_height(rows: &[MessageRow], offsets: &[f64], heights: &HashMap<String, f64>) -> f64 {
+    match rows.last() {
         None => 0.0,
         Some(last) => {
-            offsets[messages.len() - 1] + heights.get(&last.id).copied().unwrap_or(ROW_ESTIMATE_PX)
+            offsets[rows.len() - 1] + heights.get(&last.id).copied().unwrap_or(ROW_ESTIMATE_PX)
         }
     }
 }
@@ -270,13 +271,19 @@ pub fn ConversationView(
             ro.disconnect();
         });
     });
+    // The messages the person sees, as rows; the windowed list indexes
+    // these, so a hidden message takes no space. Every recompute counts as
+    // a change (MessageRow has no equality).
+    let rows = Memo::new_with_compare(
+        move |_| oc.with(|s| visible_rows(&s.messages, parse_iso_millis)),
+        |_, _| true,
+    );
     let message_offsets_signal = Memo::new(move |_| {
-        let full = oc.with(|s| s.messages.clone());
         let h = heights.get();
-        message_offsets(&full, &h)
+        rows.with(|r| message_offsets(r, &h))
     });
     let visible_range_signal = Memo::new(move |_| {
-        let len = oc.with(|s| s.messages.len());
+        let len = rows.with(Vec::len);
         let offs = message_offsets_signal.get();
         visible_range(&offs, len, scroll_top.get(), viewport_height.get())
     });
@@ -461,21 +468,33 @@ pub fn ConversationView(
                 <For
                     each=move || {
                         let (start, end) = visible_range_signal.get();
-                        oc.with(|s| s.messages[start..end].to_vec())
+                        rows.with(|r| r[start..end].to_vec())
                     }
-                    key=|m| m.id.clone()
-                    let(m)
+                    key=|r| r.id.clone()
+                    let(r)
                 >
                     {
+                        let m = &r.message;
                         let cls = match m.role.as_str() {
                             "user" => "user",
                             "assistant" => "assistant",
                             _ => "other",
                         };
-                        let who = sender_label(&m);
-                        let time = format_time(m.ts);
-                        let blocks: Vec<AnyView> = m.content.iter().map(|b| render_block(b, &m.role)).collect();
-                        let row_id = m.id.clone();
+                        let who = sender_label(m);
+                        let time = format_time(r.time);
+                        let summary = first_line(&r.content);
+                        let summary = if summary.is_empty() { "(no text)".to_owned() } else { summary };
+                        let collapsed = r.collapsed;
+                        // Per row, local to the mounted row: a collapsed row starts closed.
+                        let expanded = RwSignal::new(false);
+                        let scope_note = r.scope_note.then(|| {
+                            // TODO(claude): undecided: the wording of the note on a scope message.
+                            view! { <p class="scope-note">"Earlier messages are no longer sent to the model"</p> }
+                        });
+                        // Read from the rows each time: a scope arriving later dims a row already mounted.
+                        let dim_id = r.id.clone();
+                        let dimmed = move || rows.with(|rs| rs.iter().any(|x| x.id == dim_id && x.dimmed));
+                        let row_id = r.id.clone();
                         let row_ref = NodeRef::<html::Div>::new();
                         // Measures once mounted (mirrors VirtualList.svelte's
                         // `measureAction`: an initial `getBoundingClientRect`
@@ -529,13 +548,40 @@ pub fn ConversationView(
                                 ro.disconnect();
                             });
                         });
+                        // A collapsed row shows its summary as a button that
+                        // expands it; an expanded one shows a collapse button
+                        // above its blocks.
+                        let body = if collapsed {
+                            let content = r.content.clone();
+                            let role = m.role.clone();
+                            (move || {
+                                if expanded.get() {
+                                    let blocks: Vec<AnyView> = content.iter().map(|b| render_block(b, &role)).collect();
+                                    view! {
+                                        <button class="collapse" on:click=move |_| expanded.set(false)>"▾ collapse"</button>
+                                        {blocks}
+                                    }
+                                    .into_any()
+                                } else {
+                                    view! {
+                                        <button class="expand" on:click=move |_| expanded.set(true)>{format!("▸ {summary}")}</button>
+                                    }
+                                    .into_any()
+                                }
+                            })
+                            .into_any()
+                        } else {
+                            let blocks: Vec<AnyView> = r.content.iter().map(|b| render_block(b, &m.role)).collect();
+                            blocks.into_any()
+                        };
                         view! {
-                            <div class=format!("message {cls}") node_ref=row_ref>
+                            <div class=format!("message {cls}") class:dimmed=dimmed node_ref=row_ref>
                                 <div class="who">
                                     <span class="who-name">{who}</span>
                                     <span class="who-time">{time}</span>
                                 </div>
-                                {blocks}
+                                {scope_note}
+                                {body}
                             </div>
                         }
                     }
@@ -543,14 +589,15 @@ pub fn ConversationView(
                 <div style=move || {
                     let (_, end) = visible_range_signal.get();
                     let offs = message_offsets_signal.get();
-                    let full = oc.with(|s| s.messages.clone());
-                    let total = total_height(&full, &offs, &heights.get());
-                    let mounted_bottom = if end == 0 {
-                        0.0
-                    } else {
-                        offs[end - 1] + heights.get().get(&full[end - 1].id).copied().unwrap_or(ROW_ESTIMATE_PX)
-                    };
-                    format!("height: {}px", (total - mounted_bottom).max(0.0))
+                    rows.with(|full| {
+                        let total = total_height(full, &offs, &heights.get());
+                        let mounted_bottom = if end == 0 {
+                            0.0
+                        } else {
+                            offs[end - 1] + heights.get().get(&full[end - 1].id).copied().unwrap_or(ROW_ESTIMATE_PX)
+                        };
+                        format!("height: {}px", (total - mounted_bottom).max(0.0))
+                    })
                 }></div>
                 {move || {
                     let pending = oc.with(|s| s.pending_say.clone());
