@@ -481,6 +481,8 @@ pub fn ConversationView(
                             _ => "other",
                         };
                         let who = sender_label(m);
+                        // The message's own time (`at`, else `ts`) in the viewer's zone.
+                        // TODO(claude): undecided: whether the header names the day for a message not from today; it shows the time only, as for every message.
                         let time = format_time(r.time);
                         let summary = first_line(&r.content);
                         let summary = if summary.is_empty() { "(no text)".to_owned() } else { summary };
