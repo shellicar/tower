@@ -11,11 +11,12 @@
 //
 // Against the test broker, from the repository root:
 //
-//   just --justfile mvp/justfile --working-directory mvp broker-run '<absolute path of this script, run with node --import tsx>'
+//   just --justfile mvp/justfile --working-directory mvp broker-run 'apps/claude-code-participant/scripts/publish-extras.sh'
 //
-// It prints one line per message published, as a subscriber on the broker saw
-// it, and exits 1 when the kinds seen are not the kinds expected. NATS_URL has
-// no default, and the live deployment's port is refused.
+// It reads the conversation's messages back from the stream, prints one line
+// per message, and exits 1 when the kinds are not the kinds expected or a
+// message is not as docs/spec/conversation.md says (test/conversationSchema.ts).
+// NATS_URL has no default, and the live deployment's port is refused.
 
 import { randomUUID } from 'node:crypto';
 import { connect } from '@nats-io/transport-node';
@@ -25,6 +26,7 @@ import type { RecordEntry } from '../src/ConversationEntries.js';
 import type { IHost } from '../src/Host.js';
 import type { IIds } from '../src/Ids.js';
 import type { ITimer } from '../src/Timer.js';
+import { messageProblems } from '../test/conversationSchema.js';
 import { ANSWER, API_ERROR, COMPACT_BOUNDARY, COMPACT_SUMMARY, DATE_ATTACHMENT, INTERRUPT_MARKER, NO_RESPONSE, PARTIAL_REPLY, PROMPT, RECORDED_TOKENS_REMINDER, SECOND_PROMPT, SUBAGENT_REPORT, TASK_NOTICE, TASK_NOTICE_REPLY, THINKING, TOOL_USE, TURN_DURATION } from '../test/entries.js';
 
 const natsUrl = process.env.NATS_URL;
@@ -34,19 +36,29 @@ if (natsUrl === undefined || natsUrl.endsWith(':4222')) {
 }
 
 const conversationId = process.argv[2] ?? randomUUID();
-const changesPrefix = `conv.v2.${conversationId}.changes.`;
+const messageSubject = `conv.v2.${conversationId}.changes.message`;
+/** The stream that holds a conversation's changes (stream-init.sh, AUDIT_STREAM). */
+const STREAM = 'conv-approval';
 const HUMAN = { kind: 'human' };
 
 const nc = await connect({ servers: natsUrl });
 
-/** What a subscriber saw published on the conversation's changes, in the order it arrived. */
-const seen: { leaf: string; body: Record<string, unknown> }[] = [];
-nc.subscribe(`${changesPrefix}>`, {
-  callback: (_err, msg) => {
-    seen.push({ leaf: msg.subject.slice(changesPrefix.length), body: msg.json<Record<string, unknown>>() });
-  },
-});
-await nc.flush();
+/** The conversation's messages as the stream holds them, oldest first, read through the JetStream API's direct get. */
+async function storedMessages(): Promise<Record<string, unknown>[]> {
+  const bodies: Record<string, unknown>[] = [];
+  let seq = 1;
+  for (;;) {
+    const reply = (await nc.request(`$JS.API.STREAM.MSG.GET.${STREAM}`, JSON.stringify({ seq, next_by_subj: messageSubject }))).json<{ message?: { seq: number; data: string }; error?: { code: number; description: string } }>();
+    if (reply.error?.code === 404) {
+      return bodies;
+    }
+    if (reply.message === undefined) {
+      throw new Error(`reading ${STREAM} failed: ${JSON.stringify(reply.error)}`);
+    }
+    bodies.push(JSON.parse(Buffer.from(reply.message.data, 'base64').toString('utf8')));
+    seq = reply.message.seq + 1;
+  }
+}
 
 const broker: IBroker = {
   connect: async () => {},
@@ -121,7 +133,8 @@ await changes.close('completed');
 await nc.flush();
 await new Promise((resolve) => setTimeout(resolve, 500));
 
-const messages = seen.filter((change) => change.leaf === 'message').map((change) => change.body);
+const messages = await storedMessages();
+const problems = messages.flatMap((body) => messageProblems(body).map((problem) => `${String(body.id)} ${problem}`));
 for (const body of messages) {
   const blocks = (body.content as { type: string; text?: string }[]).map((block) => (block.type === 'text' ? String(block.text).slice(0, 48).replaceAll('\n', ' ') : block.type)).join(' | ');
   const audience = body.audience === undefined ? 'both' : JSON.stringify(body.audience);
@@ -130,9 +143,15 @@ for (const body of messages) {
 
 const EXPECTED = ['-', 'date', '-', '-', '-', 'total-tokens-reminder', '-', 'turn-finished', '-', '-', 'interrupted', '-', 'api-error', '-', 'no-response', 'subagent-report', 'task-finished', '-', '-', 'compaction'];
 const kinds = messages.map((body) => String(body.kind ?? '-'));
-console.log(`conversation ${conversationId}`);
+console.log(`conversation ${conversationId}: ${messages.length} messages on ${STREAM}, ${problems.length} not as the spec says`);
+for (const problem of problems) {
+  console.error(`not as the spec says: ${problem}`);
+}
 await nc.drain();
 if (JSON.stringify(kinds) !== JSON.stringify(EXPECTED)) {
   console.error(`expected kinds ${JSON.stringify(EXPECTED)}\nsaw ${JSON.stringify(kinds)}`);
+  process.exit(1);
+}
+if (problems.length > 0) {
   process.exit(1);
 }

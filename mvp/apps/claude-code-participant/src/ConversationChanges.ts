@@ -48,6 +48,8 @@ function extrasOf(entry: RecordEntry, classified: Classified): Record<string, un
     ...(classified.audience === undefined ? {} : { audience: classified.audience }),
     ...(classified.userContent === undefined ? {} : { userContent: classified.userContent }),
     ...(classified.scope === undefined ? {} : { scope: classified.scope }),
+    // TODO(claude): undecided: whether `at` stays its own field or the
+    // entry's time replaces `ts`. Its own field for now.
     ...(typeof entry.timestamp === 'string' ? { at: entry.timestamp } : {}),
   };
 }

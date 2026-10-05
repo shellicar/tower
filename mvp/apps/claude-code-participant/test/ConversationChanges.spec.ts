@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { ConversationChanges } from '../src/ConversationChanges.js';
 import type { RecordEntry } from '../src/ConversationEntries.js';
+import { messageProblems } from './conversationSchema.js';
 import {
   ANSWER,
+  API_ERROR,
   CALL_A,
   CALL_B,
   COMPACT_BOUNDARY,
@@ -10,14 +12,17 @@ import {
   DATE_ATTACHMENT,
   IMAGE_TOOL_RESULT,
   INTERRUPT_MARKER,
+  NO_RESPONSE,
   PARALLEL_ANSWER,
   PARTIAL_REPLY,
   PNG_BASE64,
   PROMPT,
   QUEUE_OPERATION,
+  RECORDED_TOKENS_REMINDER,
   RESULT_A,
   RESULT_B,
   SECOND_PROMPT,
+  SUBAGENT_REPORT,
   TASK_NOTICE,
   TASK_NOTICE_REPLY,
   THINKING,
@@ -384,6 +389,39 @@ describe('ConversationChanges', () => {
       const services = publishing();
       await services.changes.commit([TURN_DURATION]);
       expect(message(services, TURN_DURATION.uuid)).toMatchObject({ role: 'system', kind: 'turn-finished', audience: { model: false, user: true }, content: [{ type: 'text', text: 'Worked for 2s' }] });
+    });
+
+    describe('against the spec', () => {
+      /** Every kind the participant publishes, in the queries the sample script publishes them in. */
+      async function everyKind() {
+        const services = publishing();
+        await services.changes.openQuery('q1', HUMAN);
+        await services.changes.commit([...FIRST_QUERY, RECORDED_TOKENS_REMINDER, TURN_DURATION]);
+        await services.changes.close('completed');
+        await services.changes.openQuery('q2', HUMAN);
+        await services.changes.commit([SECOND_PROMPT, PARTIAL_REPLY, INTERRUPT_MARKER, API_ERROR, NO_RESPONSE]);
+        await services.changes.close('cancelled');
+        await services.changes.commit([SUBAGENT_REPORT, TASK_NOTICE, TASK_NOTICE_REPLY]);
+        await services.changes.close('completed');
+        await services.changes.commit([COMPACT_BOUNDARY, COMPACT_SUMMARY]);
+        await services.changes.close('completed');
+        return services;
+      }
+
+      it('publishes every kind declared', async () => {
+        const services = await everyKind();
+        const kinds = new Set(messages(services).map((body) => body.kind));
+        expect([...kinds].filter((kind) => kind !== undefined).sort()).toEqual(['api-error', 'compaction', 'date', 'interrupted', 'no-response', 'subagent-report', 'task-finished', 'total-tokens-reminder', 'turn-finished']);
+      });
+
+      it('finds a declared kind whose fields miss a required value', () => {
+        expect(messageProblems({ ts: FAKE_TIMESTAMP, id: 'm', queryId: 'q', turnId: 't', role: 'system', kind: 'turn-finished', fields: {}, content: [] })).toHaveLength(1);
+      });
+
+      it('publishes every message as the spec’s schema and its kind’s fields say', async () => {
+        const services = await everyKind();
+        expect(messages(services).flatMap((body) => messageProblems(body).map((problem) => `${String(body.id)} ${problem}`))).toEqual([]);
+      });
     });
   });
 

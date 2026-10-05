@@ -23,6 +23,10 @@ export type Classified = {
 /** The metadata of each compaction boundary seen, by the boundary's uuid; the summary entry names its boundary as its parent. */
 export type Compactions = ReadonlyMap<string, Record<string, unknown>>;
 
+// TODO(claude): undecided: `audience` restates what each declared kind
+// implies, against the rule that a message's type is stated once. Sent with
+// every kind that has one for now, so a reader that does not know the kind
+// can still tell who it is for.
 const MODEL_ONLY: Audience = { model: true, user: false };
 const USER_ONLY: Audience = { model: false, user: true };
 
@@ -68,6 +72,8 @@ function classifyAssistant(entry: RecordEntry): Classified {
 
 function classifySystem(entry: RecordEntry): Classified {
   if (entry.subtype === 'turn_duration' && typeof entry.durationMs === 'number') {
+    // TODO(claude): undecided: `endedAt` holds the same time as the
+    // message's `at`. Both are sent for now.
     return {
       role: 'system',
       kind: 'turn-finished',
@@ -81,6 +87,8 @@ function classifySystem(entry: RecordEntry): Classified {
 
 function classifyCompactionSummary(entry: RecordEntry, compactions: Compactions): Classified {
   const metadata = compactions.get(String(entry.parentUuid));
+  // TODO(claude): undecided: `preservedIds` holds the same ids as
+  // `scope.except`. Both are sent for now.
   const preserved = isObject(metadata?.preservedMessages) && Array.isArray(metadata.preservedMessages.uuids) ? metadata.preservedMessages.uuids.filter((id) => typeof id === 'string') : [];
   return {
     role: 'user',
@@ -99,6 +107,9 @@ function classifyTaskNotice(entry: RecordEntry): Classified {
   return {
     role: 'user',
     kind: 'task-finished',
+    // TODO(claude): undecided: `from` on a task-finished notice is the
+    // orchestrator, while the spec says a message the harness generated has
+    // no `from`. Orchestrator for now.
     from: { kind: 'orchestrator' },
     fields: defined({ taskId: tag(body, 'task-id'), toolUseId: tag(body, 'tool-use-id'), status: tag(body, 'status'), summary, name, durationMs, toolUses: numberTag(body, 'tool_uses'), tokens: numberTag(body, 'subagent_tokens') }),
     userContent: text(durationMs === undefined ? shown : `${shown} · ${formatDuration(durationMs)}`),
@@ -107,6 +118,8 @@ function classifyTaskNotice(entry: RecordEntry): Classified {
 
 function classifySubagentReport(entry: RecordEntry): Classified {
   const agentType = /<agent-message from="([^"]*)"/.exec(textOf(entry))?.[1];
+  // TODO(claude): undecided: `from` on a subagent's hand-back is
+  // `{ kind: agent }` bare, with no id naming which agent. Bare for now.
   return { role: 'user', kind: 'subagent-report', from: { kind: 'agent' }, fields: defined({ agentType }) };
 }
 
@@ -145,6 +158,9 @@ function classifyAttachment(entry: RecordEntry): Classified | undefined {
     return undefined;
   }
   const role = entry.renderedRole === 'system' ? 'system' : 'user';
+  // TODO(claude): undecided: whether a reminder's kind is Claude Code's
+  // attachment type, an open set the spec cannot list (as now), or one
+  // declared kind with the attachment type in its fields.
   return { role, kind: attachment.type.replaceAll('_', '-'), fields: reminderFields(attachment), audience: MODEL_ONLY, content: blocks };
 }
 
