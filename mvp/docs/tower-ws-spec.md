@@ -266,7 +266,10 @@ sent the messages before this one, except those named. `at` is the time of
 the entry the message was made from. towerd forwards each of these as the
 producer sent it, whatever its shape, and the client reads a value of the
 wrong shape as absent (a non-string `kind`, a `userContent` that is not a
-list of blocks, an `at` that is not a time). A client that does not know a
+list of blocks, an `at` that is not a time).
+<!-- TODO(claude): undecided: whether towerd forwards a misshaped extra field
+as sent (as now) or drops it before the browser. -->
+A client that does not know a
 `kind` shows `userContent` when it has it, else `content`, for a message it
 is to show.
 

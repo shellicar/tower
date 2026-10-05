@@ -311,6 +311,8 @@ pub struct WsMessage {
 /// line, ...), forwarded as the producer sent them, whatever their shape: a
 /// reader checks the shape where it uses one, and reads a misshaped value as
 /// absent. See mvp/docs/tower-ws-spec.md, `conversation`.
+// TODO(claude): undecided: whether a misshaped extra field is forwarded as
+// sent (as now) or dropped by towerd before it reaches the browser.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct WsExtras {
     /// An open string.
@@ -370,4 +372,34 @@ pub struct WsUsage {
     pub turns: i64,
     #[serde(rename = "contextTokens")]
     pub context_tokens: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A message whose `at`, `userContent`, `scope` and `kind` are all the
+    /// wrong shape.
+    const MISSHAPED: &str = r#"{"id":"x1","query":"q9","turn":"t9","role":"assistant","content":[{"type":"text","text":"still here"}],"kind":7,"userContent":"not blocks","scope":"before","at":1727930560880,"ts":1}"#;
+
+    mod a_message_with_misshaped_extras {
+        use super::*;
+
+        #[test]
+        fn deserialises() {
+            let actual = serde_json::from_str::<WsMessage>(MISSHAPED);
+
+            assert!(actual.is_ok());
+        }
+
+        #[test]
+        fn round_trips_its_extras_as_sent() {
+            let expected: Value = serde_json::from_str(MISSHAPED).unwrap();
+
+            let message: WsMessage = serde_json::from_str(MISSHAPED).unwrap();
+            let actual = serde_json::to_value(&message).unwrap();
+
+            assert_eq!(actual, expected);
+        }
+    }
 }

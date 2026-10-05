@@ -258,6 +258,15 @@ export const COMPACT_SUMMARY: RecordEntry = {
 // Entries written by hand in the shape the notes describe, for the kinds no
 // recording holds.
 
+/** The note Claude Code writes for a tool call skipped when the turn ended, as a user entry of its own. */
+export const TOOL_CALL_SKIPPED: RecordEntry = {
+  isSidechain: false,
+  type: 'user',
+  message: { role: 'user', content: [{ type: 'text', text: '[Tool call skipped: the turn ended to deliver the message that follows before this call ran. Nothing refused it; re-run it if still needed.]' }] },
+  uuid: '4b7d2e90-6c13-4f58-a2e7-9d0c3b6f1a45',
+  timestamp: '2026-09-30T18:45:35.120Z',
+};
+
 /** A subagent's hand-back: a user entry from another session. */
 export const SUBAGENT_REPORT: RecordEntry = {
   isSidechain: false,

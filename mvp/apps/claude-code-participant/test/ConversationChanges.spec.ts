@@ -27,6 +27,7 @@ import {
   TASK_NOTICE_REPLY,
   THINKING,
   TOKENS_REMINDER,
+  TOOL_CALL_SKIPPED,
   TOOL_USE,
   TURN_DURATION,
 } from './entries.js';
@@ -399,7 +400,7 @@ describe('ConversationChanges', () => {
         await services.changes.commit([...FIRST_QUERY, RECORDED_TOKENS_REMINDER, TURN_DURATION]);
         await services.changes.close('completed');
         await services.changes.openQuery('q2', HUMAN);
-        await services.changes.commit([SECOND_PROMPT, PARTIAL_REPLY, INTERRUPT_MARKER, API_ERROR, NO_RESPONSE]);
+        await services.changes.commit([SECOND_PROMPT, PARTIAL_REPLY, INTERRUPT_MARKER, TOOL_CALL_SKIPPED, API_ERROR, NO_RESPONSE]);
         await services.changes.close('cancelled');
         await services.changes.commit([SUBAGENT_REPORT, TASK_NOTICE, TASK_NOTICE_REPLY]);
         await services.changes.close('completed');
@@ -411,7 +412,7 @@ describe('ConversationChanges', () => {
       it('publishes every kind declared', async () => {
         const services = await everyKind();
         const kinds = new Set(messages(services).map((body) => body.kind));
-        expect([...kinds].filter((kind) => kind !== undefined).sort()).toEqual(['api-error', 'compaction', 'date', 'interrupted', 'no-response', 'subagent-report', 'task-finished', 'total-tokens-reminder', 'turn-finished']);
+        expect([...kinds].filter((kind) => kind !== undefined).sort()).toEqual(['api-error', 'compaction', 'date', 'interrupted', 'no-response', 'subagent-report', 'task-finished', 'tool-call-note', 'total-tokens-reminder', 'turn-finished']);
       });
 
       it('finds a declared kind whose fields miss a required value', () => {

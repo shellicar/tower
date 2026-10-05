@@ -61,6 +61,9 @@ export function formatDuration(ms: number): string {
 
 function classifyAssistant(entry: RecordEntry): Classified {
   const synthetic = isObject(entry.message) && entry.message.model === '<synthetic>';
+  // TODO(claude): undecided: the role of an API error and of "No response
+  // requested." is assistant, as Claude Code stores them, though the model
+  // wrote neither; system is the other candidate. Assistant for now.
   if (synthetic && entry.isApiErrorMessage === true) {
     return { role: 'assistant', kind: 'api-error', fields: defined({ error: entry.error, status: entry.apiErrorStatus }), audience: USER_ONLY };
   }
@@ -107,9 +110,9 @@ function classifyTaskNotice(entry: RecordEntry): Classified {
   return {
     role: 'user',
     kind: 'task-finished',
-    // TODO(claude): undecided: `from` on a task-finished notice is the
-    // orchestrator, while the spec says a message the harness generated has
-    // no `from`. Orchestrator for now.
+    // TODO(claude): limit the orchestrator to a background task's notice
+    // (`origin.producer` `session-task`), as the design record's 4 Oct entry
+    // and the epic's `fromOf` do; here every task notification gets it.
     from: { kind: 'orchestrator' },
     fields: defined({ taskId: tag(body, 'task-id'), toolUseId: tag(body, 'tool-use-id'), status: tag(body, 'status'), summary, name, durationMs, toolUses: numberTag(body, 'tool_uses'), tokens: numberTag(body, 'subagent_tokens') }),
     userContent: text(durationMs === undefined ? shown : `${shown} · ${formatDuration(durationMs)}`),
@@ -118,8 +121,9 @@ function classifyTaskNotice(entry: RecordEntry): Classified {
 
 function classifySubagentReport(entry: RecordEntry): Classified {
   const agentType = /<agent-message from="([^"]*)"/.exec(textOf(entry))?.[1];
-  // TODO(claude): undecided: `from` on a subagent's hand-back is
-  // `{ kind: agent }` bare, with no id naming which agent. Bare for now.
+  // TODO(claude): limit this to a report handed back (`origin.handback`
+  // true), as the design record's 4 Oct entry and the epic's `fromOf` do;
+  // here every `peer` entry is a subagent report.
   return { role: 'user', kind: 'subagent-report', from: { kind: 'agent' }, fields: defined({ agentType }) };
 }
 

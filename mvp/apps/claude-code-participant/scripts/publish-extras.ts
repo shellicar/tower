@@ -3,7 +3,7 @@
 // and the stream can be read back. The entries are the recorded and hand-written
 // ones in test/entries.ts: a prompt with its reminders, thinking, a tool
 // exchange and the turn-finished line; a cancelled query with its interrupt
-// marker; an API error; "No response requested."; a subagent hand-back and
+// marker and the note of a tool call it skipped; an API error; "No response requested."; a subagent hand-back and
 // the notice of a finished task, in a query Claude Code starts itself; and a
 // compaction.
 //
@@ -27,7 +27,7 @@ import type { IHost } from '../src/Host.js';
 import type { IIds } from '../src/Ids.js';
 import type { ITimer } from '../src/Timer.js';
 import { messageProblems } from '../test/conversationSchema.js';
-import { ANSWER, API_ERROR, COMPACT_BOUNDARY, COMPACT_SUMMARY, DATE_ATTACHMENT, INTERRUPT_MARKER, NO_RESPONSE, PARTIAL_REPLY, PROMPT, RECORDED_TOKENS_REMINDER, SECOND_PROMPT, SUBAGENT_REPORT, TASK_NOTICE, TASK_NOTICE_REPLY, THINKING, TOOL_USE, TURN_DURATION } from '../test/entries.js';
+import { ANSWER, API_ERROR, COMPACT_BOUNDARY, COMPACT_SUMMARY, DATE_ATTACHMENT, INTERRUPT_MARKER, NO_RESPONSE, PARTIAL_REPLY, PROMPT, RECORDED_TOKENS_REMINDER, SECOND_PROMPT, SUBAGENT_REPORT, TASK_NOTICE, TASK_NOTICE_REPLY, THINKING, TOOL_CALL_SKIPPED, TOOL_USE, TURN_DURATION } from '../test/entries.js';
 
 const natsUrl = process.env.NATS_URL;
 if (natsUrl === undefined || natsUrl.endsWith(':4222')) {
@@ -109,7 +109,7 @@ await changes.close('completed');
 
 // 2. A reply cut short by a cancel, and the marker Claude Code writes for it.
 await changes.openQuery(randomUUID(), HUMAN);
-await changes.commit([SECOND_PROMPT, PARTIAL_REPLY, INTERRUPT_MARKER]);
+await changes.commit([SECOND_PROMPT, PARTIAL_REPLY, INTERRUPT_MARKER, TOOL_CALL_SKIPPED]);
 await changes.close('cancelled');
 
 // 3. A prompt the API failed to answer.
@@ -141,7 +141,7 @@ for (const body of messages) {
   console.log(`${String(body.role).padEnd(9)} ${String(body.kind ?? '-').padEnd(22)} audience=${audience.padEnd(31)} from=${JSON.stringify(body.from ?? null).padEnd(28)} ${blocks}`);
 }
 
-const EXPECTED = ['-', 'date', '-', '-', '-', 'total-tokens-reminder', '-', 'turn-finished', '-', '-', 'interrupted', '-', 'api-error', '-', 'no-response', 'subagent-report', 'task-finished', '-', '-', 'compaction'];
+const EXPECTED = ['-', 'date', '-', '-', '-', 'total-tokens-reminder', '-', 'turn-finished', '-', '-', 'interrupted', 'tool-call-note', '-', 'api-error', '-', 'no-response', 'subagent-report', 'task-finished', '-', '-', 'compaction'];
 const kinds = messages.map((body) => String(body.kind ?? '-'));
 console.log(`conversation ${conversationId}: ${messages.length} messages on ${STREAM}, ${problems.length} not as the spec says`);
 for (const problem of problems) {

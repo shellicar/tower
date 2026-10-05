@@ -232,7 +232,10 @@ and order, and it carries these optional fields beside `content`:
 - `kind`: what the message is, an open string. The kinds below are the ones
   defined today.
 - `fields`: the values the message was made from, an object. A publisher
-  sends `fields` with every `kind`, `{}` when the kind has none. The kind
+  sends `fields` with every `kind`, `{}` when the kind has none.
+  <!-- TODO(claude): undecided: whether `fields` is required with every
+  `kind` (as now) or optional, absent meaning none. -->
+  The kind
   selects the `fields` schema the way a subject leaf selects a message schema
   (`messageKindFields`, Message schemas): the `fields` of a kind listed there
   validate against its schema, and a kind not listed is skipped, never failed.
@@ -278,14 +281,21 @@ required; a publisher leaves out a value it could not read.
 | `date` | `user` \| `system` | model only | absent | `date`: the date the model is told, `YYYY-MM-DD` | `content`: the reminder the model is sent |
 | `total-tokens-reminder` | `user` \| `system` | model only | absent | `tokensLeft`: the count the model is told | as `date` |
 
-<!-- TODO(claude): undecided: `from` on `task-finished` is `orchestrator`,
-while the `message` row above says a message the harness generated has no
-`from`. Orchestrator for now. -->
-<!-- TODO(claude): undecided: `from` on `subagent-report` is `{ kind: agent }`
-bare, with no id naming which agent. Bare for now. -->
+<!-- TODO(claude): the `from` column follows the participant's design record
+(docs/design/claude-code-participant.md, Frontend work owed, 4 Oct):
+`orchestrator` on a background task's notice, `{ kind: agent }` on a
+background agent's report. The `message` row above still says a message the
+harness generated has no `from`; that row is to be reconciled with it. -->
+<!-- TODO(claude): undecided: `role` on `api-error` and `no-response` is
+`assistant`, as Claude Code stores them, though the model wrote neither;
+`system` is the other candidate. Assistant for now. -->
+<!-- TODO(claude): undecided: `interrupted` states a cancel that
+`query.closed` with reason `cancelled` also states. Both are published for
+now: the marker is a message the model is sent. -->
 <!-- TODO(claude): undecided: `endedAt` on `turn-finished` holds the same time
-as the message's `at`, and `preservedIds` on `compaction` the same ids as
-its `scope.except`. Both are sent for now. -->
+as the message's `at`. Both are sent for now. -->
+<!-- TODO(claude): undecided: `preservedIds` on `compaction` holds the same ids
+as its `scope.except`. Both are sent for now. -->
 
 A reminder (context the harness sends the model) may carry a `kind` this
 table does not list: the harness's own name for that reminder, with
