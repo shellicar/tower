@@ -32,6 +32,13 @@ reminder text the model gets), interrupt markers (the texts Claude Code
 writes to mark an interruption, matched against a fixed list read from
 Claude Code 2.1.283).
 
+**Where a reminder sits in what the model received is semantic,** not
+presentation. Publishing Claude Code's entries in the order it writes them,
+where that differs from where the model received a reminder, records a
+conversation that never happened. How the participant produces the form the
+model received, and turns it back into Claude Code's entries on resume, is
+open (see [resume.md](resume.md)).
+
 Not seen by the model: bookkeeping entries. Subagent entries (their own
 records) are not published; see [subagents.md](subagents.md).
 
@@ -46,10 +53,10 @@ What the model sees, entry kind by entry kind, is in
   ([proof 15](../participant-findings/proof-15-machine-messages.md)).
 - **`system` is Claude Code's own notes:** the `system` entries in its record,
   such as a compaction notice or a turn's duration, which the model mostly
-  never sees. The spec's role is an open set and now names `system`.
-- As built, a `system` entry is published with its `subtype` and fields
-  dropped, so a turn-finished line publishes empty content and tower can't
-  tell it from a recap or a retry note.
+  never sees. The spec's role is an open set and names `system`.
+- A `system` entry is published with its `subtype` and fields dropped, so a
+  turn-finished line publishes empty content and tower can't tell it from a
+  recap or a retry note.
 
 ## Who wrote each message (`from`)
 
@@ -57,9 +64,9 @@ What the model sees, entry kind by entry kind, is in
 message the harness generated has none. It is provenance, never fabricated.
 Each kind of message the participant publishes is its own case in code
 (`kindOf` in `src/ConversationEntries.ts`), and each case's `from` is set in
-one place (`fromOf` in `src/ConversationChanges.ts`), so a case's value is
-easy to change later; anything no case recognises gets the catch-all, which
-is always "unknown" in tower (no `from`).
+one place (`fromOf` in `src/ConversationChanges.ts`). Anything no case
+recognises gets the catch-all, which is always "unknown" in tower (no
+`from`).
 
 | Kind | `from` |
 |---|---|
@@ -74,16 +81,15 @@ is always "unknown" in tower (no `from`).
 | A Claude Code `system` entry | none |
 | Anything unrecognised | none |
 
-The hand-back's `{kind: "agent"}` was set by the lead session reading
-Stephen's words as settling it; whether they did is unsure. Messages from
-other sessions (peer messages) would be an agent too, but would need a way to
-say which agent; check-ins can wait until they show up in the UI.
+Peer messages (from other sessions) and check-ins are not handled. A peer
+message would be `{kind: "agent"}` too, with a way to say which agent;
+undecided: how it says which. Check-ins wait until they show in the UI.
 
 **How tower labels a message** (both frontends, the same way): with a `from`,
 the author; without one, "tool" if it holds a tool result, "system" if its
-role is `system`, and "unknown" otherwise. Falling back to "system" or
-"assistant" would be a fabrication, right only by coincidence. The label
-belongs to the message, not its blocks.
+role is `system`, and "unknown" otherwise. The label belongs to the message,
+not its blocks. A fallback to "system" or "assistant" for every message
+without a `from` would be a fabrication, right only by coincidence.
 
 ## Files in messages
 
@@ -116,22 +122,23 @@ streams.
 
 "Extras" are the kinds of message beyond the plain chat that the model or the
 user sees: reminders, hand-backs, task notices, interrupt markers, compaction,
-turn-finished lines, API errors, alerts and so on. Each kind gets worked
-through: how it is sent to the API, whether it reaches the model (that is its
-visibility), and how hard it is to support. This is not an MVP blocker. A
-study set out 21 kinds and two designs, A (generic: `audience`,
+turn-finished lines, API errors, alerts and so on. Each kind is worked
+through for how it is sent to the API, whether it reaches the model (its
+visibility), and how hard it is to support. Extras are not an MVP blocker.
+
+21 kinds are catalogued, with two designs: A (generic: `audience`,
 `userContent`, `at`, `scope` on `changes.message`) and B (typed: A plus
-`kind` and `fields`), with prototypes on the unmerged branches
-`proto/extras-generic` and `proto/extras-typed`, not yet looked at
-([extras design](../participant-findings/extras-design.md)). Nothing is
-chosen. Towerd reads a closed set of fields from `changes.message`, so a new
-envelope field needs towerd, the WS spec and both frontends to change.
+`kind` and `fields`), prototyped on the unmerged branches
+`proto/extras-generic` and `proto/extras-typed`
+([extras design](../participant-findings/extras-design.md)). Undecided:
+which design, if either. Towerd reads a closed set of fields from
+`changes.message`, so a new envelope field needs towerd, the WS spec and both
+frontends to change.
 
 ## Display
 
 - Tower shows the current state of the conversation, not everything Claude
-  Code records. Publishing everything Claude Code records isn't wrong, just
-  wasteful.
+  Code records.
 - **Tower collapses messages by default,** as Claude Code does with verbose
   off.
 - **Alerts are a sticky line above the input,** not transcript messages
