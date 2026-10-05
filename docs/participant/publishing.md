@@ -88,8 +88,11 @@ undecided: how it says which. Check-ins wait until they show in the UI.
 **How tower labels a message** (both frontends, the same way): with a `from`,
 the author; without one, "tool" if it holds a tool result, "system" if its
 role is `system`, and "unknown" otherwise. The label belongs to the message,
-not its blocks. A fallback to "system" or "assistant" for every message
-without a `from` would be a fabrication, right only by coincidence.
+not its blocks.
+
+Tower doesn't fall back to "system" or "assistant" for every message without
+a `from`, because that label would be fabricated, and right only by
+coincidence.
 
 ## Files in messages
 

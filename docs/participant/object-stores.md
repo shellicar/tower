@@ -2,16 +2,16 @@
 
 The spec states the contract as reference (`docs/spec/conversation.md`,
 Transit and durable object stores). The deployment's buckets are in
-`mvp/docs/deployment.md`.
+`mvp/docs/deployment.md`. This file covers how the participant uses the two
+stores, and sending images. How a message's files reach the store before the
+message is published is in [delivery.md](delivery.md).
 
 ## The two stores
 
 - **Transit and durable.** Transit carries a request's files from tower to
   the agent, and its objects expire. Durable holds the bytes of what the
   agent committed.
-- **Only the servicer writes to durable, when it commits.** An attachment is
-  part of a request, like the say itself; it becomes part of the
-  conversation only when the agent puts it there.
+- **Only the servicer writes to durable, when it commits.**
 - **One durable bucket per deployment, kept forever,** created by
   `stream-init.sh` with no expiry, not by towerd. Stream-init is idempotent
   and sets retention on every run, so a wrong expiry is corrected on the
@@ -22,9 +22,9 @@ Transit and durable object stores). The deployment's buckets are in
   and its media type.** The store's own SHA-256 digest covers the bytes.
 - **A file is stored before the message that references it is published;**
   a message never points at nothing.
-- **The spec doesn't name the bucket.** A reference is complete on its own,
-  bucket and id, like a URI; the bucket only needs retention. The deployment
-  names it.
+- **The spec doesn't name the bucket.** A reference is complete on its own:
+  it carries both the bucket and the id. The bucket only needs retention. The
+  deployment names it.
 - **Every image the agent commits goes to durable, always;** nothing is
   measured to decide whether an image could ride inside the message.
 - **A file that can't be stored is the implementation's to handle;** the
@@ -41,8 +41,10 @@ Transit and durable object stores). The deployment's buckets are in
 
 Transit is for getting attachments to the agent, never for keeping them on
 the bus: a conversation that kept transit references would lose its files
-when they expire. Only the servicer writes to durable because anything else would let
-anyone inject something into a conversation. Stream-init creates the bucket,
+when they expire. An attachment is part of a request, like the say itself;
+it becomes part of the conversation only when the agent puts it there. Only
+the servicer writes to durable because anything else would let anyone inject
+something into a conversation. Stream-init creates the bucket,
 not towerd, so the agent doesn't depend on towerd. Objects are named under
 their conversation because a conversation is what gets deleted, not
 individual files.

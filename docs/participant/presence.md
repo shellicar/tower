@@ -1,7 +1,11 @@
 # Presence on the bus, and the requests
 
 The spec states the events and requests as reference (`docs/spec/agent.md`,
-`docs/spec/conversation.md`). This file says how the participant uses them.
+`docs/spec/conversation.md`). This file says how the participant uses them:
+the agent events, the requests, the connection and the status line. How it
+shuts down is in [shutdown.md](shutdown.md); how its messages reach the
+stream is in [delivery.md](delivery.md); serving from tower's UI is in
+[serving-from-tower.md](serving-from-tower.md).
 
 ## The agent events
 
@@ -101,7 +105,10 @@ as an extra field. Nothing here is designed yet.
   limitation. The shape for the fix: `drain` names the `instanceId` in its
   body (never in the subject), every instance receives it and only the named
   one acts, and a `drain` reaching an instance already `unavailable` is
-  `accepted`. A restart is meant for a chosen agent, not a random one.
+  `accepted`.
+
+The fix lets `drain` choose its instance because a restart is meant for a
+chosen agent, not a random one.
 
 ## Open
 

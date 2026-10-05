@@ -1,6 +1,10 @@
 # Delivery to the stream
 
-How what the participant publishes about a conversation reaches the stream.
+How what the participant publishes about a conversation reaches the stream:
+the rule, the outbox as built, a broker unreachable at start, and messages
+over the broker's size limit. What is published is in
+[publishing.md](publishing.md); the object store that holds files is in
+[object-stores.md](object-stores.md).
 
 ## The rule
 

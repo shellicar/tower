@@ -7,6 +7,10 @@ driving script `new-conversation.ts` always mints a fresh id, and no script
 re-serves an existing one. It touches the spec, towerd, both frontends and
 the participant.
 
+This file covers what is decided for serving from tower, re-serving after a
+restart, and stopping serving one conversation. How the participant answers
+`service` today is in [presence.md](presence.md).
+
 ## Decided
 
 - **Starting a new conversation is servicing.** Towerd sends `service` with a
