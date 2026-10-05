@@ -3,7 +3,7 @@
 // the tool results, background agents' reports and Claude Code's system
 // entries. Reminders, compaction summaries, attachments and interrupt markers
 // are not published yet, although the model sees them; what the model sees is
-// to be published (the Goal in docs/design/claude-code-participant.md).
+// to be published (docs/participant/purpose.md, The publish rule).
 // Bookkeeping entries and subagent entries are not published.
 
 /** One line of Claude Code's record, as the session store and the transcript file both hold it. */
