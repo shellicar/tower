@@ -1,5 +1,10 @@
 # Scope: v0, the MVP, and after
 
+This file covers what v0 was, what the MVP means, its items and where each
+stands, the order of work, and what comes after or not at all. Each item's
+detail is in the file for its area, linked from the table; the goals behind
+the MVP are in [purpose.md](purpose.md).
+
 ## v0 (reached)
 
 v0 made Claude Code addressable from the bus and usable from tower's UI
@@ -71,9 +76,9 @@ Errors in tower (see [errors.md](errors.md)) and the extras design (see
 
 ### Why this order
 
-Cancel destroyed work on every cancel. `ready`, the reply author and the
-required settings were cheap correctness. A lost message broke a
-conversation for good. Skills and live replies touch every conversation.
+A cancel that isn't like Esc destroys work on every cancel. `ready`, the
+reply author and the required settings are cheap correctness. A lost message
+breaks a conversation for good. Skills and live replies touch every conversation.
 Serving comes before recovery because automatic re-serving turns a recovery
 failure into a blip
 ([cadence](../participant-findings/cadence.md),

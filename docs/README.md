@@ -1,10 +1,16 @@
 # Tower's documentation: start here
 
-Tower is the one place to see and drive Stephen's fleet of AI conversations:
+Tower is the one place to see and drive a fleet of AI conversations:
 a NATS bus with a spec as the only coupling (`docs/spec/`), `towerd` and two
 browser frontends (`mvp/`), and agents that serve conversations on the bus.
 The work in progress is the **Claude Code participant**
 (`mvp/apps/claude-code-participant`, branch `epic/claude-code-participant`).
+
+This file is the map of the participant's documentation: what it is in
+brief, the constraints on all of it, and where each area stands. Each area's
+detail is in its own file under `participant/`; the proofs and
+investigations are in `participant-findings/`; the rest of tower's
+documentation is listed at the end.
 
 ## The participant in brief
 
@@ -13,29 +19,31 @@ The work in progress is the **Claude Code participant**
   bus the seam: Claude Code's features without rebuilding them, so the effort
   goes into presentation.
 - **The publish rule:** everything the model sees must be published. That is
-  the minimum, because a conversation that wasn't published can't be
-  reproduced. Beyond it nothing is decided, except that what the user needs to
-  see is published too.
+  the minimum. Beyond it nothing is decided, except that what the user needs
+  to see is published too. The minimum exists because a conversation that
+  wasn't published can't be reproduced.
 - **Where it is:** v0 is reached (driving a conversation from tower). The goal
-  now is the MVP: Stephen using it every day instead of the terminal, with no
-  scripts outside tower.
+  now is the MVP: its user using it every day instead of the terminal, with
+  no scripts outside tower.
 
 ## Constraints
 
 - **No ambient configuration:** everything that changes the outcome is
-  declared, and nothing comes from the user's own Claude Code setup. A
-  default can change with any update, invisibly. Only Stephen accepts a
-  default, one setting at a time (see
+  declared, and nothing comes from the user's own Claude Code setup. Only
+  Stephen accepts a default, one setting at a time (see
   [configuration](participant/configuration.md)).
-- **Trial runs use the test broker (31416), never the live one (4222).** Conv
-  subjects are keyed by conversation id, not by world, so anything published
-  to the live broker is permanent.
+- **Trial runs use the test broker (31416), never the live one (4222).**
 - **Linux and macOS;** Windows later.
-- **Fix only what the participant needs;** note and park the rest for after,
-  so the work stays focused on getting the participant working.
-- **Stephen makes every design decision.** A choice built as if decided reads
-  as decided in the code, where it is hard to see and harder to undo. What is
-  open in these docs is open: don't build it as if decided.
+- **Fix only what the participant needs;** note and park the rest for after.
+- **Stephen makes every design decision.** What is open in these docs is
+  open: don't build it as if decided.
+
+A default can change with any update, invisibly, so it is configuration
+nobody declared. Conv subjects are keyed by conversation id, not by world, so
+anything published to the live broker is permanent. Parking what the
+participant doesn't need keeps the work focused on getting the participant
+working. A choice built as if decided reads as decided in the code, where it
+is hard to see and harder to undo.
 
 ## Where each area stands
 

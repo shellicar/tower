@@ -1,5 +1,10 @@
 # Purpose and the publish rule
 
+This file covers what the participant is for, its goals, the publish rule
+and the constraints on all of the work. The MVP items and the order of work
+are in [scope.md](scope.md); what is published, kind by kind, is in
+[publishing.md](publishing.md).
+
 ## What the participant is for
 
 The Claude Code participant puts Claude Code on tower's bus as one more
@@ -16,8 +21,7 @@ participant has needed so far are listed in
 
 - **The happy path first:** seeing a conversation in tower and saying into it.
   What works easily comes first; features that need more work come later.
-- **Auto mode is make or break.** It is one of the main reasons for using
-  Claude Code at all.
+- **Auto mode is make or break.**
 - **Summarised thinking is make or break.** It works end to end on Sonnet 5,
   Opus 5.5, Fable 5.1 and Haiku 4.5 when the display is declared
   ([proof 1](../participant-findings/proof-01-thinking.md)).
@@ -31,6 +35,9 @@ participant has needed so far are listed in
 - **The wider aim:** connect every machine at home to one broker and manage
   all sessions in one UI. Resuming a conversation from the bus is a goal, but
   not the primary one, and it may have to be relaxed (see [resume.md](resume.md)).
+
+Auto mode is make or break because it is one of the main reasons for using
+Claude Code at all.
 
 ## The publish rule
 
@@ -79,14 +86,15 @@ Display).
   declared; nothing comes from the user's own Claude Code setup. See
   [configuration.md](configuration.md).
 - **Linux and macOS only for now;** Windows is planned for v1.
-- **The test broker for every trial run** (port 31416, never 4222). Conv
-  subjects are keyed by conversation id, so anything published to the live
-  broker is permanent.
+- **The test broker for every trial run** (port 31416, never 4222).
 - **Fix only what the participant needs.** Anything else found along the way
   is noted and parked, not fixed in passing
   ([parked elsewhere](../participant-findings/parked-elsewhere.md)).
   Undecided: how this applies to MVP items that change tower itself (serving
   from tower, the frontends).
+
+Trial runs stay off the live broker because conv subjects are keyed by
+conversation id, so anything published to the live broker is permanent.
 
 ## Open
 
