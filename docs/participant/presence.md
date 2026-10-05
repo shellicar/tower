@@ -10,7 +10,8 @@ The spec states the events and requests as reference (`docs/spec/agent.md`,
   - `unavailable`: it can't receive requests, and still pulses, because its
     next state is `offline` or `ready`.
   - `offline`: it stops pulsing and is inert.
-- **`offline` doesn't require the process to exit.**
+- **`offline` doesn't require the process to exit.** Provisional: it may be
+  required later if this causes problems.
 - **`offline` is final for its `instanceId`.** A process that can take
   requests again publishes `ready` under a new `instanceId`.
 - **`ready` only once the participant can serve:** after it has connected,

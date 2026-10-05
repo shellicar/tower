@@ -50,6 +50,8 @@ the design changes.
 - **A write that fails** for `attached` rejects the `service` (`failed`) and
   the conversation is not served; for `detached` and a query's closure it is
   logged.
+- Where the outbox lives, how it is keyed, the duplicate window and the
+  connection options are values inside this design, free to change.
 
 `apps/claude-code-participant/scripts/outbox-check.sh` checks this against the
 test broker, stopping, pausing and restarting it (run it through the recipe
@@ -64,8 +66,9 @@ of its own.
 ## Messages over the broker's size limit (MVP)
 
 A message over the broker's `max_payload` (1 MB) is dropped and logged, and
-the messages behind it go on. Provisional until the MVP, which delivers
-them: an outbox can't help with a message the broker will never take.
+the messages behind it go on. Until the MVP delivers them, throwing, or
+dropping and logging, is accepted: an outbox can't help with a message the
+broker will never take.
 
 Base64 files already move to the durable bucket before publishing, so the
 case left is large text, chiefly `tool_use.input`, which has no size limit.

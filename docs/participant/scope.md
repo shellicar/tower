@@ -83,6 +83,7 @@ failure into a blip
 
 - Queueing messages (v1). Two routes: a spec change, or a `say` whose
   precondition is the current query.
+- Claude Code's own rewinds published as `tip.moved`.
 - The `tools` control line.
 - Running as a service.
 - Logging.

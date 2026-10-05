@@ -11,8 +11,9 @@
   route tried ([proof 11](../participant-findings/proof-11-context.md)). The
   login is the one thing read from the real home on Linux (below).
 - **Config is declared.** A default counts as undeclared config.
-- **A default is accepted one setting at a time, never silently.** The
-  accepted ones are listed under Allowed to default, below.
+- **Defaults are accepted one setting at a time.** The Allowed to default
+  list, below, holds the defaults that are accepted; anything not on it is
+  undecided.
 - **What changes the outcome is declared** (model, effort, thinking and the
   like); what doesn't is left to Claude Code.
 - **Bridge is the reference** where it makes sense. Things not changed at
@@ -225,11 +226,26 @@ failure as ambient config.
   token-count reminder, the attribution header, tool-entry details, fast
   mode, temperature, context management, betas, output format
   ([defaults survey](../participant-findings/defaults-survey.md)).
-- **Per-model values,** overrides by model included, use Claude Code's own
-  `modelSettings` inside `claudeSettings` (for example
-  `{"modelSettings": {"claude-opus-5-5": {"effortLevel": "high"}}}`). Claude
-  Code has no per-model max-tokens setting. Undecided: overrides by model
-  family.
+- **Per-model overrides (agreed, not built, not in v0):** the `model` line's
+  values are the default, plus an optional `overrides` map keyed by exact
+  model or by family (a family is a name like `claude-haiku` or
+  `claude-opus`, as distinct from each version), for example
+  `"overrides": {"claude-haiku-4-5": {"maxTokens": 64000}}`. Each field
+  resolves to the exact model's override, then the family's, then the
+  default, and never to Claude Code's own default. The participant serves one
+  model per conversation, so the override for that model applies.
+- **Today** there is no `overrides` map: `ConversationLauncher.ts` sets
+  `CLAUDE_CODE_MAX_OUTPUT_TOKENS` from `model.maxTokens`, one value for the
+  whole process.
+- **`modelSettings`** is Claude Code's own per-model setting, mainly effort
+  (for example `{"modelSettings": {"claude-opus-5-5": {"effortLevel":
+  "high"}}}`). It passes through `claudeSettings` unchanged, and it has
+  nothing for max tokens: Claude Code's max tokens is one flat value.
+
+Max tokens is required because Claude Code's default varies silently: an
+account experiment raised Sonnet's from 64,000 to 128,000, and only after a
+start-up fetch had returned. One required value covers every model the
+process serves until the `overrides` map is built.
 
 ## Bridge's control lines, for this participant
 

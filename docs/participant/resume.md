@@ -49,7 +49,7 @@ holding up the MVP.
   construction. The participant controls the config dir, cwd and home, but no
   SDK option sets that temp dir. The participant's private home is random per
   process too, so even two local resumes differ in it.
-- **The resume prototype** (branch `proof/resume-from-published`, unmerged)
+- **The resume prototype** (branch `proof/resume-from-published`, unmerged by design)
   found that six of seven conversation shapes matched once four values were
   normalised away (device id, home path, prompt id, config dir path), and
   `/compact` didn't. Under "identical" no shape passes
@@ -85,4 +85,6 @@ Proofs that resumed from published or reduced records:
   run in a temporary config dir.
 - How the missing data is carried (see [publishing.md](publishing.md),
   Extras).
+- How the participant produces the form the model received (where each
+  reminder sat), and turns it back into Claude Code's entries on resume.
 - A test that pins what is published against what a resume needs.

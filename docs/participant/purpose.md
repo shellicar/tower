@@ -22,8 +22,9 @@ participant has needed so far are listed in
   Opus 5.5, Fable 5.1 and Haiku 4.5 when the display is declared
   ([proof 1](../participant-findings/proof-01-thinking.md)).
 - **Rewind is make or break,** but not needed to start using the
-  participant. When Claude Code rewinds itself, the move is published as
-  `tip.moved`. Tower needs no request to ask for a rewind.
+  participant. When Claude Code rewinds itself, the move is to be published
+  as `tip.moved`; not built (see [scope.md](scope.md), Later). Tower needs no
+  request to ask for a rewind.
 - **Daily use instead of the terminal.** The MVP is what it takes for its user
   to use the participant every day with no scripts outside tower (see
   [scope.md](scope.md)).

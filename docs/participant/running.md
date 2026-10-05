@@ -98,9 +98,9 @@ The unit is called a turn because cost scales with the turn count.
 - **Whatever Claude Code loads may go onto NATS,** the account email in
   reminders included. The bus is the storage of the conversation, just as the
   transcript on disk is.
-- Undecided: whether tower (the published record) is the authority on what
-  a conversation holds, with a commit a fact, or only once the local
-  conversation is gone.
+- **When the local conversation is gone, the bus is the authority.**
+  Undecided: whether tower (the published record) is the authority beyond
+  that, with a commit a fact.
 
 ## Working directories
 

@@ -19,7 +19,8 @@ the participant.
   the spec's `service` to another world is how that operation would be
   carried out.
 - **Towerd keeps which world (and directory) served a conversation after it
-  detaches.**
+  detaches.** Where it keeps it is a value inside this design, free to
+  change.
 
 If nothing is ready, nothing would receive the request either, so the
 agents that are alive are all tower needs to offer.

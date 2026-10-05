@@ -1,6 +1,6 @@
 # Tower's documentation: start here
 
-Tower is the one place to see and drive a fleet of AI conversations:
+Tower is the one place to see and drive Stephen's fleet of AI conversations:
 a NATS bus with a spec as the only coupling (`docs/spec/`), `towerd` and two
 browser frontends (`mvp/`), and agents that serve conversations on the bus.
 The work in progress is the **Claude Code participant**
@@ -17,23 +17,22 @@ The work in progress is the **Claude Code participant**
   reproduced. Beyond it nothing is decided, except that what the user needs to
   see is published too.
 - **Where it is:** v0 is reached (driving a conversation from tower). The goal
-  now is the MVP: using it every day instead of the terminal, with no scripts
-  outside tower.
+  now is the MVP: Stephen using it every day instead of the terminal, with no
+  scripts outside tower.
 
 ## Constraints
 
 - **No ambient configuration:** everything that changes the outcome is
   declared, and nothing comes from the user's own Claude Code setup. A
-  default can change with any update, invisibly, so a default is accepted
-  one setting at a time, never silently (see
+  default can change with any update, invisibly. Only Stephen accepts a
+  default, one setting at a time (see
   [configuration](participant/configuration.md)).
 - **Trial runs use the test broker (31416), never the live one (4222).** Conv
   subjects are keyed by conversation id, not by world, so anything published
   to the live broker is permanent.
 - **Linux and macOS;** Windows later.
-- **Fix only what the participant needs;** note and park the rest. A fix made
-  in passing changes another part of tower that nobody asked to change, and
-  it hides inside a participant change.
+- **Fix only what the participant needs;** note and park the rest for after,
+  so the work stays focused on getting the participant working.
 - **Stephen makes every design decision.** A choice built as if decided reads
   as decided in the code, where it is hard to see and harder to undo. What is
   open in these docs is open: don't build it as if decided.
@@ -73,8 +72,9 @@ versions, runs and what it found.
 - The skills route, the approvals design, the error message on the wire.
 - Undecided, each built one way for now: one key per control line, the reply
   to a blank line, `claudeSettings` checked only on the keys acted on, no
-  migration of transit history, whether tower is the authority on what a
-  conversation holds.
+  migration of transit history. Undecided too: whether tower is the
+  authority on what a conversation holds while the local conversation
+  exists.
 
 ## The rest of the documentation
 

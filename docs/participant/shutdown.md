@@ -37,7 +37,8 @@
   sit in 64 to 113: clean (stage 1) 0, stage 2 64, stage 3 65, a bad
   environment value 66, the config dir held by another participant 67, an
   unsupported platform 68, a process list that couldn't be read before the
-  participant was ready 69. A crash stays on Node's own 1.
+  participant was ready 69. A crash stays on Node's own 1. Which failures share a code is free to
+  change.
 - **Each Claude Code runs in its own process group,** so every trigger,
   including a terminal's Ctrl-C, goes through the participant's one path. An
   `interrupt()` that fails against a Claude Code already stopping or gone is
@@ -96,8 +97,8 @@ one session ([proof 17b](../participant-findings/proof-17b-shared-dir.md)).
   the scan may use the values from either moment, with no guarantee either
   way.
 - **Recovery is not built:** adding to the store whatever Claude Code's record
-  holds that the store lacks, before serving. It works after every kind of
-  ending except a reboot after orphans finish (an accepted edge case). It
+  holds that the store lacks, before serving. It was proven to work after
+  every kind of ending except a reboot after orphans finish (an accepted edge case). It
   gets built if the participant crashes in practice
   ([proof 17](../participant-findings/proof-17-recovery.md)).
 

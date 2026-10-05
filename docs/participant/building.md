@@ -24,8 +24,8 @@
   (`pnpm --dir mvp/apps/claude-code-participant lint`, `type-check`, `knip`,
   `test`).
 
-Starting fresh puts correctness ahead of speed. Dependency injection is easy to remove later if it proves
-overkill, and harder to add afterwards.
+Starting fresh puts correctness ahead of speed. Dependency injection is easy
+to remove later if it proves overkill, and harder to add afterwards.
 
 ## Tooling
 
@@ -35,8 +35,9 @@ overkill, and harder to add afterwards.
   is needed as a generic constraint. Line width 320
   ([lint and format comparison](../participant-findings/lint-compare.md)).
 - **The official NATS client,** `@nats-io/transport-node` 3.4.0 and its
-  `@nats-io/*` companions, never the deprecated `nats` package. The object
-  store is written through `@nats-io/obj`.
+  `@nats-io/*` companions, never the deprecated `nats` package. Issues with
+  it are addressed as they come. The object store is written through
+  `@nats-io/obj`.
 - **zod** for control-line validation (the version the SDK already uses).
 - **pnpm 12,** with this workspace as its test bed. Dependencies change only
   through pnpm commands (`pnpm install`, `pnpm add`); `packageManager` is set

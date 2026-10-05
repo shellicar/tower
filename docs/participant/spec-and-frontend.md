@@ -84,4 +84,4 @@ The rename stays inside v2 because tower is the consumer of `changes`.
 - Towerd shows the row's last kind as "query" for a `query.closed` (keep it,
   use the literal leaf, or "query_closed").
 - A glossary for model, harness, conversation, transcript, session, commit
-  and local state.
+  and local state: worked out, not written.

@@ -129,7 +129,7 @@ visibility), and how hard it is to support. Extras are not an MVP blocker.
 21 kinds are catalogued, with two designs: A (generic: `audience`,
 `userContent`, `at`, `scope` on `changes.message`) and B (typed: A plus
 `kind` and `fields`), prototyped on the unmerged branches
-`proto/extras-generic` and `proto/extras-typed`
+`proto/extras-generic` and `proto/extras-typed`, not yet looked at
 ([extras design](../participant-findings/extras-design.md)). Undecided:
 which design, if either. Towerd reads a closed set of fields from
 `changes.message`, so a new envelope field needs towerd, the WS spec and both
@@ -138,7 +138,8 @@ frontends to change.
 ## Display
 
 - Tower shows the current state of the conversation, not everything Claude
-  Code records.
+  Code records. Publishing everything Claude Code records isn't wrong, only
+  wasteful.
 - **Tower collapses messages by default,** as Claude Code does with verbose
   off.
 - **Alerts are a sticky line above the input,** not transcript messages

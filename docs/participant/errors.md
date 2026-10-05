@@ -2,10 +2,9 @@
 
 ## Errors in tower
 
-- **Any error is shown to the user,** for example an API request that
-  failed after its retries. Tower has no concept of an error yet; it is a
-  missing feature.
-- **Tower needs a message of some kind that indicates errors.**
+- **Any error should be shown to the user,** for example an API request that
+  failed after its retries. This is the direction; it is not built. Tower has
+  no concept of an error yet; it is a missing feature.
 - **Claude Code's error text is published,** even though the model never sees
   it: it is for the user of tower. It is published today as a plain
   `<synthetic>` assistant message with no `from`, its error marker dropped.
@@ -14,8 +13,9 @@
 - Errors come from two sources: Claude Code's own error entries, and failures
   only the participant sees (the broker going away, Claude Code exiting, the
   SDK's mirror error, a sandbox that failed to start).
-- Transient errors are included: any error is shown. `turn_aborted` says an
-  attempt failed, not what failed.
+- `turn_aborted` says an attempt failed, not what failed.
+- Undecided: whether transient errors (retries) are shown, or only the final
+  failure.
 
 Tower is meant to be harness- and agent-agnostic, so it needs a message of
 some kind that indicates errors. claude-cli shows errors as plain
