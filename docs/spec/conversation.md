@@ -184,7 +184,7 @@ closure, each on its own leaf under `changes.query`:
 
 | Change | Fields | Notes |
 |---|---|---|
-| `message` | `id`, `queryId`, `turnId`, `role`, `from`?, `content` | **utterance** — the dialogue grew. `id` is the message's stable id; `role` is an open set whose known values the `message` schema lists (see Message schemas); `from` says who wrote the message: a human, an agent or an orchestrator (something outside the conversation that acts on it), as `{ kind: human \| agent \| orchestrator }` + id, so two `role: user` messages written by different authors read apart. A message nobody wrote, one the harness generated, has no `from`: a tool result, a system message, a reminder (context the harness adds in the user role, not something the user said). Nothing is fabricated to fill the slot (correction, 19 Jul 2026: a tool result previously carried `from: {kind: agent}`, wrongly); `content` is content blocks |
+| `message` | `id`, `queryId`, `turnId`, `role`, `from`?, `content`, `audience`?, `userContent`?, `at`?, `scope`? | **utterance** — the dialogue grew. `id` is the message's stable id; `role` is an open set whose known values the `message` schema lists (see Message schemas); `from` says who wrote the message: a human, an agent or an orchestrator (something outside the conversation that acts on it), as `{ kind: human \| agent \| orchestrator }` + id, so two `role: user` messages written by different authors read apart. A message nobody wrote, one the harness generated, has no `from`: a tool result, a system message, a reminder (context the harness adds in the user role, not something the user said). Nothing is fabricated to fill the slot (correction, 19 Jul 2026: a tool result previously carried `from: {kind: agent}`, wrongly); `content` is content blocks; `audience`, `userContent`, `at` and `scope` say whether the model is sent it and the person shown it, in what words, when it happened, and what it replaces for the model (Who a message is for) |
 | `revision` | `messageId`, `content` | **revision** — the content under a stable id changed: a trim, a resize, or the words themselves rewritten. Carries the resulting content, never the why — the record carries effects, never reasons |
 | `tip_moved` | `to` (a message id) | **tip movement** — the tip pointer moved: rewind, fast-forward. The reflog, as events |
 | `query_started` | `queryId`, `parent`? | **query start**: a query has begun, and its messages attach after `parent`. `parent` is the id of the message the query attaches after. For a query a `say` opened, it is the message that say's premise names (its `precondition.tip`). `parent` is optional: a start without one means the query follows the tip. Published before any of the query's messages, so a consumer can place each message as it streams. Optional: a publisher that never announces a start stays compliant, and a query with no `query_started` follows the tip, as every query did before this change existed (Query start and closure) |
@@ -210,6 +210,69 @@ it — but a wrong `instanceId`. For a producer that carries the field, this
 is what makes the two-agents case reconstructible from the record instead
 of merely suspected. A producer that omits it leaves that reconstruction
 undone, same as any other fact never stated.
+
+### Who a message is for
+
+A message is the model's and the person's at once: what the model is sent
+and what a reader is shown are the same `content`. A harness can hold
+messages that only one of them gets (a reminder the model is sent and nobody
+is shown, a line marking that a turn finished that the person is shown and
+the model is never sent), and messages the two get in different words. Four
+optional fields on `message` say so. Each is absent on a plain message, and a
+message without them reads exactly as it did before they existed.
+
+- **`audience`**: `{ model: boolean, user: boolean }`, both stated. `model`
+  says whether the model is sent the message; `user` whether the person is
+  shown it. Absent means both. A message with `user: false` is part of the
+  record a reader keeps, and it is not drawn.
+- **`userContent`**: content blocks the person is shown in place of
+  `content`, for a message whose words for the person differ from the
+  model's. `content` stays what the model is sent. Only meaningful when the
+  person is shown the message; a reader ignores it when `audience.user` is
+  `false`.
+- **`at`**: when the thing the message records happened, on the publisher's
+  clock, in the same format as `ts`. `ts` stays the time the change was
+  published, and ordering stays by `ts`. A reader that shows a time for the
+  message shows `at` when present, in the reader's own time zone. A publisher
+  never writes a clock reading into `content` or `userContent`: the instant
+  goes in `at`, and only the reader turns it into a wall-clock time.
+- **`scope`**: `{ replaces: "before", except: [message ids] }` on a message
+  that replaces, for the model, every message before it: from this message
+  on the model is no longer sent those messages, except the ones `except`
+  names. The earlier messages stay in the record and are shown as before;
+  what changed is only what the model is sent. `replaces` is an open set
+  with `before` its one value today.
+
+The reader's rule, with no knowledge of why a message carries these fields:
+the model is sent `content` when `audience.model` is not `false` and no later
+`scope` has replaced the message; the person is shown `userContent` if
+present, else `content`, when `audience.user` is not `false`. A reader that
+predates the fields shows `content` for every message.
+
+TODO(claude): undecided: `audience.model` has two values. A publisher that
+cannot know at publish time whether the model will be sent a message (a
+thinking piece whose siblings have not arrived, a notice whose visibility
+Claude Code does not state) has to state a guess. A third value for
+"unknown" is not defined.
+
+TODO(claude): undecided: `audience` is per message, not per block. A harness
+that puts model-only blocks inside a message the person is shown (bridge's
+skills catalogue and context block, wrapped in `<system-reminder>`, inside the
+say's own user message) cannot state them with it.
+
+TODO(claude): undecided: "before" for `scope` is not defined against the
+tree. It can mean the message's ancestors on its path from the root (its
+query's parent chain), or every message published earlier by `ts`. The two
+agree on a conversation with no branches, which is the only kind the current
+readers handle; both frontends read it as earlier in their list.
+
+TODO(claude): undecided: `except` may name ids that were never published as
+messages (Claude Code's compaction names entries the session store never
+received). A reader ignores an id it does not hold; whether a publisher
+filters such ids out is not defined.
+
+TODO(claude): undecided: whether `at` stays a field beside `ts` or replaces
+it. Both are kept for now, and ordering is by `ts`.
 
 The folds:
 
@@ -707,6 +770,14 @@ const contentBlocks = z.array(z.looseObject({ type: z.string() }));
 
 const turnRef = { queryId: z.string(), turnId: z.string() };
 
+/** Whether the model is sent a message and whether the person is shown it;
+ *  an absent `audience` means both. */
+const audience = z.looseObject({ model: z.boolean(), user: z.boolean() });
+
+/** A message that replaces, for the model, every message before it except
+ *  the listed message ids. */
+const scope = z.looseObject({ replaces: openEnum(['before']), except: z.array(z.string()) });
+
 // Leafed classes are keyed by subject leaf (the tokens after the class): the
 // subject selects the schema, and the body carries no `type`.
 
@@ -738,7 +809,7 @@ const queryClosure = z.looseObject({ ts, instanceId: z.string().optional(), quer
 // conv.v2.{conversationId}.changes.> — instanceId is envelope metadata
 // (beside from, never inside it): which agent instance published the change.
 export const conversationChange = {
-  'message': z.looseObject({ ts, instanceId: z.string().optional(), id: z.string(), ...turnRef, role: openEnum(['user', 'assistant', 'system']), from: sender.optional(), content: contentBlocks }),
+  'message': z.looseObject({ ts, instanceId: z.string().optional(), id: z.string(), ...turnRef, role: openEnum(['user', 'assistant', 'system']), from: sender.optional(), content: contentBlocks, audience: audience.optional(), userContent: contentBlocks.optional(), at: ts.optional(), scope: scope.optional() }),
   'revision': z.looseObject({ ts, instanceId: z.string().optional(), messageId: z.string(), content: contentBlocks }),
   'tip.moved': z.looseObject({ ts, instanceId: z.string().optional(), to: z.string() }),
   // The parent is the message the query attaches after. An absent parent
