@@ -1,5 +1,10 @@
 # How the participant is built
 
+This file covers the participant's build, tooling and dependencies, keeping
+Claude Code current, and the conventions for working on it. How to run the
+checks and the scripts is in CLAUDE.md; the scripts themselves are in
+[kit.md](kit.md).
+
 ## The build
 
 - **Fresh, not from the proof code.** The proofs are reference; what they
@@ -61,8 +66,7 @@ participant detecting the update), the second only with tests covering the
 behaviour. CI doesn't check the participant today, and it would need to before
 any of this ([participant updates](../participant-findings/participant-updates.md)).
 
-The participant has one main user, and manual releases were painful for
-claude-sdk-cli.
+The participant has one main user, and manual releases are painful.
 
 ## Conventions
 

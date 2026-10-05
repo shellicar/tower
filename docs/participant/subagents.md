@@ -1,5 +1,10 @@
 # Subagents
 
+This file covers what is decided for subagents, what the SDK offers for
+them, and what is open. Cancel is in [presence.md](presence.md); the
+shutdown stages are in [shutdown.md](shutdown.md); what is published is in
+[publishing.md](publishing.md).
+
 ## Decided
 
 - **Subagents don't show up as conversations of their own,** and aren't

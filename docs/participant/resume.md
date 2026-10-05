@@ -1,5 +1,11 @@
 # Resuming from the published record
 
+This file covers resuming a conversation from the bus: where it stands, the
+test that counts, what is known, and the related proofs. How a conversation
+resumes today, from Claude Code's own record, is in
+[running.md](running.md); what is published is in
+[publishing.md](publishing.md).
+
 ## Where it stands
 
 - **Not MVP.** Today a conversation resumes from Claude Code's own record on

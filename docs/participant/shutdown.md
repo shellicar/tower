@@ -1,5 +1,12 @@
 # Shutdown, leftovers, identity and platforms
 
+This file covers how the participant shuts down, orphans after a hard kill,
+its identity and lock, the leftover scan at startup, the platforms it runs
+on, and Claude Code exiting on its own. The agent events it publishes are in
+[presence.md](presence.md); what happens to undelivered messages is in
+[delivery.md](delivery.md); the macOS login is in
+[configuration.md](configuration.md).
+
 ## Shutdown
 
 - **Each Ctrl-C escalates.** First: exit gracefully, stopping what is in

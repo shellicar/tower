@@ -1,17 +1,22 @@
 # Skills (MVP)
 
+This file covers what is decided for skills, where they stand, and what is
+known about how Claude Code loads them. The no-ambient-config principle is
+in [configuration.md](configuration.md).
+
 ## Decided
 
 - **Skills are required for the MVP, from at least one skills directory.**
 - **Skills directories are declared in config,** and skills keep their plain
   names, with no plugin prefix.
 - **Skills are managed per process, not per conversation.** Two participants
-  with different skill configuration don't contest. What matters is
-  isolation, and the available skills changing when the config changes; the
-  exact config shape doesn't. Nothing is forced that Claude Code doesn't
-  support.
-- **Skills are not ambient** (see [configuration.md](configuration.md)):
-  ambient skills would leave sessions impossible to control or compare.
+  with different skill configuration don't contest. Nothing is forced that
+  Claude Code doesn't support.
+- **Skills are not ambient** (see [configuration.md](configuration.md)).
+
+What matters is isolation, and the available skills changing when the config
+changes; the exact config shape doesn't. Ambient skills would leave sessions
+impossible to control or compare.
 
 ## Where it stands
 

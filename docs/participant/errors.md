@@ -1,5 +1,9 @@
 # Errors and logging
 
+This file covers errors shown in tower and the participant's logging. How
+the published error text is classified is in [publishing.md](publishing.md);
+the participant's exit codes are in [shutdown.md](shutdown.md).
+
 ## Errors in tower
 
 - **Any error should be shown to the user,** for example an API request that

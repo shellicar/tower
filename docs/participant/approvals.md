@@ -1,5 +1,9 @@
 # Approvals (MVP)
 
+This file covers what is decided for approvals and where they stand. The
+`permissionPrompts` setting is in [configuration.md](configuration.md);
+tower's approval contract is `docs/spec/approval.md`.
+
 ## Decided
 
 - **Approvals are part of the MVP.** They are not the top priority.
