@@ -184,7 +184,7 @@ closure, each on its own leaf under `changes.query`:
 
 | Change | Fields | Notes |
 |---|---|---|
-| `message` | `id`, `queryId`, `turnId`, `role`, `from`?, `content` | **utterance** — the dialogue grew. `id` is the message's stable id; `role` is an open set whose known values the `message` schema lists (see Message schemas); `from` says who wrote the message: a human, an agent or an orchestrator (something outside the conversation that acts on it), as `{ kind: human \| agent \| orchestrator }` + id, so two `role: user` messages written by different authors read apart. A message nobody wrote, one the harness generated, has no `from`: a tool result, a system message, a reminder (context the harness adds in the user role, not something the user said). Nothing is fabricated to fill the slot (correction, 19 Jul 2026: a tool result previously carried `from: {kind: agent}`, wrongly); `content` is content blocks |
+| `message` | `id`, `queryId`, `turnId`, `role`, `from`?, `content`, `kind`?, `fields`?, `audience`?, `userContent`?, `scope`?, `at`? | **utterance** — the dialogue grew. `id` is the message's stable id; `role` is an open set whose known values the `message` schema lists (see Message schemas); `from` says who wrote the message: a human, an agent or an orchestrator (something outside the conversation that acts on it), as `{ kind: human \| agent \| orchestrator }` + id, so two `role: user` messages written by different authors read apart. A message nobody wrote, one the harness generated, has no `from`: a tool result, a system message, a reminder (context the harness adds in the user role, not something the user said). Nothing is fabricated to fill the slot (correction, 19 Jul 2026: a tool result previously carried `from: {kind: agent}`, wrongly); `content` is content blocks. `kind` and the fields after it describe an extra message (Extra messages, below); plain chat carries none of them |
 | `revision` | `messageId`, `content` | **revision** — the content under a stable id changed: a trim, a resize, or the words themselves rewritten. Carries the resulting content, never the why — the record carries effects, never reasons |
 | `tip_moved` | `to` (a message id) | **tip movement** — the tip pointer moved: rewind, fast-forward. The reflog, as events |
 | `query_started` | `queryId`, `parent`? | **query start**: a query has begun, and its messages attach after `parent`. `parent` is the id of the message the query attaches after. For a query a `say` opened, it is the message that say's premise names (its `precondition.tip`). `parent` is optional: a start without one means the query follows the tip. Published before any of the query's messages, so a consumer can place each message as it streams. Optional: a publisher that never announces a start stays compliant, and a query with no `query_started` follows the tip, as every query did before this change existed (Query start and closure) |
@@ -219,6 +219,81 @@ The folds:
   **reachable from the tip**. A snapshot (`history`) emits exactly that — two
   folds composed. Live watchers folding as they go and late joiners asking for
   a snapshot converge on the same state, by construction.
+
+### Extra messages: `kind` and `fields`
+
+An extra message is any message beyond plain chat (a prompt, a reply, a tool
+exchange): something the harness adds that the model is sent, the person is
+shown, or both. A reminder, a subagent's hand-back, the notice that a task
+finished, an interrupt marker, a compaction, the line that ends a turn, an
+API error. It is a `message` like any other, with the same id, query, turn
+and order, and it carries these optional fields beside `content`:
+
+- `kind`: what the message is, an open string. The kinds below are the ones
+  defined today.
+- `fields`: the values the message was made from, an object. A publisher
+  sends `fields` with every `kind`, `{}` when the kind has none. The kind
+  selects the `fields` schema the way a subject leaf selects a message schema
+  (`messageKindFields`, Message schemas): the `fields` of a kind listed there
+  validate against its schema, and a kind not listed is skipped, never failed.
+- `audience`: `{ model, user }`, two booleans: whether the model is sent the
+  message, and whether the person is shown it. Absent means both.
+- `userContent`: content blocks to show the person in place of `content`,
+  when the two differ. `content` stays what the model is sent, or, for a
+  message the model is not sent, what the person is shown.
+- `scope`: `{ replaces: "before", except: [message ids] }`. From this message
+  on, the model is no longer sent the messages before it, except the ones
+  `except` names. `except` may name messages that were never published.
+- `at`: the time the harness recorded for what the message was made from.
+  `ts` stays the time of publishing.
+  <!-- TODO(claude): undecided: whether `at` stays its own field or the
+  harness's time replaces `ts`. Its own field for now. -->
+
+A consumer that does not know a message's `kind` reads it by the fields
+every extra carries: it shows the message to the person unless
+`audience.user` is `false`, and shows `userContent` when there is one, else
+`content`. A consumer that knows the kind renders it from `fields` in its own
+way. A value of the wrong shape in any of these fields is read as absent
+(conformance.md: strictness lives in tests).
+
+<!-- TODO(claude): undecided: `audience` restates what each declared kind
+already implies (the table below gives every kind one audience), which the
+rule that a message's type is stated once counts against. It is sent with
+every kind for now, so a consumer that does not know the kind can still
+apply the reading rule above. -->
+
+The kinds defined today. Every field in `fields` is optional unless marked
+required; a publisher leaves out a value it could not read.
+
+| `kind` | `role` | `audience` | `from` | `fields` | `content`, `userContent` |
+|---|---|---|---|---|---|
+| `turn-finished` | `system` | person only | absent | `durationMs` (required): how long the turn ran; `endedAt`: when it ended | `content`: the line as text |
+| `interrupted` | `user` | both | absent | `during`: `turn` \| `tool-use` (open), what the interrupt cut short | `content`: the marker text the model is sent; `userContent`: a short line for the person |
+| `tool-call-note` | `user` | both | absent | `reason`: `incomplete` \| `interrupted` \| `result-missing` \| `denied` \| `skipped` (open), why a tool call has no ordinary result | as `interrupted` |
+| `api-error` | `assistant` | person only | absent | `error`: the service's error class; `status`: the HTTP status | `content`: the error text |
+| `no-response` | `assistant` | model only | absent | none | `content`: the text the model is sent as its own earlier turn |
+| `task-finished` | `user` | both | `orchestrator` | `taskId`, `toolUseId` (the tool call that started the task), `status`: `completed` \| `failed` (open), `summary`, `name`, `durationMs`, `toolUses`, `tokens` | `content`: the notice the model is sent; `userContent`: a one-line summary |
+| `subagent-report` | `user` | both | `agent` | `agentType`: the kind of agent that sent it | `content`: the report the model is sent |
+| `compaction` | `user` | both | absent | `trigger`: `auto` \| `manual` (open); `durationMs`, `preTokens`, `postTokens`; `preservedIds`: the ids `scope.except` names | `content`: the summary the model is sent from here on; carries `scope` |
+| `date` | `user` \| `system` | model only | absent | `date`: the date the model is told, `YYYY-MM-DD` | `content`: the reminder the model is sent |
+| `total-tokens-reminder` | `user` \| `system` | model only | absent | `tokensLeft`: the count the model is told | as `date` |
+
+<!-- TODO(claude): undecided: `from` on `task-finished` is `orchestrator`,
+while the `message` row above says a message the harness generated has no
+`from`. Orchestrator for now. -->
+<!-- TODO(claude): undecided: `from` on `subagent-report` is `{ kind: agent }`
+bare, with no id naming which agent. Bare for now. -->
+<!-- TODO(claude): undecided: `endedAt` on `turn-finished` holds the same time
+as the message's `at`, and `preservedIds` on `compaction` the same ids as
+its `scope.except`. Both are sent for now. -->
+
+A reminder (context the harness sends the model) may carry a `kind` this
+table does not list: the harness's own name for that reminder, with
+`audience` model only and `fields` `{}`. A consumer reads it by the rule
+above.
+<!-- TODO(claude): undecided: whether reminder kinds are an open set named by
+the harness, as now, or one declared kind (`reminder`) with the harness's
+name in `fields`. Open set for now; this table cannot list them. -->
 
 ### Query start and closure
 
@@ -707,6 +782,17 @@ const contentBlocks = z.array(z.looseObject({ type: z.string() }));
 
 const turnRef = { queryId: z.string(), turnId: z.string() };
 
+/** An extra message's fields beside its content (Extra messages). All
+ *  optional; plain chat carries none of them. */
+const messageExtras = {
+  kind: z.string().optional(),
+  fields: z.record(z.string(), z.unknown()).optional(),
+  audience: z.looseObject({ model: z.boolean(), user: z.boolean() }).optional(),
+  userContent: contentBlocks.optional(),
+  scope: z.looseObject({ replaces: openEnum(['before']), except: z.array(z.string()) }).optional(),
+  at: ts.optional(),
+};
+
 // Leafed classes are keyed by subject leaf (the tokens after the class): the
 // subject selects the schema, and the body carries no `type`.
 
@@ -738,7 +824,7 @@ const queryClosure = z.looseObject({ ts, instanceId: z.string().optional(), quer
 // conv.v2.{conversationId}.changes.> — instanceId is envelope metadata
 // (beside from, never inside it): which agent instance published the change.
 export const conversationChange = {
-  'message': z.looseObject({ ts, instanceId: z.string().optional(), id: z.string(), ...turnRef, role: openEnum(['user', 'assistant', 'system']), from: sender.optional(), content: contentBlocks }),
+  'message': z.looseObject({ ts, instanceId: z.string().optional(), id: z.string(), ...turnRef, role: openEnum(['user', 'assistant', 'system']), from: sender.optional(), content: contentBlocks, ...messageExtras }),
   'revision': z.looseObject({ ts, instanceId: z.string().optional(), messageId: z.string(), content: contentBlocks }),
   'tip.moved': z.looseObject({ ts, instanceId: z.string().optional(), to: z.string() }),
   // The parent is the message the query attaches after. An absent parent
@@ -746,6 +832,30 @@ export const conversationChange = {
   'query.started': z.looseObject({ ts, instanceId: z.string().optional(), queryId: z.string(), parent: z.string().optional() }),
   'query.closed': queryClosure,
   'query': queryClosure,
+};
+
+// The `fields` of an extra message, keyed by its `kind`: the kind selects the
+// schema as a subject leaf selects one above, and a kind not listed is
+// skipped, never failed (Extra messages).
+const tokenCount = z.number().int().nonnegative();
+export const messageKindFields = {
+  'turn-finished': z.looseObject({ durationMs: z.number().nonnegative(), endedAt: ts.optional() }),
+  'interrupted': z.looseObject({ during: openEnum(['turn', 'tool-use']).optional() }),
+  'tool-call-note': z.looseObject({ reason: openEnum(['incomplete', 'interrupted', 'result-missing', 'denied', 'skipped']).optional() }),
+  'api-error': z.looseObject({ error: z.string().optional(), status: z.number().int().optional() }),
+  'no-response': z.looseObject({}),
+  'task-finished': z.looseObject({
+    taskId: z.string().optional(), toolUseId: z.string().optional(), status: openEnum(['completed', 'failed']).optional(),
+    summary: z.string().optional(), name: z.string().optional(),
+    durationMs: z.number().nonnegative().optional(), toolUses: z.number().int().nonnegative().optional(), tokens: tokenCount.optional(),
+  }),
+  'subagent-report': z.looseObject({ agentType: z.string().optional() }),
+  'compaction': z.looseObject({
+    trigger: openEnum(['auto', 'manual']).optional(), durationMs: z.number().nonnegative().optional(),
+    preTokens: tokenCount.optional(), postTokens: tokenCount.optional(), preservedIds: z.array(z.string()).optional(),
+  }),
+  'date': z.looseObject({ date: z.iso.date().optional() }),
+  'total-tokens-reminder': z.looseObject({ tokensLeft: tokenCount.optional() }),
 };
 
 // conv.v2.{conversationId}.attachment.> — the wire shape of the model
