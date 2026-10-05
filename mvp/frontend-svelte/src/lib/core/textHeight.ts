@@ -25,6 +25,7 @@
 // row, unchanged.
 import { layout, prepare } from '@chenglou/pretext';
 import type { ConversationMessage } from '../types';
+import { kindOf, userContentOf } from './extras';
 import { hasMarkdownConstructs } from './markdown';
 
 const FONT = '13px ui-monospace, "SF Mono", Menlo, monospace';
@@ -54,9 +55,10 @@ export function measurePlainTextHeight(
   if (message.content.length === 0 || message.content.some((b) => b.type !== 'text')) {
     return undefined;
   }
-  // An extra message is drawn as a row of its own kind, not as a plain
-  // article: measure the mounted row.
-  if (message.kind !== undefined) {
+  // An extra message is drawn as a row of its own kind, or from its
+  // userContent, not as a plain article of its content: measure the mounted
+  // row.
+  if (kindOf(message) !== undefined || userContentOf(message) !== undefined) {
     return undefined;
   }
   // Assistant text renders as markdown, whose non-uniform line heights
