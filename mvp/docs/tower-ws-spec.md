@@ -255,13 +255,22 @@ timestamp: dedupe by message `id`; rendering a known id again is a no-op.
 
 A message (here and in the live `message` event) may also carry four optional
 fields, each present only when the wire message carried it, under the same
-names and with the wire's values verbatim:
-`audience` (`{ "model": bool, "user": bool }`; absent means both), the
-parties the message is for; `userContent`, an array of content blocks to show
-the person instead of `content`; `at`, an RFC 3339 string, the entry's own time
-as distinct from `ts`; and `scope` (`{ "replaces": "before", "except": [message
-ids] }`). A message whose `audience.user` is `false` does not start an unread
-episode.
+names and with the wire's values verbatim; their meaning is the wire's
+(docs/spec/conversation.md, Who a message is for):
+`audience` (`{ "model": bool, "user": bool }`; absent means both);
+`userContent`, content blocks the person is shown instead of `content`
+(heavy values in it are refs, as in `content`); `at`, an ISO-8601 string with
+an offset, when the thing the message records happened, as distinct from `ts`
+(the publish time, which ordering keeps using); and `scope`
+(`{ "replaces": "before", "except": [message ids] }`). The client draws a
+message only when `audience.user` is not `false`, draws `userContent` when
+present and `content` otherwise, and shows `at` (when present) as the
+message's time, in the viewer's own time zone.
+
+A message whose `audience.user` is `false` does not start an unread episode.
+TODO(claude): undecided: whether unread keys on `audience.user`. Today an
+assistant-role message the person is shown starts one, and one they are not
+shown does not.
 
 ### `approvals`: once, on connect
 
@@ -735,10 +744,10 @@ const conversationMessage = z.looseObject({
   from: sender.optional(),
   content: contentBlocks,
   ts: millis,
-  audience: z.looseObject({ model: z.boolean().optional(), user: z.boolean().optional() }).optional(),
+  audience: z.looseObject({ model: z.boolean(), user: z.boolean() }).optional(),
   userContent: contentBlocks.optional(),
-  at: z.string().optional(),
-  scope: z.looseObject({ replaces: z.string(), except: z.array(z.string()).optional() }).optional(),
+  at: z.iso.datetime({ offset: true }).optional(),
+  scope: z.looseObject({ replaces: z.enum(['before']).or(z.string()), except: z.array(z.string()) }).optional(),
 });
 
 const rowState = z.looseObject({
