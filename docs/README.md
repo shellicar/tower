@@ -12,10 +12,12 @@ The work in progress is the **Claude Code participant**
   through the Agent SDK. Claude Code is the harness, tower the interface, the
   bus the seam: Claude Code's features without rebuilding them, so the effort
   goes into presentation.
-- **The publish rule:** everything the model sees must be published. That is
-  the minimum, because a conversation that wasn't published can't be
-  reproduced. Beyond it nothing is decided, except that what the user needs to
-  see is published too.
+- **The publish rule:** everything the model sees must be published, because
+  a conversation that wasn't published can't be reproduced.
+  `changes.message` is what is sent to the model, and the messages between
+  the user and the model are the conversation; the tools list and the system
+  prompt are specific to the harness and not covered. Anything else the user
+  needs or wants to see can be published on a different subject.
 - **Where it is:** v0 is reached (driving a conversation from tower). The goal
   now is the MVP: Stephen using it every day instead of the terminal, with no
   scripts outside tower.
@@ -55,7 +57,7 @@ The work in progress is the **Claude Code participant**
 | Skills | MVP, not built; route open | [skills](participant/skills.md) |
 | Approvals | MVP, not built; design open | [approvals](participant/approvals.md) |
 | Errors and logging | Decided in direction, not designed | [errors](participant/errors.md) |
-| Resuming from the bus | Not MVP; the test that counts is set | [resume](participant/resume.md) |
+| Resuming from the bus | Not MVP; the target is set | [resume](participant/resume.md) |
 | Building, tooling, dependencies | Built; Dependabot owed | [building](participant/building.md) |
 | Spec and frontend changes | Done and owed lists | [spec-and-frontend](participant/spec-and-frontend.md) |
 | The driving scripts | Built | [kit](participant/kit.md) |
@@ -68,7 +70,6 @@ versions, runs and what it found.
 
 - Whether publishing everything the model sees is itself an MVP item, and
   how the unpublished kinds are carried.
-- How strict "the same request" is for a resume from the bus.
 - The skills route, the approvals design, the error message on the wire.
 - Undecided, each built one way for now: one key per control line, the reply
   to a blank line, `claudeSettings` checked only on the keys acted on, no

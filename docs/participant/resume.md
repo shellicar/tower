@@ -22,21 +22,22 @@
 The transcript file is an undocumented format, and Claude Code offers the
 session store as its supported route.
 
-## The test that counts
+## The target
 
-**When resuming, a resume from the published store and a resume from Claude
-Code's own record must send the same request to the API: the same cache
-prefix.** Both are compared after resuming. Comparing a request before a
-resume with one after it is a different test, and not this one.
+**A resume from the published record and a resume from Claude Code's own
+record give the same result.** Both are compared after resuming. Comparing a
+request before a resume with one after it is a different comparison, and not
+this one.
+
+It is a target to get as close to as is reasonable, with each gap between
+the two understood, not a test that passes or fails. Where Claude Code
+recreates something it never hands to the store, the participant can't close
+the gap, and that gap is accepted. The known case is the
+`<tmpdir>/claude-resume-<uuid>` path in the system prompt (below).
 
 The proofs under Related proofs mostly compare the resumed request against
-the live one, so their passes don't show this test is met. Each findings file
-states which comparison it made.
-
-**Undecided: how strict "the same" is.** Two readings: the requests are
-identical (what is sent to the API is the same); or the conversation is the
-same as resuming from the local transcript, with some differences not
-holding up the MVP.
+the live one, so their passes don't show how close the target is. Each
+findings file states which comparison it made.
 
 ## What is known
 
@@ -49,6 +50,11 @@ holding up the MVP.
   construction. The participant controls the config dir, cwd and home, but no
   SDK option sets that temp dir. The participant's private home is random per
   process too, so even two local resumes differ in it.
+- **Not checked: whether that path shows up only when resuming through the
+  session store,** or also when Claude Code resumes from its own transcript
+  (`load()` returning null, today's route). The resume prototype found that
+  Claude Code's own record, handed back through `load()`, differs the same
+  way; a resume with `load()` returning null wasn't compared.
 - **The resume prototype** (branch `proof/resume-from-published`, unmerged by design)
   found that six of seven conversation shapes matched once four values were
   normalised away (device id, home path, prompt id, config dir path), and
@@ -80,7 +86,6 @@ Proofs that resumed from published or reduced records:
 
 ## Open
 
-- How strict "the same" is (above).
 - Whose paths the published conversation holds, and whether a resume must
   run in a temporary config dir.
 - How the missing data is carried (see [publishing.md](publishing.md),

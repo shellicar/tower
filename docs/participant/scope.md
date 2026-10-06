@@ -10,7 +10,7 @@ missing and some behaviour is wrong.
 
 ## The MVP
 
-**What it means:** its user using the participant day to day instead of the
+**What it means:** Stephen using the participant day to day instead of the
 terminal, with no scripts outside tower needed to support it. It is not a
 product release for other people.
 

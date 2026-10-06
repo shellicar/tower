@@ -22,6 +22,8 @@ follows what was merged.
 - **A cancelled turn's partial reply is the implementation's declaration,**
   with no recommendation (fixture `v2/scenario-2c.jsonl`). Claude Code keeps
   the partial reply and the model sees it; what a harness commits is up to it.
+  The spec makes no recommendation because one would have fitted the contract
+  to a single harness.
 - **`busy` is a known `chdir` rejection reason** beside `unsupported`, for a
   `chdir` while a query runs (fixture `agent/scenario-a17.jsonl`).
 - **The agent events `unavailable` and `offline`,** with `ready` redefined
