@@ -25,7 +25,8 @@ session store as its supported route.
 ## The target
 
 **A resume from the published record and a resume from Claude Code's own
-record give the same result.** Both are compared after resuming. Comparing a
+record send the same messages array to the API, given the same system prompt
+and tools.** Both are compared after resuming. Comparing a
 request before a resume with one after it is a different comparison, and not
 this one.
 

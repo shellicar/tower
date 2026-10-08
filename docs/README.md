@@ -14,9 +14,8 @@ The work in progress is the **Claude Code participant**
   goes into presentation.
 - **The publish rule:** everything the model sees must be published, because
   a conversation that wasn't published can't be reproduced.
-  `changes.message` is what is sent to the model, and the messages between
-  the user and the model are the conversation; the tools list and the system
-  prompt are specific to the harness and not covered. Anything else the user
+  `changes.message` is what is sent to the model; the tools list and the
+  system prompt are specific to the harness and not covered. Anything else the user
   needs or wants to see can be published on a different subject.
 - **Where it is:** v0 is reached (driving a conversation from tower). The goal
   now is the MVP: Stephen using it every day instead of the terminal, with no

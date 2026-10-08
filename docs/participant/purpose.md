@@ -34,14 +34,11 @@ participant has needed so far are listed in
 
 ## The publish rule
 
-**Everything the model sees must be published.** `changes.message` is what
+**Every message the model sees must be published.** `changes.message` is what
 is sent to the model, so every message sent to the model is published on it.
 The test for an entry is whether it is sent to the API as a message; if it
 is, it must be published.
 
-- Not everything sent to the API is covered: the tools list and the system
-  prompt are specific to the harness.
-- The messages between the user and the model are the conversation.
 - Anything else the user needs or wants to see can be published, on a
   different subject from `changes.message`. Claude Code's error text is the
   standing example: the user wants to see it and the model doesn't (see
