@@ -4,8 +4,9 @@ What tower's conversation record is for, and why that question got harder once
 Claude Code joined the bus. This document explains the ground: what the spec
 says today, what the Claude Code participant epic worked out, why no single
 answer satisfies everything that was wanted, and where Stephen leans. It
-decides nothing. Where something is decided, it says so and cites where; where
-something is a leaning or open, it says that instead.
+decides nothing, and nothing in it is decided yet: the epic's recorded
+positions are ideas, each given here with its stated reason; Stephen's
+leanings and open questions are marked as such.
 
 ## What the record was built to be
 
@@ -18,10 +19,9 @@ model, kept durably on the bus, from which any servicer can pick the
 conversation up again. Core states the same thing as a system principle: "The
 stream is the truth; everything else is intermediate state" (`core.md:85`).
 
-That shape was a deliberate fit to the first two harnesses, not an analysis of
-harnesses in general. Stephen built the record to represent the messages
-array, and whether that array is a stable thing to record was not a question
-at the time, because for his own harnesses it was:
+That shape fitted the first two harnesses without the question being
+considered. Stephen built the record to represent the messages array;
+whether that array is a stable thing to record was never asked at the time:
 
 > "i never really considered that when i designed it, just something that can
 > represent the messages array" (Stephen, 7 Oct)
@@ -44,10 +44,10 @@ Cross-harness adoption was never the reason for having several harnesses. The
 fleet is many agents, many sessions or instances across machines and
 containers, and several harnesses exist because different jobs suit
 different models, not because one conversation is expected to move between
-them. Adoption seemed within reach only because two harnesses happened to
-share a form. Claude Code behaves very differently. Supporting adoption for
-it is not required, but a first-class Claude Code experience on tower means
-its conversations should work fully there.
+them. Adoption seemed within reach because the two harnesses were built on
+each other. Claude Code behaves very differently. Supporting adoption of a
+conversation from the record for Claude Code isn't required, but Stephen
+thinks it should work, for a first-class Claude Code experience.
 
 > "fleet is just the term of many agents, ie many sessions or instances across
 > machines, containers, what have you / the reason for different harnesses is
@@ -99,12 +99,18 @@ rest of this document is about that gap.
 
 ## What the epic worked out, and how its reasons moved
 
-The Claude Code participant's decisions between 26 Sep and 1 Oct are recorded
+The Claude Code participant's positions between 26 Sep and 1 Oct are recorded
 in the pre-split design record (`48cd6c3:docs/design/claude-code-participant.md`,
 deleted in 77c2fb9 when it was split into `docs/participant/*.md`; the split
-files restate the decisions without the dated quotations). Read in order, the
-reasons shift from treating the record as the resume source to treating Claude
-Code's own record as the state.
+files restate them without the dated quotations). The record words them as
+decisions, but none is concrete yet. Stephen's view of them on 7 Oct is that
+they are ideas, and what matters is the reason each was given, if one was:
+
+> "they are just ideas, nothing is concrete yet / think about *why* they were
+> said, ie what was the reason, if any. is it stated?" (Stephen, 7 Oct)
+
+Read in order, the stated reasons shift from treating the record as the
+resume source to treating Claude Code's own record as the state.
 
 - **26 Sep: tower carries the typed attachment entries.** Proof 14 had shown a
   resume from tower restores the history but not the context Claude Code adds;
@@ -113,7 +119,7 @@ Code's own record as the state.
   option: "how is this a choice? / why would i accept this?" (old record,
   lines 184-188). The current split keeps the typed attachments only as
   something a resume would need (`docs/participant/resume.md:57-63`), not as a
-  decision.
+  position.
 - **27 Sep: where a reminder sits is semantic.** Publishing Claude Code's
   entries in the order it writes them, where that differs from where the model
   received a reminder, "records a conversation that never happened" (old
@@ -127,7 +133,7 @@ Code's own record as the state.
   that case i'd prefer to just drop it when resuming from tower, it can remain
   *internal*". The known gap, a host dying with no transcript left, was
   accepted: "this is for the 99% of cases". Proof 16 and the reconcile were set
-  aside on this decision (`docs/participant-findings/proof-16-semantic-form.md:33-34`).
+  aside on this position (`docs/participant-findings/proof-16-semantic-form.md:33-34`).
 - **29 Sep: resuming from tower is out of v0.** A conversation resumes from
   Claude Code's own local record; what is published only has to render
   correctly in tower (old record, lines 52-58; now
@@ -137,10 +143,10 @@ Code's own record as the state.
   in Claude Code's own record (old record, lines 226-228; now
   `running.md:92-94`).
 
-The early decisions only make sense if the published record is what a resume
+The early positions only make sense if the published record is what a resume
 reads. The later ones only make sense if Claude Code keeps its own record and
 the published one is an account of it. The epic's documents still carry both:
-the publish rule says everything the model sees must be published, partly so a
+the record's own publish rule says everything the model sees must be published, partly so a
 resume from the bus stays possible (`docs/participant/purpose.md:37-65`), while
 `resume.md:11-14` keeps "the same conversation" as the goal and adds that it
 "may have to be relaxed to achieve something workable".
@@ -252,6 +258,14 @@ queryable across the fleet.
 > its internal storage, then thats probably fine / note that one reason is to
 > externalise what goes on, so it can feed into a DB or index storage, for
 > example, ie it becomes queryable" (Stephen, 7 Oct)
+
+Where a harness's native data (for Claude Code, its typed entries) would go
+is a separate question. One idea Stephen raised, not a decision, is that it
+could go on a subject or event of its own rather than in the conversation's
+messages.
+
+> "it could be a separate subject or event, like a custom event" (Stephen,
+> 7 Oct)
 
 ## What other harnesses do
 
@@ -396,7 +410,9 @@ A null parent could mark where compaction restarts the model's context.
 Four things were wanted of one record:
 
 1. **Harness-neutral:** any harness can write it and any presenter read it.
-2. **Exactly what each model saw:** the messages array, as sent.
+2. **Exactly what each model saw:** the messages array, as sent. This was the
+   original design aim. Stephen's 7 Oct position is narrower: the record holds
+   at least what the model sees (see "Why it is not easy").
 3. **Cheap to join:** a new harness takes part with little work.
 4. **A lossless resume source,** including for a harness that composes its
    request at send time.
@@ -422,16 +438,18 @@ harness that only presents what its model saw still conforms.
 
 ## Where it stands
 
-**Decided** (in the epic's design record): Claude Code is the source of state;
-what is committed follows Claude Code; resuming from tower is out of v0;
-where a reminder sits is semantic; everything the model sees must be
-published (`purpose.md:37-39`).
+**Recorded in the epic's design record (positions, not yet concrete):**
+Claude Code is the source of state; what is committed follows Claude Code;
+resuming from tower is out of v0; where a reminder sits is semantic. The
+record's own rule is that everything the model sees must be published
+(`purpose.md:37-39`); it is the record's rule, not a decision of Stephen's.
 
 **Stephen's leaning** (7 Oct, recorded only here): resume from the stream is
 optional, never required; the record can become presentation and an
 externalised, queryable account; content is typed, not generic; person-only
 entries go on their own subject under `changes.`, ordered by the harness's
-timestamps; the spec changes where it has a gap.
+timestamps; the spec changes where it has a gap. As an idea only: native
+harness data could go on its own subject or event.
 
 **Open:** the typed design itself; the name of the person-only subject; how
 compaction's restart is marked; whether the spec's premise and `service` text
