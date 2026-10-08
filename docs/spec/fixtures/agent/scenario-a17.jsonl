@@ -1,0 +1,6 @@
+{"subject":"conv.v2.conv-abc.attachment.attached","message":{"ts":"2026-07-26T19:00:00+10:00","instanceId":"inst-1a2f","world":"mac","cwd":"~/repos/tower","tip":null}}
+{"subject":"conv.v2.conv-abc.requests.say","message":{"ts":"2026-07-26T19:00:10+10:00","from":{"kind":"human","userId":"stephen"},"text":"read file X and summarise it","precondition":{"tip":null}},"reply":{"accepted":true,"id":"q1"}}
+{"subject":"conv.v2.conv-abc.changes.message","message":{"ts":"2026-07-26T19:00:11+10:00","instanceId":"inst-1a2f","id":"m1","queryId":"q1","turnId":"t1","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"read file X and summarise it"}]}}
+{"subject":"conv.v2.conv-abc.attachment.attached","message":{"ts":"2026-07-26T19:00:20+10:00","instanceId":"inst-9c4d","world":"vm","cwd":"~/repos/tower"}}
+{"subject":"conv.v2.conv-abc.attachment.detached","message":{"ts":"2026-07-26T19:00:21+10:00","instanceId":"inst-1a2f","world":"mac"}}
+{"subject":"conv.v2.conv-abc.changes.query","message":{"ts":"2026-07-26T19:00:23+10:00","instanceId":"inst-1a2f","queryId":"q1","reason":"aborted"}}
