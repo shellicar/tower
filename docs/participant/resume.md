@@ -63,7 +63,7 @@ findings file states which comparison it made.
   found that six of seven conversation shapes matched once four values were
   normalised away (device id, home path, prompt id, config dir path), and
   `/compact` didn't. Without that normalising no shape matches, since every
-  store method's request holds the config dir path and no `local` request
+  store method's request holds the `claude-resume` temp path and no `local` request
   does ([resume prototype](../participant-findings/resume-prototype.md)).
 - **What a resume needs that isn't published today:** among others
   `message.id`, `message.model` (without it thinking is dropped silently),
