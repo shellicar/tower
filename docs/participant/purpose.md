@@ -57,7 +57,7 @@ published either; whether the rule covers what a subagent's model sees is
 open (see [subagents.md](subagents.md)). Details are in
 [publishing.md](publishing.md).
 
-### Why everything the model sees
+### Why every message the model sees
 
 A conversation that wasn't published can't be reproduced: nothing can rebuild
 what it doesn't have. Full reproduction (a resume from the published record
