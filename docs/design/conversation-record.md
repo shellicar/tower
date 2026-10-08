@@ -40,6 +40,22 @@ transformed on the way in.
 > conversation in bridge from the cli / so thats why it was 'on the menu'"
 > (Stephen, 7 Oct)
 
+Cross-harness adoption was never the reason for having several harnesses. The
+fleet is many agents, many sessions or instances across machines and
+containers, and several harnesses exist because different jobs suit
+different models, not because one conversation is expected to move between
+them. Adoption seemed within reach only because two harnesses happened to
+share a form. Claude Code behaves very differently. Supporting adoption for
+it is not required, but a first-class Claude Code experience on tower means
+its conversations should work fully there.
+
+> "fleet is just the term of many agents, ie many sessions or instances across
+> machines, containers, what have you / the reason for different harnesses is
+> orchestration / you might want gemini to do X, claude opus to do Y, claude
+> haiku to do Z"; "claude code behaves very differently / we dont *have* to
+> support it / but to have the first class claude code experience, i think it
+> should work" (Stephen, 7 Oct)
+
 ## What the spec defines, and what it leaves open
 
 Several rules bear on the record's content without settling it.
@@ -172,10 +188,12 @@ back to a resume:
   prototype (branch `proof/resume-from-published`, evidence in
   `mvp/apps/claude-code-participant/proof/out/r4/`) found six of seven shapes
   sent the same request as a local resume once four values were normalised
-  away, and the `/compact` shape did not (`matrix.md`, `report.md`). The four
+  away, and the `/compact` shape did not
+  (`docs/participant-findings/resume-prototype.md:34-37`; its limits, including
+  a system prompt that flipped between two texts, at `:66-68`). The four
   include a temporary config dir the SDK creates with a random name and
   Claude Code renders into the request; no SDK option sets it
-  (`docs/participant-findings/resume-prototype.md:34-37`, `:57-65`). Getting
+  (`resume-prototype.md:57-65`). Getting
   the six to match took a long list of fields beyond what is published, among
   them `message.id`, `requestId`, `message.model` and every non-message entry
   (`resume-prototype.md:45-49`).
@@ -234,24 +252,6 @@ queryable across the fleet.
 > its internal storage, then thats probably fine / note that one reason is to
 > externalise what goes on, so it can feed into a DB or index storage, for
 > example, ie it becomes queryable" (Stephen, 7 Oct)
-
-## Why more than one harness at all
-
-The fleet is many agents: many sessions or instances, across machines and
-containers. Several harnesses exist because different jobs suit different
-models, not because one conversation is expected to move between them. That
-matters here: cross-harness adoption was never the point; it seemed within
-reach only because two harnesses happened to share a form. Claude Code behaves
-very differently. Supporting adoption for it is not required, but a
-first-class Claude Code experience on tower implies its conversations should
-work fully there.
-
-> "fleet is just the term of many agents, ie many sessions or instances across
-> machines, containers, what have you / the reason for different harnesses is
-> orchestration / you might want gemini to do X, claude opus to do Y, claude
-> haiku to do Z"; "claude code behaves very differently / we dont *have* to
-> support it / but to have the first class claude code experience, i think it
-> should work" (Stephen, 7 Oct)
 
 ## What other harnesses do
 
@@ -331,7 +331,7 @@ built on `-leptos` twins and merged back.
   `mvp/apps/claude-code-participant/src/ConversationKinds.ts`,
   `classifyAttachment`).
 
-Neither is what Stephen wanted, for reasons visible in the branches:
+Measured against the positions in the next section, neither fits:
 
 - typed-2 states a message's type twice, as `kind` and as an `audience` the
   kind already implies; its own TODO says so, against the rule that a type is
@@ -357,8 +357,8 @@ Stephen's leaning is typed, not generic. A generic marking says only who sees
 something; that tells a UI whether to draw it, not how. A typed one says what
 the thing is (a compaction, a task finishing, a turn's duration), and that is
 what any presenter needs in order to present it. No typed design is specified.
-typed-2 is one attempt at the idea, and the problems above are why it isn't
-his.
+typed-2 is one attempt at the idea, and the problems above are where it
+doesn't match his leaning.
 
 > "it comes down to generic or typed, and i think it has to be typed / generic
 > would be 'user/model visible', etc / while typed would be semantic / ie
