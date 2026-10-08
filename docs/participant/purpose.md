@@ -93,7 +93,7 @@ Display).
 
 - Whether the rule covers what a subagent's model sees, given that subagent
   entries don't go onto the bus.
-- Whether publishing everything the model sees is itself an MVP item (see
+- Whether publishing every message the model sees is itself an MVP item (see
   [scope.md](scope.md), Open).
 - How the unpublished model-seen kinds are carried (see
   [publishing.md](publishing.md), Extras).

@@ -12,10 +12,9 @@ The work in progress is the **Claude Code participant**
   through the Agent SDK. Claude Code is the harness, tower the interface, the
   bus the seam: Claude Code's features without rebuilding them, so the effort
   goes into presentation.
-- **The publish rule:** everything the model sees must be published, because
-  a conversation that wasn't published can't be reproduced.
-  `changes.message` is what is sent to the model; the tools list and the
-  system prompt are specific to the harness and not covered. Anything else the user
+- **The publish rule:** every message the model sees must be published,
+  because a conversation that wasn't published can't be reproduced.
+  `changes.message` is what is sent to the model. Anything else the user
   needs or wants to see can be published on a different subject.
 - **Where it is:** v0 is reached (driving a conversation from tower). The goal
   now is the MVP: Stephen using it every day instead of the terminal, with no
@@ -67,7 +66,7 @@ versions, runs and what it found.
 
 ## The biggest open questions
 
-- Whether publishing everything the model sees is itself an MVP item, and
+- Whether publishing every message the model sees is itself an MVP item, and
   how the unpublished kinds are carried.
 - The skills route, the approvals design, the error message on the wire.
 - Undecided, each built one way for now: one key per control line, the reply

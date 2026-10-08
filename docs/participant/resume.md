@@ -6,8 +6,8 @@
   the machine that served it: the session store's `load()` returns null.
   Resuming from the bus (on another machine, say) comes later.
 - **Publishing is a separate feature from resuming.** What is published has
-  to be there when resume is built, so the publish rule (everything the model
-  sees, [purpose.md](purpose.md)) applies now even though resume waits.
+  to be there when resume is built, so the publish rule (every message the
+  model sees, [purpose.md](purpose.md)) applies now even though resume waits.
 - **The goal is that a conversation resumed from the bus is the same
   conversation,** not a translated or migrated one. The bus is the
   conversation; anything else is migration. The goal may have to be relaxed to
