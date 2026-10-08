@@ -4,9 +4,10 @@ Tower's conversation record has been asked to serve several potential goals
 at once, and Claude Code's arrival on the bus showed they don't all fit
 together. This document lays out each potential goal: where it came from,
 what was discovered about it, and what was worked out. Nothing in it is
-decided. What was worked out is marked as Stephen's view, his leaning, a
-position recorded in the epic's design record (ideas, not yet concrete), the
-document's own reading, or open.
+decided. Each conclusion is marked as one of: what the spec says, a position
+the epic's design record recorded (an idea, not concrete), the current view
+after this inspection, the current leaning, the document's own reading, or
+open.
 
 The centre of it is the second goal, resuming from the record. It became a
 goal without being chosen: for the first two harnesses it cost nothing, the
@@ -20,15 +21,15 @@ The potential goals, and in brief what was worked out about each:
    different jobs.** The backdrop; it explains why there are several
    harnesses at all.
 2. **The record as what a harness resumes from.** Treated as a hard
-   requirement, it made integrating Claude Code very difficult. Stephen
-   doesn't think it is one; it becomes a capability a harness may offer.
+   requirement, it made integrating Claude Code very difficult. The current
+   view is that it isn't one; it becomes a capability a harness may offer.
 3. **The record as exactly what the model was sent.** The messages array
-   turned out to depend on the model. His position is "at least what the
-   model sees".
+   turned out to depend on the model. The current view is that the record
+   holds at least what the model sees.
 4. **Moving conversations between harnesses.** It worked for two harnesses
-   built on each other. His view is that it isn't a goal.
-5. **An externalised, queryable record.** His leaning is typed content, since
-   a generic marking doesn't help a UI present it.
+   built on each other. The current view is that it isn't a goal.
+5. **An externalised, queryable record.** The current leaning is typed
+   content, since a generic marking doesn't help a UI present it.
 6. **Low friction to participate, against adapting the spec to every
    harness.** One of the considerations in tension, not the goal. Open.
 
@@ -39,24 +40,17 @@ Claude sessions" (`README.md:3`), making them "visible, addressable, and
 eventually orchestrated, over NATS" (`README.md:7`). The Claude Code
 participant's purpose is a seam between interface and harness: Claude Code is
 the harness, tower the interface, the bus the seam, so Claude Code's features
-come without being rebuilt (`docs/participant/purpose.md:5-9`). Its wider aim
-is one broker for every machine at home and all sessions in one UI
-(`purpose.md:31-33`). Stephen on 29 Sep, in the pre-split design record:
+come without being rebuilt and the effort goes into presentation instead of
+harness tooling (`docs/participant/purpose.md:5-9`; the design record's
+29 Sep entry, `48cd6c3:docs/design/claude-code-participant.md:29-35`). Its
+wider aim is one broker for every machine at home and all sessions in one UI
+(`purpose.md:31-33`).
 
-> "it's being able to separate the ui/interface from the harness, but still
-> *get* claude code's features / not thta tower's ui is amazing / but it means
-> that i can then focus on the presentation rather than the harness tooling"
-> (`48cd6c3:docs/design/claude-code-participant.md:29-32`)
-
-**What was worked out (Stephen's view, 7 Oct).** The fleet is many agents:
-many sessions or instances across machines and containers. Several harnesses
-exist for orchestration, because different jobs suit different models, not
-so that one conversation can move between them.
-
-> "fleet is just the term of many agents, ie many sessions or instances across
-> machines, containers, what have you / the reason for different harnesses is
-> orchestration / you might want gemini to do X, claude opus to do Y, claude
-> haiku to do Z" (Stephen, 7 Oct)
+**What was worked out (current view).** The fleet is many agents: many
+sessions or instances across machines and containers. Several harnesses
+exist for orchestration, because different jobs suit different models (one
+model for one kind of work, another for another), not so that one
+conversation can move between them.
 
 ## 2. The record as what a harness resumes from
 
@@ -98,29 +92,22 @@ is not even consistent with itself: one conversation is a different messages
 array under different models.
 
 Keeping the property meant making Claude Code resume from the stream, and
-that is when it hardened into a goal. The epic's design record holds the
-position: on 26 Sep, after proof 14 showed that a resume from tower's
-messages restores the history but not the context Claude Code adds, and that
-carrying the typed `attachment` entries makes the two resumes match, Stephen
-questioned why an impure resume would be acceptable: "how is this a choice? /
-why would i accept this?"
+that is when it hardened into a goal. The design record's 26 Sep position
+came after proof 14 showed that a resume from tower's messages restores the
+history but not the context Claude Code adds, and that carrying the typed
+`attachment` entries makes the two resumes match: tower carries those
+entries, because an impure resume was not seen as something to accept
 (`48cd6c3:docs/design/claude-code-participant.md:184-188`). That record was
 deleted in 77c2fb9 when it was split into `docs/participant/*.md`; the split
 files keep the typed attachments only as something a resume would need
-(`docs/participant/resume.md:57-63`). Stephen's view on 7 Oct of this and the
-record's other positions is that they are ideas, not concrete:
-
-> "they are just ideas, nothing is concrete yet / think about *why* they were
-> said, ie what was the reason, if any. is it stated?" (Stephen, 7 Oct)
+(`docs/participant/resume.md:57-63`). This and the record's other positions
+are ideas, not concrete; what matters about each is the reason given for it.
 
 ### What was discovered
 
-As a hard requirement, it made integrating Claude Code very difficult.
-
-> "resume from stream as a hard requirement made integrating claude code
-> incredibly difficult" (Stephen, 7 Oct)
-
-The evidence is what it takes to get from the record back to a resume:
+As a hard requirement, resuming from the stream is what made integrating
+Claude Code so difficult. The evidence is what it takes to get from the
+record back to a resume:
 
 - **Content alone restores the history but not the behaviour.** Proof 14
   resumed from tower's messages; the history replayed identically, but Claude
@@ -129,8 +116,8 @@ The evidence is what it takes to get from the record back to a resume:
   entries tower did not hold. Carrying six attachment types removed the
   difference. The cost of accepting it was inferred, not measured, at about
   1,400 tokens per resume, accumulating. Proof 16 later found two request
-  fields still differed, so the match was not byte-identical. The
-  comparison was on one seed
+  fields still differed, so the match was not byte-identical. The comparison
+  was on one seed
   (`docs/participant-findings/proof-14-pure-resume.md:18-30`, `:38`).
 - **No resume through the session store can be identical.** The resume
   prototype (branch `proof/resume-from-published`, evidence in
@@ -157,29 +144,24 @@ The evidence is what it takes to get from the record back to a resume:
   `claudeSettings` control line could set one
   (`docs/participant/configuration.md:39-42`).
 
-The aim of a resume changed along the way. It started as a record lossless
-enough to resume the same harness, then became the same behaviour, accepting
-that some values differ. Stephen's reason:
-
-> "not just a disply rule, it needs to not be lossy / ie you publish the data
-> / and you can *resume* from the data (with the same harness)"; then "that
-> one is a bit tougher, since we found out that claude code has a lot of
-> temporary filenames that it doesnt expose, but thats because im not parsing
-> the transcript file, so it might be impossible to get the same exact data,
-> in that some values might be different, but it should be the goal in terms
-> of behaviour" (Stephen, 7 Oct)
+The aim of a resume changed along the way. It started as more than a display
+rule: the record had to be lossless, so that the published data could resume
+the same harness. Then it became the same behaviour, accepting that some
+values differ. The reason is that Claude Code uses temporary file names it
+doesn't expose, which can't be recovered without parsing its transcript file,
+so the exact same data may be impossible even where the behaviour can match.
 
 The epic's later positions moved away from the goal, each with its stated
 reason (old record line numbers, then current homes):
 
 - **29 Sep: what is committed follows Claude Code** (lines 214-225; now
   `docs/participant/running.md:41-46`). Which entry kinds reach tower was left
-  unsettled, with a preference against tower holding everything Claude Code
-  keeps: "i dont want a "here's where to put all your shit" / in that case i'd
-  prefer to just drop it when resuming from tower, it can remain *internal*".
-  The gap of a host dying with no transcript left was accepted: "this is for
-  the 99% of cases". Proof 16 and the reconcile were set aside on this
-  position (`docs/participant-findings/proof-16-semantic-form.md:33-34`).
+  unsettled, with a preference against tower becoming a store for everything
+  Claude Code keeps: what tower doesn't need can stay internal to Claude Code
+  and be dropped when resuming from tower. The gap of a host dying with no
+  transcript left was accepted, because the design is for the great majority
+  of cases. Proof 16 and the reconcile were set aside on this position
+  (`docs/participant-findings/proof-16-semantic-form.md:33-34`).
 - **29 Sep: resuming from tower on another machine is out of v0** (lines
   52-58, "Resuming from tower **on another machine**" at line 54; now
   `docs/participant/scope.md:51-52`, `running.md:78-84`). A conversation
@@ -201,22 +183,14 @@ the conversation rather than the conversation.
 
 ### What was worked out
 
-Under inspection, Stephen's view (7 Oct) is that it is probably not really a
-goal of the project, and not a hard requirement.
-
-> "probably not really a goal of the project"; "is it a real hard requirement
-> or not? / i dont think so" (Stephen, 7 Oct)
-
+The current view, under inspection, is that resuming from the stream is
+probably not really a goal of the project, and not a hard requirement.
 Tower's request is `service`, not "resume from the stream". A resume from the
 stream becomes optional: a capability a harness may offer, worth having as a
-fallback if its own record dies, depending on how often that happens and
-whether losing what the stream doesn't carry is acceptable then.
-
-> "tower doesnt say 'resume from stream', it says service"; "being able to
-> resume from the conversation if the transcript died could be / but the
-> question is, how often would this happen, and if it did, would it be
-> acceptable to lose some data?"; "okay so it's purely optional, it shouldn't
-> be required, that alleviates a headache" (Stephen, 7 Oct)
+fallback if its own record dies. Whether it is worth offering depends on how
+often that happens and whether losing what the stream doesn't carry is
+acceptable then. Not requiring it removes the main obstacle to integrating
+Claude Code.
 
 **Open.** The spec's wording reads as if a servicer resumes from the record:
 the conversation is what the agent "returns to on resume"
@@ -230,18 +204,15 @@ bridge is open. So is how strict "the same" is for a resume a harness offers
 **Where it came from.** A turn is "one API round: what was sent to the API
 and what came back" (`conversation.md:26`): the record was built to represent
 the messages array. That fitted the first two harnesses without the question
-being considered.
-
-> "i never really considered that when i designed it, just something that can
-> represent the messages array" (Stephen, 7 Oct)
+of whether the array is stable ever being considered.
 
 The epic's record carried the same goal. Its rule is that everything the
 model sees must be published (`docs/participant/purpose.md:37-39`); that is
-the record's rule, not a decision of Stephen's. Its 27 Sep position is that
-where a reminder sits is semantic: publishing Claude Code's entries in the
-order it writes them, where that differs from where the model received a
-reminder, "records a conversation that never happened" (old record, lines
-178-183; now `docs/participant/publishing.md:35-40`).
+the record's rule, not a decision. Its 27 Sep position is that where a
+reminder sits is semantic: publishing Claude Code's entries in the order it
+writes them, where that differs from where the model received a reminder,
+"records a conversation that never happened" (old record, lines 178-183; now
+`docs/participant/publishing.md:35-40`).
 
 **What was discovered.** What the model was sent depends on the model. On the
 unmerged `proof-16-semantic-form` branch,
@@ -267,23 +238,17 @@ presentation time, is between the agent and its model
 (`conversation.md:655-657`), listed among implementation details that are
 deliberately not contract.
 
-**What was worked out (Stephen's position, 7 Oct).** Said while discussing
-what the conversation is: it holds at least what the model sees.
-
-> "if the conversation is what's send to the model, then it has to contain
-> what the model sees at least" (Stephen, 7 Oct)
-
-And tower itself doesn't need to follow each harness's rules about what its
-model sees; it only needs to know whether to show something to the person.
-
-> "tower doesn't need to follow the harnesses rules, it just needs to know
-> whether it shows it to the user or not" (Stephen, 7 Oct)
+**What was worked out (current view).** If the conversation is what is sent
+to the model, it holds at least what the model sees; not necessarily the
+exact per-model array. And tower itself doesn't need to follow each
+harness's rules about what its model sees; it only needs to know whether to
+show something to the person.
 
 ## 4. Moving conversations between harnesses
 
 **Where it came from.** Bridge can adopt a conversation claude-sdk-cli
-started, tools aside, by the replay described in section 2. That made moving
-conversations between harnesses look within reach.
+started, tools aside, by the replay described in section 2. That put moving
+conversations between harnesses on the menu.
 
 **What was discovered.** It worked because the two were built on each other:
 the record each keeps is the messages array it sends. It isn't why there are
@@ -295,28 +260,17 @@ one adapter may not be resumable through another", and leaves whether that
 is true, and whether it should be, open. That paragraph is about model
 adapters, not harnesses.
 
-**What was worked out (Stephen's view, 7 Oct).** Moving conversations between
-harnesses isn't a goal. Supporting it for Claude Code isn't required, but he
-thinks it should work, for a first-class Claude Code experience.
-
-> "my cli (claude-sdk-cli) and headless harness (bridge) worked, because they
-> were both based on each other / so other than tools, you can adopt a
-> conversation in bridge from the cli / so thats why it was 'on the menu' /
-> claude code behaves very differently / we dont *have* to support it / but
-> to have the first class claude code experience, i think it should work"
-> (Stephen, 7 Oct)
+**What was worked out (current view).** Moving conversations between
+harnesses isn't a goal. Supporting it for Claude Code isn't required, but it
+should work, for a first-class Claude Code experience.
 
 ## 5. An externalised, queryable record
 
 **Where it came from.** If a harness keeps its own store as working state,
 the published record can become presentation and an externalised account of
-what happened. One reason to keep that account is that it can feed a
-database or an index and become queryable.
-
-> "if its purpose changes, in that its presentation, and the harness can use
-> its internal storage, then thats probably fine / note that one reason is to
-> externalise what goes on, so it can feed into a DB or index storage, for
-> example, ie it becomes queryable" (Stephen, 7 Oct)
+what happened, which is acceptable in the current view. One reason to keep
+that account is that it can feed a database or an index and become
+queryable.
 
 **What was discovered.** Plain chat is not the hard part; the "extras" are.
 The epic catalogued 21 kinds of message beyond plain chat (reminders,
@@ -337,8 +291,8 @@ on `-leptos` twins and merged back).
   `mvp/apps/claude-code-participant/src/ConversationKinds.ts`,
   `classifyAttachment`).
 
-This document's reading of the prototype code, set against Stephen's
-positions here, is that neither matches them. typed-2 states a type twice,
+This document's reading of the prototype code, set against the current view
+in this document, is that neither matches it. typed-2 states a type twice,
 `kind` and an `audience` the kind implies, as its own TODO notes
 (`ConversationKinds.ts:26`); its reminder kinds are one harness's internals;
 both keep person-only entries inside `changes.message`; typed-2 publishes a
@@ -347,54 +301,39 @@ compaction boundary as a bare `system` message that reads as model-visible
 user entries the model does see (typed-2 `classifyUser`; generic-2
 `ConversationEntries.ts:239-241`), and neither has a case for `!` bash
 entries or local-command output, which the model also sees
-(`what-the-model-sees.md`, "The model sees"). Nothing records Stephen's
-reaction to either prototype.
+(`what-the-model-sees.md`, "The model sees"). No review of either prototype
+is recorded.
 
-**What was worked out (Stephen's leaning, 7 Oct).** Typed, not generic. A
-generic marking says only who sees something, which tells a UI whether to
-draw it but not how; a typed one says what the thing is, which a UI needs to
-present it. No typed design is specified; typed-2 is one attempt.
+**What was worked out (current leaning).** Typed, not generic. A generic
+marking says only who sees something (user-visible, model-visible), which
+tells a UI whether to draw it but not how; a typed one is semantic, saying
+what the thing is, which tower or any other UI needs to present it. No typed
+design is specified; typed-2 is one attempt.
 
-> "it comes down to generic or typed, and i think it has to be typed / generic
-> would be 'user/model visible', etc / while typed would be semantic / ie
-> generic doesnt help tower (or any other UI) present it" (Stephen, 7 Oct)
+Further leanings and ideas:
 
-Further leanings and ideas from the same day:
-
-- **Person-only entries on their own subject.** Entries the person sees but
-  the model doesn't (a turn-finished line, an alert) would live on their own
-  subject under `changes.`, its name open, ordered by the harness's own
-  timestamps, which he judges far easier than resuming from the stream.
-  Claude Code stamps each entry with its own time; the record of that also
-  notes that the pieces of one API message spread a median 2.2 s (max 234 s)
-  and can be out of file order (`what-the-model-sees.md:71-73`). Equal
-  timestamps he judges not worth handling yet. The Agent Client Protocol's
-  `notice`, at Preview, has the same shape: "visible to the user without
-  becoming conversation history" (agentclientprotocol/agent-client-protocol
-  2797d33, `docs/rfds/session-notices.mdx:11-13`).
-
-  > "it does mean that it needs to live on a stream/subject, but i dont think
-  > its nearly as bad as the resume from stream"; "it would be
-  > changes.<something>"; "notifications or alerts or something, i dont know
-  > yet"; "claude code already has its own timestamps / the edge case right
-  > now isnt worth worrying about" (Stephen, 7 Oct)
-
+- **Person-only entries on their own subject** (current leaning). Entries the
+  person sees but the model doesn't (a turn-finished line, an alert, a
+  notification) would live on their own subject, `changes.<something>`, its
+  name open, ordered by the harness's own timestamps. That needs a subject of
+  its own but is far easier than resuming from the stream. Claude Code stamps
+  each entry with its own time; the record of that also notes that the
+  pieces of one API message spread a median 2.2 s (max 234 s) and can be out
+  of file order (`what-the-model-sees.md:71-73`). Equal timestamps are an
+  edge case not worth handling yet. The Agent Client Protocol's `notice`, at
+  Preview, has the same shape: "visible to the user without becoming
+  conversation history" (agentclientprotocol/agent-client-protocol 2797d33,
+  `docs/rfds/session-notices.mdx:11-13`).
 - **Native harness data on its own subject or event** (an idea, not a
   decision). A harness's native data, for Claude Code its typed entries,
-  could go on a subject or event of its own rather than in the conversation's
-  messages.
-
-  > "it could be a separate subject or event, like a custom event" (Stephen,
-  > 7 Oct)
-
-- **The spec changes where it has a gap.** A missing parent link is something
-  to add; the spec itself says per-message parents would be an extension that
-  leaves every existing record valid (`conversation.md:57-61`). On how the
-  record would mark where compaction restarts the model's context, he
-  suggested, as a question, a null parent.
-
-  > "stop thinking the spec is frozen, its not"; "you'd probably have null
-  > parent to indicate?" (Stephen, 7 Oct)
+  could go on a separate subject or a custom event rather than in the
+  conversation's messages.
+- **The spec changes where it has a gap.** The spec is not frozen. A missing
+  parent link is something to add; the spec itself says per-message parents
+  would be an extension that leaves every existing record valid
+  (`conversation.md:57-61`). One question raised about how the record would
+  mark where compaction restarts the model's context is whether a null
+  parent would indicate it.
 
 ## 6. Low friction to participate, against adapting the spec
 
@@ -405,12 +344,9 @@ unsupported operation is answered `rejected: unsupported`, because
 "compliance is answering, not implementing" (`conformance.md:66-67`,
 `conversation.md:773`). `from` is provenance: a harness-generated message has
 none (`conversation.md:187`), and a servicer "echoes what the sender sent and
-never authors it" (`conversation.md:450-456`). Stephen put the tension as a
-question:
-
-> "basically, does the spec try to adapt and support everything? / or does it
-> try to make participating as easy/frictionless as possible?" (Stephen,
-> 7 Oct)
+never authors it" (`conversation.md:450-456`). The tension is whether the
+spec tries to adapt to and support everything every harness does, or tries
+to make participating as easy as possible.
 
 **What was discovered.** Other harnesses store non-plain content in widely
 different ways, and most keep a model-facing form apart from a UI-facing
@@ -439,9 +375,9 @@ records `displayContent` beside `content` when the two differ
 `packages/core/src/core/geminiChat.ts:555-566`); and ACP's `notice` stays out
 of history (section 5).
 
-The rest of this section is the document's reading, not something measured
-or something Stephen said. The difficulty of joining depends on how far a
-harness's own record is from what its model saw:
+The rest of this section is the document's reading, not something measured.
+The difficulty of joining depends on how far a harness's own record is from
+what its model saw:
 
 - **Its record is the messages array** (bridge, claude-sdk-cli). Easy: the
   record is the request.
@@ -465,11 +401,11 @@ harness's content has to map onto, and typed-2 already reached for one
 harness's internal names.
 
 Put together, the potential goals ask four things of one record (this
-document's framing, not Stephen's list):
+document's framing):
 
 1. **Harness-neutral:** any harness can write it and any presenter read it.
-2. **Exactly what each model saw:** the original design aim. Stephen's 7 Oct
-   position is narrower: at least what the model sees (section 3).
+2. **Exactly what each model saw:** the original design aim. The current
+   view is narrower: at least what the model sees (section 3).
 3. **Cheap to join.**
 4. **A lossless resume source.**
 
@@ -481,12 +417,9 @@ what the model saw; and a neutral vocabulary rich enough to resume every such
 harness losslessly grows with every harness's internals, which is the
 opposite of cheap to join. Each position gives up one of the four.
 
-**Open.** Low friction is one of the considerations in tension, not the goal,
-and how it weighs against the others is open.
-
-> "of course its open / the point is to evaluate the things that are
-> contending or cause tension … thats *one* thing, it doesnt mean frinctionless
-> participation is the *goal*" (Stephen, 7 Oct)
+**Open.** Low friction is one of the considerations in tension, not the goal.
+The point is to weigh the considerations that contend with each other, and
+how this one weighs against the others is open.
 
 ## What remains open
 
@@ -496,8 +429,8 @@ and how it weighs against the others is open.
 - The typed design itself; nothing is specified (section 5).
 - The name of the person-only subject, and whether native harness data gets
   a subject or event of its own (section 5).
-- How compaction's restart is marked, for example by the null parent he
-  asked about (section 5).
+- How compaction's restart is marked, for example whether by a null parent
+  (section 5).
 - How low friction to participate weighs against adapting the spec to every
   harness (section 6).
 - Whether any of the epic's recorded positions becomes concrete (sections 2
