@@ -41,8 +41,11 @@ Transit and durable object stores). The deployment's buckets are in
 
 Transit is for getting attachments to the agent, never for keeping them on
 the bus: a conversation that kept transit references would lose its files
-when they expire. Only the servicer writes to durable because anything else would let
-anyone inject something into a conversation. Stream-init creates the bucket,
+when they expire. With transit alone, an agent's images expired from the
+transit store, and the agent then said it had fabricated them; that is why
+committed files go to a durable store kept forever. Only the servicer writes
+to durable because anything else would let anyone inject something into a
+conversation. Stream-init creates the bucket,
 not towerd, so the agent doesn't depend on towerd. Objects are named under
 their conversation because a conversation is what gets deleted, not
 individual files.

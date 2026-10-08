@@ -10,7 +10,7 @@ missing and some behaviour is wrong.
 
 ## The MVP
 
-**What it means:** its user using the participant day to day instead of the
+**What it means:** Stephen using the participant day to day instead of the
 terminal, with no scripts outside tower needed to support it. It is not a
 product release for other people.
 
@@ -99,7 +99,7 @@ failure into a blip
 
 ## Open
 
-- Whether publishing everything the model sees is an MVP item. Resuming from
+- Whether publishing every message the model sees is an MVP item. Resuming from
   the bus is not MVP either way.
 - Archive: MVP or not.
 - How firm re-serving after a restart is, and whether it is an option rather

@@ -6,8 +6,8 @@
   the machine that served it: the session store's `load()` returns null.
   Resuming from the bus (on another machine, say) comes later.
 - **Publishing is a separate feature from resuming.** What is published has
-  to be there when resume is built, so the publish rule (everything the model
-  sees, [purpose.md](purpose.md)) applies now even though resume waits.
+  to be there when resume is built, so the publish rule (every message the
+  model sees, [purpose.md](purpose.md)) applies now even though resume waits.
 - **The goal is that a conversation resumed from the bus is the same
   conversation,** not a translated or migrated one. The bus is the
   conversation; anything else is migration. The goal may have to be relaxed to
@@ -22,21 +22,26 @@
 The transcript file is an undocumented format, and Claude Code offers the
 session store as its supported route.
 
-## The test that counts
+## The target
 
-**When resuming, a resume from the published store and a resume from Claude
-Code's own record must send the same request to the API: the same cache
-prefix.** Both are compared after resuming. Comparing a request before a
-resume with one after it is a different test, and not this one.
+**A resume from the published record and a resume from Claude Code's own
+record send the same messages array to the API, given the same system prompt
+and tools.** Both are compared after resuming. Comparing a
+request before a resume with one after it is a different comparison, and not
+this one.
+
+It is a target to get as close to as is reasonable, with each gap between
+the two understood, not a test that passes or fails. Where Claude Code
+recreates something it never hands to the store, the participant can't close
+the gap, and that gap is accepted. The known case is the
+`<tmpdir>/claude-resume-<uuid>` path (below), which lands in the messages
+array: in the resume prototype's r4 `file` request it is in the sandbox block
+at `$.messages[7].content[0].text`, and in the request's `safeguards` field.
+It reaches the system prompt only after `/compact`.
 
 The proofs under Related proofs mostly compare the resumed request against
-the live one, so their passes don't show this test is met. Each findings file
-states which comparison it made.
-
-**Undecided: how strict "the same" is.** Two readings: the requests are
-identical (what is sent to the API is the same); or the conversation is the
-same as resuming from the local transcript, with some differences not
-holding up the MVP.
+the live one, so their passes don't show how close the target is. Each
+findings file states which comparison it made.
 
 ## What is known
 
@@ -49,11 +54,17 @@ holding up the MVP.
   construction. The participant controls the config dir, cwd and home, but no
   SDK option sets that temp dir. The participant's private home is random per
   process too, so even two local resumes differ in it.
+- **The path appears only when resuming through the session store.** In the
+  resume prototype, the `local` method (`load()` returning null, today's
+  route) was the reference for every comparison. In its r4 run every store
+  method's request holds the path, including `file` (Claude Code's own record
+  handed back through `load()`), and no `local` request does.
 - **The resume prototype** (branch `proof/resume-from-published`, unmerged by design)
   found that six of seven conversation shapes matched once four values were
   normalised away (device id, home path, prompt id, config dir path), and
-  `/compact` didn't. Under "identical" no shape passes
-  ([resume prototype](../participant-findings/resume-prototype.md)).
+  `/compact` didn't. Without that normalising no shape matches, since every
+  store method's request holds the `claude-resume` temp path and no `local` request
+  does ([resume prototype](../participant-findings/resume-prototype.md)).
 - **What a resume needs that isn't published today:** among others
   `message.id`, `message.model` (without it thinking is dropped silently),
   `requestId`, the typed attachment entries and their `rendered` blocks, the
@@ -80,7 +91,6 @@ Proofs that resumed from published or reduced records:
 
 ## Open
 
-- How strict "the same" is (above).
 - Whose paths the published conversation holds, and whether a resume must
   run in a temporary config dir.
 - How the missing data is carried (see [publishing.md](publishing.md),

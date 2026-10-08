@@ -267,9 +267,15 @@ process serves until the `overrides` map is built.
 
 ## Open
 
-- **`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`** still passes through. It forces the
-  permission mode to `default`, but it also hardens the commands Claude Code
-  runs. Strip it, keep it, or refuse loudly. (`src/startup.ts`, marked.)
+- **`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`** still passes through. Read from
+  Claude Code's binary: it scrubs the environment of the commands Claude Code
+  runs and isolates them with bubblewrap, and turning it off loses that
+  subprocess isolation. Claude Code turns it on by itself when
+  `GITHUB_ACTIONS` is set, unless it is explicitly off. The binary also
+  states that it forces the permission mode to `default` ("Permission mode
+  forced to default", naming `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` as set); read
+  from the binary, not run. Strip it, keep it, or refuse loudly.
+  (`src/startup.ts`, marked.)
 - Whether variables that change a required value only indirectly belong on
   the strip list (`CLAUDE_CODE_MODEL_CATALOG` and `_URL`,
   `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`). `CLAUDE_CODE_FORK_SUBAGENT` also

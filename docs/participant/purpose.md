@@ -25,7 +25,7 @@ participant has needed so far are listed in
   participant. When Claude Code rewinds itself, the move is to be published
   as `tip.moved`; not built (see [scope.md](scope.md), Later). Tower needs no
   request to ask for a rewind.
-- **Daily use instead of the terminal.** The MVP is what it takes for its user
+- **Daily use instead of the terminal.** The MVP is what it takes for Stephen
   to use the participant every day with no scripts outside tower (see
   [scope.md](scope.md)).
 - **The wider aim:** connect every machine at home to one broker and manage
@@ -34,18 +34,19 @@ participant has needed so far are listed in
 
 ## The publish rule
 
-**Everything the model sees must be published.** The test for an entry is
-whether it is sent to the API; if it is, it must be published. That is the
-minimum.
+**Every message the model sees must be published.** `changes.message` is what
+is sent to the model, so every message sent to the model is published on it.
+The test for an entry is whether it is sent to the API as a message; if it
+is, it must be published.
 
+- Anything else the user needs or wants to see can be published, on a
+  different subject from `changes.message`. Claude Code's error text is the
+  standing example: the user wants to see it and the model doesn't (see
+  [errors.md](errors.md)).
 - "Published" means carried on the bus by the participant. It does not have to
   mean that tower stores or shows it; "in tower" is shorthand.
 - What is published does not have to render in tower, and is not limited to
   what tower shows.
-- Beyond the minimum, what gets published is not decided.
-- What the user needs to see is published too, even when the model never sees
-  it. Claude Code's error text is the standing example (see
-  [errors.md](errors.md)).
 
 **Where it stands in the code.** The participant publishes prompts, every
 piece of each reply, tool results, background agents' reports and Claude
@@ -56,13 +57,14 @@ published either; whether the rule covers what a subagent's model sees is
 open (see [subagents.md](subagents.md)). Details are in
 [publishing.md](publishing.md).
 
-### Why everything the model sees
+### Why every message the model sees
 
 A conversation that wasn't published can't be reproduced: nothing can rebuild
 what it doesn't have. Full reproduction (a resume from the published record
-sending the same request as a resume from Claude Code's own record) may turn
-out not to be achievable. The minimum is what makes trying possible, so the
-rule holds either way.
+sending the same messages array to the API as a resume from Claude Code's own
+record, given the same system prompt and tools) may turn out not to be
+achievable. Publishing every message the model sees is what makes trying
+possible, so the rule holds either way.
 
 ## Showing is a separate question
 
@@ -92,7 +94,7 @@ Display).
 
 - Whether the rule covers what a subagent's model sees, given that subagent
   entries don't go onto the bus.
-- Whether publishing everything the model sees is itself an MVP item (see
+- Whether publishing every message the model sees is itself an MVP item (see
   [scope.md](scope.md), Open).
 - How the unpublished model-seen kinds are carried (see
   [publishing.md](publishing.md), Extras).

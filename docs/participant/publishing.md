@@ -1,7 +1,8 @@
 # The publisher: what goes on `changes`
 
-The rule this follows is in [purpose.md](purpose.md): everything the model
-sees must be published, and what the user needs to see is published too.
+The rule this follows is in [purpose.md](purpose.md): every message the
+model sees must be published, and anything else the user needs or wants to
+see can be published on a different subject.
 How the published messages reach the stream is in [delivery.md](delivery.md).
 
 ## What is published today

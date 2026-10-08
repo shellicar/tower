@@ -16,8 +16,9 @@ different comparisons, and each file says which:
 - **Before against after:** the first request after a resume compared with
   the live conversation's next request (or the seed's context).
 - **Both methods after resuming:** a resume from the published store compared
-  with a resume from Claude Code's own record. This is the test that counts
-  now (see [resume.md](../participant/resume.md)).
+  with a resume from Claude Code's own record. This is the comparison the
+  target makes: the same messages array, given the same system prompt and
+  tools (see [resume.md](../participant/resume.md)).
 
 A pass on the first doesn't show the second.
 
