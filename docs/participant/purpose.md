@@ -61,9 +61,10 @@ open (see [subagents.md](subagents.md)). Details are in
 
 A conversation that wasn't published can't be reproduced: nothing can rebuild
 what it doesn't have. Full reproduction (a resume from the published record
-sending the same request as a resume from Claude Code's own record) may turn
-out not to be achievable. The minimum is what makes trying possible, so the
-rule holds either way.
+sending the same messages array to the API as a resume from Claude Code's own
+record, given the same system prompt and tools) may turn out not to be
+achievable. Publishing every message the model sees is what makes trying
+possible, so the rule holds either way.
 
 ## Showing is a separate question
 

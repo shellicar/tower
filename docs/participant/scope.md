@@ -99,7 +99,7 @@ failure into a blip
 
 ## Open
 
-- Whether publishing everything the model sees is an MVP item. Resuming from
+- Whether publishing every message the model sees is an MVP item. Resuming from
   the bus is not MVP either way.
 - Archive: MVP or not.
 - How firm re-serving after a restart is, and whether it is an option rather
