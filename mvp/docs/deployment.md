@@ -53,8 +53,50 @@ existing one.
 stream-init runs on every `up` and brings an existing broker to the shape
 above, so there is no separate migration step.
 
-`mvp/compose.test.yaml` is the same layout on port 31416, with no volume, for
-`just broker-run`.
+`mvp/compose.test.yaml` is the same layout on 127.0.0.1:31416, with no
+volume, for `just broker-run`.
+
+## Preview environment
+
+`mvp/compose.preview.yaml` is a third broker with the same streams and
+bucket, on 127.0.0.1:31417, for keeping real data and looking at it in tower
+over days. Its JetStream store is in a named volume, so the data survives
+`down` and `up`. It has no restart policy: it runs only while started by
+hand. Nothing that serves conversations runs against it.
+
+Run these from the repo root.
+
+Start the broker (stream-init runs as part of `up`):
+
+```sh
+docker compose -f mvp/compose.preview.yaml up -d
+```
+
+Build the frontends towerd serves, once (and again after a frontend change):
+
+```sh
+just --justfile mvp/justfile --working-directory mvp frontend
+```
+
+Run towerd against the preview broker, with its own db
+(`mvp/tower-preview.db`):
+
+```sh
+just --justfile mvp/justfile --working-directory mvp preview
+```
+
+Tower is then at http://127.0.0.1:9081 (Svelte) and http://127.0.0.1:9083
+(Leptos). None of these ports is one `just dev` or `just run` uses, so the
+preview runs beside the normal tower.
+
+Stop towerd with Ctrl-C, then stop the broker. This keeps the data:
+
+```sh
+docker compose -f mvp/compose.preview.yaml down
+```
+
+Adding `-v` to `down` deletes the volume, and with it everything the preview
+broker holds.
 
 ## When to update this page
 

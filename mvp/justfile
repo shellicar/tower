@@ -70,6 +70,14 @@ broker-run +command:
 run:
     cargo run -p towerd
 
+# Run towerd against the preview broker (compose.preview.yaml, 31417), with
+# its own db and ports so it runs beside `just run` or `just dev`. The values
+# are fixed here, so an inherited NATS_URL cannot point it at another broker.
+# Svelte on http://127.0.0.1:9081, leptos on http://127.0.0.1:9083; both are
+# served from dist, so `just frontend` must have built them.
+preview:
+    NATS_URL='nats://127.0.0.1:31417' TOWER_DB='tower-preview.db' TOWER_BIND='127.0.0.1:9081' TOWER_BIND_LEPTOS='127.0.0.1:9083' cargo run -p towerd
+
 # Bring the whole mvp up: towerd + BOTH frontends with hot reload, side by
 # side for comparison. Multi-process orchestration is the one job cargo
 # doesn't do; dev.sh owns it. The broker is expected up (docker compose up
