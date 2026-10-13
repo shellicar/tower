@@ -42,8 +42,10 @@ There are 9 run directories:
 
 ### `rewind_conversation` works (observed)
 
-In all 7 cases the next prompt attached where it should, without restarting
-Claude Code, and none of the cut content reached the model.
+In the 6 cases that targeted the current branch, the rewind succeeded (in
+multiback after a first `stale_target`), the next prompt attached where it
+should without restarting Claude Code, and none of the cut content reached
+the model. The 7th, aimed at a cut branch, was refused.
 
 | Case | Rewind result | Next prompt's body |
 |---|---|---|
