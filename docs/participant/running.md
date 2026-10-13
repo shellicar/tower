@@ -91,8 +91,9 @@ Undecided:
    and their notifications land on the new branch, where the model sees
    them. Whether that is acceptable. Due with decision 1, if it chooses the
    rewind.
-4. **Returning to a cut branch:** `rewind_conversation` can't reach one; only
-   the restart route can. Due before work on returning to a cut branch
+4. **Returning to a cut branch:** `rewind_conversation` can't reach one
+   (observed). The restart route, resuming at a chosen entry, should reach
+   one, but no run has tried it. Due before work on returning to a cut branch
    starts.
 
 ## Messages and turns
