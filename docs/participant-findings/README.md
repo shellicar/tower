@@ -117,6 +117,8 @@ never put to Stephen. Its code was deleted and its findings are not evidence.
 | [bridge-gap](bridge-gap.md) | The participant against bridge | n/a |
 | [cadence](cadence.md) | How long pieces took | n/a |
 | [parked-elsewhere](parked-elsewhere.md) | Problems found outside the participant | n/a |
+| [cancel-before-reply](cancel-before-reply.md) | Cancel before the reply: the restart route | before against after |
+| [rewind-conversation](rewind-conversation.md) | Rewinding in-process with `rewind_conversation` | neither |
 
 Evidence that is gone: the committer options report
 (`/tmp/committer-options/final-report.md`), the branch analysis data
