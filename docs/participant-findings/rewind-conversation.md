@@ -236,8 +236,9 @@ Whether the participant could hit them (inferred from the code):
 
 - **Speed (observed):** 0 to 22 ms in the runs. The restart route's 1.1 to
   1.7 s comes from [the restart route's runs](cancel-before-reply.md) and was
-  not observed again here. Background tasks, shells and in-process state all
-  survive.
+  not observed again here. Background shells survive (observed: `sleep 602`
+  and `sleep 9`); background tasks other than shells and in-process state
+  surviving was not observed.
 - **Returning to an abandoned branch:** it can't. Only the in-memory current
   branch is reachable (`target_not_found`, observed). The report names the
   restart route with `resumeSessionAt` as still needed for that; no run

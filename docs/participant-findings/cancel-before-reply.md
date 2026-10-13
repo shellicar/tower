@@ -74,7 +74,7 @@ Before the first byte (run `first-byte-drop-...13-14-14`), with the opening
 reminders and the Environment system message shortened:
 
 ```
-thread: {"type":"create"}  diagnostics: {"previous_message_id":"msg_011CfxQM6TUpm8pUMhpwhqLf"}
+thread: {"type":"create"}  diagnostics: {"previous_message_id":"<previous message id>"}
 [0] user:      <system-reminder>(session context)</system-reminder> | <system-reminder>(git attribution)</system-reminder> | "Reply with the word READY only."
 [1] system:    "# Environment ... Today's date is 2026-10-13."
 [2] assistant: "READY"

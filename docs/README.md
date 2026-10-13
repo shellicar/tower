@@ -69,7 +69,7 @@ versions, runs and what it found.
 - Whether publishing every message the model sees is itself an MVP item, and
   how the unpublished kinds are carried.
 - The skills route, the approvals design, the error message on the wire.
-- How a say is sent after a cancel or a move back in tower: whether to
+- How a say is sent after a move back in tower: whether to
   rewind Claude Code, the spec shape, a cut turn's background shells, and
   returning to a cut branch (see
   [running](participant/running.md#cancel-rewind-and-the-next-say)).

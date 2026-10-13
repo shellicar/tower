@@ -58,8 +58,9 @@ its own, entry by entry as it writes
 Send A, cancel, send B: Claude Code commits A, so by default B follows A and
 the interrupt marker. Two routes make B attach before A instead:
 - **The restart route:** close Claude Code and resume it with
-  `resumeSessionAt` and `resumeDropsTurn`. About 1.1 to 1.7 s, and the
-  process's background tasks and in-memory state go with it
+  `resumeSessionAt` and `resumeDropsTurn`. About 1.1 to 1.7 s (observed),
+  and the process's background tasks and in-memory state go with it (read,
+  not run)
   ([cancel before the reply](../participant-findings/cancel-before-reply.md)).
 - **In process, `rewind_conversation`:** an undeclared control request.
   0 to 22 ms, nothing restarted, and the rewind is durable across a resume
