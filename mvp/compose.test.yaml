@@ -21,7 +21,7 @@ services:
     image: nats:latest
     command: ['-js', '-sd', '/tmp/jetstream']
     ports:
-      - '31416:4222'
+      - '127.0.0.1:31416:4222'
 
   # The same stream-init the deployment runs, against the same subject layout,
   # so a run here exercises the routing the real broker has instead of a
