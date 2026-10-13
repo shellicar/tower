@@ -53,6 +53,50 @@ its own, entry by entry as it writes
 [cancel scenarios](../participant-findings/cancel-scenarios.md),
 [store commit and resume](../participant-findings/store-commit-resume.md)).
 
+## Cancel, rewind and the next say
+
+Send A, cancel, send B: Claude Code commits A, so by default B follows A and
+the interrupt marker. Two routes make B attach before A instead:
+- **The restart route:** close Claude Code and resume it with
+  `resumeSessionAt` and `resumeDropsTurn`. About 1.1 to 1.7 s (observed),
+  and the process's background tasks and in-memory state go with it (read,
+  not run)
+  ([cancel before the reply](../participant-findings/cancel-before-reply.md)).
+- **In process, `rewind_conversation`:** an undeclared control request.
+  0 to 22 ms, nothing restarted, and the rewind is durable across a resume
+  ([rewind_conversation](../participant-findings/rewind-conversation.md)).
+
+Rewind-like functionality is anything that sends a prompt to attach anywhere
+other than the end of Claude Code's chain, such as moving back to an earlier
+message in tower and sending from there.
+
+Settled:
+- **The participant accepts what Claude Code commits** rather than fighting
+  it. Where Claude Code supports an option that gives the wanted behaviour,
+  the participant can use it, as long as it doesn't add too much complexity,
+  latency or the like.
+- **A refused say fails;** retrying is for the user.
+- **A move back to an earlier message can stay local in tower** until the
+  next say, which carries the move.
+
+Undecided:
+1. **How B is sent after a move back:** accept it fully, so B follows A and
+   the marker (today's behaviour), or rewind in-process with
+   `rewind_conversation` when B is sent. Due before work on any rewind-like
+   functionality starts.
+2. **The spec shape for a move back and a say:** `tip_moved` plus the say, or
+   one event; and how a say names an earlier message, since today a say
+   whose premise isn't the tip is refused as stale. Due with decision 1,
+   before the code, if decision 1 chooses the rewind.
+3. **A cut turn's background shells:** with the rewind they keep running,
+   and their notifications land on the new branch, where the model sees
+   them. Whether that is acceptable. Due with decision 1, if it chooses the
+   rewind.
+4. **Returning to a cut branch:** `rewind_conversation` can't reach one
+   (observed). The restart route, resuming at a chosen entry, should reach
+   one, but no run has tried it. Due before work on returning to a cut branch
+   starts.
+
 ## Messages and turns
 
 - **Each piece of a reply is its own message:** thinking, text and each tool
