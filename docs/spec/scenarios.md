@@ -278,6 +278,7 @@ presence, not on literal timestamps — silence is represented the way approval
 | a14 — service spawns fresh | `fixtures/agent/scenario-a14.jsonl` |
 | a15 — service adopts a record | `fixtures/agent/scenario-a15.jsonl` |
 | a16 — the rejection vocabulary | `fixtures/agent/scenario-a16.jsonl` |
+| a17 — a displaced servicer closes its query | `fixtures/agent/scenario-a17.jsonl` |
 
 The concern spans two trees, though a single scenario need not. `ready` and
 `pulse` are the world's own telemetry; `service` and `drain` address the
@@ -287,9 +288,9 @@ world's request tree; the claim on a conversation is the conversation's
 a1 to a3 carry world telemetry beside the claim, and a2 adds a `drain`
 request. a5's world lines are two `service` requests, which no stream
 captures, and the holder's `pulse`, so replaying it yields the claim and
-that pulse. a6 to a11 carry conversation lines only. a12 to a15 mix both
-trees, the claim beside the liveness the premise reads; a16 is requests
-alone, so it replays as nothing.
+that pulse. a6 to a11 and a17 carry conversation lines only. a12 to a15
+mix both trees, the claim beside the liveness the premise reads; a16 is
+requests alone, so it replays as nothing.
 
 ### a1 — world up, fresh conversation
 
@@ -480,3 +481,19 @@ would leave a reader unable to tell which is the contract.
 - Exercises: four requests, four rejections; no event traffic at all.
 - Asserts: `reason` is the token a caller branches on; `detail` is optional
   human-facing diagnostics, present on `invalid_cwd` and `failed`.
+
+### a17 — a displaced servicer closes its query
+
+a9's displacement with a query running through it. inst-1 attaches and
+accepts a say; inst-2's `attached` supersedes the claim; inst-1 stands down
+with `detached` and publishes the query's closure anyway, `aborted`, carrying
+its own `instanceId` (conversation.md, Query closure).
+
+- Exercises: a `changes.query` published by an instance whose claim no longer
+  stands, beside the `detached` that acknowledged the displacement.
+- Asserts: the closure is owed by the servicer that ran the query, not by
+  whoever holds the conversation now — a consumer waiting on q1 is answered by
+  the instance that no longer serves it; and the two subjects are unordered
+  against each other. The required entries are a subsequence per subject, so a
+  capture with the closure ahead of the `detached` conforms exactly as this one
+  does.
