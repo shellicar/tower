@@ -1,4 +1,7 @@
 {"type":"change","category":"added","description":"The rail can be filtered to only conversations a live agent is serving, or only unread ones, saved per tab."}
 {"type":"change","category":"added","description":"A conversation's panel shows the directory its agent is working in."}
 {"type":"change","category":"fixed","description":"An agent whose claim omits its world reads as alive on the rail."}
+{"type":"change","category":"added","description":"Allow filtering for conversations missing a tag."}
+{"type":"change","category":"fixed","description":"Stop tags randomly changing order in the filter."}
+{"type":"change","category":"fixed","description":"Allow clearing a filter that no conversations match."}
 {"type":"change","category":"added","description":"A conversation's id can be searched for in the rail and copied from its panel."}

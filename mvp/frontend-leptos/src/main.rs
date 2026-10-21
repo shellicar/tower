@@ -5,6 +5,7 @@
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
 mod concerns;
+mod facets;
 mod markdown;
 mod pricing;
 mod time;
