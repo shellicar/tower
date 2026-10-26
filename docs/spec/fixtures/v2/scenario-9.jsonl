@@ -1,0 +1,16 @@
+{"subject":"conv.v2.conv-abc.requests.say","message":{"ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"text":"read file X and summarise it","precondition":{"tip":null}},"reply":{"accepted":true,"id":"q1"}}
+{"subject":"conv.v2.conv-abc.changes.query.started","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","queryId":"q1"}}
+{"subject":"conv.v2.conv-abc.changes.message","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","id":"m1","queryId":"q1","turnId":"t1","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"read file X and summarise it"}]}}
+{"subject":"conv.v2.conv-abc.changes.message","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","id":"m2","queryId":"q1","turnId":"t1","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"File X contains…"}]}}
+{"subject":"conv.v2.conv-abc.changes.query.closed","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","queryId":"q1","reason":"completed"}}
+{"subject":"conv.v2.conv-abc.requests.say","message":{"ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"text":"now summarise file Y","precondition":{"tip":"m2"}},"reply":{"accepted":true,"id":"q2"}}
+{"subject":"conv.v2.conv-abc.changes.query.started","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","queryId":"q2","parent":"m2"}}
+{"subject":"conv.v2.conv-abc.changes.message","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","id":"m3","queryId":"q2","turnId":"t2","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"now summarise file Y"}]}}
+{"subject":"conv.v2.conv-abc.changes.message","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","id":"m4","queryId":"q2","turnId":"t2","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"File Y contains…"}]}}
+{"subject":"conv.v2.conv-abc.changes.query.closed","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","queryId":"q2","reason":"completed"}}
+{"subject":"conv.v2.conv-abc.changes.tip.moved","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","to":"m2"}}
+{"subject":"conv.v2.conv-abc.requests.say","message":{"ts":"2026-07-07T21:00:00+10:00","from":{"kind":"human","userId":"stephen"},"text":"now summarise file Z","precondition":{"tip":"m2"}},"reply":{"accepted":true,"id":"q3"}}
+{"subject":"conv.v2.conv-abc.changes.query.started","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","queryId":"q3","parent":"m2"}}
+{"subject":"conv.v2.conv-abc.changes.message","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","id":"m5","queryId":"q3","turnId":"t3","role":"user","from":{"kind":"human","userId":"stephen"},"content":[{"type":"text","text":"now summarise file Z"}]}}
+{"subject":"conv.v2.conv-abc.changes.message","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","id":"m6","queryId":"q3","turnId":"t3","role":"assistant","from":{"kind":"agent"},"content":[{"type":"text","text":"File Z contains…"}]}}
+{"subject":"conv.v2.conv-abc.changes.query.closed","message":{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","queryId":"q3","reason":"completed"}}

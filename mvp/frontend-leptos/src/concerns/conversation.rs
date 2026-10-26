@@ -448,6 +448,32 @@ impl Conversations {
     }
 }
 
+/// How a message's header presents its author. A message with a `from` is
+/// labelled by its `userId`, else its `kind`, else its role. A message with
+/// no `from` is labelled by what it is: "tool" when it carries a tool
+/// result, "system" when its role is `system`, and "unknown" otherwise. The
+/// label belongs to the message, not to its blocks: one tool result anywhere
+/// in it makes the whole message "tool".
+pub fn sender_label(m: &WsMessage) -> String {
+    match &m.from {
+        Some(from) => from
+            .get("userId")
+            .and_then(Value::as_str)
+            .or_else(|| from.get("kind").and_then(Value::as_str))
+            .unwrap_or(&m.role)
+            .to_owned(),
+        None if m
+            .content
+            .iter()
+            .any(|b| b.get("type").and_then(Value::as_str) == Some("tool_result")) =>
+        {
+            "tool".to_owned()
+        }
+        None if m.role == "system" => "system".to_owned(),
+        None => "unknown".to_owned(),
+    }
+}
+
 /// Insert in ts order, dedupe by id (boundary overlap is expected). Same id =
 /// replace (revisions keep the id; last write wins).
 fn insert_message(messages: &mut Vec<WsMessage>, m: WsMessage) {
@@ -759,5 +785,92 @@ mod tests {
             assert_eq!(s.live_query, None);
             assert_eq!(s.last_say.as_deref(), Some("query cancelled"));
         });
+    }
+
+    fn unsent(content: Vec<Value>) -> WsMessage {
+        unsent_as("user", content)
+    }
+
+    fn unsent_as(role: &str, content: Vec<Value>) -> WsMessage {
+        WsMessage {
+            from: None,
+            content,
+            ..msg("m", "q", role, 1)
+        }
+    }
+
+    #[test]
+    fn a_sender_is_named_by_its_user_id() {
+        let m = WsMessage {
+            from: Some(json!({ "kind": "human", "userId": "stephen" })),
+            ..msg("m", "q", "user", 1)
+        };
+        assert_eq!(sender_label(&m), "stephen");
+    }
+
+    #[test]
+    fn a_sender_without_a_user_id_is_named_by_its_kind() {
+        assert_eq!(sender_label(&msg("m", "q", "user", 1)), "human");
+    }
+
+    #[test]
+    fn no_sender_delivering_tool_results_reads_as_tool() {
+        let m = unsent(vec![
+            json!({ "type": "tool_result", "tool_use_id": "t1", "content": "ok" }),
+        ]);
+        assert_eq!(sender_label(&m), "tool");
+    }
+
+    #[test]
+    fn no_sender_with_a_tool_result_beside_other_blocks_reads_as_tool() {
+        let m = unsent(vec![
+            json!({ "type": "tool_result", "tool_use_id": "t1", "content": "ok" }),
+            json!({ "type": "text", "text": "note" }),
+        ]);
+        assert_eq!(sender_label(&m), "tool");
+    }
+
+    #[test]
+    fn a_system_message_with_a_sender_is_named_by_its_sender() {
+        let m = WsMessage {
+            from: Some(json!({ "kind": "agent" })),
+            ..msg("m", "q", "system", 1)
+        };
+        assert_eq!(sender_label(&m), "agent");
+    }
+
+    #[test]
+    fn a_system_message_with_no_sender_delivering_a_tool_result_reads_as_tool() {
+        let m = unsent_as(
+            "system",
+            vec![json!({ "type": "tool_result", "tool_use_id": "t1", "content": "ok" })],
+        );
+        assert_eq!(sender_label(&m), "tool");
+    }
+
+    #[test]
+    fn a_system_message_with_no_sender_reads_as_system() {
+        let m = unsent_as(
+            "system",
+            vec![json!({ "type": "text", "text": "compacted" })],
+        );
+        assert_eq!(sender_label(&m), "system");
+    }
+
+    #[test]
+    fn a_user_message_with_no_sender_and_no_tool_result_reads_as_unknown() {
+        let m = unsent(vec![json!({ "type": "text", "text": "hi" })]);
+        assert_eq!(sender_label(&m), "unknown");
+    }
+
+    #[test]
+    fn an_assistant_message_with_no_sender_reads_as_unknown() {
+        let m = unsent_as("assistant", vec![json!({ "type": "text", "text": "hi" })]);
+        assert_eq!(sender_label(&m), "unknown");
+    }
+
+    #[test]
+    fn no_sender_and_no_content_reads_as_unknown() {
+        assert_eq!(sender_label(&unsent(vec![])), "unknown");
     }
 }

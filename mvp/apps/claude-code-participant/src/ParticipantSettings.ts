@@ -1,0 +1,129 @@
+import type { EffortLevel, PermissionMode, ThinkingAdaptive } from '@anthropic-ai/claude-agent-sdk';
+
+// Adaptive or off: the SDK's `enabled` is a fixed thinking budget, which is
+// deprecated and gives worse thinking.
+export const THINKING_TYPES = ['adaptive', 'disabled'] as const;
+export const THINKING_DISPLAYS = ['summarized', 'omitted'] as const;
+export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const satisfies readonly EffortLevel[];
+export const PERMISSION_MODES = ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto'] as const satisfies readonly PermissionMode[];
+
+// An SDK update that adds a value fails the type check here, instead of the
+// new value being refused without anyone noticing.
+type Covers<Union, Listed> = [Exclude<Union, Listed>] extends [never] ? true : false;
+const effortCovered: Covers<EffortLevel, (typeof EFFORT_LEVELS)[number]> = true;
+const permissionModesCovered: Covers<PermissionMode, (typeof PERMISSION_MODES)[number]> = true;
+const displaysCovered: Covers<NonNullable<ThinkingAdaptive['display']>, (typeof THINKING_DISPLAYS)[number]> = true;
+void effortCovered;
+void permissionModesCovered;
+void displaysCovered;
+
+type ThinkingType = (typeof THINKING_TYPES)[number];
+type ThinkingDisplay = (typeof THINKING_DISPLAYS)[number];
+
+export type ModelCell = {
+  name?: string;
+  maxTokens?: number;
+  thinking?: ThinkingType;
+  thinkingDisplay?: ThinkingDisplay;
+  effort?: EffortLevel;
+};
+
+export type SystemCell = {
+  /** Whether Claude Code's own system prompt (the `claude_code` preset) is sent. */
+  preset: boolean;
+  /** Own text, sent after the preset or on its own. */
+  text?: string;
+};
+
+export type ClaudeSettings = Record<string, unknown>;
+
+/** Everything a conversation is launched with, all required values present. */
+export type LaunchSettings = {
+  model: Required<ModelCell>;
+  system: SystemCell;
+  permissionMode: PermissionMode;
+  context: string | undefined;
+  claudeSettings: ClaudeSettings | undefined;
+};
+
+export type Readiness = { ready: true; settings: LaunchSettings } | { ready: false; missing: string[] };
+
+/** How long each shutdown stage may take before it escalates on its own. */
+export type ShutdownPolicy = {
+  /** Stage 1: interrupt everything, then wait for it all to finish. */
+  gracefulMs: number;
+  /** Stage 2: SIGTERM to every Claude Code, then to whatever is left, and a wait for them all to go. */
+  teardownMs: number;
+};
+
+/**
+ * What the control lines set. Nothing a conversation is launched with has a
+ * default: the process starts with those cells empty and refuses to launch a
+ * conversation until the required ones are set. The shutdown policy is
+ * the exception: shutdown has to work whatever was or wasn't configured.
+ */
+export class ParticipantSettings {
+  public model: ModelCell = {};
+  public system: SystemCell | undefined;
+  public permissionMode: PermissionMode | undefined;
+  public context: string | undefined;
+  public claudeSettings: ClaudeSettings | undefined;
+  public shutdownPolicy: ShutdownPolicy = { gracefulMs: 30_000, teardownMs: 10_000 };
+
+  private release: () => void = () => {};
+  private readonly configured = new Promise<void>((resolve) => {
+    this.release = resolve;
+  });
+
+  /** Resolves once `settled()` has found every required value set. */
+  public whenReady(): Promise<void> {
+    return this.configured;
+  }
+
+  /** Called after a control line may have changed a value: resolves `whenReady` if every required value is now set. */
+  public settled(): void {
+    if (this.readiness().ready) {
+      this.release();
+    }
+  }
+
+  /** The values a conversation launched now would get, or what's missing. */
+  public readiness(): Readiness {
+    const { name, maxTokens, thinking, thinkingDisplay, effort } = this.model;
+    const missing: string[] = [];
+    if (name === undefined) {
+      missing.push('model.name');
+    }
+    if (maxTokens === undefined) {
+      missing.push('model.maxTokens');
+    }
+    if (thinking === undefined) {
+      missing.push('model.thinking');
+    }
+    if (thinkingDisplay === undefined) {
+      missing.push('model.thinkingDisplay');
+    }
+    if (effort === undefined) {
+      missing.push('model.effort');
+    }
+    if (this.system === undefined) {
+      missing.push('system');
+    }
+    if (this.permissionMode === undefined) {
+      missing.push('permissionMode');
+    }
+    if (name === undefined || maxTokens === undefined || thinking === undefined || thinkingDisplay === undefined || effort === undefined || this.system === undefined || this.permissionMode === undefined) {
+      return { ready: false, missing };
+    }
+    return {
+      ready: true,
+      settings: {
+        model: { name, maxTokens, thinking, thinkingDisplay, effort },
+        system: { ...this.system },
+        permissionMode: this.permissionMode,
+        context: this.context,
+        claudeSettings: this.claudeSettings === undefined ? undefined : structuredClone(this.claudeSettings),
+      },
+    };
+  }
+}

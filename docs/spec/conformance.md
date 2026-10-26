@@ -46,16 +46,19 @@ Three roles:
 - **Producers**: drive a scripted session, capture what got published per
   subject, normalise the volatile fields (`ts`, and every minted id —
   `queryId`, `turnId`, `messageId`, `approvalId`, `toolu_…` tool use ids,
-  `inst-…` instance ids), then every message
+  `inst-…` instance ids, and the opaque part of a durable object name,
+  `{conversationId}/{opaqueId}`), then every message
   validates against its schema and each subject's capture contains the
   fixture's required entries as a subsequence, extras allowed. Extras allowed
   is add-only honoured in the test: new optional events pass; a misshaped old
   one fails.
 - **Consumers**: replay the fixtures and assert **the specs' own folds** —
   latest revision per message, the reachable set from the tip, queries grouped
-  by `queryId` and closed by the `query` closure change on `changes` (a
-  telemetry-derived ending is observation, never authority —
-  conversation.md, Query closure), the approval outstanding set
+  by `queryId`, placed in the tree by the `parent` on `query.started` where
+  the publisher announced one, and closed by the closure change on
+  `changes`, `query.closed` or its old name `query` (a telemetry-derived
+  ending is observation, never authority — conversation.md, Query start and
+  closure), the approval outstanding set
   (raised + pulse = pending, silence = void, settled = done).
 - **Servicers**: scripted request/reply exchanges asserting the reply
   discipline — `say` accepted with an id; a stale premise rejected `stale`;

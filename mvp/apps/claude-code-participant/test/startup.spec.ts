@@ -1,0 +1,175 @@
+import { describe, expect, it } from 'vitest';
+import { readStartup as readStartupOn, StartupError } from '../src/startup.js';
+import { startupExitOf } from './support.js';
+
+/** Read as on Linux, unless a test names another platform. */
+const readStartup = (env: NodeJS.ProcessEnv, platform: NodeJS.Platform = 'linux') => readStartupOn(env, platform);
+
+const complete = {
+  NATS_URL: 'nats://127.0.0.1:31416',
+  PARTICIPANT_WORLD: 'test-world',
+  PARTICIPANT_DURABLE_BUCKET: 'durable',
+  PARTICIPANT_CONFIG_DIR: '/agents/alpha/config',
+  HOME: '/home/someone',
+  PATH: '/usr/bin',
+};
+
+describe('readStartup', () => {
+  describe('NATS_URL', () => {
+    it('refuses to start without it', () => {
+      const { NATS_URL: _, ...env } = complete;
+      expect(() => readStartup(env)).toThrow(StartupError);
+    });
+
+    it('refuses to start when it is empty', () => {
+      expect(() => readStartup({ ...complete, NATS_URL: '' })).toThrow('NATS_URL is required');
+    });
+
+    it('is read as given', () => {
+      expect(readStartup(complete).natsUrl).toBe('nats://127.0.0.1:31416');
+    });
+  });
+
+  describe('PARTICIPANT_WORLD', () => {
+    it('exits as a bad environment value when it is missing', () => {
+      const { PARTICIPANT_WORLD: _, ...env } = complete;
+      expect(startupExitOf(() => readStartup(env))).toBe('badEnvironment');
+    });
+
+    it('refuses to start when it is empty', () => {
+      expect(() => readStartup({ ...complete, PARTICIPANT_WORLD: '' })).toThrow('PARTICIPANT_WORLD is required');
+    });
+
+    it('is the world', () => {
+      expect(readStartup(complete).world).toBe('test-world');
+    });
+  });
+
+  describe('PARTICIPANT_DURABLE_BUCKET', () => {
+    it('exits as a bad environment value when it is missing', () => {
+      const { PARTICIPANT_DURABLE_BUCKET: _, ...env } = complete;
+      expect(startupExitOf(() => readStartup(env))).toBe('badEnvironment');
+    });
+
+    it('refuses to start when it is empty', () => {
+      expect(() => readStartup({ ...complete, PARTICIPANT_DURABLE_BUCKET: '' })).toThrow('PARTICIPANT_DURABLE_BUCKET is required');
+    });
+
+    it('is the durable bucket', () => {
+      expect(readStartup(complete).durableBucket).toBe('durable');
+    });
+  });
+
+  describe('PARTICIPANT_CONFIG_DIR', () => {
+    it('exits as a bad environment value when it is missing', () => {
+      const { PARTICIPANT_CONFIG_DIR: _, ...env } = complete;
+      expect(startupExitOf(() => readStartup(env))).toBe('badEnvironment');
+    });
+
+    it('exits as a bad environment value when it is relative', () => {
+      expect(startupExitOf(() => readStartup({ ...complete, PARTICIPANT_CONFIG_DIR: 'agents/alpha' }))).toBe('badEnvironment');
+    });
+
+    it('refuses to start without it', () => {
+      const { PARTICIPANT_CONFIG_DIR: _, ...env } = complete;
+      expect(() => readStartup(env)).toThrow('PARTICIPANT_CONFIG_DIR is required');
+    });
+
+    it('refuses a relative path', () => {
+      expect(() => readStartup({ ...complete, PARTICIPANT_CONFIG_DIR: 'agents/alpha' })).toThrow('PARTICIPANT_CONFIG_DIR must be an absolute path');
+    });
+
+    it('is the config dir', () => {
+      expect(readStartup(complete).configDir).toBe('/agents/alpha/config');
+    });
+  });
+
+  describe('HOME', () => {
+    it('refuses to start without it', () => {
+      const { HOME: _, ...env } = complete;
+      expect(() => readStartup(env)).toThrow('HOME is required');
+    });
+
+    it('refuses a relative path', () => {
+      expect(() => readStartup({ ...complete, HOME: 'someone' })).toThrow('HOME must be an absolute path');
+    });
+
+    it('is the real home', () => {
+      expect(readStartup(complete).realHome).toBe('/home/someone');
+    });
+  });
+
+  describe('PARTICIPANT_LOGIN_DIR', () => {
+    const onMac = { ...complete, PARTICIPANT_LOGIN_DIR: '/data/tower/login' };
+
+    it('refuses to start without it on macOS', () => {
+      expect(() => readStartup(complete, 'darwin')).toThrow('PARTICIPANT_LOGIN_DIR is required');
+    });
+
+    it('exits as a bad environment value when it is missing on macOS', () => {
+      expect(startupExitOf(() => readStartup(complete, 'darwin'))).toBe('badEnvironment');
+    });
+
+    it('refuses a relative path on macOS', () => {
+      expect(() => readStartup({ ...onMac, PARTICIPANT_LOGIN_DIR: 'tower/login' }, 'darwin')).toThrow('PARTICIPANT_LOGIN_DIR must be an absolute path');
+    });
+
+    it('is the login dir on macOS', () => {
+      expect(readStartup(onMac, 'darwin').loginDir).toBe('/data/tower/login');
+    });
+
+    it('is not needed on Linux', () => {
+      expect(readStartup(complete).loginDir).toBeNull();
+    });
+
+    it('is ignored on Linux', () => {
+      expect(readStartup(onMac).loginDir).toBeNull();
+    });
+  });
+
+  describe('inherited environment', () => {
+    it('drops the parent Claude Code session variables', () => {
+      const actual = readStartup({ ...complete, CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 'x', CLAUDE_CODE_ENTRYPOINT: 'cli', AI_AGENT: 'claude' }).inheritedEnv;
+      expect(Object.keys(actual).filter((name) => name.startsWith('CLAUDE') || name === 'AI_AGENT')).toEqual([]);
+    });
+
+    it('passes the rest through', () => {
+      expect(readStartup({ ...complete, LANG: 'C.UTF-8' }).inheritedEnv.LANG).toBe('C.UTF-8');
+    });
+
+    it('drops a model set in the environment', () => {
+      expect(readStartup({ ...complete, ANTHROPIC_MODEL: 'claude-haiku-4-5' }).inheritedEnv.ANTHROPIC_MODEL).toBeUndefined();
+    });
+
+    it('drops an effort set in the environment', () => {
+      expect(readStartup({ ...complete, CLAUDE_CODE_EFFORT_LEVEL: 'medium' }).inheritedEnv.CLAUDE_CODE_EFFORT_LEVEL).toBeUndefined();
+    });
+
+    it('drops every Claude Code variable that changes a required value', () => {
+      const configuration = {
+        ANTHROPIC_DEFAULT_MODEL: 'x',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'x',
+        CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP: '1',
+        CLAUDE_CODE_MODEL_CAPABILITIES: 'x',
+        ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: 'x',
+        CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: '1',
+        CLAUDE_CODE_DISABLE_THINKING: '1',
+        CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING: '1',
+        MAX_THINKING_TOKENS: '1024',
+        DISABLE_INTERLEAVED_THINKING: '1',
+        CLAUDE_CODE_THINKING_DISPLAY_UPDATES: '0',
+        CLAUDE_CODE_MAX_OUTPUT_TOKENS: '100',
+        CLAUDE_CODE_EXTRA_BODY: '{}',
+        CLAUDE_CODE_SIMPLE: '1',
+        CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT: '1',
+        CLAUDE_CODE_ENABLE_AUTO_MODE: '1',
+        CLAUDE_CODE_PLAN_MODE_REQUIRED: '1',
+      };
+      expect(Object.keys(readStartup({ ...complete, ...configuration }).inheritedEnv).filter((name) => name in configuration)).toEqual([]);
+    });
+
+    it('keeps variables that configure something other than a required value', () => {
+      expect(readStartup({ ...complete, ANTHROPIC_SMALL_FAST_MODEL: 'claude-haiku-4-5' }).inheritedEnv.ANTHROPIC_SMALL_FAST_MODEL).toBe('claude-haiku-4-5');
+    });
+  });
+});

@@ -96,6 +96,7 @@ fn attachment_kinds(events: &[Event]) -> Vec<&str> {
 const SCENARIO_1: &str = fixture!("v2/scenario-1.jsonl");
 const SCENARIO_2: &str = fixture!("v2/scenario-2.jsonl");
 const SCENARIO_2B: &str = fixture!("v2/scenario-2b.jsonl");
+const SCENARIO_2C: &str = fixture!("v2/scenario-2c.jsonl");
 const SCENARIO_3: &str = fixture!("v2/scenario-3.jsonl");
 const SCENARIO_4: &str = fixture!("v2/scenario-4.jsonl");
 const SCENARIO_5: &str = fixture!("v2/scenario-5.jsonl");
@@ -116,6 +117,7 @@ const AGENT_A13: &str = fixture!("agent/scenario-a13.jsonl");
 const AGENT_A14: &str = fixture!("agent/scenario-a14.jsonl");
 const AGENT_A15: &str = fixture!("agent/scenario-a15.jsonl");
 const AGENT_A16: &str = fixture!("agent/scenario-a16.jsonl");
+const AGENT_A17: &str = fixture!("agent/scenario-a17.jsonl");
 
 fn assert_all_known(events: &[Event]) {
     for e in events {
@@ -179,6 +181,35 @@ fn scenario_2_cancelled_turn_commits_no_message_and_the_query_closes_cancelled()
             .any(|e| matches!(&e.kind, EventKind::Change(ConvChange::Message(_))))
     );
     // The query still closed — committally, reason cancelled.
+    assert!(evs.iter().any(|e| matches!(
+        &e.kind,
+        EventKind::Change(ConvChange::Query(q)) if q.reason == "cancelled"
+    )));
+}
+
+#[test]
+fn scenario_2c_cancelled_turn_commits_its_partial_reply_and_the_query_closes_cancelled() {
+    // The other declaration of scenario 2: the implementation keeps what the
+    // assistant had written when the cancel landed. Whether the user-role
+    // half committed is not a required entry, so nothing here asserts on it.
+    let evs = events(SCENARIO_2C);
+    assert_all_known(&evs);
+    assert!(evs.iter().any(|e| matches!(
+        &e.kind,
+        EventKind::Telemetry(wire::ConvTelemetry::TurnCancelled(_))
+    )));
+    let partial = evs
+        .iter()
+        .find_map(|e| match &e.kind {
+            EventKind::Change(ConvChange::Message(m)) if m.role == "assistant" => Some(m),
+            _ => None,
+        })
+        .expect("the partial reply commits");
+    assert_eq!(partial.turn_id.0, "t3");
+    assert_eq!(
+        partial.content,
+        vec![serde_json::json!({"type":"text","text":"Deleting"})]
+    );
     assert!(evs.iter().any(|e| matches!(
         &e.kind,
         EventKind::Change(ConvChange::Query(q)) if q.reason == "cancelled"
@@ -577,4 +608,27 @@ fn agent_a16_rejection_vocabulary() {
     // carries a cause; `reason` stays the machine token.
     assert!(replies[1]["detail"].is_string());
     assert!(replies[2]["detail"].is_string());
+}
+
+#[test]
+fn conv_attachment_a17_chdir_while_a_query_runs_is_busy_then_accepted() {
+    // Both chdir lines are requests (filtered). The first lands mid-query
+    // and is answered `busy`; the same chdir after the query closes is
+    // accepted, and `moved` follows at the new cwd.
+    let evs = events(AGENT_A17);
+    assert_all_known(&evs);
+    let attachment: Vec<&str> = evs
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EventKind::Attachment(a) => Some(a.type_name()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(attachment, ["attached", "moved"]);
+    let replies = replies(AGENT_A17);
+    let outcomes: Vec<&str> = replies
+        .iter()
+        .map(|r| r["reason"].as_str().unwrap_or("accepted"))
+        .collect();
+    assert_eq!(outcomes, ["accepted", "busy", "accepted"]);
 }

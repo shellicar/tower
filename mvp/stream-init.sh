@@ -43,6 +43,9 @@
 # this supersedes): this runs unattended with nowhere obvious to put one, so
 # the safety property here is different — nothing is purged until its copy
 # is confirmed, which a static backup file doesn't verify on its own.
+#
+# Last, the durable object store bucket: created if it is missing, and set
+# back to no maximum age if something gave it one.
 
 set -eu
 
@@ -90,6 +93,22 @@ stream_exists() {
 
 current_subjects() {
   nats_ stream info "$1" -j | jq -r '.config.subjects | join(" ")'
+}
+
+bucket_exists() {
+  nats_ object info "$1" >/dev/null 2>&1
+}
+
+create_bucket() {
+  nats_ object add "$1" --storage file >/dev/null
+}
+
+get_bucket_age() {
+  nats_ stream info "OBJ_$1" -j | jq -r '.config.max_age'
+}
+
+set_bucket_age() {
+  nats_ object edit "$1" --ttl "$2" >/dev/null
 }
 
 # Intersection of two space-separated subject lists, space-separated out.
@@ -218,6 +237,17 @@ for stream in $ALL_STREAMS; do
     done
   done
 done
+echo
+
+echo "## Durable object store bucket"
+if ! bucket_exists durable; then
+  echo "  creating durable"
+  create_bucket durable
+fi
+if [ "$(get_bucket_age durable)" != 0 ]; then
+  echo "  durable has a maximum age, setting it back to none"
+  set_bucket_age durable 0
+fi
 echo
 
 echo "stream-init converged"
