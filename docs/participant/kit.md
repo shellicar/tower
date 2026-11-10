@@ -42,9 +42,9 @@ A script may default these; the participant itself never does.
 
 ## Publishing a past session into preview
 
-With the preview broker up (`docker compose -f mvp/compose.preview.yaml up -d`)
-and towerd running against it (`just --justfile mvp/justfile
---working-directory mvp preview`), from `mvp/apps/claude-code-participant`:
+With the preview broker up and towerd running against it (the steps are in
+[deployment.md](../../mvp/docs/deployment.md), Preview environment), from
+`mvp/apps/claude-code-participant`:
 
 ```sh
 NATS_URL=nats://127.0.0.1:31417 node --env-file-if-exists=.env --import tsx scripts/preview-conversation.ts <session id>
@@ -79,6 +79,9 @@ The stream drops a message whose id it has stored within its duplicate
 window (two minutes unless the stream says otherwise), and a message's id is
 its entry's uuid, so a second run of the same session inside that window
 publishes nothing new.
+
+Run on Linux (WSL2) only so far. On macOS, check that an unset `NATS_URL` is
+refused and that one run against the preview broker shows in tower.
 
 ## Open
 

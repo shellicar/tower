@@ -111,9 +111,9 @@ when it happens.
 
 Because Claude Code doesn't always write its entries in time order, a
 message can be published after one with a later `ts`. A manual `/compact`
-does this: the compaction notice (a `system` entry) is written before the
-`/compact` command's own record, which carries the earlier time. Tower
-orders a conversation's messages by `ts`.
+can do this: in one session the compaction notice (a `system` entry) was
+written before the `/compact` command's own record, which carried the
+earlier time. Tower orders a conversation's messages by `ts`.
 
 Undecided: whether live serving keeps the entry's time, as the preview
 script needs (see [kit.md](kit.md)), or goes back to the time a message is
