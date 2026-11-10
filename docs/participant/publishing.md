@@ -102,11 +102,22 @@ referenced (no media type) aborts the main turn; background subagents run on.
 
 ## Time
 
-The participant stamps `ts` when the message is handed to the outbox, not
-when Claude Code wrote the entry. Tower must be able to show a message's
-original time (for example a turn-finished line's time, like Claude Code's
-"done HH:MM"). Whether that reuses `ts` or adds a field is open, as is
-whether query-level timing metadata could serve instead.
+`ts` is when the thing happened, not when it was published
+([nats.md](../spec/nats.md), Encoding). A message's `ts` is the `timestamp`
+Claude Code wrote on its entry; an entry with none gets the time it is handed
+to the outbox. Everything else the participant publishes (query closures,
+`attached`, `detached`) is stamped when it is handed to the outbox, which is
+when it happens.
+
+Because Claude Code doesn't always write its entries in time order, a
+message can be published after one with a later `ts`. A manual `/compact`
+does this: the compaction notice (a `system` entry) is written before the
+`/compact` command's own record, which carries the earlier time. Tower
+orders a conversation's messages by `ts`.
+
+Undecided: whether live serving keeps the entry's time, as the preview
+script needs (see [kit.md](kit.md)), or goes back to the time a message is
+handed to the outbox. It takes the entry's time for now.
 
 ## Live replies (MVP)
 
@@ -156,7 +167,7 @@ frontends to change.
 
 - How the unpublished model-seen kinds are carried, and the extras design.
 - Keeping each `system` entry's subtype and fields.
-- The original-time carrier.
+- Whether live serving stamps a message with its entry's time (see Time).
 - A test that pins what is published against what a resume needs (nothing
   pins it today; see [resume.md](resume.md)).
 - The two catch-all cases marked in `src/ConversationEntries.ts`: whether each
