@@ -223,10 +223,7 @@ export class ConversationChanges {
       return;
     }
     const from = fromOf(kind, query);
-    // A message's `ts` is when Claude Code wrote its entry; an entry with no time of its own gets the time it is handed over.
-    // TODO(claude): undecided: whether live serving stamps a message with its entry's time, as replaying a transcript must, or with the time it is handed to the outbox. The entry's time in both for now.
-    const ts = typeof entry.timestamp === 'string' ? entry.timestamp : this.sources.timer.timestamp();
-    await this.publish('message', { id, queryId: query.id, turnId: turn.id, role, ...(from === undefined ? {} : { from }), content }, { id, files, ts });
+    await this.publish('message', { id, queryId: query.id, turnId: turn.id, role, ...(from === undefined ? {} : { from }), content }, { id, files });
     if (kind === 'prompt') {
       query.from = undefined;
     }
@@ -291,9 +288,8 @@ export class ConversationChanges {
     return { type: 'object', id, bucket, mediaType, size: bytes.length };
   }
 
-  /** Hands a change to the outbox, stamped `ts` when given and with the current time otherwise. */
-  private publish(leaf: string, fields: Record<string, unknown>, delivery: { id?: string; files?: readonly OutgoingFile[]; ts?: string } = {}): Promise<void> {
-    const body = { ts: delivery.ts ?? this.sources.timer.timestamp(), instanceId: this.sources.instanceId, ...fields };
+  private publish(leaf: string, fields: Record<string, unknown>, delivery: { id?: string; files?: readonly OutgoingFile[] } = {}): Promise<void> {
+    const body = { ts: this.sources.timer.timestamp(), instanceId: this.sources.instanceId, ...fields };
     return this.sources.lane.enqueue({ subject: `${this.subjectPrefix}.${leaf}`, body, id: delivery.id ?? this.sources.ids.mint(), files: delivery.files ?? [] });
   }
 }

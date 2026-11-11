@@ -58,27 +58,24 @@ the script exits 2 without publishing.
 It reads the transcript through the Agent SDK's `importSessionToStore` and
 hands each entry to the participant's publisher (`ConversationChanges`), so
 what reaches the stream is what the participant's publishing path produces,
-under a new conversation id it prints. Each run is a new conversation. It
-prints how many messages the stream took, and each place where the messages'
-`ts` order and their publish order disagree. Files go to the `durable`
-bucket. The outbox is a temporary directory, removed once everything is
-delivered; when something isn't, the script names the directory and exits 1.
+under a new conversation id it prints. Each message's `ts` is its entry's
+original time. Each run is a new conversation: the id the stream
+deduplicates by is scoped to it. It prints how many messages the stream
+took, and each place where the messages' `ts` order and their publish order
+disagree. Files go to the `durable` bucket. The outbox is a temporary
+directory, removed once everything is delivered; when something isn't, the
+script names the directory and exits 1.
 
 How it differs from serving live, each undecided and built this way for now:
 
-- every entry the participant classifies as a prompt opens a query of its own
-  and carries `from: {kind: "human"}`; live, a query opens with a say, and
-  only its first prompt carries the say's `from`;
+- every entry in the main record the participant classifies as a prompt
+  opens a query of its own and carries `from: {kind: "human"}`; live, a query
+  opens with a say, and only its first prompt carries the say's `from`;
 - no query closure is published, because a transcript doesn't say how a
   query ended;
 - no `attached` or `detached` is published, and the messages name an instance
   id minted for the run;
 - a session id found in more than one project directory is refused.
-
-The stream drops a message whose id it has stored within its duplicate
-window (two minutes unless the stream says otherwise), and a message's id is
-its entry's uuid, so a second run of the same session inside that window
-publishes nothing new.
 
 Run on Linux (WSL2) only so far. On macOS, check that an unset `NATS_URL` is
 refused and that one run against the preview broker shows in tower.

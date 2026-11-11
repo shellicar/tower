@@ -72,7 +72,7 @@ describe('ConversationChanges', () => {
     it('publishes the prompt with its ids, role, the say’s from and its content', async () => {
       const services = await firstQuery();
       expect(message(services, PROMPT.uuid)).toEqual({
-        ts: PROMPT.timestamp,
+        ts: FAKE_TIMESTAMP,
         instanceId: 'inst-1',
         id: PROMPT.uuid,
         queryId: 'q1',
@@ -86,7 +86,7 @@ describe('ConversationChanges', () => {
     it('publishes a reply piece as assistant, from the agent', async () => {
       const services = await firstQuery();
       expect(message(services, THINKING.uuid)).toEqual({
-        ts: THINKING.timestamp,
+        ts: FAKE_TIMESTAMP,
         instanceId: 'inst-1',
         id: THINKING.uuid,
         queryId: 'q1',
@@ -110,22 +110,6 @@ describe('ConversationChanges', () => {
     it('gives the tool result no from', async () => {
       const services = await firstQuery();
       expect(message(services, IMAGE_TOOL_RESULT.uuid)).not.toHaveProperty('from');
-    });
-
-    it('stamps each message with the time its entry was written', async () => {
-      const services = await firstQuery();
-      const expected = [PROMPT, THINKING, TOOL_USE, IMAGE_TOOL_RESULT, ANSWER].map((entry) => entry.timestamp);
-      const actual = messages(services).map((body) => body.ts);
-      expect(actual).toEqual(expected);
-    });
-
-    it('stamps a message whose entry has no time with the time it is handed over', async () => {
-      const services = publishing();
-      const system: RecordEntry = { type: 'system', subtype: 'informational', uuid: 's0000000-0000-4000-8000-00000000001s', content: 'Tool finished' };
-      await services.changes.commit([system]);
-      const expected = FAKE_TIMESTAMP;
-      const actual = message(services, system.uuid)?.ts;
-      expect(actual).toEqual(expected);
     });
 
     it('gives a system entry no from', async () => {

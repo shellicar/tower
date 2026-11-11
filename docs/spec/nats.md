@@ -104,9 +104,6 @@ it is a real fork, taken knowingly.
   subject-less discriminator lives.
 - Every message carries `ts` (ISO-8601 with UTC offset), except subjects that
   declare themselves bare.
-- `ts` is when the thing the message records happened, not when the message
-  was published. A message published after the fact carries the time of the
-  fact, so the order of `ts` and the order of publishing can disagree.
 - Everything else belongs to the concern's spec.
 
 ## Two kinds of traffic

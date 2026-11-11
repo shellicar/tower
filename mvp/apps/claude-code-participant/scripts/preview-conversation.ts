@@ -1,7 +1,9 @@
 // Publishes a finished Claude Code session into the preview environment as
 // the participant would have published it: the session's record goes through
 // the participant's own publishing path, under a new conversation id, which
-// it prints. Each message carries its entry's original time as `ts`.
+// it prints. Each message carries its entry's original time as `ts`, and goes
+// to the stream under an id scoped to the conversation, so each run of one
+// session is stored as a conversation of its own.
 //
 //   NATS_URL=nats://127.0.0.1:31417 node --env-file-if-exists=.env --import tsx scripts/preview-conversation.ts <session id>
 //
@@ -10,8 +12,8 @@
 // transcript is found under ${CLAUDE_CONFIG_DIR:-~/.claude}/projects, and read
 // through the Agent SDK's importSessionToStore, subagents' records included
 // (the participant publishes none of them). Files go to the preview's
-// `durable` bucket. It lists each place where
-// the published messages' `ts` order and their publish order disagree. The
+// `durable` bucket. It lists each place where the published messages' `ts`
+// order and their publish order disagree. The
 // outbox is a temporary directory, removed once everything in it is
 // delivered; if anything is left, the script says where and exits 1.
 
@@ -30,7 +32,7 @@ import { IOutboxStore } from '../src/OutboxStore.js';
 import { ParticipantConfig } from '../src/ParticipantConfig.js';
 import { IPublisher } from '../src/SessionStore.js';
 import { ITimer } from '../src/Timer.js';
-import { orderDisagreements, type PublishedMessage, TranscriptReplay } from '../src/TranscriptReplay.js';
+import { deliveryId, EntryClock, orderDisagreements, type PublishedMessage, TranscriptReplay } from '../src/TranscriptReplay.js';
 
 const PREVIEW_URL = 'nats://127.0.0.1:31417';
 const DURABLE_BUCKET = 'durable';
@@ -65,12 +67,20 @@ async function transcriptsOf(id: string): Promise<string[]> {
 
 type Published = PublishedMessage & { role: unknown; blocks: string };
 
-/** The broker, noting each message the stream has taken, in the order it took them. */
+/**
+ * The broker, sending each message under an id scoped to the conversation it
+ * replays, and noting each message the stream has taken, in the order it took
+ * them.
+ */
 class RecordingBroker extends NatsBroker {
   public readonly messages: Published[] = [];
+  public conversationId: string | undefined;
 
   public override async publishToStream(subject: string, body: Record<string, unknown>, id: string): Promise<void> {
-    await super.publishToStream(subject, body, id);
+    if (this.conversationId === undefined) {
+      throw new Error('no conversation is being replayed');
+    }
+    await super.publishToStream(subject, body, deliveryId(this.conversationId, id));
     if (subject.endsWith('.changes.message')) {
       const content = Array.isArray(body.content) ? (body.content as { type?: unknown }[]) : [];
       this.messages.push({ id: String(body.id), ts: String(body.ts), role: body.role, blocks: content.map((block) => String(block.type)).join(',') });
@@ -106,11 +116,13 @@ try {
 }
 
 const conversationId = ids.mint();
+broker.conversationId = conversationId;
 console.log(`conversation ${conversationId}`);
 
+const clock = new EntryClock(provider.resolve(ITimer));
 const changes = new ConversationChanges(conversationId, {
   lane: outbox.lane(conversationId),
-  timer: provider.resolve(ITimer),
+  timer: clock,
   ids,
   host: provider.resolve(IHost),
   // TODO(claude): undecided: which instance a replayed conversation's messages name. A fresh id each run for now, with no `attached` or `detached` published for it.
@@ -122,8 +134,7 @@ const unroute = publisher.route(sessionId, changes);
 
 let failed = false;
 try {
-  // TODO(claude): undecided: whether the import is given the directory the session ran in. It isn't for now: a session's entries can name more than one directory, and the SDK finds the transcript from the id alone.
-  await importSessionToStore(sessionId, new TranscriptReplay(publisher, changes, ids));
+  await importSessionToStore(sessionId, new TranscriptReplay(publisher, changes, ids, clock));
 } catch (err) {
   console.error(`reading session ${sessionId} failed: ${describeError(err)}`);
   failed = true;

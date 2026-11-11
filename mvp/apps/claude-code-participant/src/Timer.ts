@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 export abstract class ITimer {
   /** Milliseconds, for measuring how long something took. */
   public abstract now(): number;
-  /** The wall-clock time, as the `ts` of anything published that has no time of its own. */
+  /** The wall-clock time, as the `ts` every published message carries. */
   public abstract timestamp(): string;
   /** Resolves after `ms`, or as soon as `wake` aborts; a sleep that is woken leaves no timer behind. */
   public abstract sleep(ms: number, wake?: AbortSignal): Promise<void>;
