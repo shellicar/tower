@@ -108,6 +108,10 @@ original time (for example a turn-finished line's time, like Claude Code's
 "done HH:MM"). Whether that reuses `ts` or adds a field is open, as is
 whether query-level timing metadata could serve instead.
 
+The preview script (see [kit.md](kit.md)) is the exception: what it
+publishes from a past session's transcript is stamped with each entry's
+original time.
+
 ## Live replies (MVP)
 
 Each block streamed as it is written, thinking included. Not built: the

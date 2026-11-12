@@ -12,6 +12,9 @@ participant from a terminal. How to run them is in CLAUDE.md
   always with a fresh id.
 - `say.ts` says into a conversation.
 - `login.ts` (`pnpm claude-login`) makes the macOS login once.
+- `preview-conversation.ts` publishes a finished Claude Code session into the
+  preview environment as the participant would have published it (see
+  below).
 - The check scripts (`outbox-check`, `bus-check`, `publisher-check`,
   `shutdown-check`, `live-check`, `author-check`) exercise pieces against the
   test broker.
@@ -36,6 +39,46 @@ the app's optional `.env`), so it never defaults to the live broker.
   `${XDG_DATA_HOME:-~/.local/share}/tower/login`.
 
 A script may default these; the participant itself never does.
+
+## Publishing a past session into preview
+
+With the preview broker up and towerd running against it (the steps are in
+[deployment.md](../../mvp/docs/deployment.md), Preview environment), from
+`mvp/apps/claude-code-participant`:
+
+```sh
+NATS_URL=nats://127.0.0.1:31417 node --env-file-if-exists=.env --import tsx scripts/preview-conversation.ts <session id>
+```
+
+The session id is the name of the transcript file under
+`${CLAUDE_CONFIG_DIR:-~/.claude}/projects/<project>/`, without `.jsonl`.
+`NATS_URL` must be exactly `nats://127.0.0.1:31417`: unset or anything else,
+the script exits 2 without publishing.
+
+It reads the transcript through the Agent SDK's `importSessionToStore` and
+hands each entry to the participant's publisher (`ConversationChanges`), so
+what reaches the stream is what the participant's publishing path produces,
+under a new conversation id it prints. Each message's `ts` is its entry's
+original time. Each run is a new conversation: the id the stream
+deduplicates by is scoped to it. It prints how many messages the stream
+took, and each place where the messages' `ts` order and their publish order
+disagree. Files go to the `durable` bucket. The outbox is a temporary
+directory, removed once everything is delivered; when something isn't, the
+script names the directory and exits 1.
+
+How it differs from serving live, each undecided and built this way for now:
+
+- every entry in the main record the participant classifies as a prompt
+  opens a query of its own and carries `from: {kind: "human"}`; live, a query
+  opens with a say, and only its first prompt carries the say's `from`;
+- no query closure is published, because a transcript doesn't say how a
+  query ended;
+- no `attached` or `detached` is published, and the messages name an instance
+  id minted for the run;
+- a session id found in more than one project directory is refused.
+
+Run on Linux (WSL2) only so far. On macOS, check that an unset `NATS_URL` is
+refused and that one run against the preview broker shows in tower.
 
 ## Open
 
