@@ -28,8 +28,7 @@ export interface ConversationMessage {
   query: string;
   turn: string;
   role: string;
-  /** Absent for a tool_result — it carries no sender (conversation.md:
-   *  a mechanical delivery is not an utterance, so nobody "sent" it). */
+  /** See mvp/docs/tower-ws-spec.md, `conversation`: response to `open`. */
   from?: Sender;
   content: ContentBlock[];
   ts: Millis;

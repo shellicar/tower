@@ -1,0 +1,7 @@
+#!/bin/sh
+# First on Claude Code's PATH on macOS. Claude Code reads and writes its login
+# in the Keychain through `security`, which it runs with its own HOME, the
+# participant's private one, where there is no keychain. This runs
+# /usr/bin/security with the real HOME, which the participant passes in
+# TOWER_REAL_HOME.
+HOME="$TOWER_REAL_HOME" exec /usr/bin/security "$@"

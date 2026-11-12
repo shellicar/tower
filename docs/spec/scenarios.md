@@ -6,7 +6,8 @@ files in `fixtures/` — **this repo is their source of truth**; implementations
 carry verbatim copies, byte-diffable against these files (conformance.md,
 Artifacts). One line per wire message, the subject riding each line; request
 lines carry their reply inline, since a reply has no subject of its own. `ts`
-values and minted ids (`m…`, `q…`, `t…`, `apr-…`, `toolu_…`, `inst-…`) are
+values and minted ids (`m…`, `q…`, `t…`, `apr-…`, `toolu_…`, `inst-…`, and the
+opaque part of a durable object name, `{conversationId}/{opaqueId}`) are
 placeholders: conformance normalises them before comparison, so a fixture is a
 template by construction, never a byte-exact recording. The templates double as
 the specs' worked examples. First implementation contact validates them — where
@@ -18,12 +19,15 @@ wrong, and the fix lands twice.
 | 1 — the plain exchange | `fixtures/scenario-1.jsonl` |
 | 2 — cancel mid-turn | `fixtures/scenario-2.jsonl` |
 | 2b — cancel after completion | `fixtures/scenario-2b.jsonl` |
+| 2c — cancel mid-turn, partial reply committed | `fixtures/scenario-2c.jsonl` |
 | 3 — edit and rewind | `fixtures/scenario-3.jsonl` |
 | 4 — revision | `fixtures/scenario-4.jsonl` |
 | 5 — stale premise | `fixtures/scenario-5.jsonl` |
 | 6 — approval, both endings | `fixtures/scenario-6a.jsonl`, `fixtures/scenario-6b.jsonl` |
 | 7 — the block stream | `fixtures/scenario-7.jsonl` |
 | 8 — the attachment, both endings | `fixtures/scenario-8a.jsonl`, `fixtures/scenario-8b.jsonl` |
+| 9: the query's parent | `fixtures/v2/scenario-9.jsonl` |
+| 10: a say's file, committed durably | `fixtures/v2/scenario-10.jsonl` |
 
 Each template lists the **required** entries: a producer's capture must contain
 them as a subsequence per subject, extras allowed (add-only honoured).
@@ -32,12 +36,23 @@ them as a subsequence per subject, extras allowed (add-only honoured).
 
 `fixtures/v2/` carries the conversation scenarios in the v2 tree
 (conversation.md, Subjects): leaf subjects spelling each type, and a
-`query` closure change wherever a query closes — completed in scenarios 1,
-2b, and 3; cancelled in scenario 2. Scenario 5's second query never closes
-(still live when the fixture ends), scenario 7 is one turn's stream
+query closure change wherever a query closes — completed in scenarios 1,
+2b, 3, 9 and 10; cancelled in scenarios 2 and 2c. Scenario 5's second query never
+closes (still live when the fixture ends), scenario 7 is one turn's stream
 mid-query, and scenario 8b never opens a query at all (rejected before
 acceptance), so none of the three carries a closure. Scenario 6 is
 approval-concern traffic and has no v2 form.
+
+The closures in scenarios 1, 2, 2b, 2c and 3 carry the closure's old name,
+`changes.query`, and none of scenarios 1 to 8 announces a `query.started`:
+the record a publisher leaves that predates the start (conversation.md,
+Query start and closure). Agent scenario a17's closure carries the old name
+too. A consumer reads that record forever, so these fixtures stay its test
+surface. A producer that follows the spec now publishes `query.closed` and
+never `query`, so its capture cannot contain these fixtures' closure lines.
+Whether these fixtures move to the new names is not yet decided. Scenarios 9
+and 10 carry the new names. Neither has a v1 form, since v1 has no query
+changes.
 
 Every v2 change line carries the envelope `instanceId` — required of every
 compliant publisher, optional in the schema only for producers that predate
@@ -71,11 +86,13 @@ closing round (ends `end_turn`).
 
 - Exercises: `turn_started` with request inputs, `turn_ended` with verbatim
   `stopReason`, `tool_use` with full payload, `usage` per round, message
-  commits on `changes`, `from` on every message that is an utterance — absent
-  on the `tool_result`, which nobody sent.
+  commits on `changes`, `from` on every message someone wrote (a human, an
+  agent or an orchestrator), absent on the `tool_result`, which the harness
+  generated.
 - Asserts: the baseline schemas; the query fold grouping by `queryId` and
-  closed by the `query` closure change on `changes` — carried by the v2 twin,
-  since v1 has no closure change (conversation.md, The v1 tree). An ending
+  closed by the query closure change on `changes` (`query`, the closure's old
+  name, in this fixture) — carried by the v2 twin, since v1 has no closure
+  change (conversation.md, The v1 tree). An ending
   read off `turn_ended` and its verbatim `stopReason` is lawful observation,
   never the fold's authority.
 
@@ -94,14 +111,16 @@ accepted `cancel`.
 - Exercises: `cancel {id}` accepted; `turn_cancelled` on telemetry; the
   partial assistant message existing only as deltas — nothing committed.
 - Asserts: the telemetry/commit gap is honest — a full telemetry trail with
-  zero commits for the interrupted turn; whether the user-role half committed
-  is the implementation's declaration, visible either way.
+  zero commits for the interrupted turn; whether either half committed is the
+  implementation's declaration, visible either way.
 
 Fixture: `fixtures/scenario-2.jsonl`.
 
 The user-role commit for `q2` is deliberately absent from the required
 entries: committing it or not is the implementation's declaration, and either
-capture is compliant. No assistant commit may appear for `t3`.
+capture is compliant. This capture is an implementation that declares the
+partial assistant message uncommitted: no assistant commit appears for `t3`.
+Scenario 2c is the other declaration.
 
 ### 2b — cancel after completion
 
@@ -121,6 +140,25 @@ control loop, and a cancel landing in that gap was answered `accepted` with a
 
 Fixture: `fixtures/scenario-2b.jsonl`.
 
+### 2c — cancel mid-turn, partial reply committed
+
+Scenario 2 again, from an implementation that keeps what the assistant had
+written when the cancel landed: the partial reply commits as `t3`'s assistant
+message, its content exactly the text the deltas carried. Which of 2 and 2c
+an implementation matches is its declaration (conversation.md, The change
+stream); both are compliant.
+
+- Exercises: `cancel {id}` accepted; `turn_cancelled` on telemetry; the
+  partial assistant message committed on `changes` after the cancel.
+- Asserts: a committed assistant message for a cancelled turn is an ordinary
+  commit — it folds like any other message, and the query still closes
+  `cancelled`.
+
+Fixture: `fixtures/scenario-2c.jsonl`.
+
+The user-role commit for `q2` is absent from the required entries here too,
+for the same reason as scenario 2.
+
 ## 3. Edit and rewind
 
 "read file X" edited to "read file Y": a new query attached mid-tree, then a
@@ -137,6 +175,10 @@ Fixture: `fixtures/scenario-3.jsonl`.
 
 After the first `tip_moved`, `m2`–`m4` are unreachable but present; after the
 fast-forward, `m5`–`m6` are the unreachable branch. Both remain in the log.
+
+The query's parent is implicit here: the fixture announces no
+`query.started`, so `q2` follows the tip the rewind left at `m1`. Scenario 9
+states the parent on the record.
 
 ## 4. Revision
 
@@ -218,9 +260,9 @@ A `say` carrying a reference block from a prior `POST /attachment` upload
 Two captures, same shape as scenario 6's two endings:
 
 1. **Resolved** (8a) — the block names a bucket the servicer can actually
-   fetch from. The say is accepted and the committed message carries the
-   reference block **verbatim** — never the resolved bytes; resolution is a
-   model-facing render, not a record fact (conversation.md).
+   fetch from. The say is accepted and the committed message carries a
+   reference block, never the resolved bytes; resolution is a model-facing
+   render, not a record fact (conversation.md).
 2. **Unresolvable** (8b) — the block names no bucket (or one the servicer
    can't reach). The say rejects outright, before anything commits — no
    placeholder, no partial accept. `reason` is the canonical token
@@ -231,15 +273,19 @@ Two captures, same shape as scenario 6's two endings:
 - Exercises: an `attachments` array riding a `say`; the reference block
   ordering (attachment blocks lead, the text block follows — same order the
   API sees); a say-level reject distinct from `stale`/`empty`.
-- Asserts: a resolvable attachment's reference block is never rewritten by
-  acceptance — the record holds exactly what the sender sent; an
-  unresolvable one never reaches acceptance at all, so no dangling pending
-  say and no placeholder text stands in for what the sender actually
-  attached.
+- Asserts: a resolvable file is accepted and committed as a reference block,
+  never as bytes; an unresolvable one never reaches acceptance at all, so no
+  dangling pending say and no placeholder text stands in for what the sender
+  actually attached.
 
 ### 8a — resolved
 
 Fixture: `fixtures/scenario-8a.jsonl`.
+
+8a's committed message carries the say's block unchanged, naming the
+transit store. A servicer commits a block naming the durable store
+(conversation.md, Transit and durable object stores), so a producer's
+capture matches scenario 10's message line, not 8a's.
 
 ### 8b — unresolvable
 
@@ -247,10 +293,55 @@ Fixture: `fixtures/scenario-8b.jsonl`.
 
 This is a request-driven fixture (The two branches) with a twist: there is no
 "unsupported" branch here, because every servicer that accepts `attachments`
-at all must validate them the same way — accept-with-verbatim-block or
+at all must validate them the same way — accept-with-a-reference-block or
 reject-outright are the only two compliant outcomes for a resolvable-or-not
 block. A servicer that has never implemented attachment support simply never
 exercises this fixture (declared capability, per the two-branches rule).
+
+## 9. The query's parent
+
+Three queries, each announced by `query.started` before its messages and
+closed by `query.closed`. `q1` opens an empty conversation, so its start
+carries no `parent` and it follows the tip; `q2` continues from `m2`; a
+rewind moves the tip back to `m2`, and `q3` attaches there too. v2 only.
+
+- Exercises: the new names, `query.started` and `query.closed`;
+  `query.started` without a `parent` and with one.
+- Asserts: where the `say` that opened a query names a message in its
+  `precondition.tip`, the query's `parent` is that message (`q2`, `q3`);
+  where it states `{ "tip": null }`, the start carries no `parent` (`q1`);
+  each start precedes its query's first message.
+
+Fixture: `fixtures/v2/scenario-9.jsonl`.
+
+The rewind comes before `q3` on purpose: every parent stated here is the tip
+when its query starts, so a consumer that ignores `query.started` folds the same
+tree from the messages and the `tip_moved`. This fixture does not check
+placement by parent. A start whose parent is not the current tip, with no
+`tip_moved` before it, is an open question (conversation.md, Open
+questions), and no fixture takes a side on it.
+
+## 10. A say's file, committed durably
+
+A `say` carrying scenario 8a's attachment, accepted and committed with its
+file in the durable store (conversation.md, Transit and durable object
+stores). The say's block names the transit store; the committed message's
+block names the durable store and the object that holds the file. The query
+opens with `query.started`, its `parent` the say's premise `m4`, and closes
+with `query.closed` after the reply. The conversation id and the object's
+opaque id are random GUIDs. v2 only.
+
+- Exercises: a committed block that differs from the say's block in `bucket`
+  and `id` only: same `type`, same `mediaType`, same `size`.
+- Asserts: the committed message never carries the transit reference; its
+  block's `id` is the object's whole name, `{conversationId}/{opaqueId}`,
+  whose `conversationId` is the conversation the message belongs to.
+
+Fixture: `fixtures/v2/scenario-10.jsonl`.
+
+The bucket names `attach` and `durable` are examples; the deployment names
+both stores. The object's metadata (`messageId`, `mediaType`) is in the
+store, not on the wire, so no fixture carries it.
 
 ## Agent scenarios
 
@@ -278,6 +369,7 @@ presence, not on literal timestamps — silence is represented the way approval
 | a14 — service spawns fresh | `fixtures/agent/scenario-a14.jsonl` |
 | a15 — service adopts a record | `fixtures/agent/scenario-a15.jsonl` |
 | a16 — the rejection vocabulary | `fixtures/agent/scenario-a16.jsonl` |
+| a17 — chdir while a query runs | `fixtures/agent/scenario-a17.jsonl` |
 
 The concern spans two trees, though a single scenario need not. `ready` and
 `pulse` are the world's own telemetry; `service` and `drain` address the
@@ -289,7 +381,8 @@ request. a5's world lines are two `service` requests, which no stream
 captures, and the holder's `pulse`, so replaying it yields the claim and
 that pulse. a6 to a11 carry conversation lines only. a12 to a15 mix both
 trees, the claim beside the liveness the premise reads; a16 is requests
-alone, so it replays as nothing.
+alone, so it replays as nothing. a17 carries conversation lines only: the
+claim, one query's traffic, and the move.
 
 ### a1 — world up, fresh conversation
 
@@ -480,3 +573,17 @@ would leave a reader unable to tell which is the contract.
 - Exercises: four requests, four rejections; no event traffic at all.
 - Asserts: `reason` is the token a caller branches on; `detail` is optional
   human-facing diagnostics, present on `invalid_cwd` and `failed`.
+
+### a17 — chdir while a query runs
+
+A `chdir` arrives while the holder is in the middle of a query, from a
+servicer that can't move now: it answers `busy` (conversation.md, Requests),
+and nothing moves. The query ends, the sender sends the same `chdir` again,
+and this time it is accepted and the move lands.
+
+- Exercises: `attached` at one `cwd`; a `say` accepted and its turn started;
+  `chdir` rejected `busy`; the query closing `completed`; the same `chdir`
+  accepted; the `moved` that follows at the new `cwd`.
+- Asserts: a `busy` rejection leaves the attachment's `cwd` where it was —
+  no `moved` until a `chdir` is accepted; `busy` is a rejection for now, not
+  `unsupported`, so the same request can succeed once the query has ended.

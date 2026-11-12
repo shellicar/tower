@@ -58,6 +58,26 @@ fn message_lands_in_views_and_row() {
     assert_eq!(read_cursor(&views.db, "conv-approval").unwrap(), 1);
 }
 
+const QUERY_CLOSED_Q1: &str = r#"{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","queryId":"q1","reason":"completed"}"#;
+
+#[test]
+fn query_closed_reaches_views_as_a_query_closure() {
+    let (mut views, mut rx) = fresh();
+    let expected = Some(("q1".to_string(), "completed".to_string()));
+
+    views.apply(
+        "conv-approval",
+        1,
+        &event("conv.v2.conv-abc.changes.query.closed", QUERY_CLOSED_Q1),
+    );
+    let actual = std::iter::from_fn(|| rx.try_recv().ok()).find_map(|e| match e {
+        ViewEvent::QueryClosed { query, reason, .. } => Some((query.0, reason)),
+        _ => None,
+    });
+
+    assert_eq!(actual, expected);
+}
+
 #[test]
 fn replay_is_idempotent() {
     let (mut views, _rx) = fresh();

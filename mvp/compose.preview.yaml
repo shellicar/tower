@@ -1,0 +1,35 @@
+# A broker for looking at real data in tower over days, kept apart from the
+# deployment on 4222 and from the test broker on 31416. `just preview` runs
+# towerd against it. Agents that serve conversations are not pointed here.
+#
+# The project is named here rather than inferred from the directory, so
+# `down` reaches this broker and nothing else on the machine.
+name: tower-preview
+
+services:
+  # JetStream's store sits in a named volume, so `down` and `up -d` keep the
+  # data; `down -v` deletes it. No restart policy: the broker runs only while
+  # it has been started by hand. Published on localhost only, with no
+  # monitoring port.
+  nats:
+    image: nats:latest
+    command: ['-js', '-sd', '/data']
+    ports:
+      - '127.0.0.1:31417:4222'
+    volumes:
+      - nats-data:/data
+
+  # The same stream-init as compose.yaml and compose.test.yaml: on every `up`
+  # it converges the three streams and the `durable` object store bucket.
+  stream-init:
+    image: natsio/nats-box:latest
+    depends_on:
+      - nats
+    volumes:
+      - ./stream-init.sh:/stream-init.sh:ro
+    entrypoint:
+      - sh
+      - /stream-init.sh
+
+volumes:
+  nats-data:

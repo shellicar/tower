@@ -239,7 +239,7 @@ mod tests {
             model: "m".into(),
             thinking: false,
             effort: None,
-            max_tokens: 1,
+            max_tokens: Some(1),
         };
         conv.fold(&EventKind::Telemetry(ConvTelemetry::TurnStarted(started)));
         assert_eq!(conv.last_closure, None);

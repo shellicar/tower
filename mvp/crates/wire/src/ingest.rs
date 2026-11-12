@@ -176,7 +176,9 @@ fn conv_kind(class: &str, event_type: &str, value: Value) -> Option<EventKind> {
             "message" => ConvChange::Message(serde_json::from_value(value).ok()?),
             "revision" => ConvChange::Revision(serde_json::from_value(value).ok()?),
             "tip_moved" => ConvChange::TipMoved(serde_json::from_value(value).ok()?),
-            "query" => ConvChange::Query(serde_json::from_value(value).ok()?),
+            // `changes.query` is the closure's old name, and consumers read it
+            // forever (conversation.md, Query start and closure).
+            "query_closed" | "query" => ConvChange::Query(serde_json::from_value(value).ok()?),
             _ => return None,
         }),
         "attachment" => EventKind::Attachment(match event_type {
@@ -342,6 +344,21 @@ mod tests {
     }
 
     #[test]
+    fn query_closed_leaf_parses_as_the_closure() {
+        // docs/spec/fixtures/v2/scenario-9.jsonl line 5, verbatim.
+        let payload = br#"{"ts":"2026-07-07T21:00:00+10:00","instanceId":"inst-1a2f","queryId":"q1","reason":"completed"}"#;
+        let expected = EventKind::Change(ConvChange::Query(crate::conv::Query {
+            ts: "2026-07-07T21:00:00+10:00".into(),
+            query_id: crate::ids::QueryId("q1".into()),
+            reason: "completed".into(),
+        }));
+
+        let actual = conv_event("conv.v2.conv-abc.changes.query.closed", payload).kind;
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn telemetry_parses_from_the_leaf() {
         let payload = br#"{"ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t2","stopReason":"end_turn"}"#;
         let event = conv_event("conv.v2.conv-abc.telemetry.turn.ended", payload);
@@ -349,6 +366,18 @@ mod tests {
             panic!("expected turn_ended");
         };
         assert_eq!(t.stop_reason, "end_turn");
+    }
+
+    #[test]
+    fn turn_started_without_max_tokens_is_still_a_turn_start() {
+        // maxTokens is optional (conversation.md): a publisher that can't see
+        // its own limit still starts turns, and towerd/helm must count them.
+        let payload = br#"{"ts":"2026-07-07T21:00:00+10:00","queryId":"q1","turnId":"t1","service":"anthropic.messages","model":"claude-sonnet-4-5","thinking":false}"#;
+        let event = conv_event("conv.v2.conv-abc.telemetry.turn.started", payload);
+        assert!(matches!(
+            event.kind,
+            EventKind::Telemetry(ConvTelemetry::TurnStarted(_))
+        ));
     }
 
     #[test]

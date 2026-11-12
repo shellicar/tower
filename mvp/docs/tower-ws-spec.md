@@ -244,8 +244,10 @@ always, regardless of what is open. This event *is* the staleness product.
 The catch-up: every stored message with `ts` greater than the request's
 `after`, in `ts` order. Each message carries all three ids (the message `id`,
 `query` and `turn`) as every message does everywhere in this system; plus
-`role`, the `from` object verbatim from the wire (**absent for a
-`tool_result`** — a mechanical delivery carries no sender, never fabricated),
+`role`, the `from` object verbatim from the wire (who wrote the message:
+a human, an agent, or an orchestrator, something outside the conversation
+that acts on it; **absent** for anything the harness generated, such as a
+tool result, a system message or a reminder, and never fabricated),
 `content` blocks verbatim
 (the client renders known block types, skips unknown ones), and `ts`. The
 boundary may overlap what the client already holds when `after` is a shared
@@ -719,7 +721,7 @@ const conversationMessage = z.looseObject({
   id: z.string(),
   query: z.string(),
   turn: z.string(),
-  role: openEnum(['user', 'assistant']),
+  role: openEnum(['user', 'assistant', 'system']),
   from: sender.optional(),
   content: contentBlocks,
   ts: millis,
